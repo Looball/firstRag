@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="ProjectModuleManager">
+    <modules>
+      <module fileurl="file://$PROJECT_DIR$/.idea/FirstRAG.iml" filepath="$PROJECT_DIR$/.idea/FirstRAG.iml" />
+      <module fileurl="file://$PROJECT_DIR$/../HM-Python-Advance/.idea/HM-Python-Advance.iml" filepath="$PROJECT_DIR$/../HM-Python-Advance/.idea/HM-Python-Advance.iml" />
+      <module fileurl="file://$PROJECT_DIR$/../HM-Python-base/.idea/HM-Python-base.iml" filepath="$PROJECT_DIR$/../HM-Python-base/.idea/HM-Python-base.iml" />
+      <module fileurl="file://$PROJECT_DIR$/../learn_python/.idea/learn_python.iml" filepath="$PROJECT_DIR$/../learn_python/.idea/learn_python.iml" />
+    </modules>
+  </component>
+</project>
