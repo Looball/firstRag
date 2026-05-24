@@ -1,0 +1,3 @@
+# Local documents and generated vector store
+/local_doc/
+/vector_db/
