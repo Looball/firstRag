@@ -102,7 +102,7 @@ def main():
     # 使用递归字符文本分割器
     # 切分文档
     text_splitter = RecursiveCharacterTextSplitter(
-        chunk_size=500, chunk_overlap=50)
+        chunk_size=1000, chunk_overlap=200)
 
     split_docs = text_splitter.split_documents(texts)
     print(split_docs)

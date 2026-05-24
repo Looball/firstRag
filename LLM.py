@@ -28,6 +28,11 @@ vectordb = Chroma(
     embedding_function=embedding
 )
 
+# 导入RunnableLambda，用来自定义LCEL
+from langchain_core.runnables import RunnableLambda
+def combine_docs(docs):
+    return "\n\n".join(doc.page_content for doc in docs)
+
 
 # 创建 LLM 模型
 model = ChatDeepSeek(
@@ -75,12 +80,22 @@ print(a)
 
 # 对问题进行向量检索，返回本地知识库中最相关的context
 question = '模型微调的一般流程是什么'
-res_vect = vectordb.as_retriever(search_type='mmr',search_kwargs={"k": 3})
+res_vect = vectordb.as_retriever(search_type='similarity',search_kwargs={"k": 2})
 docs = res_vect.invoke(question)
 print(f"检索到的内容数：{len(docs)}")
 
 
 for i, doc in enumerate(docs):
-    print(f"检索到的第{i}个内容: \n {doc.page_content}", end="\n-----------------------------------------------------\n")
+    print(f"检索到的第{i+1}个内容: \n {doc.page_content}", end="\n-----------------------------------------------------\n")
+
+
+# 创建LCEL，组建 问题向量检索链
+print('------------------------------')
+combiner = RunnableLambda(combine_docs)
+retrieval_chain = res_vect | combiner
+res = retrieval_chain.invoke("模型微调的一般流程是什么")
+print(res)
+
+
 
 
