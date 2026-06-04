@@ -7,5 +7,7 @@
     <orderEntry type="module" module-name="HM-Python-base" />
     <orderEntry type="module" module-name="learn_python" />
     <orderEntry type="module" module-name="HM-Python-Advance" />
+    <orderEntry type="module" module-name="learn-claude-code" />
+    <orderEntry type="module" module-name="mini-swe-agent" />
   </component>
 </module>

@@ -5,7 +5,9 @@
       <module fileurl="file://$PROJECT_DIR$/.idea/FirstRAG.iml" filepath="$PROJECT_DIR$/.idea/FirstRAG.iml" />
       <module fileurl="file://$PROJECT_DIR$/../HM-Python-Advance/.idea/HM-Python-Advance.iml" filepath="$PROJECT_DIR$/../HM-Python-Advance/.idea/HM-Python-Advance.iml" />
       <module fileurl="file://$PROJECT_DIR$/../HM-Python-base/.idea/HM-Python-base.iml" filepath="$PROJECT_DIR$/../HM-Python-base/.idea/HM-Python-base.iml" />
+      <module fileurl="file://$PROJECT_DIR$/../learn-claude-code/.idea/learn-claude-code.iml" filepath="$PROJECT_DIR$/../learn-claude-code/.idea/learn-claude-code.iml" />
       <module fileurl="file://$PROJECT_DIR$/../learn_python/.idea/learn_python.iml" filepath="$PROJECT_DIR$/../learn_python/.idea/learn_python.iml" />
+      <module fileurl="file://$PROJECT_DIR$/../mini-swe-agent/.idea/mini-swe-agent.iml" filepath="$PROJECT_DIR$/../mini-swe-agent/.idea/mini-swe-agent.iml" />
     </modules>
   </component>
 </project>
