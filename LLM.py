@@ -172,6 +172,9 @@ condense_question_system_template = (
     "如果用户最新的问题不需要完善则返回用户的问题。"
     )
 
+
+
+
 # 构造 压缩问题的 prompt template
 condense_question_prompt = ChatPromptTemplate([
         ("system", condense_question_system_template),
@@ -179,9 +182,54 @@ condense_question_prompt = ChatPromptTemplate([
         ("human", "{input}"),
     ])
 
-# 构造检索文档的链
+# placeholder 使用方法
+"""
+!!! note "Messages Placeholder"
+
+        ```python
+        # In addition to Human/AI/Tool/Function messages,
+        # you can initialize the template with a MessagesPlaceholder
+        # either using the class directly or with the shorthand tuple syntax:
+
+        template = ChatPromptTemplate(
+            [
+                ("system", "You are a helpful AI bot."),
+                # Means the template will receive an optional list of messages under
+                # the "conversation" key
+                ("placeholder", "{conversation}"),
+                # Equivalently:
+                # MessagesPlaceholder(variable_name="conversation", optional=True)
+            ]
+        )
+
+        prompt_value = template.invoke(
+            {
+                "conversation": [
+                    ("human", "Hi!"),
+                    ("ai", "How can I assist you today?"),
+                    ("human", "Can you make me an ice cream sundae?"),
+                    ("ai", "No."),
+                ]
+            }
+        )
+
+        # Output:
+        # ChatPromptValue(
+        #    messages=[
+        #        SystemMessage(content='You are a helpful AI bot.'),
+        #        HumanMessage(content='Hi!'),
+        #        AIMessage(content='How can I assist you today?'),
+        #        HumanMessage(content='Can you make me an ice cream sundae?'),
+        #        AIMessage(content='No.'),
+        #    ]
+        # )
+        ```
+"""
+
+# 创建检索期
 res_vect = vectordb.as_retriever(search_type='similarity',search_kwargs={"k": 2})
 
+# 构造检索文档的链
 # RunnableBranch 会根据条件选择要运行的分支
 retrieve_docs = RunnableBranch(
     # 分支 1: 若聊天记录中没有 chat_history 则直接使用用户问题查询向量数据库
