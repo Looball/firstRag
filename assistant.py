@@ -1,10 +1,43 @@
 # 使用os获取环境变量  os.environ.get('')
 import os
-from langchain_core import chat_history
 
+
+# 导入类型变量
+from typing import Any,TypedDict,cast
+from collections.abc import Iterable
+
+from langchain_core.runnables import RunnableSerializable
+from langchain_core.vectorstores.base import VectorStoreRetriever
+from langchain_core.documents import Document
+from langchain_core.runnables import Runnable,RunnableLambda,RunnableBranch,RunnablePassthrough
+
+from streamlit.delta_generator import DeltaGenerator
+
+# 类型别名
+type RetrievedDocs = list[Document]
+type ChainInput = dict[str, Any]
+
+# 导入pydantic
+from pydantic import SecretStr
+
+
+# 导入自定义的 embedding模型
+from loadDoc import ZhipuAIEmbeddings
+
+# 使用DeepSeek官方封装的langchain包
+from langchain_deepseek import ChatDeepSeek
+
+# 从langchain导入 提示词模版对象
+from langchain_core.prompts import ChatPromptTemplate
+
+# 导入langchain 输出解析器
+from langchain_core.output_parsers import StrOutputParser
+
+# 导入streamlit包
+import streamlit as st
 
 # 创建 向量知识库 检索器
-def get_retriever():
+def get_retriever() -> VectorStoreRetriever:
 
     """ don't need input
 
@@ -15,8 +48,6 @@ def get_retriever():
     :return: an object of "vectordb.as_retriever"
     """
 
-    # 导入自定义的 embedding模型
-    from loadDoc import ZhipuAIEmbeddings
     # 创建文本嵌入对象
     embedding = ZhipuAIEmbeddings()
 
@@ -34,11 +65,16 @@ def get_retriever():
     return vectordb.as_retriever(search_type='similarity',search_kwargs={"k": 2})
 
 # 提取检索器文本
-def get_res_doc(docs):
-    return "\n\n".join(doc.page_content for doc in docs["context"])
+def get_res_doc(inputs: dict[str, Any]) -> str:
+    docs = inputs.get("context", [])
+    return "\n\n".join(
+        doc.page_content
+        for doc in docs
+        if isinstance(doc, Document)
+    )
 
 # 组建问答链
-def get_chain():
+def get_chain() -> RunnableSerializable:
     """ 创建模型、提示词模版、输出解析器 组建LCEL
 
     第一次：用户输入 | 提示词 |LLM模型 | OutStr -> 补充用户问题
@@ -48,8 +84,9 @@ def get_chain():
 
     :return: ans: str
     """
-    # 使用DeepSeek官方封装的langchain包
-    from langchain_deepseek import ChatDeepSeek
+    deepseek_api_key = os.environ.get("DEEPSEEK_API_KEY")
+    if not deepseek_api_key:
+        raise ValueError("缺少环境变量 DEEPSEEK_API_KEY")
 
     # 创建 LLM 模型
     model = ChatDeepSeek(
@@ -58,8 +95,7 @@ def get_chain():
         max_tokens=8000,
         timeout=None,
         max_retries=2,
-        api_key=os.environ.get('DEEPSEEK_API_KEY'),
-        # other params...
+        api_key=SecretStr(deepseek_api_key),
     )
 
     # 创建向量检索器
@@ -75,8 +111,6 @@ def get_chain():
         "如果用户最新的问题不需要完善则返回用户的问题。"
     )
 
-    # 从langchain导入 提示词模版对象
-    from langchain_core.prompts import ChatPromptTemplate
 
     # 构造提示词模版
     condense_question_prompt = ChatPromptTemplate([
@@ -85,15 +119,31 @@ def get_chain():
         ("human", "{input}"),
     ])
 
-    # 导入langchain 输出解析器
-    from langchain_core.output_parsers import StrOutputParser
-    # 导入链分支
-    from langchain_core.runnables import RunnableBranch
+    # 检查历史记录
+    def has_no_chat_history(x: ChainInput) -> bool:
+        return not bool(x.get("chat_history"))
+
+    # 配合has_no_chat_history使用，获取用户第一次的输入
+    def get_user_input(x: ChainInput) -> str:
+        return x["input"]
+
+    # 没有历史记录时的检索方案
+    no_history_retriever: Runnable[ChainInput, RetrievedDocs] = (
+            RunnableLambda(get_user_input) | retriever
+    )
+
+    # 有历史记录时的检索方案
+    history_retriever: RunnableSerializable[ChainInput, RetrievedDocs] = (
+            condense_question_prompt
+            | model
+            | StrOutputParser()
+            | retriever
+    )
 
     # 进行向量检索
-    retrieve_docs = RunnableBranch(
-        (lambda x: not x.get("chat_history", False), (lambda x: x["input"]) | retriever,),
-        condense_question_prompt | model | StrOutputParser() | retriever,
+    retrieve_docs: RunnableSerializable[ChainInput, RetrievedDocs] = RunnableBranch(
+        (RunnableLambda(has_no_chat_history), no_history_retriever),
+        cast(Any, history_retriever), # 告诉IDE不再做严格检查
     )
 
     # """
@@ -119,10 +169,10 @@ def get_chain():
         ]
     )
 
-    # 创建问答链
-    from langchain_core.runnables import RunnablePassthrough
     qa_chain = (
-            RunnablePassthrough.assign(context=get_res_doc)  # 使用 get_res_doc 函数整合 qa_prompt 中的 context
+            RunnablePassthrough.assign(
+                context=RunnableLambda(get_res_doc)
+            )  # 使用 get_res_doc 函数整合 qa_prompt 中的 context
             | qa_prompt  # 问答模板
             | model
             | StrOutputParser()  # 规定输出的格式为 str
@@ -130,18 +180,16 @@ def get_chain():
 
     # 传入向量数据库的查询结果，并指定将qa_chain的返回结果定义为answer，返回最终链
     qa_history_chain = RunnablePassthrough.assign(
-        context=(lambda x: x) | retrieve_docs  # 将查询结果存为 content
+        context=retrieve_docs
     ).assign(answer=qa_chain)  # 将最终结果存为 answer
 
     return qa_history_chain
 
 
-
-from langchain_core.runnables import RunnableSerializable
 # 从链中获取结果
-def get_answer(chain:RunnableSerializable, input:str, chat_history:list):
+def get_answer(chain:RunnableSerializable, user_input:str, chat_history:list):
     res = chain.stream({
-        "input": input,
+        "input": user_input,
         "chat_history": chat_history
     })
 
@@ -150,11 +198,11 @@ def get_answer(chain:RunnableSerializable, input:str, chat_history:list):
             yield r["answer"]
 
 
-def render_stream(stream):
-    output = ""
-    placeholder = None
+def render_stream(stream:Iterable) -> str :
 
-    import streamlit as st
+    output = ""
+    placeholder: DeltaGenerator | None = None
+
 
     for chunk in stream:
         if chunk is None:
@@ -164,7 +212,8 @@ def render_stream(stream):
 
         if placeholder is None:
             placeholder = st.empty()
-        placeholder.markdown(output)
+        else:
+            placeholder.markdown(output)
 
     return output
 
@@ -175,7 +224,6 @@ def main():
 
     :return:
     """
-    import streamlit as st
 
     st.markdown('### 🦜🔗 RAG本地知识库Demo')
 
@@ -196,7 +244,8 @@ def main():
         with messages.chat_message(message[0]):  # messages指在容器下显示，chat_message显示用户及ai头像
             st.markdown(message[1])  # 打印内容
 
-    if prompt := st.chat_input("Say something"):
+    prompt = st.chat_input("Say something")
+    if isinstance(prompt, str):
 
         # 先copy一份过去的历史记录，用于传入chat_history
         history_for_chain = st.session_state.messages.copy()
@@ -210,9 +259,9 @@ def main():
 
         # 生成回复
         answer = get_answer(
-            chain = st.session_state.qa_history_chain,
-            input = prompt,
-            chat_history = history_for_chain
+            chain=st.session_state.qa_history_chain,
+            user_input=prompt,
+            chat_history=history_for_chain,
         )
 
         # 流式输出
