@@ -1,16 +1,58 @@
-# 这是一个示例 Python 脚本。
+from pydantic import BaseModel, Field
+from typing import Annotated,Literal,List
+from fastapi import FastAPI, File, Form, UploadFile, HTTPException
+from fastapi.responses import StreamingResponse
 
-# 按 ⌃R 执行或将其替换为您的代码。
-# 按 双击 ⇧ 在所有地方搜索类、文件、工具窗口、操作和设置。
+# 从当前项目文件导入
+from assistant import get_chain,get_answer
 
+app = FastAPI()
 
-def print_hi(name):
-    # 在下面的代码行中使用断点来调试脚本。
-    print(f'Hi, {name}')  # 按 ⌘F8 切换断点。
+# 定义Message消息类型
+class Message(BaseModel):
+    role: Literal["user", "assistant"]
+    content: str
 
+# 定义chat请求类型
+class ChatRequest(BaseModel):
+    messages: List[Message]
+    attachment_context: str = Field(default="", alias="attachmentContext")
 
-# 按装订区域中的绿色按钮以运行脚本。
-if __name__ == '__main__':
-    print_hi('PyCharm')
+# 将聊天历史转话语 langchain能够处理的格式 元组列表
+def to_langchain_history(messages: List[Message]) -> list[tuple[str, str]]:
+    role_map = {
+        "user": "human",
+        "assistant": "ai",
+    }
+    return [(role_map[message.role], message.content) for message in messages]
 
-# 访问 https://www.jetbrains.com/help/pycharm/ 获取 PyCharm 帮助
+# 请求聊天接口
+@app.post("/chat")
+def chat(req:ChatRequest):
+    if not req.messages:
+        raise HTTPException(status_code=400, detail="messages 不能为空")
+
+    # 取出历史记录
+    history = to_langchain_history(req.messages[:-1])
+    # 取出用户输入
+    user_inputs = req.messages[-1].content
+    # 创建检索链
+    chain = get_chain()
+
+    return StreamingResponse(
+        get_answer(chain,user_inputs,history),
+        media_type="text/plain; charset=utf-8",
+    )
+
+# 上传文件接口
+@app.post("/update")
+async def update_file(
+    file: Annotated[bytes, File()],
+    fileb: Annotated[UploadFile, File()],
+    token: Annotated[str, Form()],
+):
+    return {
+        "file_size": len(file),
+        "token": token,
+        "fileb_content_type": fileb.content_type,
+    }
