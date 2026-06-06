@@ -3,7 +3,7 @@ import os
 
 
 # 导入类型变量
-from typing import Any,TypedDict,cast
+from typing import Any,cast
 from collections.abc import Iterable
 
 from langchain_core.runnables import RunnableSerializable
@@ -43,7 +43,7 @@ def get_retriever() -> VectorStoreRetriever:
 
     从loadDoc封装好的ZhipuAIembedding创建 embedding对象
 
-    使用环境变量：'ZAI_EMD_API'
+    使用环境变量：ZAI_EMD_API
 
     :return: an object of "vectordb.as_retriever"
     """
@@ -95,6 +95,7 @@ def get_chain() -> RunnableSerializable:
         max_tokens=8000,
         timeout=None,
         max_retries=2,
+        streaming=True,
         api_key=SecretStr(deepseek_api_key),
     )
 
@@ -274,4 +275,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-
