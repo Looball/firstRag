@@ -13,3 +13,7 @@ __pycache__/
 .idea/
 .DS_Store
 *.py[cod]
+
+# agent
+.agents/
+AGENTS.md
