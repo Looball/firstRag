@@ -3,10 +3,59 @@ from typing import Annotated,Literal,List
 from fastapi import FastAPI, File, Form, UploadFile, HTTPException
 from fastapi.responses import StreamingResponse
 
-# 从当前项目文件导入
+import jwt
+
+# 从当前RAG项目文件导入
 from assistant import get_chain,get_answer
 
+# SqlQuery
+from SqlQuery.query import exe_sql
+
 app = FastAPI()
+
+class Account(BaseModel):
+    username: str
+    password: str
+
+# 登录界面接口
+@app.post('/login')
+def login(req:Account):
+    """
+    前端POST的数据格式
+    {username: "monkey", password: "123456"}
+    :param req: 请求体
+    """
+
+    if not req.username:
+        raise HTTPException(status_code=400, detail="用户名不能为空")
+    username = req.username
+
+    if not req.password:
+        raise HTTPException(status_code=400, detail="密码不能为空")
+    password = req.password
+
+    sql = f"""
+            SELECT u.id, u.username, u.password_hash
+            FROM users AS u
+            WHERE u.username = %s
+            """
+    res = exe_sql(sql,(username,))
+    if not res:
+        raise HTTPException(status_code=401, detail="用户不存在")
+
+    user = res[0]
+    if password != user['password_hash']:
+        raise HTTPException(status_code=401, detail="密码错误")
+
+    return {
+        "success": True,
+        "message": "登录成功",
+        "user": {
+            "id": user["id"],
+            "username": user["username"],
+        }
+    }
+
 
 # 定义Message消息类型
 class Message(BaseModel):
