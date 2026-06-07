@@ -3,6 +3,13 @@
 /vector_db/
 
 .vscode
-.idea/
+
+.env
 
 /.streamlit/
+
+# 忽略idea文件
+__pycache__/
+.idea/
+.DS_Store
+*.py[cod]
