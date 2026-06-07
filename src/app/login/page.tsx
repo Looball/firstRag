@@ -2,14 +2,11 @@
 
 import { useRouter } from "next/navigation";
 import { type FormEvent, useState } from "react";
-
-const AUTH_STORAGE_KEY = "ai-learning-assistant-auth";
-
-type LoginResponse = {
-  error?: string;
-  message?: string;
-  [key: string]: unknown;
-};
+import {
+  AUTH_STORAGE_KEY,
+  isAuthState,
+  type LoginResponse,
+} from "@/lib/auth";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -46,6 +43,10 @@ export default function LoginPage() {
 
       if (!response.ok) {
         throw new Error(data.error || data.message || "登录失败，请稍后再试。");
+      }
+
+      if (!isAuthState(data)) {
+        throw new Error("登录响应缺少 access_token 或 token_type。");
       }
 
       localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(data));

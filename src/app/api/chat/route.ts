@@ -15,12 +15,19 @@ function getBackendChatUrl() {
 export async function POST(request: Request) {
   try {
     const body = await request.text();
+    const upstreamHeaders = new Headers({
+      Accept: "text/plain",
+      "Content-Type": request.headers.get("Content-Type") || "application/json",
+    });
+    const authorization = request.headers.get("Authorization");
+
+    if (authorization) {
+      upstreamHeaders.set("Authorization", authorization);
+    }
+
     const upstreamResponse = await fetch(getBackendChatUrl(), {
       method: "POST",
-      headers: {
-        Accept: "text/plain",
-        "Content-Type": request.headers.get("Content-Type") || "application/json",
-      },
+      headers: upstreamHeaders,
       body,
       cache: "no-store",
     });

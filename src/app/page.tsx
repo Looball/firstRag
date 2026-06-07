@@ -1,6 +1,11 @@
 "use client";
 
 import { type ReactNode, useEffect, useRef, useState } from "react";
+import {
+  AUTH_STORAGE_KEY,
+  buildAuthorizationHeader,
+  parseAuthState,
+} from "@/lib/auth";
 
 type Message = {
   role: "user" | "assistant";
@@ -15,7 +20,6 @@ type ChatSession = {
 
 const STORAGE_KEY = "ai-learning-assistant-sessions";
 const CURRENT_SESSION_KEY = "ai-learning-assistant-current-session";
-const AUTH_STORAGE_KEY = "ai-learning-assistant-auth";
 const LEGACY_INITIAL_MESSAGE =
   "你好，我是你的 AI 学习助手。你可以问我任何关于 AI 的问题。";
 
@@ -398,7 +402,10 @@ export default function Home() {
 
   useEffect(() => {
     try {
-      if (!localStorage.getItem(AUTH_STORAGE_KEY)) {
+      const authState = parseAuthState(localStorage.getItem(AUTH_STORAGE_KEY));
+
+      if (!authState) {
+        localStorage.removeItem(AUTH_STORAGE_KEY);
         window.location.href = "/login";
         return;
       }
@@ -590,6 +597,14 @@ export default function Home() {
       return;
     }
 
+    const authState = parseAuthState(localStorage.getItem(AUTH_STORAGE_KEY));
+
+    if (!authState) {
+      localStorage.removeItem(AUTH_STORAGE_KEY);
+      window.location.href = "/login";
+      return;
+    }
+
     const userMessage: Message = {
       role: "user",
       content: messageContent,
@@ -681,6 +696,7 @@ export default function Home() {
       const response = await fetch("/api/chat", {
         method: "POST",
         headers: {
+          Authorization: buildAuthorizationHeader(authState),
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
@@ -696,8 +712,10 @@ export default function Home() {
           const errorData = JSON.parse(errorText) as {
             answer?: string;
             detail?: string;
+            error?: string;
           };
-          errorMessage = errorData.answer || errorData.detail || errorMessage;
+          errorMessage =
+            errorData.answer || errorData.detail || errorData.error || errorMessage;
         } catch {
           errorMessage = errorText.trim() || errorMessage;
         }
