@@ -4,6 +4,7 @@ import { type ReactNode, useEffect, useRef, useState } from "react";
 import {
   AUTH_STORAGE_KEY,
   buildAuthorizationHeader,
+  getAuthUsername,
   parseAuthState,
 } from "@/lib/auth";
 
@@ -500,6 +501,7 @@ export default function Home() {
   const [hasCheckedAuth, setHasCheckedAuth] = useState(false);
   const [isCreatingSession, setIsCreatingSession] = useState(false);
   const [pageError, setPageError] = useState("");
+  const [currentUsername, setCurrentUsername] = useState("");
 
   const bottomRef = useRef<HTMLDivElement | null>(null);
   const previousSessionIdRef = useRef("");
@@ -595,6 +597,8 @@ export default function Home() {
         window.location.href = "/login";
         return;
       }
+
+      setCurrentUsername(getAuthUsername(authState));
     } catch (error) {
       console.error("Failed to read auth state:", error);
       window.location.href = "/login";
@@ -711,6 +715,13 @@ export default function Home() {
     previousMessageCountRef.current = currentMessageCount;
     previousLoadingRef.current = isCurrentSessionLoading;
   }, [currentSession?.id, currentSession?.messages.length, isCurrentSessionLoading]);
+
+  function handleLogout() {
+    localStorage.removeItem(AUTH_STORAGE_KEY);
+    localStorage.removeItem(STORAGE_KEY);
+    localStorage.removeItem(CURRENT_SESSION_KEY);
+    window.location.href = "/login";
+  }
 
   async function handleCreateSession() {
     setIsCreatingSession(true);
@@ -1033,6 +1044,22 @@ export default function Home() {
     <main className="min-h-screen bg-zinc-100 px-4 py-6 md:px-6 md:py-8">
       <div className="mx-auto grid w-full max-w-6xl gap-6 lg:grid-cols-[280px_minmax(0,1fr)]">
         <aside className="flex h-[calc(100vh-4rem)] flex-col rounded-3xl border border-zinc-200 bg-white p-4 shadow-sm md:h-[calc(100vh-5rem)] lg:sticky lg:top-6">
+          <div className="mb-4 rounded-2xl border border-zinc-200 bg-zinc-50 px-4 py-3">
+            <p className="text-xs font-medium text-zinc-500">用户名</p>
+            <div className="mt-1 flex items-center justify-between gap-3">
+              <p className="min-w-0 truncate text-sm font-semibold text-zinc-900">
+                {currentUsername || "已登录"}
+              </p>
+              <button
+                type="button"
+                onClick={handleLogout}
+                className="shrink-0 rounded-lg px-2 py-1 text-xs font-medium text-zinc-500 transition hover:bg-zinc-200 hover:text-zinc-900"
+              >
+                退出
+              </button>
+            </div>
+          </div>
+
           <button
             onClick={() => {
               void handleCreateSession();

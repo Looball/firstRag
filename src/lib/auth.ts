@@ -50,6 +50,26 @@ export function buildAuthorizationHeader(authState: AuthState) {
   return `${normalizedTokenType} ${authState.access_token.trim()}`;
 }
 
+export function getAuthUsername(authState: AuthState) {
+  const user = authState.user;
+
+  if (typeof user !== "object" || user === null) {
+    return "";
+  }
+
+  const candidate = user as { username?: unknown; name?: unknown };
+
+  if (typeof candidate.username === "string" && candidate.username.trim()) {
+    return candidate.username.trim();
+  }
+
+  if (typeof candidate.name === "string" && candidate.name.trim()) {
+    return candidate.name.trim();
+  }
+
+  return "";
+}
+
 export function getAuthErrorMessage(data: LoginResponse, fallback: string) {
   if (typeof data.error === "string" && data.error.trim()) {
     return data.error.trim();
