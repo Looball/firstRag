@@ -1,15 +1,52 @@
 from pydantic import BaseModel, Field
 from typing import Annotated,Literal,List
-from fastapi import FastAPI, File, Form, UploadFile, HTTPException
+from fastapi import FastAPI, File, Form, UploadFile, HTTPException,Header
 from fastapi.responses import StreamingResponse
 
-import jwt
+import jwt,os
+from datetime import datetime, timedelta, timezone
 
 # 从当前RAG项目文件导入
 from assistant import get_chain,get_answer
 
-# SqlQuery
-from SqlQuery.query import exe_sql
+# SqlStatement
+from SqlStatement.query import exe_sql
+
+# 读取环境变量配置
+JWT_SECRET_KEY = os.environ.get("JWT_SECRET_KEY")
+JWT_ALGORITHM = "HS256"
+ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24
+
+# 生成token
+def create_access_token(user_id: int, username: str) -> str:
+    if not JWT_SECRET_KEY:
+        raise RuntimeError("缺少环境变量 JWT_SECRET_KEY")
+
+    expire = datetime.now(timezone.utc) + timedelta(
+        minutes=ACCESS_TOKEN_EXPIRE_MINUTES
+    )
+
+    payload = {
+        "sub": str(user_id),
+        "username": username,
+        "exp": expire,
+    }
+
+    return jwt.encode(payload, JWT_SECRET_KEY, algorithm=JWT_ALGORITHM)
+
+
+# 解析token
+def decode_access_token(token: str) -> dict:
+    try:
+        return jwt.decode(
+            token,
+            JWT_SECRET_KEY,
+            algorithms=[JWT_ALGORITHM],
+        )
+    except jwt.ExpiredSignatureError:
+        raise HTTPException(status_code=401, detail="登录已过期")
+    except jwt.InvalidTokenError:
+        raise HTTPException(status_code=401, detail="无效 token")
 
 app = FastAPI()
 
@@ -39,13 +76,17 @@ def login(req:Account):
             FROM users AS u
             WHERE u.username = %s
             """
-    res = exe_sql(sql,(username,))
-    if not res:
+    rows = exe_sql(sql,(username,))
+    if not rows:
         raise HTTPException(status_code=401, detail="用户不存在")
 
-    user = res[0]
+    user = rows[0]
     if password != user['password_hash']:
         raise HTTPException(status_code=401, detail="密码错误")
+
+    token = create_access_token(
+        user_id=user['id'], username=user['username']
+    )
 
     return {
         "success": True,
@@ -53,7 +94,9 @@ def login(req:Account):
         "user": {
             "id": user["id"],
             "username": user["username"],
-        }
+        },
+        "access_token": token,
+        "token_type": "bearer"
     }
 
 
@@ -92,6 +135,45 @@ def chat(req:ChatRequest):
         get_answer(chain,user_inputs,history),
         media_type="text/plain; charset=utf-8",
     )
+
+
+# ———————————————————————————————————————————————————————————————————————————————————————————— #
+# 定义'/chat/conservation'的请求体数据类型
+class CreateConversationRequest(BaseModel):
+    title: str | None = '新会话'
+
+def get_current_user_payload(authorization: str = Header(...)) -> dict:
+    if not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="认证格式错误")
+
+    token = authorization.removeprefix("Bearer ").strip()
+    return decode_access_token(token)
+
+@app.post('/chat/conversation')
+def create_conservation(
+        req:CreateConversationRequest,
+        authorization: str = Header(...)
+):
+    payload = get_current_user_payload(authorization)
+
+    user_id = payload['sub']
+    title = req.title
+
+    sql = """
+        INSERT INTO conversations (user_id, title)
+        VALUES (%s, %s)
+        RETURNING id, user_id, title, created_at, updated_at;
+        """
+    rows = exe_sql(sql_statement=sql, args_tuple=(user_id, title))
+    conversion = rows[0]
+
+    return {
+        "success": True,
+        "message": "会话创建成功",
+        "conversation": dict(conversion),
+    }
+# ———————————————————————————————————————————————————————————————————————————————————————————— #
+
 
 # 上传文件接口
 @app.post("/update")
