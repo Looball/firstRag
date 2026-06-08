@@ -4,6 +4,7 @@ from fastapi import FastAPI, File, Form, UploadFile, HTTPException,Header
 from fastapi.responses import StreamingResponse
 
 import jwt,os
+from pwdlib import PasswordHash
 from datetime import datetime, timedelta, timezone
 
 # 从当前RAG项目文件导入
@@ -12,9 +13,10 @@ from assistant import get_chain,get_answer
 # SqlStatement
 from SqlStatement.query import exe_sql
 
+# ***********************************************************************************
 # ——————————————————————————!!! JWT TOKEN 处理 BEGIN !!!———————————————————————————— #
 # —————————————————————————————————————————————————————————————————————————————————— #
-# 读取环境变量配置
+# 设置JWT配置信息，环境变量中需要有 JWT_SECRET_KEY
 JWT_SECRET_KEY = os.environ.get("JWT_SECRET_KEY")
 JWT_ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24
@@ -36,7 +38,6 @@ def create_access_token(user_id: int, username: str) -> str:
 
     return jwt.encode(payload, JWT_SECRET_KEY, algorithm=JWT_ALGORITHM)
 
-
 # 解析token，验证token
 def decode_access_token(token: str) -> dict:
     try:
@@ -57,14 +58,53 @@ def get_current_user_payload(authorization: str = Header(...)) -> dict:
 
     token = authorization.removeprefix("Bearer ").strip()
     return decode_access_token(token)
-
 # ——————————————————————————————————————————————————————————————————————————————— #
 # ——————————————————————————!!! JWT TOKEN 处理 END !!!———————————————————————————— #
-
+# ***********************************************************************************
 
 app = FastAPI()
 
+# ***********************************************************************************
+# ———————————————————!!! 注册界面'/register'接口处理 BEGIN !!!————————————————————————— #
+# —————————————————————————————————————————————————————————————————————————————————— #
+# 定义用户注册提交的数据类型
+class RegisterQuest(BaseModel):
+    username: str
+    password: str
 
+@app.post('/register')
+def register(req:RegisterQuest):
+
+    # 使用hash算法加密密码
+    password_hash = PasswordHash.recommended().hash(req.password)
+
+    # 向数据库中插入注册用户的信息
+    sql = """
+        insert into users (username,password_hash)
+        values (%s,%s)
+        RETURNING id,username
+    """
+    res = exe_sql(sql_statement=sql,args_tuple=(req.username,password_hash))
+    user = res[0]
+
+    # 生成token
+    token = create_access_token(
+        user_id=user['id'], username=user['username']
+    )
+
+    return {
+        "access_token": token,
+        "token_type": "bearer",
+        "user": dict(user)
+    }
+
+
+# —————————————————————————————————————————————————————————————————————————————————— #
+# ———————————————————!!! 注册界面'/register'接口处理 END !!!————————————————————————— #
+# ***********************************************************************************
+
+
+# ***********************************************************************************
 # ———————————————————!!! 登录界面'/login'接口处理 BEGIN !!!———————————————————————————— #
 # —————————————————————————————————————————————————————————————————————————————————— #
 # 定义POST '/login' 请求体数据结构
@@ -81,14 +121,17 @@ def login(req:Account):
     :param req: 请求体
     """
 
+    # 用户名不能为空
     if not req.username:
         raise HTTPException(status_code=400, detail="用户名不能为空")
     username = req.username
 
+    # 密码不能为空
     if not req.password:
         raise HTTPException(status_code=400, detail="密码不能为空")
     password = req.password
 
+    # 从数据库中查询 id username password_hash
     sql = f"""
             SELECT u.id, u.username, u.password_hash
             FROM users AS u
@@ -98,10 +141,14 @@ def login(req:Account):
     if not rows:
         raise HTTPException(status_code=401, detail="用户不存在")
 
+    # 取出用户信息，只有一条数据
     user = rows[0]
-    if password != user['password_hash']:
+
+    # 密码校验 hash比对
+    if not PasswordHash.recommended().verify(password,user['password_hash']):
         raise HTTPException(status_code=401, detail="密码错误")
 
+    # 生成token
     token = create_access_token(
         user_id=user['id'], username=user['username']
     )
@@ -118,8 +165,9 @@ def login(req:Account):
     }
 # ————————————————————————————————————————————————————————————————————————————————— #
 # ———————————————————!!! 登录界面'/login'接口处理 END !!!————————————————————————————— #
+# ***********************************************************************************
 
-
+# ***********************************************************************************
 # ———————————————————!!! 聊天界面'/chat'接口处理 BEGIN !!!———————————————————————————— #
 # —————————————————————————————————————————————————————————————————————————————————— #
 # 定义Message消息类型
@@ -222,9 +270,9 @@ def chat(
     )
 # ————————————————————————————————————————————————————————————————————————————————— #
 # ———————————————————!!! 聊天界面'/chat'接口处理 END !!!————————————————————————————— #
+# ***********************************************************************************
 
-
-
+# ***********************************************************************************
 # ———————————————!!! 聊天界面'/chat/conversation'接口处理 BEGIN !!!——————————————————— #
 # —————————————————————————————————————————————————————————————————————————————————— #
 class CreateConversationRequest(BaseModel):
