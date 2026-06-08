@@ -12,6 +12,8 @@ from assistant import get_chain,get_answer
 # SqlStatement
 from SqlStatement.query import exe_sql
 
+# ——————————————————————————!!! JWT TOKEN 处理 BEGIN !!!———————————————————————————— #
+# —————————————————————————————————————————————————————————————————————————————————— #
 # 读取环境变量配置
 JWT_SECRET_KEY = os.environ.get("JWT_SECRET_KEY")
 JWT_ALGORITHM = "HS256"
@@ -35,7 +37,7 @@ def create_access_token(user_id: int, username: str) -> str:
     return jwt.encode(payload, JWT_SECRET_KEY, algorithm=JWT_ALGORITHM)
 
 
-# 解析token
+# 解析token，验证token
 def decode_access_token(token: str) -> dict:
     try:
         return jwt.decode(
@@ -48,8 +50,24 @@ def decode_access_token(token: str) -> dict:
     except jwt.InvalidTokenError:
         raise HTTPException(status_code=401, detail="无效 token")
 
+# 从token中获取payload user_id
+def get_current_user_payload(authorization: str = Header(...)) -> dict:
+    if not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="认证格式错误")
+
+    token = authorization.removeprefix("Bearer ").strip()
+    return decode_access_token(token)
+
+# ——————————————————————————————————————————————————————————————————————————————— #
+# ——————————————————————————!!! JWT TOKEN 处理 END !!!———————————————————————————— #
+
+
 app = FastAPI()
 
+
+# ———————————————————!!! 登录界面'/login'接口处理 BEGIN !!!———————————————————————————— #
+# —————————————————————————————————————————————————————————————————————————————————— #
+# 定义POST '/login' 请求体数据结构
 class Account(BaseModel):
     username: str
     password: str
@@ -76,7 +94,7 @@ def login(req:Account):
             FROM users AS u
             WHERE u.username = %s
             """
-    rows = exe_sql(sql,(username,))
+    rows = exe_sql(sql_statement=sql,args_tuple=(username,))
     if not rows:
         raise HTTPException(status_code=401, detail="用户不存在")
 
@@ -98,8 +116,12 @@ def login(req:Account):
         "access_token": token,
         "token_type": "bearer"
     }
+# ————————————————————————————————————————————————————————————————————————————————— #
+# ———————————————————!!! 登录界面'/login'接口处理 END !!!————————————————————————————— #
 
 
+# ———————————————————!!! 聊天界面'/chat'接口处理 BEGIN !!!———————————————————————————— #
+# —————————————————————————————————————————————————————————————————————————————————— #
 # 定义Message消息类型
 class Message(BaseModel):
     role: Literal["user", "assistant"]
@@ -107,47 +129,106 @@ class Message(BaseModel):
 
 # 定义chat请求类型
 class ChatRequest(BaseModel):
-    messages: List[Message]
-    attachment_context: str = Field(default="", alias="attachmentContext")
+    conversation_id: str
+    message: str
+
+# 定义存储聊天消息的函数
+def save_message(conversation_id: str, role: str, content: str):
+    sql = """
+    INSERT INTO messages (conversation_id, role, content)
+    VALUES (%s, %s, %s)
+    RETURNING id;
+    """
+    exe_sql(sql_statement=sql,args_tuple=(conversation_id, role, content))
+
+# 返回answer 流式消息生成器，在生成器迭代完后，将answer保存到 message表
+def stream_answer_and_save(chain, user_input: str, history: list, conversation_id: str):
+    full_answer = ""
+
+    for chunk in get_answer(chain, user_input, history):
+        full_answer += chunk
+        yield chunk
+
+    save_message(conversation_id, "assistant", full_answer)
 
 # 将聊天历史转话语 langchain能够处理的格式 元组列表
-def to_langchain_history(messages: List[Message]) -> list[tuple[str, str]]:
+def load_chat_history(conversation_id: str) -> list[tuple[str, str]]:
+    sql = """
+    SELECT role, content
+    FROM messages
+    WHERE conversation_id = %s
+    ORDER BY created_at ASC, id ASC;
+    """
+    rows = exe_sql(sql_statement=sql, args_tuple=(conversation_id,))
+
     role_map = {
         "user": "human",
         "assistant": "ai",
     }
-    return [(role_map[message.role], message.content) for message in messages]
+
+    return [
+        (role_map[row["role"]], row["content"])
+        for row in rows
+        if row["role"] in role_map
+    ]
 
 # 请求聊天接口
 @app.post("/chat")
-def chat(req:ChatRequest):
-    if not req.messages:
-        raise HTTPException(status_code=400, detail="messages 不能为空")
+def chat(
+        req:ChatRequest,
+        authorization: str = Header(...)
+) -> StreamingResponse:
+
+    # 解析验证token，获取user_id
+    payload = get_current_user_payload(authorization)
+    user_id = int(payload['sub'])
+
+    # 取出请求体中的数据
+    conversation_id = req.conversation_id
+    message = req.message
+
+    if not message:
+        raise HTTPException(status_code=400, detail="message不能为空")
+
+    sql = """
+            select id
+            from conversations
+            where user_id = %s and id = %s
+        """
+
+    conversation_exist = exe_sql(sql_statement=sql,args_tuple=(user_id,conversation_id))
+
+    if not conversation_exist:
+        raise HTTPException(status_code=404, detail="会话不存在")
 
     # 取出历史记录
-    history = to_langchain_history(req.messages[:-1])
-    # 取出用户输入
-    user_inputs = req.messages[-1].content
+    history = load_chat_history(conversation_id)
+
+    # 保存用户输入
+    save_message(conversation_id, "user", message)
+
     # 创建检索链
     chain = get_chain()
 
+    # 返回流式响应
     return StreamingResponse(
-        get_answer(chain,user_inputs,history),
-        media_type="text/plain; charset=utf-8",
+        stream_answer_and_save(
+            chain=chain,
+            user_input=message,
+            history=history,
+            conversation_id=conversation_id,
+        ),
+        media_type="text/plain; charset=utf-8"
     )
+# ————————————————————————————————————————————————————————————————————————————————— #
+# ———————————————————!!! 聊天界面'/chat'接口处理 END !!!————————————————————————————— #
 
 
-# ———————————————————————————————————————————————————————————————————————————————————————————— #
-# 定义'/chat/conservation'的请求体数据类型
+
+# ———————————————!!! 聊天界面'/chat/conversation'接口处理 BEGIN !!!——————————————————— #
+# —————————————————————————————————————————————————————————————————————————————————— #
 class CreateConversationRequest(BaseModel):
     title: str | None = '新会话'
-
-def get_current_user_payload(authorization: str = Header(...)) -> dict:
-    if not authorization.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="认证格式错误")
-
-    token = authorization.removeprefix("Bearer ").strip()
-    return decode_access_token(token)
 
 @app.post('/chat/conversation')
 def create_conservation(
@@ -172,7 +253,8 @@ def create_conservation(
         "message": "会话创建成功",
         "conversation": dict(conversion),
     }
-# ———————————————————————————————————————————————————————————————————————————————————————————— #
+# —————————————————————————————————————————————————————————————————————————————————— #
+# ———————————————!!! 聊天界面'/chat/conversation'接口处理 END !!!——————————————————— #
 
 
 # 上传文件接口
