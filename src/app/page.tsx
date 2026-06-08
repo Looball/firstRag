@@ -23,6 +23,7 @@ type ChatSession = {
 type BackendConversation = {
   id?: unknown;
   title?: unknown;
+  messages?: unknown;
 };
 
 type CreateConversationResponse = {
@@ -35,36 +36,18 @@ type CreateConversationResponse = {
   message?: string;
 };
 
+type ListConversationsResponse = {
+  conversations?: unknown;
+  answer?: string;
+  detail?: string;
+  error?: string;
+  message?: string;
+};
+
 const STORAGE_KEY = "ai-learning-assistant-sessions";
 const CURRENT_SESSION_KEY = "ai-learning-assistant-current-session";
 const LEGACY_INITIAL_MESSAGE =
   "你好，我是你的 AI 学习助手。你可以问我任何关于 AI 的问题。";
-
-function createId() {
-  if (typeof crypto?.randomUUID === "function") {
-    return crypto.randomUUID();
-  }
-
-  if (typeof crypto?.getRandomValues === "function") {
-    const bytes = crypto.getRandomValues(new Uint8Array(16));
-    bytes[6] = (bytes[6] & 0x0f) | 0x40;
-    bytes[8] = (bytes[8] & 0x3f) | 0x80;
-
-    const hex = Array.from(bytes, (byte) =>
-      byte.toString(16).padStart(2, "0")
-    );
-
-    return [
-      hex.slice(0, 4).join(""),
-      hex.slice(4, 6).join(""),
-      hex.slice(6, 8).join(""),
-      hex.slice(8, 10).join(""),
-      hex.slice(10, 16).join(""),
-    ].join("-");
-  }
-
-  return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
-}
 
 function buildSessionTitle(input: string) {
   const normalized = input.replace(/\s+/g, " ").trim();
@@ -87,10 +70,6 @@ function isMessage(value: unknown): value is Message {
     (candidate.role === "user" || candidate.role === "assistant") &&
     typeof candidate.content === "string"
   );
-}
-
-function serializeSessionsForStorage(sessions: ChatSession[]) {
-  return JSON.stringify(sessions);
 }
 
 function getResponseErrorMessage(errorText: string, fallback: string) {
@@ -212,6 +191,32 @@ function removeLegacyInitialMessage(messages: Message[]) {
   }
 
   return messages;
+}
+
+function toChatSession(value: unknown): ChatSession | null {
+  if (typeof value !== "object" || value === null) {
+    return null;
+  }
+
+  const conversation = value as BackendConversation;
+
+  if (typeof conversation.id !== "string" || !conversation.id.trim()) {
+    return null;
+  }
+
+  const messages = Array.isArray(conversation.messages)
+    ? removeLegacyInitialMessage(conversation.messages.filter(isMessage))
+    : [];
+
+  return {
+    id: conversation.id,
+    title:
+      typeof conversation.title === "string" && conversation.title.trim()
+        ? conversation.title.trim()
+        : "新对话",
+    messages,
+    isPersisted: true,
+  };
 }
 
 function waitForNextPaint() {
@@ -497,7 +502,6 @@ export default function Home() {
     {}
   );
   const [sessionErrors, setSessionErrors] = useState<Record<string, string>>({});
-  const [hasLoaded, setHasLoaded] = useState(false);
   const [hasCheckedAuth, setHasCheckedAuth] = useState(false);
   const [isCreatingSession, setIsCreatingSession] = useState(false);
   const [pageError, setPageError] = useState("");
@@ -588,6 +592,40 @@ export default function Home() {
     return nextSession;
   }
 
+  async function loadBackendSessions() {
+    const authState = parseAuthState(localStorage.getItem(AUTH_STORAGE_KEY));
+
+    if (!authState) {
+      localStorage.removeItem(AUTH_STORAGE_KEY);
+      window.location.href = "/login";
+      throw new Error("登录已失效，请重新登录。");
+    }
+
+    const response = await fetch("/api/chat/conversations", {
+      method: "GET",
+      headers: {
+        Authorization: buildAuthorizationHeader(authState),
+      },
+      cache: "no-store",
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(
+        getResponseErrorMessage(errorText, "读取会话列表失败，请稍后再试。")
+      );
+    }
+
+    const data = (await response.json()) as ListConversationsResponse;
+    const conversations = Array.isArray(data.conversations)
+      ? data.conversations
+      : [];
+
+    return conversations
+      .map(toChatSession)
+      .filter((session): session is ChatSession => session !== null);
+  }
+
   useEffect(() => {
     try {
       const authState = parseAuthState(localStorage.getItem(AUTH_STORAGE_KEY));
@@ -612,67 +650,40 @@ export default function Home() {
     let isCancelled = false;
 
     async function restoreSessions() {
-    let nextSessions: ChatSession[] = [];
-    let savedCurrentSessionId = "";
+      let nextSessions: ChatSession[] = [];
+      let didLoadSessions = false;
 
-    try {
-      const savedSessions = localStorage.getItem(STORAGE_KEY);
-      savedCurrentSessionId = localStorage.getItem(CURRENT_SESSION_KEY) || "";
-
-      if (savedSessions) {
-        const parsedSessions = JSON.parse(savedSessions) as unknown;
-
-        if (Array.isArray(parsedSessions) && parsedSessions.length > 0) {
-          nextSessions = parsedSessions.map((session) => {
-            const messages = Array.isArray(session?.messages)
-              ? removeLegacyInitialMessage(session.messages.filter(isMessage))
-              : [];
-
-            return {
-              id:
-                typeof session?.id === "string" && session.id
-                  ? session.id
-                  : createId(),
-              title:
-                typeof session?.title === "string" && session.title.trim()
-                  ? session.title.trim()
-                  : "新对话",
-              messages,
-              isPersisted: session?.isPersisted === true,
-            };
-          });
-        }
-      }
-    } catch (error) {
-      console.error("Failed to restore saved sessions:", error);
-    }
-
-    if (nextSessions.length === 0) {
       try {
-        nextSessions = [await createBackendSession()];
+        nextSessions = await loadBackendSessions();
+        didLoadSessions = true;
       } catch (error) {
-        console.error("Failed to create initial session:", error);
+        console.error("Failed to load saved sessions:", error);
         setPageError(
           error instanceof Error
             ? error.message
-            : "创建初始对话失败，请稍后再试。"
+            : "读取会话列表失败，请稍后再试。"
         );
       }
-    }
 
-    if (isCancelled) {
-      return;
-    }
+      if (didLoadSessions && nextSessions.length === 0) {
+        try {
+          nextSessions = [await createBackendSession()];
+        } catch (error) {
+          console.error("Failed to create initial session:", error);
+          setPageError(
+            error instanceof Error
+              ? error.message
+              : "创建初始对话失败，请稍后再试。"
+          );
+        }
+      }
 
-    setSessions(nextSessions);
-    setCurrentSessionId(
-      nextSessions.length > 0 &&
-        savedCurrentSessionId &&
-        nextSessions.some((session) => session.id === savedCurrentSessionId)
-        ? savedCurrentSessionId
-        : nextSessions[0]?.id || ""
-    );
-    setHasLoaded(true);
+      if (isCancelled) {
+        return;
+      }
+
+      setSessions(nextSessions);
+      setCurrentSessionId(nextSessions[0]?.id || "");
     }
 
     if (hasCheckedAuth) {
@@ -683,22 +694,6 @@ export default function Home() {
       isCancelled = true;
     };
   }, [hasCheckedAuth]);
-
-  useEffect(() => {
-    if (!hasLoaded || sessions.length === 0) {
-      return;
-    }
-
-    try {
-      localStorage.setItem(STORAGE_KEY, serializeSessionsForStorage(sessions));
-
-      if (currentSessionId) {
-        localStorage.setItem(CURRENT_SESSION_KEY, currentSessionId);
-      }
-    } catch (error) {
-      console.error("Failed to persist sessions:", error);
-    }
-  }, [sessions, currentSessionId, hasLoaded]);
 
   useEffect(() => {
     const currentMessageCount = currentSession?.messages.length ?? 0;
