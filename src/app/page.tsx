@@ -283,7 +283,7 @@ function renderInlineMarkdown(
           className={`rounded px-1.5 py-0.5 font-mono text-[0.92em] ${
             isUserMessage
               ? "bg-white/15 text-white"
-              : "bg-zinc-200 text-zinc-900"
+              : "bg-[#dfe9e5] text-[#105149]"
           }`}
         >
           {token.slice(1, -1)}
@@ -361,7 +361,7 @@ function MarkdownContent({
           className={`overflow-x-auto rounded-xl px-4 py-3 text-sm ${
             isUserMessage
               ? "bg-black/25 text-white"
-              : "bg-zinc-900 text-zinc-100"
+              : "bg-[#17201f] text-[#eef5f2]"
           }`}
         >
           <code>{codeLines.join("\n")}</code>
@@ -1222,44 +1222,49 @@ export default function Home() {
 
   if (!hasCheckedAuth) {
     return (
-      <main className="flex min-h-screen items-center justify-center bg-zinc-100 px-4 text-sm text-zinc-500">
-        正在进入...
+      <main className="research-canvas flex min-h-screen items-center justify-center px-4">
+        <div className="font-utility flex items-center gap-3 text-xs font-semibold text-[#176b62]">
+          <span className="h-2.5 w-2.5 animate-pulse bg-[#e36b4f]" />
+          正在整理研究台...
+        </div>
       </main>
     );
   }
 
   return (
-    <main className="min-h-screen bg-zinc-100 px-4 py-6 md:px-6 md:py-8">
-      <div className="mx-auto grid min-w-0 w-full max-w-6xl gap-6 lg:grid-cols-[280px_minmax(0,1fr)]">
-        <aside className="flex min-w-0 h-[calc(100vh-4rem)] flex-col rounded-3xl border border-zinc-200 bg-white p-4 shadow-sm md:h-[calc(100vh-5rem)] lg:sticky lg:top-6">
-          <div className="flex items-center justify-between gap-3 border-b border-zinc-200 px-1 pb-4">
+    <main className="research-canvas min-h-screen px-3 py-3 md:px-5 md:py-5">
+      <div className="mx-auto grid min-w-0 w-full max-w-[1440px] gap-4 lg:grid-cols-[304px_minmax(0,1fr)]">
+        <aside className="research-enter flex min-w-0 max-h-[calc(100vh-1.5rem)] flex-col border border-[#bdcac5] bg-[#edf2ef] p-4 lg:sticky lg:top-5 lg:h-[calc(100vh-2.5rem)] lg:max-h-none">
+          <div className="flex items-center justify-between gap-3 border-b border-[#c7d1cd] px-1 pb-4">
             <div className="min-w-0">
-              <p className="text-xs font-medium text-zinc-500">当前用户</p>
-              <p className="mt-1 truncate text-sm font-semibold text-zinc-900">
+              <p className="font-utility text-[10px] font-semibold uppercase text-[#72807b]">
+                Researcher
+              </p>
+              <p className="font-display mt-1 truncate text-lg font-semibold text-[#17201f]">
                 {currentUsername || "已登录"}
               </p>
             </div>
             <button
               type="button"
               onClick={handleLogout}
-              className="shrink-0 rounded-lg px-2 py-1 text-xs font-medium text-zinc-500 transition hover:bg-zinc-100 hover:text-zinc-900"
+              className="font-utility shrink-0 border-b border-[#9eaaa6] px-1 py-1 text-[11px] font-semibold text-[#64716d] transition hover:border-[#e36b4f] hover:text-[#9b3c29]"
             >
               退出
             </button>
           </div>
 
-          <div className="border-b border-zinc-200 py-4">
+          <div className="border-b border-[#c7d1cd] py-4">
             <div className="flex items-center justify-between gap-3">
               <label
                 htmlFor="knowledge-base"
-                className="text-xs font-medium text-zinc-500"
+                className="font-utility text-[10px] font-semibold uppercase text-[#72807b]"
               >
-                当前知识库
+                Knowledge Base
               </label>
               <button
                 type="button"
                 onClick={() => setIsKnowledgeBaseManagerOpen(true)}
-                className="rounded-lg px-2 py-1 text-xs font-medium text-zinc-500 transition hover:bg-zinc-100 hover:text-zinc-900"
+                className="text-xs font-semibold text-[#176b62] underline decoration-[#d5a83b] decoration-2 underline-offset-4"
               >
                 管理
               </button>
@@ -1271,7 +1276,7 @@ export default function Home() {
               onChange={(event) =>
                 setSelectedKnowledgeBaseId(event.target.value)
               }
-              className="mt-2 w-full rounded-lg border border-zinc-300 bg-white px-3 py-2.5 text-sm font-medium text-zinc-900 outline-none transition focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200"
+              className="research-focus mt-2 w-full border border-[#b7c4bf] bg-[#fcfdfb] px-3 py-2.5 text-sm font-semibold text-[#17201f]"
             >
               {knowledgeBases.map((knowledgeBase) => (
                 <option key={knowledgeBase.id} value={knowledgeBase.id}>
@@ -1284,14 +1289,14 @@ export default function Home() {
               <button
                 type="button"
                 onClick={() => fileInputRef.current?.click()}
-                className="rounded-lg bg-zinc-900 px-3 py-2 text-xs font-medium text-white transition hover:bg-zinc-700"
+                className="bg-[#176b62] px-3 py-2.5 text-xs font-semibold text-white transition hover:bg-[#105149]"
               >
                 上传文件
               </button>
               <button
                 type="button"
                 onClick={() => setIsFileManagerOpen(true)}
-                className="rounded-lg border border-zinc-300 px-3 py-2 text-xs font-medium text-zinc-700 transition hover:bg-zinc-100"
+                className="border border-[#aebdb7] bg-[#fcfdfb] px-3 py-2.5 text-xs font-semibold text-[#46514e] transition hover:border-[#176b62] hover:text-[#176b62]"
               >
                 文件 {selectedKnowledgeFiles.length}
               </button>
@@ -1311,14 +1316,18 @@ export default function Home() {
               void handleCreateSession();
             }}
             disabled={isCreatingSession}
-            className="mt-4 w-full rounded-lg bg-zinc-900 px-4 py-3 text-sm font-medium text-white transition hover:bg-zinc-700 disabled:cursor-not-allowed disabled:bg-zinc-400"
+            className="mt-4 w-full border border-[#17201f] bg-[#17201f] px-4 py-3 text-sm font-semibold text-white transition hover:bg-[#2d3936] disabled:border-[#9ba8a3] disabled:bg-[#9ba8a3]"
           >
-            {isCreatingSession ? "创建中..." : "新建对话"}
+            {isCreatingSession ? "创建中..." : "＋ 新建研究会话"}
           </button>
 
           <div className="mt-4 flex items-center justify-between px-1">
-            <p className="text-xs font-medium text-zinc-500">会话</p>
-            <p className="text-xs text-zinc-400">{sessions.length}</p>
+            <p className="font-utility text-[10px] font-semibold uppercase text-[#72807b]">
+              Conversation Index
+            </p>
+            <p className="font-utility text-[10px] text-[#72807b]">
+              {String(sessions.length).padStart(2, "0")}
+            </p>
           </div>
 
           <div className="mt-2 min-h-0 min-w-0 flex-1 space-y-2 overflow-y-auto pr-1">
@@ -1328,10 +1337,10 @@ export default function Home() {
               return (
                 <div
                   key={session.id}
-                  className={`min-w-0 w-full rounded-2xl px-4 py-3 text-left text-sm transition ${
+                  className={`min-w-0 w-full border-l-4 px-3 py-3 text-left text-sm transition ${
                     isActive
-                      ? "bg-zinc-900 text-white"
-                      : "bg-zinc-100 text-zinc-700 hover:bg-zinc-200"
+                      ? "border-[#e36b4f] bg-[#17201f] text-white"
+                      : "border-transparent bg-[#fcfdfb] text-[#46514e] hover:border-[#d5a83b] hover:bg-white"
                   }`}
                 >
                   <div className="flex items-start justify-between gap-3">
@@ -1352,7 +1361,7 @@ export default function Home() {
                               }
                             }}
                             autoFocus
-                            className="w-full rounded-xl border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 outline-none focus:border-zinc-500"
+                            className="research-focus w-full border border-[#b7c4bf] bg-white px-3 py-2 text-sm text-[#17201f]"
                           />
                           <div className="flex gap-2">
                             <button
@@ -1360,7 +1369,7 @@ export default function Home() {
                                 void handleSaveRename();
                               }}
                               disabled={renamingSessionId === session.id}
-                              className="rounded-lg bg-zinc-900 px-2 py-1 text-xs text-white transition hover:bg-zinc-700"
+                              className="bg-[#176b62] px-2 py-1 text-xs text-white transition hover:bg-[#105149]"
                             >
                               {renamingSessionId === session.id
                                 ? "保存中..."
@@ -1368,7 +1377,7 @@ export default function Home() {
                             </button>
                             <button
                               onClick={handleCancelRename}
-                              className="rounded-lg px-2 py-1 text-xs transition hover:bg-zinc-200 hover:text-zinc-900"
+                              className="px-2 py-1 text-xs transition hover:bg-[#dfe7e3] hover:text-[#17201f]"
                             >
                               取消
                             </button>
@@ -1381,10 +1390,10 @@ export default function Home() {
                           }}
                           className="min-w-0 w-full text-left"
                         >
-                          <div className="truncate font-medium">{session.title}</div>
+                          <div className="truncate font-semibold">{session.title}</div>
                           <div
                             className={`mt-1 truncate text-xs ${
-                              isActive ? "text-zinc-300" : "text-zinc-500"
+                              isActive ? "text-[#b8c8c3]" : "text-[#7b8884]"
                             }`}
                           >
                             {session.messages[session.messages.length - 1]?.content ||
@@ -1403,8 +1412,8 @@ export default function Home() {
                           }}
                           className={`rounded-lg px-2 py-1 text-xs transition ${
                             isActive
-                              ? "text-zinc-300 hover:bg-zinc-800 hover:text-white"
-                              : "text-zinc-500 hover:bg-zinc-200 hover:text-zinc-900"
+                              ? "text-[#b8c8c3] hover:bg-white/10 hover:text-white"
+                              : "text-[#73807c] hover:bg-[#dfe7e3] hover:text-[#17201f]"
                           }`}
                         >
                           重命名
@@ -1418,8 +1427,8 @@ export default function Home() {
                           disabled={deletingSessionId === session.id}
                           className={`rounded-lg px-2 py-1 text-xs transition ${
                             isActive
-                              ? "text-zinc-300 hover:bg-zinc-800 hover:text-white"
-                              : "text-zinc-500 hover:bg-zinc-200 hover:text-zinc-900"
+                              ? "text-[#b8c8c3] hover:bg-white/10 hover:text-white"
+                              : "text-[#73807c] hover:bg-[#fff1ed] hover:text-[#9b3c29]"
                           }`}
                         >
                           {deletingSessionId === session.id
@@ -1435,18 +1444,58 @@ export default function Home() {
           </div>
         </aside>
 
-        <section className="min-w-0 rounded-3xl border border-zinc-200 bg-white p-6 shadow-sm md:p-8">
-          <div>
-            <h1 className="text-4xl font-bold tracking-tight text-zinc-900 md:text-5xl">
-              ❤️本地知识库问答系统Demo❤️
-            </h1>
-            <p className="mt-4 max-w-2xl text-lg leading-8 text-zinc-600">
-              基于 Next.js fastapi langchain chroma 构建的本地知识库问答系统。
-            </p>
-          </div>
+        <section className="research-paper research-enter min-w-0 border border-[#bdcac5]">
+          <header className="border-b border-[#cbd5d1] px-5 py-5 md:px-8 md:py-6">
+            <div className="flex flex-col justify-between gap-5 md:flex-row md:items-end">
+              <div className="min-w-0">
+                <div className="flex items-center gap-3">
+                  <span className="font-utility bg-[#d5a83b] px-2 py-1 text-[10px] font-bold uppercase text-[#17201f]">
+                    Live Research
+                  </span>
+                  <span className="font-utility text-[10px] font-semibold uppercase text-[#72807b]">
+                    {selectedKnowledgeBase?.name || "默认知识库"}
+                  </span>
+                </div>
+                <h1 className="font-display mt-4 truncate text-3xl font-semibold text-[#17201f] md:text-4xl">
+                  {currentSession?.title || "研究工作台"}
+                </h1>
+                <p className="mt-2 max-w-2xl text-sm leading-6 text-[#64716d]">
+                  基于当前知识库继续提问，回答与上下文会保存在此会话中。
+                </p>
+              </div>
+              <div className="font-utility flex shrink-0 gap-5 border-t border-[#d6dedb] pt-4 text-[10px] uppercase text-[#72807b] md:border-l md:border-t-0 md:pl-5 md:pt-0">
+                <span>
+                  Messages
+                  <strong className="mt-1 block text-base text-[#17201f]">
+                    {String(currentSession?.messages.length || 0).padStart(2, "0")}
+                  </strong>
+                </span>
+                <span>
+                  Files
+                  <strong className="mt-1 block text-base text-[#17201f]">
+                    {String(selectedKnowledgeFiles.length).padStart(2, "0")}
+                  </strong>
+                </span>
+              </div>
+            </div>
+          </header>
 
-          <div className="mt-8">
-            <div className="space-y-4">
+          <div className="px-5 py-7 md:px-8 md:py-9">
+            <div className="space-y-6">
+              {currentSession?.messages.length === 0 && (
+                <div className="border-y border-[#cbd5d1] py-12 text-center">
+                  <p className="font-utility text-[10px] font-semibold uppercase text-[#176b62]">
+                    Empty Research Log
+                  </p>
+                  <h2 className="font-display mt-3 text-2xl font-semibold text-[#17201f]">
+                    从一个明确的问题开始
+                  </h2>
+                  <p className="mx-auto mt-2 max-w-md text-sm leading-6 text-[#64716d]">
+                    你的问题和 AI 回答会按顺序记录在这里，便于后续回顾与继续追问。
+                  </p>
+                </div>
+              )}
+
               {currentSession?.messages.map((message, index) => {
                 const messageKey = `${currentSession.id}-${index}`;
                 const isStreamingPlaceholder =
@@ -1458,51 +1507,72 @@ export default function Home() {
                 return (
                   <div
                     key={messageKey}
-                    className={
+                    className={`relative grid min-w-0 gap-3 border-l-2 pl-5 md:grid-cols-[74px_minmax(0,1fr)] md:gap-5 md:pl-6 ${
                       message.role === "user"
-                        ? "ml-auto max-w-[85%] rounded-2xl bg-zinc-900 px-5 py-4 text-white"
-                        : "mr-auto max-w-[85%] rounded-2xl bg-zinc-100 px-5 py-4 text-zinc-900"
-                    }
+                        ? "border-[#e36b4f]"
+                        : "border-[#176b62]"
+                    }`}
                   >
-                    <MarkdownContent
-                      content={
-                        isStreamingPlaceholder
-                          ? "AI 正在思考中..."
-                          : message.content
-                      }
-                      isUserMessage={message.role === "user"}
-                    />
+                    <div className="font-utility pt-1 text-[10px] font-semibold uppercase text-[#72807b]">
+                      <span className="block text-[#17201f]">
+                        {String(index + 1).padStart(2, "0")}
+                      </span>
+                      {message.role === "user" ? "Question" : "Response"}
+                    </div>
+                    <article
+                      className={`min-w-0 px-5 py-4 ${
+                        message.role === "user"
+                          ? "bg-[#17201f] text-white"
+                          : "border border-[#d5ded9] bg-[#f5f8f6] text-[#26312f]"
+                      }`}
+                    >
+                      <MarkdownContent
+                        content={
+                          isStreamingPlaceholder
+                            ? "AI 正在思考中..."
+                            : message.content
+                        }
+                        isUserMessage={message.role === "user"}
+                      />
 
-                    {message.role === "assistant" && message.content && (
-                      <div className="mt-3 flex justify-end">
-                        <button
-                          onClick={() =>
-                            handleCopyMessage(messageKey, message.content)
-                          }
-                          className="rounded-lg px-2 py-1 text-xs text-zinc-500 transition hover:bg-zinc-200 hover:text-zinc-900"
-                        >
-                          {copiedMessageKey === messageKey ? "已复制" : "复制回答"}
-                        </button>
-                      </div>
-                    )}
+                      {message.role === "assistant" && message.content && (
+                        <div className="mt-4 flex justify-end border-t border-[#d6dedb] pt-3">
+                          <button
+                            onClick={() =>
+                              handleCopyMessage(messageKey, message.content)
+                            }
+                            className="font-utility text-[10px] font-semibold uppercase text-[#64716d] transition hover:text-[#176b62]"
+                          >
+                            {copiedMessageKey === messageKey
+                              ? "Copied"
+                              : "Copy Response"}
+                          </button>
+                        </div>
+                      )}
+                    </article>
                   </div>
                 );
               })}
 
               {shouldShowThinkingIndicator && (
-                <div className="mr-auto max-w-[85%] animate-pulse rounded-2xl bg-zinc-100 px-5 py-4 text-zinc-500">
-                  AI 正在思考中...
+                <div className="grid gap-3 border-l-2 border-[#176b62] pl-5 md:grid-cols-[74px_minmax(0,1fr)] md:gap-5 md:pl-6">
+                  <p className="font-utility pt-1 text-[10px] font-semibold uppercase text-[#72807b]">
+                    Response
+                  </p>
+                  <div className="animate-pulse border border-[#d5ded9] bg-[#f5f8f6] px-5 py-4 text-sm text-[#64716d]">
+                    正在检索资料并组织回答...
+                  </div>
                 </div>
               )}
 
               {currentSessionError && (
-                <div className="rounded-2xl border border-red-200 bg-red-50 px-5 py-4 text-red-600">
+                <div className="border-l-4 border-[#e36b4f] bg-[#fff1ed] px-5 py-4 text-[#9b3c29]">
                   {currentSessionError}
                 </div>
               )}
 
               {pageError && (
-                <div className="rounded-2xl border border-red-200 bg-red-50 px-5 py-4 text-red-600">
+                <div className="border-l-4 border-[#e36b4f] bg-[#fff1ed] px-5 py-4 text-[#9b3c29]">
                   {pageError}
                 </div>
               )}
@@ -1511,43 +1581,56 @@ export default function Home() {
             </div>
           </div>
 
-          <div className="mt-8 border-t border-zinc-200 pt-6">
-            <label
-              htmlFor="question"
-              className="mb-2 block text-sm font-medium text-zinc-700"
-            >
-              输入你的问题
-            </label>
-            <textarea
-              id="question"
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && !e.shiftKey && !isCurrentSessionLoading) {
-                  e.preventDefault();
-                  void handleSubmit();
-                }
-              }}
-              placeholder="比如：请解释一下 RAG 的核心概念。"
-              className="min-h-[120px] w-full rounded-2xl border border-zinc-300 bg-white px-4 py-3 text-zinc-900 outline-none transition focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200"
-            />
+          <div className="border-t border-[#cbd5d1] bg-[#eef3f0] px-5 py-5 md:px-8 md:py-6">
+            <div className="flex items-center justify-between gap-4">
+              <label
+                htmlFor="question"
+                className="font-utility block text-[10px] font-semibold uppercase text-[#176b62]"
+              >
+                Add To Research Log
+              </label>
+              <span className="font-utility text-[10px] text-[#7b8884]">
+                Enter 发送 · Shift + Enter 换行
+              </span>
+            </div>
+            <div className="mt-3 flex flex-col gap-3 md:flex-row md:items-end">
+              <textarea
+                id="question"
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (
+                    e.key === "Enter" &&
+                    !e.shiftKey &&
+                    !isCurrentSessionLoading
+                  ) {
+                    e.preventDefault();
+                    void handleSubmit();
+                  }
+                }}
+                placeholder="输入一个需要结合当前知识库回答的问题..."
+                className="research-focus min-h-[104px] min-w-0 flex-1 resize-y border border-[#aebdb7] bg-[#fcfdfb] px-4 py-3 text-[#17201f]"
+              />
 
-            <button
-              onClick={() => {
-                void handleSubmit();
-              }}
-              disabled={isCurrentSessionLoading || isCreatingSession || !currentSession}
-              className="mt-4 inline-flex items-center rounded-2xl bg-zinc-900 px-5 py-3 text-sm font-medium text-white transition hover:bg-zinc-700 disabled:cursor-not-allowed disabled:bg-zinc-400"
-            >
-              {isCurrentSessionLoading ? "思考中..." : "发送消息"}
-            </button>
+              <button
+                onClick={() => {
+                  void handleSubmit();
+                }}
+                disabled={
+                  isCurrentSessionLoading || isCreatingSession || !currentSession
+                }
+                className="h-12 shrink-0 bg-[#176b62] px-6 text-sm font-semibold text-white transition hover:bg-[#105149] disabled:bg-[#91aaa4] md:h-[104px] md:w-32"
+              >
+                {isCurrentSessionLoading ? "思考中..." : "发送问题"}
+              </button>
+            </div>
           </div>
         </section>
       </div>
 
       {isKnowledgeBaseManagerOpen && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4 py-8"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-[#17201f]/55 px-4 py-8 backdrop-blur-[2px]"
           role="presentation"
           onMouseDown={(event) => {
             if (event.target === event.currentTarget) {
@@ -1559,17 +1642,20 @@ export default function Home() {
             role="dialog"
             aria-modal="true"
             aria-labelledby="knowledge-base-manager-title"
-            className="max-h-full w-full max-w-lg overflow-y-auto rounded-2xl bg-white shadow-xl"
+            className="research-paper max-h-full w-full max-w-lg overflow-y-auto border border-[#bdcac5]"
           >
-            <div className="flex items-center justify-between border-b border-zinc-200 px-6 py-5">
+            <div className="flex items-center justify-between border-b border-[#cbd5d1] px-6 py-5">
               <div>
+                <p className="font-utility text-[10px] font-semibold uppercase text-[#176b62]">
+                  Library Index
+                </p>
                 <h2
                   id="knowledge-base-manager-title"
-                  className="text-lg font-semibold text-zinc-900"
+                  className="font-display mt-2 text-2xl font-semibold text-[#17201f]"
                 >
                   知识库管理
                 </h2>
-                <p className="mt-1 text-sm text-zinc-500">
+                <p className="mt-1 text-sm text-[#64716d]">
                   当前：{selectedKnowledgeBase?.name || "默认知识库"}
                 </p>
               </div>
@@ -1577,14 +1663,14 @@ export default function Home() {
                 type="button"
                 onClick={() => setIsKnowledgeBaseManagerOpen(false)}
                 aria-label="关闭知识库管理"
-                className="flex h-9 w-9 items-center justify-center rounded-lg text-xl text-zinc-500 transition hover:bg-zinc-100 hover:text-zinc-900"
+                className="flex h-9 w-9 items-center justify-center text-xl text-[#64716d] transition hover:bg-[#e1e9e5] hover:text-[#17201f]"
               >
                 ×
               </button>
             </div>
 
             <div className="px-6 py-5">
-              <div className="divide-y divide-zinc-200 border-y border-zinc-200">
+              <div className="divide-y divide-[#d5ded9] border-y border-[#cbd5d1]">
                 {knowledgeBases.map((knowledgeBase) => {
                   const fileCount = knowledgeFiles.filter(
                     (file) => file.knowledgeBaseId === knowledgeBase.id
@@ -1602,24 +1688,26 @@ export default function Home() {
                         setSelectedKnowledgeBaseId(knowledgeBase.id);
                         setIsKnowledgeBaseManagerOpen(false);
                       }}
-                      className="flex w-full items-center justify-between gap-4 py-4 text-left transition hover:bg-zinc-50"
+                      className="flex w-full items-center justify-between gap-4 px-2 py-4 text-left transition hover:bg-[#eef3f0]"
                     >
                       <div className="min-w-0">
                         <div className="flex items-center gap-2">
-                          <p className="truncate text-sm font-semibold text-zinc-900">
+                          <p className="truncate text-sm font-semibold text-[#17201f]">
                             {knowledgeBase.name}
                           </p>
                           {knowledgeBase.isDefault && (
-                            <span className="rounded bg-zinc-100 px-1.5 py-0.5 text-[11px] font-medium text-zinc-500">
+                            <span className="font-utility bg-[#e0ebe7] px-1.5 py-0.5 text-[10px] font-semibold text-[#176b62]">
                               默认
                             </span>
                           )}
                         </div>
-                        <p className="mt-1 text-xs text-zinc-500">
+                        <p className="mt-1 text-xs text-[#72807b]">
                           {fileCount} 个文件 · {conversationCount} 个会话
                         </p>
                       </div>
-                      <span className="text-sm text-zinc-400">选择</span>
+                      <span className="text-sm font-semibold text-[#176b62]">
+                        选择
+                      </span>
                     </button>
                   );
                 })}
@@ -1628,7 +1716,7 @@ export default function Home() {
               <div className="mt-6">
                 <label
                   htmlFor="new-knowledge-base-name"
-                  className="block text-sm font-medium text-zinc-700"
+                  className="font-utility block text-[10px] font-semibold uppercase text-[#72807b]"
                 >
                   新建知识库
                 </label>
@@ -1646,13 +1734,13 @@ export default function Home() {
                       }
                     }}
                     placeholder="知识库名称"
-                    className="min-w-0 flex-1 rounded-lg border border-zinc-300 px-3 py-2.5 text-sm text-zinc-900 outline-none transition focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200"
+                    className="research-focus min-w-0 flex-1 border border-[#b7c4bf] bg-white px-3 py-2.5 text-sm text-[#17201f]"
                   />
                   <button
                     type="button"
                     onClick={handleCreateKnowledgeBase}
                     disabled={!newKnowledgeBaseName.trim()}
-                    className="rounded-lg bg-zinc-900 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-zinc-700 disabled:cursor-not-allowed disabled:bg-zinc-300"
+                    className="bg-[#176b62] px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-[#105149] disabled:bg-[#a7b8b2]"
                   >
                     创建
                   </button>
@@ -1665,7 +1753,7 @@ export default function Home() {
 
       {isFileManagerOpen && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4 py-8"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-[#17201f]/55 px-4 py-8 backdrop-blur-[2px]"
           role="presentation"
           onMouseDown={(event) => {
             if (event.target === event.currentTarget) {
@@ -1677,17 +1765,20 @@ export default function Home() {
             role="dialog"
             aria-modal="true"
             aria-labelledby="file-manager-title"
-            className="max-h-full w-full max-w-xl overflow-y-auto rounded-2xl bg-white shadow-xl"
+            className="research-paper max-h-full w-full max-w-xl overflow-y-auto border border-[#bdcac5]"
           >
-            <div className="flex items-center justify-between border-b border-zinc-200 px-6 py-5">
+            <div className="flex items-center justify-between border-b border-[#cbd5d1] px-6 py-5">
               <div>
+                <p className="font-utility text-[10px] font-semibold uppercase text-[#176b62]">
+                  Source Material
+                </p>
                 <h2
                   id="file-manager-title"
-                  className="text-lg font-semibold text-zinc-900"
+                  className="font-display mt-2 text-2xl font-semibold text-[#17201f]"
                 >
                   知识库文件
                 </h2>
-                <p className="mt-1 text-sm text-zinc-500">
+                <p className="mt-1 text-sm text-[#64716d]">
                   {selectedKnowledgeBase?.name || "默认知识库"}
                 </p>
               </div>
@@ -1695,7 +1786,7 @@ export default function Home() {
                 type="button"
                 onClick={() => setIsFileManagerOpen(false)}
                 aria-label="关闭文件管理"
-                className="flex h-9 w-9 items-center justify-center rounded-lg text-xl text-zinc-500 transition hover:bg-zinc-100 hover:text-zinc-900"
+                className="flex h-9 w-9 items-center justify-center text-xl text-[#64716d] transition hover:bg-[#e1e9e5] hover:text-[#17201f]"
               >
                 ×
               </button>
@@ -1705,12 +1796,12 @@ export default function Home() {
               <button
                 type="button"
                 onClick={() => fileInputRef.current?.click()}
-                className="w-full rounded-lg border border-dashed border-zinc-300 px-4 py-5 text-sm font-medium text-zinc-700 transition hover:border-zinc-500 hover:bg-zinc-50"
+                className="w-full border border-dashed border-[#9bada6] bg-[#eef3f0] px-4 py-5 text-sm font-semibold text-[#46514e] transition hover:border-[#176b62] hover:text-[#176b62]"
               >
                 选择文件上传
               </button>
 
-              <div className="mt-5 divide-y divide-zinc-200 border-y border-zinc-200">
+              <div className="mt-5 divide-y divide-[#d5ded9] border-y border-[#cbd5d1]">
                 {selectedKnowledgeFiles.length > 0 ? (
                   selectedKnowledgeFiles.map((file) => (
                     <div
@@ -1718,10 +1809,10 @@ export default function Home() {
                       className="flex items-center justify-between gap-4 py-4"
                     >
                       <div className="min-w-0">
-                        <p className="truncate text-sm font-medium text-zinc-900">
+                        <p className="truncate text-sm font-semibold text-[#17201f]">
                           {file.name}
                         </p>
-                        <p className="mt-1 text-xs text-zinc-500">
+                        <p className="mt-1 text-xs text-[#72807b]">
                           {formatFileSize(file.size)} ·{" "}
                           {file.status === "processing" ? "处理中" : "已选择"}
                         </p>
@@ -1729,14 +1820,14 @@ export default function Home() {
                       <button
                         type="button"
                         onClick={() => handleRemoveKnowledgeFile(file.id)}
-                        className="shrink-0 rounded-lg px-2 py-1 text-xs font-medium text-zinc-500 transition hover:bg-red-50 hover:text-red-600"
+                        className="shrink-0 px-2 py-1 text-xs font-semibold text-[#72807b] transition hover:bg-[#fff1ed] hover:text-[#9b3c29]"
                       >
                         移除
                       </button>
                     </div>
                   ))
                 ) : (
-                  <p className="py-8 text-center text-sm text-zinc-500">
+                  <p className="py-8 text-center text-sm text-[#72807b]">
                     暂无文件
                   </p>
                 )}
@@ -1750,9 +1841,9 @@ export default function Home() {
         onClick={() => {
           window.scrollTo({ top: 0, behavior: "smooth" });
         }}
-        className="fixed bottom-6 right-6 rounded-full border border-zinc-300 bg-white px-4 py-3 text-sm font-medium text-zinc-700 shadow-sm transition hover:border-zinc-400 hover:bg-zinc-100"
+        className="font-utility fixed bottom-5 right-5 border border-[#9bada6] bg-[#fcfdfb] px-3 py-2 text-[10px] font-semibold uppercase text-[#46514e] shadow-sm transition hover:border-[#176b62] hover:text-[#176b62]"
       >
-        回到顶部
+        Top ↑
       </button>
     </main>
   );

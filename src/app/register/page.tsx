@@ -70,20 +70,28 @@ export default function RegisterPage() {
   }
 
   return (
-    <main className="flex min-h-screen items-center justify-center bg-zinc-100 px-4 py-10">
-      <section className="w-full max-w-md rounded-3xl border border-zinc-200 bg-white p-8 shadow-sm">
-        <div>
-          <p className="text-sm font-medium text-zinc-500">本地知识库问答系统</p>
-          <h1 className="mt-3 text-3xl font-bold tracking-tight text-zinc-900">
-            注册
+    <main className="research-canvas flex min-h-screen items-center justify-center px-4 py-10">
+      <section className="research-paper research-enter w-full max-w-md border border-[#cbd5d1] p-7 md:p-10">
+        <div className="border-b border-[#cbd5d1] pb-7">
+          <div className="flex items-center justify-between gap-4">
+            <p className="font-utility text-[11px] font-semibold uppercase text-[#176b62]">
+              New Researcher
+            </p>
+            <span className="h-2.5 w-2.5 bg-[#d5a83b]" aria-hidden="true" />
+          </div>
+          <h1 className="font-display mt-8 text-4xl font-semibold text-[#17201f]">
+            建立研究档案
           </h1>
+          <p className="mt-3 text-sm leading-6 text-[#64716d]">
+            创建账号后即可建立知识库并保存每次问答记录。
+          </p>
         </div>
 
-        <form onSubmit={handleSubmit} className="mt-8 space-y-5">
+        <form onSubmit={handleSubmit} className="mt-7 space-y-5">
           <div>
             <label
               htmlFor="username"
-              className="block text-sm font-medium text-zinc-700"
+              className="font-utility block text-xs font-semibold text-[#46514e]"
             >
               用户名
             </label>
@@ -92,7 +100,7 @@ export default function RegisterPage() {
               value={username}
               onChange={(event) => setUsername(event.target.value)}
               autoComplete="username"
-              className="mt-2 w-full rounded-2xl border border-zinc-300 bg-white px-4 py-3 text-zinc-900 outline-none transition focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200"
+              className="research-focus mt-2 w-full border border-[#b9c6c1] bg-white px-4 py-3 text-[#17201f]"
               placeholder="请输入用户名"
             />
           </div>
@@ -100,7 +108,7 @@ export default function RegisterPage() {
           <div>
             <label
               htmlFor="password"
-              className="block text-sm font-medium text-zinc-700"
+              className="font-utility block text-xs font-semibold text-[#46514e]"
             >
               密码
             </label>
@@ -110,7 +118,7 @@ export default function RegisterPage() {
               value={password}
               onChange={(event) => setPassword(event.target.value)}
               autoComplete="new-password"
-              className="mt-2 w-full rounded-2xl border border-zinc-300 bg-white px-4 py-3 text-zinc-900 outline-none transition focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200"
+              className="research-focus mt-2 w-full border border-[#b9c6c1] bg-white px-4 py-3 text-[#17201f]"
               placeholder="请输入密码"
             />
           </div>
@@ -118,7 +126,7 @@ export default function RegisterPage() {
           <div>
             <label
               htmlFor="confirm-password"
-              className="block text-sm font-medium text-zinc-700"
+              className="font-utility block text-xs font-semibold text-[#46514e]"
             >
               确认密码
             </label>
@@ -128,13 +136,13 @@ export default function RegisterPage() {
               value={confirmPassword}
               onChange={(event) => setConfirmPassword(event.target.value)}
               autoComplete="new-password"
-              className="mt-2 w-full rounded-2xl border border-zinc-300 bg-white px-4 py-3 text-zinc-900 outline-none transition focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200"
+              className="research-focus mt-2 w-full border border-[#b9c6c1] bg-white px-4 py-3 text-[#17201f]"
               placeholder="请再次输入密码"
             />
           </div>
 
           {error && (
-            <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-600">
+            <div className="border-l-4 border-[#e36b4f] bg-[#fff1ed] px-4 py-3 text-sm text-[#9b3c29]">
               {error}
             </div>
           )}
@@ -142,16 +150,16 @@ export default function RegisterPage() {
           <button
             type="submit"
             disabled={isSubmitting}
-            className="w-full rounded-2xl bg-zinc-900 px-4 py-3 text-sm font-medium text-white transition hover:bg-zinc-700 disabled:cursor-not-allowed disabled:bg-zinc-400"
+            className="w-full bg-[#176b62] px-4 py-3.5 text-sm font-semibold text-white transition hover:bg-[#105149] disabled:bg-[#91aaa4]"
           >
             {isSubmitting ? "注册中..." : "注册"}
           </button>
 
-          <p className="text-center text-sm text-zinc-500">
+          <p className="border-t border-[#dbe2df] pt-5 text-center text-sm text-[#64716d]">
             已有账号？{" "}
             <a
               href="/login"
-              className="font-medium text-zinc-900 transition hover:text-zinc-600"
+              className="font-semibold text-[#176b62] underline decoration-[#d5a83b] decoration-2 underline-offset-4"
             >
               去登录
             </a>

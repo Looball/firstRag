@@ -1,11 +1,22 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: #f3f6f4;
+  --foreground: #17201f;
+  --paper: #fcfdfb;
+  --paper-muted: #e9efec;
+  --ink-muted: #64716d;
+  --line: #cbd5d1;
+  --research: #176b62;
+  --research-dark: #105149;
+  --coral: #e36b4f;
+  --index: #d5a83b;
   --font-sans:
     "SF Pro Text", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei",
     "Noto Sans CJK SC", "Source Han Sans SC", system-ui, sans-serif;
+  --font-display:
+    "Songti SC", "STSong", "Noto Serif CJK SC", "Source Han Serif SC",
+    "SimSun", serif;
   --font-mono:
     "SF Mono", "JetBrains Mono", "Cascadia Code", "Fira Code",
     "Source Code Pro", ui-monospace, monospace;
@@ -14,19 +25,106 @@
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --font-sans: var(--font-sans);
+  --font-mono: var(--font-mono);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+* {
+  box-sizing: border-box;
+}
+
+html {
+  background: var(--background);
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
   font-family: var(--font-sans);
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+button,
+select {
+  cursor: pointer;
+}
+
+button:disabled {
+  cursor: not-allowed;
+}
+
+::selection {
+  background: color-mix(in srgb, var(--index) 45%, white);
+  color: var(--foreground);
+}
+
+.font-display {
+  font-family: var(--font-display);
+}
+
+.font-utility {
+  font-family: var(--font-mono);
+}
+
+.research-canvas {
+  background-color: var(--background);
+  background-image:
+    linear-gradient(rgba(23, 107, 98, 0.045) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(23, 107, 98, 0.045) 1px, transparent 1px);
+  background-size: 28px 28px;
+}
+
+.research-paper {
+  background:
+    linear-gradient(90deg, var(--coral) 0 4px, transparent 4px),
+    var(--paper);
+  box-shadow:
+    0 1px 0 rgba(23, 32, 31, 0.08),
+    0 18px 50px rgba(23, 32, 31, 0.07);
+}
+
+.research-focus {
+  outline: none;
+  transition:
+    border-color 160ms ease,
+    box-shadow 160ms ease,
+    background-color 160ms ease;
+}
+
+.research-focus:focus {
+  border-color: var(--research);
+  box-shadow: 0 0 0 3px rgba(23, 107, 98, 0.14);
+}
+
+.research-enter {
+  animation: research-enter 420ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@keyframes research-enter {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }
