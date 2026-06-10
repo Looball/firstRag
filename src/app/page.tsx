@@ -20,6 +20,20 @@ type ChatSession = {
   isPersisted: boolean;
 };
 
+type KnowledgeBase = {
+  id: string;
+  name: string;
+  isDefault: boolean;
+};
+
+type KnowledgeFile = {
+  id: string;
+  knowledgeBaseId: string;
+  name: string;
+  size: number;
+  status: "ready" | "processing";
+};
+
 type BackendConversation = {
   id?: unknown;
   title?: unknown;
@@ -46,8 +60,27 @@ type ListConversationsResponse = {
 
 const STORAGE_KEY = "ai-learning-assistant-sessions";
 const CURRENT_SESSION_KEY = "ai-learning-assistant-current-session";
+const DEFAULT_KNOWLEDGE_BASE_ID = "default";
 const LEGACY_INITIAL_MESSAGE =
   "你好，我是你的 AI 学习助手。你可以问我任何关于 AI 的问题。";
+
+function createClientId() {
+  return typeof crypto?.randomUUID === "function"
+    ? crypto.randomUUID()
+    : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
+function formatFileSize(size: number) {
+  if (size < 1024) {
+    return `${size} B`;
+  }
+
+  if (size < 1024 * 1024) {
+    return `${Math.round(size / 1024)} KB`;
+  }
+
+  return `${(size / (1024 * 1024)).toFixed(1)} MB`;
+}
 
 function buildSessionTitle(input: string) {
   const normalized = input.replace(/\s+/g, " ").trim();
@@ -508,8 +541,24 @@ export default function Home() {
   const [isCreatingSession, setIsCreatingSession] = useState(false);
   const [pageError, setPageError] = useState("");
   const [currentUsername, setCurrentUsername] = useState("");
+  const [knowledgeBases, setKnowledgeBases] = useState<KnowledgeBase[]>([
+    {
+      id: DEFAULT_KNOWLEDGE_BASE_ID,
+      name: "默认知识库",
+      isDefault: true,
+    },
+  ]);
+  const [selectedKnowledgeBaseId, setSelectedKnowledgeBaseId] = useState(
+    DEFAULT_KNOWLEDGE_BASE_ID
+  );
+  const [knowledgeFiles, setKnowledgeFiles] = useState<KnowledgeFile[]>([]);
+  const [isKnowledgeBaseManagerOpen, setIsKnowledgeBaseManagerOpen] =
+    useState(false);
+  const [isFileManagerOpen, setIsFileManagerOpen] = useState(false);
+  const [newKnowledgeBaseName, setNewKnowledgeBaseName] = useState("");
 
   const bottomRef = useRef<HTMLDivElement | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
   const previousSessionIdRef = useRef("");
   const previousMessageCountRef = useRef(0);
   const previousLoadingRef = useRef(false);
@@ -527,6 +576,56 @@ export default function Home() {
     : null;
   const shouldShowThinkingIndicator =
     isCurrentSessionLoading && currentSessionLastMessage?.role !== "assistant";
+  const selectedKnowledgeBase =
+    knowledgeBases.find(
+      (knowledgeBase) => knowledgeBase.id === selectedKnowledgeBaseId
+    ) || knowledgeBases[0];
+  const selectedKnowledgeFiles = knowledgeFiles.filter(
+    (file) => file.knowledgeBaseId === selectedKnowledgeBaseId
+  );
+
+  function handleCreateKnowledgeBase() {
+    const normalizedName = newKnowledgeBaseName.trim();
+
+    if (!normalizedName) {
+      return;
+    }
+
+    const knowledgeBase: KnowledgeBase = {
+      id: createClientId(),
+      name: normalizedName,
+      isDefault: false,
+    };
+
+    setKnowledgeBases((prev) => [...prev, knowledgeBase]);
+    setSelectedKnowledgeBaseId(knowledgeBase.id);
+    setNewKnowledgeBaseName("");
+  }
+
+  function handleSelectFiles(files: FileList | null) {
+    if (!files?.length) {
+      return;
+    }
+
+    const nextFiles = Array.from(files).map<KnowledgeFile>((file) => ({
+      id: createClientId(),
+      knowledgeBaseId: selectedKnowledgeBaseId,
+      name: file.name,
+      size: file.size,
+      status: "ready",
+    }));
+
+    setKnowledgeFiles((prev) => [...nextFiles, ...prev]);
+    setIsFileManagerOpen(true);
+
+    if (fileInputRef.current) {
+      fileInputRef.current.value = "";
+    }
+  }
+
+  function handleRemoveKnowledgeFile(fileId: string) {
+    setKnowledgeFiles((prev) => prev.filter((file) => file.id !== fileId));
+  }
 
   async function createBackendSession(title = "新对话") {
     const authState = parseAuthState(localStorage.getItem(AUTH_STORAGE_KEY));
@@ -1131,22 +1230,80 @@ export default function Home() {
 
   return (
     <main className="min-h-screen bg-zinc-100 px-4 py-6 md:px-6 md:py-8">
-      <div className="mx-auto grid w-full max-w-6xl gap-6 lg:grid-cols-[280px_minmax(0,1fr)]">
-        <aside className="flex h-[calc(100vh-4rem)] flex-col rounded-3xl border border-zinc-200 bg-white p-4 shadow-sm md:h-[calc(100vh-5rem)] lg:sticky lg:top-6">
-          <div className="mb-4 rounded-2xl border border-zinc-200 bg-zinc-50 px-4 py-3">
-            <p className="text-xs font-medium text-zinc-500">用户名</p>
-            <div className="mt-1 flex items-center justify-between gap-3">
-              <p className="min-w-0 truncate text-sm font-semibold text-zinc-900">
+      <div className="mx-auto grid min-w-0 w-full max-w-6xl gap-6 lg:grid-cols-[280px_minmax(0,1fr)]">
+        <aside className="flex min-w-0 h-[calc(100vh-4rem)] flex-col rounded-3xl border border-zinc-200 bg-white p-4 shadow-sm md:h-[calc(100vh-5rem)] lg:sticky lg:top-6">
+          <div className="flex items-center justify-between gap-3 border-b border-zinc-200 px-1 pb-4">
+            <div className="min-w-0">
+              <p className="text-xs font-medium text-zinc-500">当前用户</p>
+              <p className="mt-1 truncate text-sm font-semibold text-zinc-900">
                 {currentUsername || "已登录"}
               </p>
+            </div>
+            <button
+              type="button"
+              onClick={handleLogout}
+              className="shrink-0 rounded-lg px-2 py-1 text-xs font-medium text-zinc-500 transition hover:bg-zinc-100 hover:text-zinc-900"
+            >
+              退出
+            </button>
+          </div>
+
+          <div className="border-b border-zinc-200 py-4">
+            <div className="flex items-center justify-between gap-3">
+              <label
+                htmlFor="knowledge-base"
+                className="text-xs font-medium text-zinc-500"
+              >
+                当前知识库
+              </label>
               <button
                 type="button"
-                onClick={handleLogout}
-                className="shrink-0 rounded-lg px-2 py-1 text-xs font-medium text-zinc-500 transition hover:bg-zinc-200 hover:text-zinc-900"
+                onClick={() => setIsKnowledgeBaseManagerOpen(true)}
+                className="rounded-lg px-2 py-1 text-xs font-medium text-zinc-500 transition hover:bg-zinc-100 hover:text-zinc-900"
               >
-                退出
+                管理
               </button>
             </div>
+
+            <select
+              id="knowledge-base"
+              value={selectedKnowledgeBaseId}
+              onChange={(event) =>
+                setSelectedKnowledgeBaseId(event.target.value)
+              }
+              className="mt-2 w-full rounded-lg border border-zinc-300 bg-white px-3 py-2.5 text-sm font-medium text-zinc-900 outline-none transition focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200"
+            >
+              {knowledgeBases.map((knowledgeBase) => (
+                <option key={knowledgeBase.id} value={knowledgeBase.id}>
+                  {knowledgeBase.name}
+                </option>
+              ))}
+            </select>
+
+            <div className="mt-3 grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                className="rounded-lg bg-zinc-900 px-3 py-2 text-xs font-medium text-white transition hover:bg-zinc-700"
+              >
+                上传文件
+              </button>
+              <button
+                type="button"
+                onClick={() => setIsFileManagerOpen(true)}
+                className="rounded-lg border border-zinc-300 px-3 py-2 text-xs font-medium text-zinc-700 transition hover:bg-zinc-100"
+              >
+                文件 {selectedKnowledgeFiles.length}
+              </button>
+            </div>
+            <input
+              ref={fileInputRef}
+              type="file"
+              multiple
+              accept=".txt,.md,.csv,.json,.pdf,.png,.jpg,.jpeg,.webp,.gif"
+              onChange={(event) => handleSelectFiles(event.target.files)}
+              className="hidden"
+            />
           </div>
 
           <button
@@ -1154,19 +1311,24 @@ export default function Home() {
               void handleCreateSession();
             }}
             disabled={isCreatingSession}
-            className="w-full rounded-2xl bg-zinc-900 px-4 py-3 text-sm font-medium text-white transition hover:bg-zinc-700 disabled:cursor-not-allowed disabled:bg-zinc-400"
+            className="mt-4 w-full rounded-lg bg-zinc-900 px-4 py-3 text-sm font-medium text-white transition hover:bg-zinc-700 disabled:cursor-not-allowed disabled:bg-zinc-400"
           >
             {isCreatingSession ? "创建中..." : "新建对话"}
           </button>
 
-          <div className="mt-4 min-h-0 flex-1 space-y-2 overflow-y-auto pr-1">
+          <div className="mt-4 flex items-center justify-between px-1">
+            <p className="text-xs font-medium text-zinc-500">会话</p>
+            <p className="text-xs text-zinc-400">{sessions.length}</p>
+          </div>
+
+          <div className="mt-2 min-h-0 min-w-0 flex-1 space-y-2 overflow-y-auto pr-1">
             {sessions.map((session) => {
               const isActive = session.id === currentSession?.id;
 
               return (
                 <div
                   key={session.id}
-                  className={`w-full rounded-2xl px-4 py-3 text-left text-sm transition ${
+                  className={`min-w-0 w-full rounded-2xl px-4 py-3 text-left text-sm transition ${
                     isActive
                       ? "bg-zinc-900 text-white"
                       : "bg-zinc-100 text-zinc-700 hover:bg-zinc-200"
@@ -1273,7 +1435,7 @@ export default function Home() {
           </div>
         </aside>
 
-        <section className="rounded-3xl border border-zinc-200 bg-white p-6 shadow-sm md:p-8">
+        <section className="min-w-0 rounded-3xl border border-zinc-200 bg-white p-6 shadow-sm md:p-8">
           <div>
             <h1 className="text-4xl font-bold tracking-tight text-zinc-900 md:text-5xl">
               ❤️本地知识库问答系统Demo❤️
@@ -1382,6 +1544,207 @@ export default function Home() {
           </div>
         </section>
       </div>
+
+      {isKnowledgeBaseManagerOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4 py-8"
+          role="presentation"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) {
+              setIsKnowledgeBaseManagerOpen(false);
+            }
+          }}
+        >
+          <section
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="knowledge-base-manager-title"
+            className="max-h-full w-full max-w-lg overflow-y-auto rounded-2xl bg-white shadow-xl"
+          >
+            <div className="flex items-center justify-between border-b border-zinc-200 px-6 py-5">
+              <div>
+                <h2
+                  id="knowledge-base-manager-title"
+                  className="text-lg font-semibold text-zinc-900"
+                >
+                  知识库管理
+                </h2>
+                <p className="mt-1 text-sm text-zinc-500">
+                  当前：{selectedKnowledgeBase?.name || "默认知识库"}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsKnowledgeBaseManagerOpen(false)}
+                aria-label="关闭知识库管理"
+                className="flex h-9 w-9 items-center justify-center rounded-lg text-xl text-zinc-500 transition hover:bg-zinc-100 hover:text-zinc-900"
+              >
+                ×
+              </button>
+            </div>
+
+            <div className="px-6 py-5">
+              <div className="divide-y divide-zinc-200 border-y border-zinc-200">
+                {knowledgeBases.map((knowledgeBase) => {
+                  const fileCount = knowledgeFiles.filter(
+                    (file) => file.knowledgeBaseId === knowledgeBase.id
+                  ).length;
+                  const conversationCount =
+                    knowledgeBase.id === DEFAULT_KNOWLEDGE_BASE_ID
+                      ? sessions.length
+                      : 0;
+
+                  return (
+                    <button
+                      key={knowledgeBase.id}
+                      type="button"
+                      onClick={() => {
+                        setSelectedKnowledgeBaseId(knowledgeBase.id);
+                        setIsKnowledgeBaseManagerOpen(false);
+                      }}
+                      className="flex w-full items-center justify-between gap-4 py-4 text-left transition hover:bg-zinc-50"
+                    >
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2">
+                          <p className="truncate text-sm font-semibold text-zinc-900">
+                            {knowledgeBase.name}
+                          </p>
+                          {knowledgeBase.isDefault && (
+                            <span className="rounded bg-zinc-100 px-1.5 py-0.5 text-[11px] font-medium text-zinc-500">
+                              默认
+                            </span>
+                          )}
+                        </div>
+                        <p className="mt-1 text-xs text-zinc-500">
+                          {fileCount} 个文件 · {conversationCount} 个会话
+                        </p>
+                      </div>
+                      <span className="text-sm text-zinc-400">选择</span>
+                    </button>
+                  );
+                })}
+              </div>
+
+              <div className="mt-6">
+                <label
+                  htmlFor="new-knowledge-base-name"
+                  className="block text-sm font-medium text-zinc-700"
+                >
+                  新建知识库
+                </label>
+                <div className="mt-2 flex gap-2">
+                  <input
+                    id="new-knowledge-base-name"
+                    value={newKnowledgeBaseName}
+                    onChange={(event) =>
+                      setNewKnowledgeBaseName(event.target.value)
+                    }
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter") {
+                        event.preventDefault();
+                        handleCreateKnowledgeBase();
+                      }
+                    }}
+                    placeholder="知识库名称"
+                    className="min-w-0 flex-1 rounded-lg border border-zinc-300 px-3 py-2.5 text-sm text-zinc-900 outline-none transition focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200"
+                  />
+                  <button
+                    type="button"
+                    onClick={handleCreateKnowledgeBase}
+                    disabled={!newKnowledgeBaseName.trim()}
+                    className="rounded-lg bg-zinc-900 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-zinc-700 disabled:cursor-not-allowed disabled:bg-zinc-300"
+                  >
+                    创建
+                  </button>
+                </div>
+              </div>
+            </div>
+          </section>
+        </div>
+      )}
+
+      {isFileManagerOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4 py-8"
+          role="presentation"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) {
+              setIsFileManagerOpen(false);
+            }
+          }}
+        >
+          <section
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="file-manager-title"
+            className="max-h-full w-full max-w-xl overflow-y-auto rounded-2xl bg-white shadow-xl"
+          >
+            <div className="flex items-center justify-between border-b border-zinc-200 px-6 py-5">
+              <div>
+                <h2
+                  id="file-manager-title"
+                  className="text-lg font-semibold text-zinc-900"
+                >
+                  知识库文件
+                </h2>
+                <p className="mt-1 text-sm text-zinc-500">
+                  {selectedKnowledgeBase?.name || "默认知识库"}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsFileManagerOpen(false)}
+                aria-label="关闭文件管理"
+                className="flex h-9 w-9 items-center justify-center rounded-lg text-xl text-zinc-500 transition hover:bg-zinc-100 hover:text-zinc-900"
+              >
+                ×
+              </button>
+            </div>
+
+            <div className="px-6 py-5">
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                className="w-full rounded-lg border border-dashed border-zinc-300 px-4 py-5 text-sm font-medium text-zinc-700 transition hover:border-zinc-500 hover:bg-zinc-50"
+              >
+                选择文件上传
+              </button>
+
+              <div className="mt-5 divide-y divide-zinc-200 border-y border-zinc-200">
+                {selectedKnowledgeFiles.length > 0 ? (
+                  selectedKnowledgeFiles.map((file) => (
+                    <div
+                      key={file.id}
+                      className="flex items-center justify-between gap-4 py-4"
+                    >
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-medium text-zinc-900">
+                          {file.name}
+                        </p>
+                        <p className="mt-1 text-xs text-zinc-500">
+                          {formatFileSize(file.size)} ·{" "}
+                          {file.status === "processing" ? "处理中" : "已选择"}
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => handleRemoveKnowledgeFile(file.id)}
+                        className="shrink-0 rounded-lg px-2 py-1 text-xs font-medium text-zinc-500 transition hover:bg-red-50 hover:text-red-600"
+                      >
+                        移除
+                      </button>
+                    </div>
+                  ))
+                ) : (
+                  <p className="py-8 text-center text-sm text-zinc-500">
+                    暂无文件
+                  </p>
+                )}
+              </div>
+            </div>
+          </section>
+        </div>
+      )}
 
       <button
         onClick={() => {
