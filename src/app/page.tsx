@@ -497,6 +497,7 @@ export default function Home() {
   const [input, setInput] = useState("");
   const [editingSessionId, setEditingSessionId] = useState("");
   const [editingTitle, setEditingTitle] = useState("");
+  const [renamingSessionId, setRenamingSessionId] = useState("");
   const [copiedMessageKey, setCopiedMessageKey] = useState("");
   const [loadingSessions, setLoadingSessions] = useState<Record<string, boolean>>(
     {}
@@ -773,22 +774,70 @@ export default function Home() {
     setEditingTitle(session.title);
   }
 
-  function handleSaveRename() {
+  async function handleSaveRename() {
+    if (!editingSessionId || renamingSessionId) {
+      return;
+    }
+
     const normalizedTitle = editingTitle.trim() || "新对话";
+    const authState = parseAuthState(localStorage.getItem(AUTH_STORAGE_KEY));
 
-    setSessions((prev) =>
-      prev.map((session) =>
-        session.id === editingSessionId
-          ? {
-              ...session,
-              title: normalizedTitle,
-            }
-          : session
-      )
-    );
+    if (!authState) {
+      localStorage.removeItem(AUTH_STORAGE_KEY);
+      window.location.href = "/login";
+      return;
+    }
 
-    setEditingSessionId("");
-    setEditingTitle("");
+    setRenamingSessionId(editingSessionId);
+    setSessionErrors((prev) => ({
+      ...prev,
+      [editingSessionId]: "",
+    }));
+
+    try {
+      const response = await fetch(
+        `/api/chat/conversation/${encodeURIComponent(editingSessionId)}`,
+        {
+          method: "PATCH",
+          headers: {
+            Authorization: buildAuthorizationHeader(authState),
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            title: normalizedTitle,
+          }),
+        }
+      );
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(
+          getResponseErrorMessage(errorText, "重命名失败，请稍后再试。")
+        );
+      }
+
+      setSessions((prev) =>
+        prev.map((session) =>
+          session.id === editingSessionId
+            ? {
+                ...session,
+                title: normalizedTitle,
+              }
+            : session
+        )
+      );
+
+      setEditingSessionId("");
+      setEditingTitle("");
+    } catch (error) {
+      setSessionErrors((prev) => ({
+        ...prev,
+        [editingSessionId]:
+          error instanceof Error ? error.message : "重命名失败，请稍后再试。",
+      }));
+    } finally {
+      setRenamingSessionId("");
+    }
   }
 
   function handleCancelRename() {
@@ -1087,7 +1136,8 @@ export default function Home() {
                             onChange={(e) => setEditingTitle(e.target.value)}
                             onKeyDown={(e) => {
                               if (e.key === "Enter") {
-                                handleSaveRename();
+                                e.preventDefault();
+                                void handleSaveRename();
                               }
 
                               if (e.key === "Escape") {
@@ -1099,10 +1149,15 @@ export default function Home() {
                           />
                           <div className="flex gap-2">
                             <button
-                              onClick={handleSaveRename}
+                              onClick={() => {
+                                void handleSaveRename();
+                              }}
+                              disabled={renamingSessionId === session.id}
                               className="rounded-lg bg-zinc-900 px-2 py-1 text-xs text-white transition hover:bg-zinc-700"
                             >
-                              保存
+                              {renamingSessionId === session.id
+                                ? "保存中..."
+                                : "保存"}
                             </button>
                             <button
                               onClick={handleCancelRename}
