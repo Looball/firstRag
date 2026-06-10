@@ -97,8 +97,6 @@ def register(req:RegisterQuest):
         "token_type": "bearer",
         "user": dict(user)
     }
-
-
 # —————————————————————————————————————————————————————————————————————————————————— #
 # ———————————————————!!! 注册界面'/register'接口处理 END !!!————————————————————————— #
 # ***********************************************************************************
@@ -168,7 +166,7 @@ def login(req:Account):
 # ***********************************************************************************
 
 # ***********************************************************************************
-# ———————————————————!!! 聊天界面'/chat'接口处理 BEGIN !!!———————————————————————————— #
+# —————————————!!! 聊天界面 发送消息 '/chat' 接口处理 BEGIN !!!————————————————————————— #
 # —————————————————————————————————————————————————————————————————————————————————— #
 # 定义Message消息类型
 class Message(BaseModel):
@@ -269,11 +267,92 @@ def chat(
         media_type="text/plain; charset=utf-8"
     )
 # ————————————————————————————————————————————————————————————————————————————————— #
-# ———————————————————!!! 聊天界面'/chat'接口处理 END !!!————————————————————————————— #
+# —————————————!!! 聊天界面 发送消息 '/chat' 接口处理 END !!!—————————————————————————— #
 # ***********************************************************************************
 
+
 # ***********************************************************************************
-# ———————————————!!! 聊天界面'/chat/conversation'接口处理 BEGIN !!!——————————————————— #
+# ————!!! 聊天界面 加载当前用户全部会话 GET '/chat/conversations' 接口处理 BEGIN !!!—————— #
+# —————————————————————————————————————————————————————————————————————————————————— #
+@app.get('/chat/conversations')
+def get_conversations(authorization: str = Header(...)):
+    """
+    返回的数据结构
+    {
+    "success": true,
+    "conversations": [{
+      "id": "会话UUID",
+      "title": "会话标题",
+      "messages": [
+        {"role": "user","content": "你好"},
+        {"role": "assistant","content": "你好，有什么可以帮你？"}]
+    }]
+    }
+    :param authorization:
+    :return:
+    """
+
+    # 获取payload，并解析id
+    payload = get_current_user_payload(authorization)
+    user_id = int(payload['sub'])
+
+    # 查询数据
+    sql = """
+    SELECT
+        c.id AS conversation_id,
+        c.title,
+        c.created_at AS conversation_created_at,
+        c.updated_at AS conversation_updated_at,
+        m.id AS message_id,
+        m.role,
+        m.content,
+        m.created_at AS message_created_at
+    FROM conversations AS c
+    LEFT JOIN messages AS m
+        ON m.conversation_id = c.id
+    WHERE c.user_id = %s
+    ORDER BY c.updated_at DESC, m.created_at ASC, m.id ASC;
+    """
+    rows = exe_sql(sql_statement=sql,args_tuple=(user_id,))
+
+    # 组建返回体消息
+    conversations = {}
+    for row in rows:
+        # 获取会话id
+        conversation_id = row['conversation_id']
+        # 第一次检查，
+        if conversation_id not in conversations:
+            conversations[conversation_id] = {
+                "id": conversation_id,
+                "title": row["title"],
+                "created_at": row["conversation_created_at"],
+                "updated_at": row["conversation_updated_at"],
+                "messages": [],
+            }
+
+        # 将消息添加到"messages"
+        if row["message_id"] is not None:
+            conversations[conversation_id]['messages'].append({
+                "id": row["message_id"],
+                "role": row["role"],
+                "content": row["content"],
+                "created_at": row["message_created_at"],
+            })
+
+    # 返回数据
+    return {
+        "success": True,
+        "conversations": list(conversations.values()),
+    }
+
+
+# ***********************************************************************************
+# ————!!! 聊天界面 加载当前用户全部会话 GET '/chat/conversations' 接口处理 END !!!———————— #
+# —————————————————————————————————————————————————————————————————————————————————— #
+
+
+# ***********************************************************************************
+# ——————!!! 聊天界面 新建会话 POST '/chat/conversation' 接口处理 BEGIN !!!——————————————— #
 # —————————————————————————————————————————————————————————————————————————————————— #
 class CreateConversationRequest(BaseModel):
     title: str | None = '新会话'
@@ -285,7 +364,7 @@ def create_conservation(
 ):
     payload = get_current_user_payload(authorization)
 
-    user_id = payload['sub']
+    user_id = int(payload['sub'])
     title = req.title
 
     sql = """
@@ -302,7 +381,7 @@ def create_conservation(
         "conversation": dict(conversion),
     }
 # —————————————————————————————————————————————————————————————————————————————————— #
-# ———————————————!!! 聊天界面'/chat/conversation'接口处理 END !!!——————————————————— #
+# ———————!!! 聊天界面 新建会话 POST '/chat/conversation' 接口处理 END !!!———————————————— #
 
 
 # 上传文件接口
