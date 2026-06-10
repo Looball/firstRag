@@ -3,6 +3,7 @@ from typing import Annotated,Literal,List
 from fastapi import FastAPI, File, Form, UploadFile, HTTPException,Header
 from fastapi.responses import StreamingResponse
 
+from uuid import UUID
 import jwt,os
 from pwdlib import PasswordHash
 from datetime import datetime, timedelta, timezone
@@ -335,7 +336,7 @@ def get_conversations(authorization: str = Header(...)):
     FROM conversations AS c
     LEFT JOIN messages AS m
         ON m.conversation_id = c.id
-    WHERE c.user_id = %s
+    WHERE c.user_id = %s and c.deleted_at is null
     ORDER BY c.updated_at DESC, m.created_at ASC, m.id ASC;
     """
     rows = exe_sql(sql_statement=sql,args_tuple=(user_id,))
@@ -370,6 +371,72 @@ def get_conversations(authorization: str = Header(...)):
         "conversations": list(conversations.values()),
     }
 
+# —————————————————————————————————————————————————————————————————————————————————— #
+# 会话重命名功能
+class RenameConversationRequest(BaseModel):
+    title:str
+
+@app.patch('/chat/conversation/{conversation_id}')
+def rename_conversation(
+        conversation_id: UUID,
+        req:RenameConversationRequest,
+        authorization: str = Header(...)):
+
+    # 获取重命名后的title
+    title = req.title
+
+    # 获取payload，并解析id
+    payload = get_current_user_payload(authorization)
+    user_id = int(payload['sub'])
+
+    # 更新数据库数据
+    sql = """
+    update conversations
+    set title = %s,
+        updated_at = now()
+    where id = %s and user_id = %s
+    RETURNING id, user_id, title, created_at, updated_at;
+    """
+    rows = exe_sql(sql_statement=sql, args_tuple=(title,conversation_id,user_id))
+    if not rows:
+        raise HTTPException(status_code=404, detail="会话不存在")
+
+    return {
+        "success": True,
+        "conversation": dict(rows[0]),
+    }
+
+# ——————————————————————————————————————————————————————————————————————————————————— #
+@app.delete('/chat/conversation/{conversation_id}')
+def delete_conversation(
+        conversation_id:UUID,
+        authorization: str = Header(...)
+):
+
+    # 获取payload，并解析id
+    payload = get_current_user_payload(authorization)
+    user_id = int(payload['sub'])
+
+    # 软删除
+    sql = """
+    update conversations
+    set deleted_at = now(),
+        updated_at = now()
+    where id = %s and user_id = %s and deleted_at IS NULL
+    RETURNING id;
+    """
+    rows = exe_sql(sql_statement=sql,args_tuple=(conversation_id,user_id))
+
+    # 会话是否存在
+    if not rows:
+        raise HTTPException(
+            status_code=404, detail="会话不存在"
+        )
+
+    return {
+        "success": True,
+        "conversation_id": str(conversation_id),
+    }
 
 # ***********************************************************************************
 # ————!!! 聊天界面 加载当前用户全部会话 GET '/chat/conversations' 接口处理 END !!!———————— #
