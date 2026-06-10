@@ -498,6 +498,7 @@ export default function Home() {
   const [editingSessionId, setEditingSessionId] = useState("");
   const [editingTitle, setEditingTitle] = useState("");
   const [renamingSessionId, setRenamingSessionId] = useState("");
+  const [deletingSessionId, setDeletingSessionId] = useState("");
   const [copiedMessageKey, setCopiedMessageKey] = useState("");
   const [loadingSessions, setLoadingSessions] = useState<Record<string, boolean>>(
     {}
@@ -738,34 +739,78 @@ export default function Home() {
     }
   }
 
-  function handleDeleteSession(sessionId: string) {
-    if (sessions.length === 1) {
-      setSessions([]);
-      setCurrentSessionId("");
-      setInput("");
-      setLoadingSessions({});
-      setSessionErrors({});
-      void handleCreateSession();
+  async function handleDeleteSession(sessionId: string) {
+    if (deletingSessionId) {
       return;
     }
 
-    const remainingSessions = sessions.filter((session) => session.id !== sessionId);
+    const authState = parseAuthState(localStorage.getItem(AUTH_STORAGE_KEY));
 
-    setSessions(remainingSessions);
-    setLoadingSessions((prev) => {
-      const next = { ...prev };
-      delete next[sessionId];
-      return next;
-    });
-    setSessionErrors((prev) => {
-      const next = { ...prev };
-      delete next[sessionId];
-      return next;
-    });
+    if (!authState) {
+      localStorage.removeItem(AUTH_STORAGE_KEY);
+      window.location.href = "/login";
+      return;
+    }
 
-    if (currentSessionId === sessionId) {
-      setCurrentSessionId(remainingSessions[0].id);
-      setInput("");
+    setDeletingSessionId(sessionId);
+    setPageError("");
+
+    try {
+      const response = await fetch(
+        `/api/chat/conversation/${encodeURIComponent(sessionId)}`,
+        {
+          method: "DELETE",
+          headers: {
+            Authorization: buildAuthorizationHeader(authState),
+          },
+        }
+      );
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(
+          getResponseErrorMessage(errorText, "删除会话失败，请稍后再试。")
+        );
+      }
+
+      const remainingSessions = sessions.filter(
+        (session) => session.id !== sessionId
+      );
+
+      setSessions(remainingSessions);
+      setLoadingSessions((prev) => {
+        const next = { ...prev };
+        delete next[sessionId];
+        return next;
+      });
+      setSessionErrors((prev) => {
+        const next = { ...prev };
+        delete next[sessionId];
+        return next;
+      });
+
+      if (editingSessionId === sessionId) {
+        setEditingSessionId("");
+        setEditingTitle("");
+      }
+
+      if (remainingSessions.length === 0) {
+        setCurrentSessionId("");
+        setInput("");
+
+        const newSession = await createBackendSession();
+        setSessions([newSession]);
+        setCurrentSessionId(newSession.id);
+      } else if (currentSessionId === sessionId) {
+        setCurrentSessionId(remainingSessions[0].id);
+        setInput("");
+      }
+    } catch (error) {
+      setPageError(
+        error instanceof Error ? error.message : "删除会话失败，请稍后再试。"
+      );
+    } finally {
+      setDeletingSessionId("");
     }
   }
 
@@ -1206,15 +1251,18 @@ export default function Home() {
                         <button
                           onClick={(e) => {
                             e.stopPropagation();
-                            handleDeleteSession(session.id);
+                            void handleDeleteSession(session.id);
                           }}
+                          disabled={deletingSessionId === session.id}
                           className={`rounded-lg px-2 py-1 text-xs transition ${
                             isActive
                               ? "text-zinc-300 hover:bg-zinc-800 hover:text-white"
                               : "text-zinc-500 hover:bg-zinc-200 hover:text-zinc-900"
                           }`}
                         >
-                          删除
+                          {deletingSessionId === session.id
+                            ? "删除中..."
+                            : "删除"}
                         </button>
                       </div>
                     )}
