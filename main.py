@@ -136,15 +136,40 @@ def login(req:Account):
             WHERE u.username = %s
             """
     rows = exe_sql(sql_statement=sql,args_tuple=(username,))
+
+    # 判断是否存在用户
     if not rows:
-        raise HTTPException(status_code=401, detail="用户不存在")
+        raise HTTPException(status_code=401, detail="用户或密码错误")
 
     # 取出用户信息，只有一条数据
     user = rows[0]
+    stored_hash = user.get("password_hash")
+
+    # 查到用户，但是没有密码
+    if not stored_hash:
+        raise HTTPException(status_code=401, detail="用户或密码错误")
+
+    # 创建hash对象
+    password_hash = PasswordHash.recommended()
 
     # 密码校验 hash比对
-    if not PasswordHash.recommended().verify(password,user['password_hash']):
-        raise HTTPException(status_code=401, detail="密码错误")
+    try:
+        password_valid = password_hash.verify(
+            password,
+            stored_hash
+        )
+    except Exception:
+        raise HTTPException(
+            status_code=401,
+            detail="用户名或密码错误"
+        )
+
+    # 密码不正确
+    if not password_valid:
+        raise HTTPException(
+            status_code=401,
+            detail="用户名或密码错误"
+        )
 
     # 生成token
     token = create_access_token(
