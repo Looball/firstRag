@@ -43,6 +43,13 @@ type KnowledgeFile = {
   status: "ready" | "processing";
 };
 
+type BackendKnowledgeFile = {
+  id?: unknown;
+  original_name?: unknown;
+  size_bytes?: unknown;
+  status?: unknown;
+};
+
 type KnowledgeBaseFile = {
   knowledgeBaseId: string;
   knowledgeFileId: string;
@@ -86,17 +93,18 @@ type CreateKnowledgeBaseResponse = {
   message?: string;
 };
 
+type UploadKnowledgeFilesResponse = {
+  files?: unknown;
+  detail?: string;
+  error?: string;
+  message?: string;
+};
+
 const STORAGE_KEY = "ai-learning-assistant-sessions";
 const CURRENT_SESSION_KEY = "ai-learning-assistant-current-session";
 const DEFAULT_KNOWLEDGE_BASE_ID = "default";
 const LEGACY_INITIAL_MESSAGE =
   "你好，我是你的 AI 学习助手。你可以问我任何关于 AI 的问题。";
-
-function createClientId() {
-  return typeof crypto?.randomUUID === "function"
-    ? crypto.randomUUID()
-    : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
-}
 
 function formatFileSize(size: number) {
   if (size < 1024) {
@@ -307,6 +315,38 @@ function toKnowledgeBase(value: unknown): KnowledgeBase | null {
     name: knowledgeBase.name.trim(),
     isDefault: knowledgeBase.is_default === true,
     fileCount: Number.isFinite(fileCount) ? fileCount : 0,
+  };
+}
+
+function toKnowledgeFile(
+  value: unknown,
+  sourceFile?: File
+): KnowledgeFile | null {
+  if (typeof value !== "object" || value === null) {
+    return null;
+  }
+
+  const knowledgeFile = value as BackendKnowledgeFile;
+
+  if (
+    typeof knowledgeFile.id !== "string" ||
+    !knowledgeFile.id.trim() ||
+    typeof knowledgeFile.original_name !== "string" ||
+    !knowledgeFile.original_name.trim()
+  ) {
+    return null;
+  }
+
+  const size = Number(knowledgeFile.size_bytes);
+
+  return {
+    id: knowledgeFile.id,
+    name: knowledgeFile.original_name.trim(),
+    size: Number.isFinite(size) ? size : sourceFile?.size || 0,
+    fingerprint: sourceFile
+      ? getFileFingerprint(sourceFile)
+      : knowledgeFile.id,
+    status: knowledgeFile.status === "ready" ? "ready" : "processing",
   };
 }
 
@@ -599,6 +639,10 @@ export default function Home() {
   const [isCreatingSession, setIsCreatingSession] = useState(false);
   const [isCreatingKnowledgeBase, setIsCreatingKnowledgeBase] =
     useState(false);
+  const [isUploadingKnowledgeFiles, setIsUploadingKnowledgeFiles] =
+    useState(false);
+  const [knowledgeFileUploadError, setKnowledgeFileUploadError] =
+    useState("");
   const [pageError, setPageError] = useState("");
   const [currentUsername, setCurrentUsername] = useState("");
   const [knowledgeBases, setKnowledgeBases] = useState<KnowledgeBase[]>([
@@ -723,62 +767,115 @@ export default function Home() {
     }
   }
 
-  function handleSelectFiles(files: FileList | null) {
-    if (!files?.length || !selectedKnowledgeBaseId) {
+  async function handleSelectFiles(files: FileList | null) {
+    if (
+      !files?.length ||
+      !selectedKnowledgeBaseId ||
+      isUploadingKnowledgeFiles
+    ) {
       return;
     }
 
-    const nextKnowledgeFiles = [...knowledgeFiles];
-    const knowledgeFileIds: string[] = [];
+    const selectedFiles = Array.from(files);
+    const authState = parseAuthState(localStorage.getItem(AUTH_STORAGE_KEY));
 
-    Array.from(files).forEach((file) => {
-      const fingerprint = getFileFingerprint(file);
-      const existingFile = nextKnowledgeFiles.find(
-        (knowledgeFile) => knowledgeFile.fingerprint === fingerprint
-      );
+    if (!authState) {
+      localStorage.removeItem(AUTH_STORAGE_KEY);
+      window.location.href = "/login";
+      return;
+    }
 
-      if (existingFile) {
-        knowledgeFileIds.push(existingFile.id);
-        return;
-      }
+    const formData = new FormData();
+    selectedFiles.forEach((file) => formData.append("files", file));
+    formData.append("description", "");
 
-      const knowledgeFile: KnowledgeFile = {
-        id: createClientId(),
-        name: file.name,
-        size: file.size,
-        fingerprint,
-        status: "ready",
-      };
-
-      nextKnowledgeFiles.unshift(knowledgeFile);
-      knowledgeFileIds.push(knowledgeFile.id);
-    });
-
-    setKnowledgeFiles(nextKnowledgeFiles);
-    setKnowledgeBaseFiles((prev) => {
-      const nextAssociations = [...prev];
-
-      knowledgeFileIds.forEach((knowledgeFileId) => {
-        const associationExists = nextAssociations.some(
-          (association) =>
-            association.knowledgeBaseId === selectedKnowledgeBaseId &&
-            association.knowledgeFileId === knowledgeFileId
-        );
-
-        if (!associationExists) {
-          nextAssociations.push({
-            knowledgeBaseId: selectedKnowledgeBaseId,
-            knowledgeFileId,
-          });
-        }
-      });
-
-      return nextAssociations;
-    });
+    setIsUploadingKnowledgeFiles(true);
+    setKnowledgeFileUploadError("");
     setIsFileManagerOpen(true);
 
-    if (fileInputRef.current) {
-      fileInputRef.current.value = "";
+    try {
+      const response = await fetch(
+        `/api/chat/knowledge-base/${encodeURIComponent(
+          selectedKnowledgeBaseId
+        )}/files`,
+        {
+          method: "POST",
+          headers: {
+            Authorization: buildAuthorizationHeader(authState),
+          },
+          body: formData,
+        }
+      );
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(
+          getResponseErrorMessage(errorText, "上传文件失败，请稍后再试。")
+        );
+      }
+
+      const data = (await response.json()) as UploadKnowledgeFilesResponse;
+      const uploadedValues = Array.isArray(data.files) ? data.files : [];
+      const uploadedFiles = uploadedValues
+        .map((value, index) => toKnowledgeFile(value, selectedFiles[index]))
+        .filter(
+          (knowledgeFile): knowledgeFile is KnowledgeFile =>
+            knowledgeFile !== null
+        );
+
+      if (uploadedFiles.length === 0) {
+        throw new Error("上传响应缺少有效的 files 数据。");
+      }
+
+      setKnowledgeFiles((prev) => {
+        const uploadedIds = new Set(uploadedFiles.map((file) => file.id));
+        return [
+          ...uploadedFiles,
+          ...prev.filter((file) => !uploadedIds.has(file.id)),
+        ];
+      });
+      setKnowledgeBaseFiles((prev) => {
+        const nextAssociations = [...prev];
+
+        uploadedFiles.forEach((file) => {
+          const associationExists = nextAssociations.some(
+            (association) =>
+              association.knowledgeBaseId === selectedKnowledgeBaseId &&
+              association.knowledgeFileId === file.id
+          );
+
+          if (!associationExists) {
+            nextAssociations.push({
+              knowledgeBaseId: selectedKnowledgeBaseId,
+              knowledgeFileId: file.id,
+            });
+          }
+        });
+
+        return nextAssociations;
+      });
+      setKnowledgeBases((prev) =>
+        prev.map((knowledgeBase) =>
+          knowledgeBase.id === selectedKnowledgeBaseId
+            ? {
+                ...knowledgeBase,
+                fileCount: knowledgeBase.fileCount + uploadedFiles.length,
+              }
+            : knowledgeBase
+        )
+      );
+    } catch (error) {
+      setKnowledgeFileUploadError(
+        error instanceof Error
+          ? error.message
+          : "上传文件失败，请稍后再试。"
+      );
+    } finally {
+      setIsUploadingKnowledgeFiles(false);
+
+      if (fileInputRef.current) {
+        fileInputRef.current.value = "";
+      }
     }
   }
 
@@ -1562,10 +1659,12 @@ export default function Home() {
               <button
                 type="button"
                 onClick={() => fileInputRef.current?.click()}
-                disabled={!selectedKnowledgeBaseId}
+                disabled={
+                  !selectedKnowledgeBaseId || isUploadingKnowledgeFiles
+                }
                 className="bg-[#176b62] px-3 py-2.5 text-xs font-semibold text-white transition hover:bg-[#105149] disabled:bg-[#91aaa4]"
               >
-                上传文件
+                {isUploadingKnowledgeFiles ? "上传中..." : "上传文件"}
               </button>
               <button
                 type="button"
@@ -1580,7 +1679,9 @@ export default function Home() {
               type="file"
               multiple
               accept=".txt,.md,.csv,.json,.pdf,.png,.jpg,.jpeg,.webp,.gif"
-              onChange={(event) => handleSelectFiles(event.target.files)}
+              onChange={(event) => {
+                void handleSelectFiles(event.target.files);
+              }}
               className="hidden"
             />
           </div>
@@ -2082,13 +2183,26 @@ export default function Home() {
               <button
                 type="button"
                 onClick={() => fileInputRef.current?.click()}
-                disabled={!selectedKnowledgeBaseId}
+                disabled={
+                  !selectedKnowledgeBaseId || isUploadingKnowledgeFiles
+                }
                 className="w-full border border-dashed border-[#9bada6] bg-[#eef3f0] px-4 py-5 text-sm font-semibold text-[#46514e] transition hover:border-[#176b62] hover:text-[#176b62] disabled:border-[#cbd5d1] disabled:text-[#9ba8a3]"
               >
-                {selectedKnowledgeBaseId
-                  ? "选择文件上传"
-                  : "请先创建知识库"}
+                {isUploadingKnowledgeFiles
+                  ? "正在上传并登记文件..."
+                  : selectedKnowledgeBaseId
+                    ? "选择文件上传"
+                    : "请先创建知识库"}
               </button>
+
+              {knowledgeFileUploadError && (
+                <p
+                  role="alert"
+                  className="mt-3 border-l-4 border-[#e36b4f] bg-[#fff1ed] px-4 py-3 text-sm text-[#9b3c29]"
+                >
+                  {knowledgeFileUploadError}
+                </p>
+              )}
 
               <div className="mt-6">
                 <div className="flex items-center justify-between gap-4">
