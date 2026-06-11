@@ -50,6 +50,8 @@ prisma/*.db-journal
 .agents/
 AGENTS.md
 
+skills-lock.json
+
 # .vscode
 .vscode/
 
