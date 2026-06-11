@@ -25,6 +25,14 @@ type KnowledgeBase = {
   id: string;
   name: string;
   isDefault: boolean;
+  fileCount: number;
+};
+
+type BackendKnowledgeBase = {
+  id?: unknown;
+  name?: unknown;
+  is_default?: unknown;
+  file_count?: unknown;
 };
 
 type KnowledgeFile = {
@@ -59,6 +67,20 @@ type CreateConversationResponse = {
 type ListConversationsResponse = {
   conversations?: unknown;
   answer?: string;
+  detail?: string;
+  error?: string;
+  message?: string;
+};
+
+type ListKnowledgeBasesResponse = {
+  knowledge_bases?: unknown;
+  detail?: string;
+  error?: string;
+  message?: string;
+};
+
+type CreateKnowledgeBaseResponse = {
+  knowledge_base?: BackendKnowledgeBase;
   detail?: string;
   error?: string;
   message?: string;
@@ -259,6 +281,32 @@ function toChatSession(value: unknown): ChatSession | null {
         : "新对话",
     messages,
     isPersisted: true,
+  };
+}
+
+function toKnowledgeBase(value: unknown): KnowledgeBase | null {
+  if (typeof value !== "object" || value === null) {
+    return null;
+  }
+
+  const knowledgeBase = value as BackendKnowledgeBase;
+
+  if (
+    typeof knowledgeBase.id !== "string" ||
+    !knowledgeBase.id.trim() ||
+    typeof knowledgeBase.name !== "string" ||
+    !knowledgeBase.name.trim()
+  ) {
+    return null;
+  }
+
+  const fileCount = Number(knowledgeBase.file_count);
+
+  return {
+    id: knowledgeBase.id,
+    name: knowledgeBase.name.trim(),
+    isDefault: knowledgeBase.is_default === true,
+    fileCount: Number.isFinite(fileCount) ? fileCount : 0,
   };
 }
 
@@ -549,6 +597,8 @@ export default function Home() {
   const [sessionErrors, setSessionErrors] = useState<Record<string, string>>({});
   const [hasCheckedAuth, setHasCheckedAuth] = useState(false);
   const [isCreatingSession, setIsCreatingSession] = useState(false);
+  const [isCreatingKnowledgeBase, setIsCreatingKnowledgeBase] =
+    useState(false);
   const [pageError, setPageError] = useState("");
   const [currentUsername, setCurrentUsername] = useState("");
   const [knowledgeBases, setKnowledgeBases] = useState<KnowledgeBase[]>([
@@ -556,6 +606,7 @@ export default function Home() {
       id: DEFAULT_KNOWLEDGE_BASE_ID,
       name: "默认知识库",
       isDefault: true,
+      fileCount: 0,
     },
   ]);
   const [selectedKnowledgeBaseId, setSelectedKnowledgeBaseId] = useState(
@@ -608,27 +659,72 @@ export default function Home() {
   const reusableKnowledgeFiles = knowledgeFiles.filter(
     (file) => !selectedKnowledgeFileIds.has(file.id)
   );
+  const selectedKnowledgeBaseFileCount =
+    selectedKnowledgeFiles.length || selectedKnowledgeBase?.fileCount || 0;
 
-  function handleCreateKnowledgeBase() {
+  async function handleCreateKnowledgeBase() {
     const normalizedName = newKnowledgeBaseName.trim();
 
-    if (!normalizedName) {
+    if (!normalizedName || isCreatingKnowledgeBase) {
       return;
     }
 
-    const knowledgeBase: KnowledgeBase = {
-      id: createClientId(),
-      name: normalizedName,
-      isDefault: false,
-    };
+    const authState = parseAuthState(localStorage.getItem(AUTH_STORAGE_KEY));
 
-    setKnowledgeBases((prev) => [...prev, knowledgeBase]);
-    setSelectedKnowledgeBaseId(knowledgeBase.id);
-    setNewKnowledgeBaseName("");
+    if (!authState) {
+      localStorage.removeItem(AUTH_STORAGE_KEY);
+      window.location.href = "/login";
+      return;
+    }
+
+    setIsCreatingKnowledgeBase(true);
+    setPageError("");
+
+    try {
+      const response = await fetch("/api/chat/knowledge-base", {
+        method: "POST",
+        headers: {
+          Authorization: buildAuthorizationHeader(authState),
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          name: normalizedName,
+        }),
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(
+          getResponseErrorMessage(errorText, "创建知识库失败，请稍后再试。")
+        );
+      }
+
+      const data = (await response.json()) as CreateKnowledgeBaseResponse;
+      const knowledgeBase = toKnowledgeBase(data.knowledge_base);
+
+      if (!knowledgeBase) {
+        throw new Error("创建知识库响应缺少有效的 knowledge_base。");
+      }
+
+      setKnowledgeBases((prev) => [
+        ...prev.filter((candidate) => candidate.id !== knowledgeBase.id),
+        knowledgeBase,
+      ]);
+      setSelectedKnowledgeBaseId(knowledgeBase.id);
+      setNewKnowledgeBaseName("");
+    } catch (error) {
+      setPageError(
+        error instanceof Error
+          ? error.message
+          : "创建知识库失败，请稍后再试。"
+      );
+    } finally {
+      setIsCreatingKnowledgeBase(false);
+    }
   }
 
   function handleSelectFiles(files: FileList | null) {
-    if (!files?.length) {
+    if (!files?.length || !selectedKnowledgeBaseId) {
       return;
     }
 
@@ -820,6 +916,43 @@ export default function Home() {
       .filter((session): session is ChatSession => session !== null);
   }
 
+  async function loadBackendKnowledgeBases() {
+    const authState = parseAuthState(localStorage.getItem(AUTH_STORAGE_KEY));
+
+    if (!authState) {
+      localStorage.removeItem(AUTH_STORAGE_KEY);
+      window.location.href = "/login";
+      throw new Error("登录已失效，请重新登录。");
+    }
+
+    const response = await fetch("/api/chat/knowledge-bases", {
+      method: "GET",
+      headers: {
+        Authorization: buildAuthorizationHeader(authState),
+      },
+      cache: "no-store",
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(
+        getResponseErrorMessage(errorText, "读取知识库列表失败，请稍后再试。")
+      );
+    }
+
+    const data = (await response.json()) as ListKnowledgeBasesResponse;
+    const knowledgeBaseValues = Array.isArray(data.knowledge_bases)
+      ? data.knowledge_bases
+      : [];
+
+    return knowledgeBaseValues
+      .map(toKnowledgeBase)
+      .filter(
+        (knowledgeBase): knowledgeBase is KnowledgeBase =>
+          knowledgeBase !== null
+      );
+  }
+
   useEffect(() => {
     try {
       const authState = parseAuthState(localStorage.getItem(AUTH_STORAGE_KEY));
@@ -882,6 +1015,46 @@ export default function Home() {
 
     if (hasCheckedAuth) {
       void restoreSessions();
+    }
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [hasCheckedAuth]);
+
+  useEffect(() => {
+    let isCancelled = false;
+
+    async function restoreKnowledgeBases() {
+      try {
+        const nextKnowledgeBases = await loadBackendKnowledgeBases();
+
+        if (isCancelled) {
+          return;
+        }
+
+        setKnowledgeBases(nextKnowledgeBases);
+        setSelectedKnowledgeBaseId(
+          nextKnowledgeBases.find((knowledgeBase) => knowledgeBase.isDefault)
+            ?.id ||
+            nextKnowledgeBases[0]?.id ||
+            ""
+        );
+      } catch (error) {
+        console.error("Failed to load knowledge bases:", error);
+
+        if (!isCancelled) {
+          setPageError(
+            error instanceof Error
+              ? error.message
+              : "读取知识库列表失败，请稍后再试。"
+          );
+        }
+      }
+    }
+
+    if (hasCheckedAuth) {
+      void restoreKnowledgeBases();
     }
 
     return () => {
@@ -1375,6 +1548,9 @@ export default function Home() {
               }
               className="research-focus mt-2 w-full border border-[#b7c4bf] bg-[#fcfdfb] px-3 py-2.5 text-sm font-semibold text-[#17201f]"
             >
+              {knowledgeBases.length === 0 && (
+                <option value="">暂无知识库</option>
+              )}
               {knowledgeBases.map((knowledgeBase) => (
                 <option key={knowledgeBase.id} value={knowledgeBase.id}>
                   {knowledgeBase.name}
@@ -1386,7 +1562,8 @@ export default function Home() {
               <button
                 type="button"
                 onClick={() => fileInputRef.current?.click()}
-                className="bg-[#176b62] px-3 py-2.5 text-xs font-semibold text-white transition hover:bg-[#105149]"
+                disabled={!selectedKnowledgeBaseId}
+                className="bg-[#176b62] px-3 py-2.5 text-xs font-semibold text-white transition hover:bg-[#105149] disabled:bg-[#91aaa4]"
               >
                 上传文件
               </button>
@@ -1395,7 +1572,7 @@ export default function Home() {
                 onClick={() => setIsFileManagerOpen(true)}
                 className="border border-[#aebdb7] bg-[#fcfdfb] px-3 py-2.5 text-xs font-semibold text-[#46514e] transition hover:border-[#176b62] hover:text-[#176b62]"
               >
-                文件 {selectedKnowledgeFiles.length}
+                文件 {selectedKnowledgeBaseFileCount}
               </button>
             </div>
             <input
@@ -1550,7 +1727,7 @@ export default function Home() {
                     Live Research
                   </span>
                   <span className="font-utility text-[10px] font-semibold uppercase text-[#72807b]">
-                    {selectedKnowledgeBase?.name || "默认知识库"}
+                    {selectedKnowledgeBase?.name || "暂无知识库"}
                   </span>
                 </div>
                 <h1 className="font-display mt-4 truncate text-3xl font-semibold text-[#17201f] md:text-4xl">
@@ -1570,7 +1747,7 @@ export default function Home() {
                 <span>
                   Files
                   <strong className="mt-1 block text-base text-[#17201f]">
-                    {String(selectedKnowledgeFiles.length).padStart(2, "0")}
+                    {String(selectedKnowledgeBaseFileCount).padStart(2, "0")}
                   </strong>
                 </span>
               </div>
@@ -1756,7 +1933,7 @@ export default function Home() {
                   知识库管理
                 </h2>
                 <p className="mt-1 text-sm text-[#64716d]">
-                  当前：{selectedKnowledgeBase?.name || "默认知识库"}
+                  当前：{selectedKnowledgeBase?.name || "暂无知识库"}
                 </p>
               </div>
               <button
@@ -1772,14 +1949,14 @@ export default function Home() {
             <div className="px-6 py-5">
               <div className="divide-y divide-[#d5ded9] border-y border-[#cbd5d1]">
                 {knowledgeBases.map((knowledgeBase) => {
-                  const fileCount = knowledgeBaseFiles.filter(
+                  const localFileCount = knowledgeBaseFiles.filter(
                     (association) =>
                       association.knowledgeBaseId === knowledgeBase.id
                   ).length;
+                  const fileCount =
+                    localFileCount || knowledgeBase.fileCount || 0;
                   const conversationCount =
-                    knowledgeBase.id === DEFAULT_KNOWLEDGE_BASE_ID
-                      ? sessions.length
-                      : 0;
+                    knowledgeBase.isDefault ? sessions.length : 0;
 
                   return (
                     <button
@@ -1831,7 +2008,7 @@ export default function Home() {
                     onKeyDown={(event) => {
                       if (event.key === "Enter") {
                         event.preventDefault();
-                        handleCreateKnowledgeBase();
+                        void handleCreateKnowledgeBase();
                       }
                     }}
                     placeholder="知识库名称"
@@ -1839,11 +2016,16 @@ export default function Home() {
                   />
                   <button
                     type="button"
-                    onClick={handleCreateKnowledgeBase}
-                    disabled={!newKnowledgeBaseName.trim()}
+                    onClick={() => {
+                      void handleCreateKnowledgeBase();
+                    }}
+                    disabled={
+                      !newKnowledgeBaseName.trim() ||
+                      isCreatingKnowledgeBase
+                    }
                     className="bg-[#176b62] px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-[#105149] disabled:bg-[#a7b8b2]"
                   >
-                    创建
+                    {isCreatingKnowledgeBase ? "创建中..." : "创建"}
                   </button>
                 </div>
               </div>
@@ -1880,7 +2062,7 @@ export default function Home() {
                   知识库文件
                 </h2>
                 <p className="mt-1 text-sm text-[#64716d]">
-                  {selectedKnowledgeBase?.name || "默认知识库"}
+                  {selectedKnowledgeBase?.name || "暂无知识库"}
                 </p>
                 <p className="mt-1 text-xs text-[#72807b]">
                   文件只保存一次，可关联到多个知识库
@@ -1900,9 +2082,12 @@ export default function Home() {
               <button
                 type="button"
                 onClick={() => fileInputRef.current?.click()}
-                className="w-full border border-dashed border-[#9bada6] bg-[#eef3f0] px-4 py-5 text-sm font-semibold text-[#46514e] transition hover:border-[#176b62] hover:text-[#176b62]"
+                disabled={!selectedKnowledgeBaseId}
+                className="w-full border border-dashed border-[#9bada6] bg-[#eef3f0] px-4 py-5 text-sm font-semibold text-[#46514e] transition hover:border-[#176b62] hover:text-[#176b62] disabled:border-[#cbd5d1] disabled:text-[#9ba8a3]"
               >
-                选择文件上传
+                {selectedKnowledgeBaseId
+                  ? "选择文件上传"
+                  : "请先创建知识库"}
               </button>
 
               <div className="mt-6">
