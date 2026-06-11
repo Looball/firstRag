@@ -643,6 +643,10 @@ export default function Home() {
     useState(false);
   const [knowledgeFileUploadError, setKnowledgeFileUploadError] =
     useState("");
+  const [detachingKnowledgeFileId, setDetachingKnowledgeFileId] =
+    useState("");
+  const [knowledgeFileDetachError, setKnowledgeFileDetachError] =
+    useState("");
   const [pageError, setPageError] = useState("");
   const [currentUsername, setCurrentUsername] = useState("");
   const [knowledgeBases, setKnowledgeBases] = useState<KnowledgeBase[]>([
@@ -901,16 +905,77 @@ export default function Home() {
     });
   }
 
-  function handleRemoveKnowledgeFile(fileId: string) {
-    setKnowledgeBaseFiles((prev) =>
-      prev.filter(
-        (association) =>
-          !(
-            association.knowledgeBaseId === selectedKnowledgeBaseId &&
-            association.knowledgeFileId === fileId
+  async function handleRemoveKnowledgeFile(fileId: string) {
+    if (
+      !selectedKnowledgeBaseId ||
+      !fileId ||
+      detachingKnowledgeFileId
+    ) {
+      return;
+    }
+
+    const authState = parseAuthState(localStorage.getItem(AUTH_STORAGE_KEY));
+
+    if (!authState) {
+      localStorage.removeItem(AUTH_STORAGE_KEY);
+      window.location.href = "/login";
+      return;
+    }
+
+    setDetachingKnowledgeFileId(fileId);
+    setKnowledgeFileDetachError("");
+
+    try {
+      const response = await fetch(
+        `/api/chat/knowledge-base/${encodeURIComponent(
+          selectedKnowledgeBaseId
+        )}/files/${encodeURIComponent(fileId)}`,
+        {
+          method: "DELETE",
+          headers: {
+            Authorization: buildAuthorizationHeader(authState),
+          },
+        }
+      );
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(
+          getResponseErrorMessage(
+            errorText,
+            "解除文件关联失败，请稍后再试。"
           )
-      )
-    );
+        );
+      }
+
+      setKnowledgeBaseFiles((prev) =>
+        prev.filter(
+          (association) =>
+            !(
+              association.knowledgeBaseId === selectedKnowledgeBaseId &&
+              association.knowledgeFileId === fileId
+            )
+        )
+      );
+      setKnowledgeBases((prev) =>
+        prev.map((knowledgeBase) =>
+          knowledgeBase.id === selectedKnowledgeBaseId
+            ? {
+                ...knowledgeBase,
+                fileCount: Math.max(0, knowledgeBase.fileCount - 1),
+              }
+            : knowledgeBase
+        )
+      );
+    } catch (error) {
+      setKnowledgeFileDetachError(
+        error instanceof Error
+          ? error.message
+          : "解除文件关联失败，请稍后再试。"
+      );
+    } finally {
+      setDetachingKnowledgeFileId("");
+    }
   }
 
   async function createBackendSession(title = "新对话") {
@@ -2204,6 +2269,15 @@ export default function Home() {
                 </p>
               )}
 
+              {knowledgeFileDetachError && (
+                <p
+                  role="alert"
+                  className="mt-3 border-l-4 border-[#e36b4f] bg-[#fff1ed] px-4 py-3 text-sm text-[#9b3c29]"
+                >
+                  {knowledgeFileDetachError}
+                </p>
+              )}
+
               <div className="mt-6">
                 <div className="flex items-center justify-between gap-4">
                   <p className="font-utility text-[10px] font-semibold uppercase text-[#176b62]">
@@ -2240,10 +2314,15 @@ export default function Home() {
                           </div>
                           <button
                             type="button"
-                            onClick={() => handleRemoveKnowledgeFile(file.id)}
-                            className="shrink-0 px-2 py-1 text-xs font-semibold text-[#72807b] transition hover:bg-[#fff1ed] hover:text-[#9b3c29]"
+                            onClick={() => {
+                              void handleRemoveKnowledgeFile(file.id);
+                            }}
+                            disabled={Boolean(detachingKnowledgeFileId)}
+                            className="shrink-0 px-2 py-1 text-xs font-semibold text-[#72807b] transition hover:bg-[#fff1ed] hover:text-[#9b3c29] disabled:cursor-not-allowed disabled:text-[#aab3b0]"
                           >
-                            解除关联
+                            {detachingKnowledgeFileId === file.id
+                              ? "解除中..."
+                              : "解除关联"}
                           </button>
                         </div>
                       );
