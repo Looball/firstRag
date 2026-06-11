@@ -633,18 +633,58 @@ def create_knowledge_base(
         },
     }
 
-
-
-
 # —————————————————————————————————————————————————————————————————————————————————————— #
-# 获取知识库中的文件信息
-@app.get('/chat/knowledge-base/{knowledge_base_id}/files')
-def get_knowledge_files(
+# 获取当前知识库的文件信息
+@app.get("/chat/knowledge-base/{knowledge_base_id}/files")
+def get_knowledge_base_files(
     knowledge_base_id: UUID,
-    authorization: str = Header(...)
+    authorization: str = Header(...),
 ):
     payload = get_current_user_payload(authorization)
-    user_id = int(payload['sub'])
+    user_id = int(payload["sub"])
+
+    sql = """
+    SELECT
+        kf.id,
+        kf.original_name,
+        kf.mime_type,
+        kf.size_bytes,
+        kf.status,
+        kf.created_at,
+        kf.updated_at
+    FROM knowledge_base_files AS kbf
+    JOIN knowledge_bases AS kb
+      ON kb.id = kbf.knowledge_base_id
+    JOIN knowledge_files AS kf
+      ON kf.id = kbf.knowledge_file_id
+    WHERE kb.id = %s
+      AND kb.user_id = %s
+      AND kb.deleted_at IS NULL
+      AND kf.user_id = %s
+      AND kf.deleted_at IS NULL
+    ORDER BY kbf.created_at DESC;
+    """
+
+    rows = exe_sql(
+        sql_statement=sql,
+        args_tuple=(knowledge_base_id, user_id, user_id),
+    )
+
+    return {
+        "success": True,
+        "files": [
+            {
+                "id": str(row["id"]),
+                "original_name": row["original_name"],
+                "mime_type": row["mime_type"],
+                "size_bytes": row["size_bytes"],
+                "status": row["status"],
+                "created_at": row["created_at"],
+                "updated_at": row["updated_at"],
+            }
+            for row in rows
+        ],
+    }
 
 # —————————————————————————————————————————————————————————————————————————————————————— #
 # 向知识库上传文件
@@ -877,31 +917,139 @@ def unpacking_knowledge_bases_and_file(
     }
 
 # —————————————————————————————————————————————————————————————————————————————————————— #
+# 增加文件和知识库的关联
+@app.post('/chat/knowledge-base/{knowledge_base_id}/files/{knowledge_file_id}')
+def packing_knowledge_bases_and_file(
+    knowledge_base_id: UUID,
+    knowledge_file_id: UUID,
+    authorization: str = Header(...)
+):
+    # 解析token，获取id
+    payload = get_current_user_payload(authorization)
+    user_id = int(payload["sub"])
+
+    sql = """
+        INSERT INTO knowledge_base_files (
+            knowledge_base_id,
+            knowledge_file_id
+        )
+        SELECT
+            kb.id,
+            kf.id
+        FROM knowledge_bases AS kb
+        CROSS JOIN knowledge_files AS kf
+        WHERE kb.id = %s
+          AND kb.user_id = %s
+          AND kb.deleted_at IS NULL
+          AND kf.id = %s
+          AND kf.user_id = %s
+          AND kf.deleted_at IS NULL
+        ON CONFLICT (knowledge_base_id, knowledge_file_id)
+        DO NOTHING
+        RETURNING
+            knowledge_base_id,
+            knowledge_file_id,
+            created_at;
+        """
+
+    rows = exe_sql(
+        sql_statement=sql,
+        args_tuple=(
+            knowledge_base_id,
+            user_id,
+            knowledge_file_id,
+            user_id,
+        ),
+    )
+
+    if not rows:
+        # 可能是资源不存在，也可能已经关联
+        check_rows = exe_sql(
+            sql_statement="""
+                SELECT 1
+                FROM knowledge_base_files
+                WHERE knowledge_base_id = %s
+                  AND knowledge_file_id = %s;
+                """,
+            args_tuple=(knowledge_base_id, knowledge_file_id),
+        )
+
+        if check_rows:
+            return {
+                "success": True,
+                "already_exists": True,
+                "message": "文件已经关联到该知识库",
+                "knowledge_base_id": str(knowledge_base_id),
+                "knowledge_file_id": str(knowledge_file_id),
+            }
+
+        raise HTTPException(
+            status_code=404,
+            detail="知识库或文件不存在",
+        )
+
+    relation = rows[0]
+
+    return {
+        "success": True,
+        "already_exists": False,
+        "message": "文件关联成功",
+        "knowledge_base_id": str(relation["knowledge_base_id"]),
+        "knowledge_file_id": str(relation["knowledge_file_id"]),
+        "created_at": relation["created_at"],
+    }
+
+
+# —————————————————————————————————————————————————————————————————————————————————————— #
 # 获取当前用户下所有知识库文件
 @app.get('/chat/knowledge-files')
 def get_all_knowledge_files(
     authorization: str = Header(...)
 ):
-    # 解析token，获取用户id
     payload = get_current_user_payload(authorization)
-    user_id = int(payload['sub'])
+    user_id = int(payload["sub"])
 
     sql = """
-    SELECT id, original_name, size_bytes, status
-    FROM knowledge_files
-    WHERE user_id = %s 
-      AND deleted_at is null
-    ORDER BY created_at DESC;
-    """
-    rows = exe_sql(sql_statement=sql, args_tuple=(user_id,))
+        SELECT
+            kf.id,
+            kf.original_name,
+            kf.mime_type,
+            kf.size_bytes,
+            kf.status,
+            kf.created_at,
+            COUNT(kbf.knowledge_base_id) AS usage_count
+        FROM knowledge_files AS kf
+        LEFT JOIN knowledge_base_files AS kbf
+          ON kbf.knowledge_file_id = kf.id
+        WHERE kf.user_id = %s
+          AND kf.deleted_at IS NULL
+        GROUP BY
+            kf.id,
+            kf.original_name,
+            kf.mime_type,
+            kf.size_bytes,
+            kf.status,
+            kf.created_at
+        ORDER BY kf.created_at DESC;
+        """
 
-    file_list = [ dict(row) for row in rows]
+    rows = exe_sql(sql_statement=sql, args_tuple=(user_id,))
 
     return {
         "success": True,
-        "file_list": file_list
+        "files": [
+            {
+                "id": str(row["id"]),
+                "original_name": row["original_name"],
+                "mime_type": row["mime_type"],
+                "size_bytes": row["size_bytes"],
+                "status": row["status"],
+                "usage_count": row["usage_count"],
+                "created_at": row["created_at"],
+            }
+            for row in rows
+        ],
     }
-
 
 # ***********************************************************************************
 # ————————————!!! 知识库管理 '/chat/knowledge-base' 接口处理 END !!!——————————————— #
