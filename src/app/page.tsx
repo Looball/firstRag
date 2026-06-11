@@ -659,6 +659,10 @@ export default function Home() {
     useState("");
   const [knowledgeFileDetachError, setKnowledgeFileDetachError] =
     useState("");
+  const [attachingKnowledgeFileId, setAttachingKnowledgeFileId] =
+    useState("");
+  const [knowledgeFileAttachError, setKnowledgeFileAttachError] =
+    useState("");
   const [isLoadingKnowledgeFiles, setIsLoadingKnowledgeFiles] =
     useState(false);
   const [knowledgeFileLoadError, setKnowledgeFileLoadError] = useState("");
@@ -1029,26 +1033,62 @@ export default function Home() {
     }
   }
 
-  function handleAttachKnowledgeFile(fileId: string) {
-    setKnowledgeBaseFiles((prev) => {
-      const associationExists = prev.some(
-        (association) =>
-          association.knowledgeBaseId === selectedKnowledgeBaseId &&
-          association.knowledgeFileId === fileId
+  async function handleAttachKnowledgeFile(fileId: string) {
+    if (
+      !selectedKnowledgeBaseId ||
+      !fileId ||
+      attachingKnowledgeFileId
+    ) {
+      return;
+    }
+
+    const authState = parseAuthState(localStorage.getItem(AUTH_STORAGE_KEY));
+
+    if (!authState) {
+      localStorage.removeItem(AUTH_STORAGE_KEY);
+      window.location.href = "/login";
+      return;
+    }
+
+    setAttachingKnowledgeFileId(fileId);
+    setKnowledgeFileAttachError("");
+
+    try {
+      const response = await fetch(
+        `/api/chat/knowledge-base/${encodeURIComponent(
+          selectedKnowledgeBaseId
+        )}/files/${encodeURIComponent(fileId)}`,
+        {
+          method: "POST",
+          headers: {
+            Authorization: buildAuthorizationHeader(authState),
+          },
+        }
       );
 
-      if (associationExists) {
-        return prev;
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(
+          getResponseErrorMessage(
+            errorText,
+            "添加文件关联失败，请稍后再试。"
+          )
+        );
       }
 
-      return [
-        ...prev,
-        {
-          knowledgeBaseId: selectedKnowledgeBaseId,
-          knowledgeFileId: fileId,
-        },
-      ];
-    });
+      await Promise.all([
+        loadKnowledgeBaseFiles(selectedKnowledgeBaseId),
+        loadAllKnowledgeFiles(),
+      ]);
+    } catch (error) {
+      setKnowledgeFileAttachError(
+        error instanceof Error
+          ? error.message
+          : "添加文件关联失败，请稍后再试。"
+      );
+    } finally {
+      setAttachingKnowledgeFileId("");
+    }
   }
 
   async function handleRemoveKnowledgeFile(fileId: string) {
@@ -2423,6 +2463,15 @@ export default function Home() {
                 </p>
               )}
 
+              {knowledgeFileAttachError && (
+                <p
+                  role="alert"
+                  className="mt-3 border-l-4 border-[#e36b4f] bg-[#fff1ed] px-4 py-3 text-sm text-[#9b3c29]"
+                >
+                  {knowledgeFileAttachError}
+                </p>
+              )}
+
               {knowledgeFileLoadError && (
                 <p
                   role="alert"
@@ -2549,10 +2598,15 @@ export default function Home() {
                           </div>
                           <button
                             type="button"
-                            onClick={() => handleAttachKnowledgeFile(file.id)}
-                            className="shrink-0 bg-[#176b62] px-3 py-2 text-xs font-semibold text-white transition hover:bg-[#105149]"
+                            onClick={() => {
+                              void handleAttachKnowledgeFile(file.id);
+                            }}
+                            disabled={Boolean(attachingKnowledgeFileId)}
+                            className="shrink-0 bg-[#176b62] px-3 py-2 text-xs font-semibold text-white transition hover:bg-[#105149] disabled:cursor-not-allowed disabled:bg-[#91aaa4]"
                           >
-                            添加
+                            {attachingKnowledgeFileId === file.id
+                              ? "添加中..."
+                              : "添加"}
                           </button>
                         </div>
                       );
