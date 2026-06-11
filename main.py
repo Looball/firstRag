@@ -3,8 +3,10 @@ from typing import Annotated,Literal,List
 from fastapi import FastAPI, File, Form, UploadFile, HTTPException,Header
 from fastapi.responses import StreamingResponse
 
-from uuid import UUID
-import jwt,os
+from uuid import UUID,uuid4
+import hashlib # 计算文件hash
+import jwt,os # 生成token令牌
+from pathlib import Path # 拼接路径工具
 from pwdlib import PasswordHash
 from datetime import datetime, timedelta, timezone
 
@@ -13,6 +15,10 @@ from assistant import get_chain,get_answer
 
 # SqlStatement
 from SqlStatement.query import exe_sql
+
+
+# 设置文件存储路径
+UPLOAD_ROOT = Path("./uploads")
 
 # ***********************************************************************************
 # ——————————————————————————!!! JWT TOKEN 处理 BEGIN !!!———————————————————————————— #
@@ -524,7 +530,7 @@ def create_conservation(
 # —————————————————————————————————————————————————————————————————————————————————— #
 # 获取用户的知识库
 @app.get('/chat/knowledge-bases')
-def get_knowledge_base(
+def get_knowledge_bases(
     authorization: str = Header(...)
 ):
 
@@ -575,8 +581,10 @@ def get_knowledge_base(
 
 # —————————————————————————————————————————————————————————————————————————————————————— #
 # 新建知识库
+# 定义请求体数据类型
 class CreateKnowledgeBaseRequest(BaseModel):
     name: str = Field(min_length=1, max_length=50)
+
 @app.post('/chat/knowledge-base')
 def create_knowledge_base(
     req:CreateKnowledgeBaseRequest,
@@ -631,22 +639,195 @@ def create_knowledge_base(
 # —————————————————————————————————————————————————————————————————————————————————————— #
 # 获取知识库中的文件信息
 @app.get('/chat/knowledge-base/{knowledge_base_id}/files')
-def create_knowledge_base(
-        knowledge_base_id: UUID,
-        authorization: str = Header(...)
+def get_knowledge_files(
+    knowledge_base_id: UUID,
+    authorization: str = Header(...)
 ):
     payload = get_current_user_payload(authorization)
     user_id = int(payload['sub'])
 
 # —————————————————————————————————————————————————————————————————————————————————————— #
 # 向知识库上传文件
+# 组装文件存储路径
+def build_storage_path(
+    user_id: int,
+    file_id: str,
+    file_hash: str,
+    original_name: str,
+) -> Path:
+    extension = Path(original_name).suffix.lower()
+
+    return (
+        UPLOAD_ROOT
+        / "users"
+        / str(user_id)
+        / file_hash[:2]
+        / file_hash[2:4]
+        / file_id
+        / f"source{extension}"
+    )
+
+# 异步  分批计算单个文件hash值
+async def calculate_file_hash(file: UploadFile) -> tuple[str, int]:
+    sha256 = hashlib.sha256()
+    size_bytes = 0
+
+    while chunk := await file.read(1024 * 1024):
+        sha256.update(chunk)
+        size_bytes += len(chunk)
+
+    await file.seek(0)
+    return sha256.hexdigest(), size_bytes
+
+# API路由
 @app.post('/chat/knowledge-base/{knowledge_base_id}/files')
-def create_knowledge_base(
+async def upload_knowledge_files(
     knowledge_base_id: UUID,
-    authorization: str = Header(...)
+    files: list[UploadFile] = File(...),
+    description: str = Form(""),
+    authorization: str = Header(...),
 ):
+    # 解析token，获取用户id
     payload = get_current_user_payload(authorization)
-    user_id = int(payload['sub'])
+    user_id = int(payload["sub"])
+
+    # 检查知识库存在且属于当前用户
+    rows = exe_sql(
+        sql_statement="""
+        SELECT id
+        FROM knowledge_bases
+        WHERE id = %s
+          AND user_id = %s
+          AND deleted_at IS NULL
+        """,
+        args_tuple=(knowledge_base_id, user_id),
+    )
+    if not rows:
+        raise HTTPException(status_code=404, detail="知识库不存在")
+
+    uploaded_files = []
+
+    # 使用循环处理多个文件
+    for file in files:
+        # 判断文件名是否存在
+        if not file.filename:
+            raise HTTPException(status_code=400, detail="文件名不能为空")
+
+        # 计算文件hash值和文件大小
+        file_hash, size_bytes = await calculate_file_hash(file)
+
+        # 同一用户上传过相同内容时，复用已有文件，只补充知识库关联。
+        existing_files = exe_sql(
+            sql_statement="""
+            SELECT id, original_name, size_bytes, status
+            FROM knowledge_files
+            WHERE user_id = %s
+              AND file_hash = %s
+              AND deleted_at IS NULL
+            LIMIT 1;
+            """,
+            args_tuple=(user_id, file_hash),
+        )
+
+        if existing_files:
+            existing_file = existing_files[0]
+
+            relation_rows = exe_sql(
+                sql_statement="""
+                INSERT INTO knowledge_base_files (
+                    knowledge_base_id,
+                    knowledge_file_id
+                )
+                VALUES (%s, %s)
+                ON CONFLICT (knowledge_base_id, knowledge_file_id)
+                DO NOTHING
+                RETURNING knowledge_file_id;
+                """,
+                args_tuple=(knowledge_base_id, existing_file["id"]),
+            )
+
+            uploaded_files.append({
+                **dict(existing_file),
+                "reused": True,
+                "already_in_knowledge_base": not bool(relation_rows),
+            })
+            await file.close()
+            continue
+
+        # 为文件生成UUID
+        file_id = uuid4()
+
+        # 拼接路径 ROOT_PATH / storage_path
+        storage_path = build_storage_path(
+            user_id=user_id,
+            file_id=str(file_id),
+            file_hash=file_hash,
+            original_name=file.filename,
+        )
+
+        # 创建文件目录
+        storage_path.parent.mkdir(parents=True, exist_ok=True)
+
+        # 保存文件，写入本地路径
+        try:
+            with storage_path.open("wb") as output:
+                while chunk := await file.read(1024 * 1024):
+                    output.write(chunk)
+
+            # 同时插入文件记录和知识库关联记录
+            rows = exe_sql(
+                sql_statement="""
+                WITH new_file AS (
+                    INSERT INTO knowledge_files (
+                        id,
+                        user_id,
+                        original_name,
+                        storage_path,
+                        mime_type,
+                        size_bytes,
+                        file_hash,
+                        status
+                    )
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, 'pending')
+                    RETURNING id, original_name, size_bytes, status
+                ),
+                new_relation AS (
+                    INSERT INTO knowledge_base_files (
+                        knowledge_base_id,
+                        knowledge_file_id
+                    )
+                    SELECT %s, id
+                    FROM new_file
+                )
+                SELECT *
+                FROM new_file;
+                """,
+                args_tuple=(
+                    file_id,
+                    user_id,
+                    file.filename,
+                    str(storage_path),
+                    file.content_type or "application/octet-stream",
+                    size_bytes,
+                    file_hash,
+                    knowledge_base_id,
+                ),
+            )
+
+            uploaded_files.append(dict(rows[0]))
+
+        except Exception:
+            storage_path.unlink(missing_ok=True)
+            raise
+
+        finally:
+            await file.close()
+
+    return {
+        "success": True,
+        "description": description,
+        "files": uploaded_files,
+    }
 
 # —————————————————————————————————————————————————————————————————————————————————————— #
 # 解除数据库与文件的关联
@@ -656,20 +837,72 @@ def unpacking_knowledge_bases_and_file(
     knowledge_file_id: UUID,
     authorization: str = Header(...)
 ):
+
+    # 解析token，获取id
     payload = get_current_user_payload(authorization)
     user_id = int(payload['sub'])
 
+    # 解除关联
+    sql = """
+    DELETE FROM knowledge_base_files AS kbf
+    USING knowledge_bases AS kb, knowledge_files AS kf
+    WHERE kbf.knowledge_base_id = kb.id
+      AND kbf.knowledge_file_id = kf.id
+      AND kb.id = %s
+      AND kf.id = %s
+      AND kb.user_id = %s
+      AND kf.user_id = %s
+      AND kb.deleted_at IS NULL
+      AND kf.deleted_at IS NULL
+    RETURNING
+        kbf.knowledge_base_id,
+        kbf.knowledge_file_id;
+    """
+    rows = exe_sql(
+        sql_statement=sql,
+        args_tuple=(
+            knowledge_base_id,
+            knowledge_file_id,
+            user_id,
+            user_id
+        )
+    )
+    if not rows:
+        raise HTTPException(status_code=404, detail="文件关联不存在")
+
+    return {
+        "success": True,
+        "knowledge_base_id": str(knowledge_base_id),
+        "knowledge_file_id": str(knowledge_file_id),
+    }
+
 # —————————————————————————————————————————————————————————————————————————————————————— #
 # 获取当前用户下所有知识库文件
-@app.get('chat/knowledge-files')
-def get_knowledge_files(
+@app.get('/chat/knowledge-files')
+def get_all_knowledge_files(
     authorization: str = Header(...)
 ):
     # 解析token，获取用户id
     payload = get_current_user_payload(authorization)
     user_id = int(payload['sub'])
 
+    sql = """
+    SELECT id, original_name, size_bytes, status
+    FROM knowledge_files
+    WHERE user_id = %s 
+      AND deleted_at is null
+    ORDER BY created_at DESC;
+    """
+    rows = exe_sql(sql_statement=sql, args_tuple=(user_id,))
+
+    file_list = [ dict(row) for row in rows]
+
+    return {
+        "success": True,
+        "file_list": file_list
+    }
+
+
 # ***********************************************************************************
 # ————————————!!! 知识库管理 '/chat/knowledge-base' 接口处理 END !!!——————————————— #
 # —————————————————————————————————————————————————————————————————————————————————— #
-
