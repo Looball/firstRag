@@ -121,14 +121,14 @@ def register(req:RegisterQuest):
     JOIN new_knowledge_base
         ON new_knowledge_base.user_id = new_user.id
     """
-    res = exe_sql(sql_statement=cmt_sql,args_tuple=(req.username,password_hash))
+    rows = exe_sql(sql_statement=cmt_sql,args_tuple=(req.username,password_hash))
 
     # 检查是否注册成功
-    if not res:
+    if not rows:
         raise HTTPException(status_code=500, detail="注册失败")
 
     # 取出数据
-    user = res[0]
+    user = rows[0]
 
     # 生成token
     token = create_access_token(
@@ -532,17 +532,104 @@ def get_knowledge_base(
     payload = get_current_user_payload(authorization)
     user_id = int(payload['sub'])
 
-# —————————————————————————————————————————————————————————————————————————————————————— #
-# 新建知识库
-@app.post('/chat/knowledge-base')
-def create_knowledge_base(
-    authorization: str = Header(...)
-):
-    payload = get_current_user_payload(authorization)
-    user_id = int(payload['sub'])
+    sql = """
+        SELECT
+            kb.id,
+            kb.name,
+            kb.is_default,
+            kb.created_at,
+            kb.updated_at,
+            COUNT(kbf.knowledge_file_id) AS file_count
+        FROM knowledge_bases AS kb
+        LEFT JOIN knowledge_base_files AS kbf
+            ON kbf.knowledge_base_id = kb.id
+        WHERE kb.user_id = %s
+          AND kb.deleted_at IS NULL
+        GROUP BY
+            kb.id,
+            kb.name,
+            kb.is_default,
+            kb.created_at,
+            kb.updated_at
+        ORDER BY
+            kb.is_default DESC,
+            kb.created_at ASC;
+        """
+    rows = exe_sql(sql_statement=sql, args_tuple=(user_id,))
+
+    return {
+        "success": True,
+        "knowledge_bases": [
+            {
+                "id": str(row["id"]),
+                "name": row["name"],
+                "is_default": row["is_default"],
+                "file_count": row["file_count"],
+                "created_at": row["created_at"],
+                "updated_at": row["updated_at"],
+            }
+            for row in rows
+        ],
+    }
+
 
 # —————————————————————————————————————————————————————————————————————————————————————— #
-# 获取知识库中的文件
+# 新建知识库
+class CreateKnowledgeBaseRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=50)
+@app.post('/chat/knowledge-base')
+def create_knowledge_base(
+    req:CreateKnowledgeBaseRequest,
+    authorization: str = Header(...)
+):
+
+    # 验证token，获取用户id
+    payload = get_current_user_payload(authorization)
+    user_id = int(payload['sub'])
+    name = req.name.strip()
+
+    if not name:
+        raise HTTPException(
+            status_code=400,
+            detail="知识库名称不能为空",
+        )
+
+    # 创建知识库
+    sql = """
+    INSERT INTO knowledge_bases (
+        user_id,
+        name,
+        is_default
+    )
+    VALUES (%s, %s, FALSE)
+    RETURNING
+        id,
+        name,
+        is_default,
+        created_at,
+        updated_at;
+    """
+    rows = exe_sql(sql_statement=sql,args_tuple=(user_id,name))
+
+    knowledge_base = rows[0]
+
+    return {
+        "success": True,
+        "knowledge_base": {
+            "id": str(knowledge_base["id"]),
+            "name": knowledge_base["name"],
+            "is_default": knowledge_base["is_default"],
+            "file_count": 0,
+            "created_at": knowledge_base["created_at"],
+            "updated_at": knowledge_base["updated_at"],
+        },
+    }
+
+
+
+
+# —————————————————————————————————————————————————————————————————————————————————————— #
+# 获取知识库中的文件信息
 @app.get('/chat/knowledge-base/{knowledge_base_id}/files')
 def create_knowledge_base(
         knowledge_base_id: UUID,
