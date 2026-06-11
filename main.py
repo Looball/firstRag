@@ -79,18 +79,60 @@ def register(req:RegisterQuest):
     # 使用hash算法加密密码
     password_hash = PasswordHash.recommended().hash(req.password)
 
-    # 向数据库中插入注册用户的信息
-    sql = """
-        insert into users (username,password_hash)
-        values (%s,%s)
-        RETURNING id,username
+    # # 向数据库中插入注册用户的信息
+    # sql = """
+    #     insert into users (username,password_hash)
+    #     values (%s,%s)
+    #     RETURNING id,username
+    # """
+    # res = exe_sql(sql_statement=sql,args_tuple=(req.username,password_hash))
+    # user = res[0]
+
+    # 向数据库中插入注册用户的信息，并为用户注册默认知识库
+    # 使用Common Table Expression # 公共表表达式
+    cmt_sql = """
+    WITH new_user AS (
+    INSERT INTO users (
+        username,
+        password_hash
+    )
+    VALUES (%s, %s)
+    RETURNING id, username, created_at
+    ),
+    new_knowledge_base AS (
+    INSERT INTO knowledge_bases (
+        user_id,
+        name,
+        is_default
+    )
+    SELECT
+        id,
+        '默认知识库',
+        TRUE
+    FROM new_user
+    RETURNING id, user_id, name, is_default, created_at
+    )
+    SELECT
+        new_user.id AS user_id,
+        new_user.username,
+        new_knowledge_base.id AS knowledge_base_id,
+        new_knowledge_base.name AS knowledge_base_name
+    FROM new_user
+    JOIN new_knowledge_base
+        ON new_knowledge_base.user_id = new_user.id
     """
-    res = exe_sql(sql_statement=sql,args_tuple=(req.username,password_hash))
+    res = exe_sql(sql_statement=cmt_sql,args_tuple=(req.username,password_hash))
+
+    # 检查是否注册成功
+    if not res:
+        raise HTTPException(status_code=500, detail="注册失败")
+
+    # 取出数据
     user = res[0]
 
     # 生成token
     token = create_access_token(
-        user_id=user['id'], username=user['username']
+        user_id=user['user_id'], username=user['username']
     )
 
     return {
@@ -474,17 +516,73 @@ def create_conservation(
     }
 # —————————————————————————————————————————————————————————————————————————————————— #
 # ———————!!! 聊天界面 新建会话 POST '/chat/conversation' 接口处理 END !!!———————————————— #
+# ***********************************************************************************
 
 
-# 上传文件接口
-@app.post("/update")
-async def update_file(
-    file: Annotated[bytes, File()],
-    fileb: Annotated[UploadFile, File()],
-    token: Annotated[str, Form()],
+# ***********************************************************************************
+# ————————————!!! 知识库管理 '/chat/knowledge-base' 接口处理 BEGIN !!!——————————————— #
+# —————————————————————————————————————————————————————————————————————————————————— #
+# 获取用户的知识库
+@app.get('/chat/knowledge-bases')
+def get_knowledge_base(
+    authorization: str = Header(...)
 ):
-    return {
-        "file_size": len(file),
-        "token": token,
-        "fileb_content_type": fileb.content_type,
-    }
+
+    # 获取用户id
+    payload = get_current_user_payload(authorization)
+    user_id = int(payload['sub'])
+
+# —————————————————————————————————————————————————————————————————————————————————————— #
+# 新建知识库
+@app.post('/chat/knowledge-base')
+def create_knowledge_base(
+    authorization: str = Header(...)
+):
+    payload = get_current_user_payload(authorization)
+    user_id = int(payload['sub'])
+
+# —————————————————————————————————————————————————————————————————————————————————————— #
+# 获取知识库中的文件
+@app.get('/chat/knowledge-base/{knowledge_base_id}/files')
+def create_knowledge_base(
+        knowledge_base_id: UUID,
+        authorization: str = Header(...)
+):
+    payload = get_current_user_payload(authorization)
+    user_id = int(payload['sub'])
+
+# —————————————————————————————————————————————————————————————————————————————————————— #
+# 向知识库上传文件
+@app.post('/chat/knowledge-base/{knowledge_base_id}/files')
+def create_knowledge_base(
+    knowledge_base_id: UUID,
+    authorization: str = Header(...)
+):
+    payload = get_current_user_payload(authorization)
+    user_id = int(payload['sub'])
+
+# —————————————————————————————————————————————————————————————————————————————————————— #
+# 解除数据库与文件的关联
+@app.delete('/chat/knowledge-base/{knowledge_base_id}/files/{knowledge_file_id}')
+def unpacking_knowledge_bases_and_file(
+    knowledge_base_id: UUID,
+    knowledge_file_id: UUID,
+    authorization: str = Header(...)
+):
+    payload = get_current_user_payload(authorization)
+    user_id = int(payload['sub'])
+
+# —————————————————————————————————————————————————————————————————————————————————————— #
+# 获取当前用户下所有知识库文件
+@app.get('chat/knowledge-files')
+def get_knowledge_files(
+    authorization: str = Header(...)
+):
+    # 解析token，获取用户id
+    payload = get_current_user_payload(authorization)
+    user_id = int(payload['sub'])
+
+# ***********************************************************************************
+# ————————————!!! 知识库管理 '/chat/knowledge-base' 接口处理 END !!!——————————————— #
+# —————————————————————————————————————————————————————————————————————————————————— #
+
