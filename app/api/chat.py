@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 
 from app.core.security import get_current_user_id
+from app.repositories.conversation_repository import conversation_exists
 from app.schemas.chat import ChatRequest
 from app.services.chat_service import (
     load_chat_history,
@@ -9,7 +10,6 @@ from app.services.chat_service import (
     stream_answer_and_save,
 )
 from app.services.rag_service import get_chain
-from SqlStatement.query import exe_sql
 
 
 router = APIRouter(tags=["chat"])
@@ -26,15 +26,7 @@ def chat(
         raise HTTPException(status_code=400, detail="message不能为空")
 
     # 检查会话存在且属于当前用户
-    conversation_exists = exe_sql(
-        sql_statement="""
-        SELECT id
-        FROM conversations
-        WHERE user_id = %s AND id = %s
-        """,
-        args_tuple=(user_id, req.conversation_id),
-    )
-    if not conversation_exists:
+    if not conversation_exists(user_id, req.conversation_id):
         raise HTTPException(status_code=404, detail="会话不存在")
 
     # 取出历史记录

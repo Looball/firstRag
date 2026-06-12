@@ -3,11 +3,16 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException
 
 from app.core.security import get_current_user_id
+from app.repositories.conversation_repository import (
+    create_conversation as create_conversation_record,
+    get_user_conversations,
+    rename_conversation as rename_conversation_record,
+    soft_delete_conversation,
+)
 from app.schemas.conversation import (
     CreateConversationRequest,
     RenameConversationRequest,
 )
-from SqlStatement.query import exe_sql
 
 
 router = APIRouter(prefix="/chat", tags=["conversations"])
@@ -31,26 +36,7 @@ def get_conversations(user_id: int = Depends(get_current_user_id)):
     }
     """
     # 查询数据
-    rows = exe_sql(
-        sql_statement="""
-        SELECT
-            c.id AS conversation_id,
-            c.title,
-            c.created_at AS conversation_created_at,
-            c.updated_at AS conversation_updated_at,
-            m.id AS message_id,
-            m.role,
-            m.content,
-            m.created_at AS message_created_at
-        FROM conversations AS c
-        LEFT JOIN messages AS m
-          ON m.conversation_id = c.id
-        WHERE c.user_id = %s
-          AND c.deleted_at IS NULL
-        ORDER BY c.updated_at DESC, m.created_at ASC, m.id ASC;
-        """,
-        args_tuple=(user_id,),
-    )
+    rows = get_user_conversations(user_id)
 
     # 组建返回体消息
     conversations = {}
@@ -92,22 +78,17 @@ def rename_conversation(
     user_id: int = Depends(get_current_user_id),
 ):
     # 更新数据库数据
-    rows = exe_sql(
-        sql_statement="""
-        UPDATE conversations
-        SET title = %s,
-            updated_at = now()
-        WHERE id = %s AND user_id = %s
-        RETURNING id, user_id, title, created_at, updated_at;
-        """,
-        args_tuple=(req.title, conversation_id, user_id),
+    conversation = rename_conversation_record(
+        conversation_id,
+        user_id,
+        req.title,
     )
-    if not rows:
+    if conversation is None:
         raise HTTPException(status_code=404, detail="会话不存在")
 
     return {
         "success": True,
-        "conversation": dict(rows[0]),
+        "conversation": dict(conversation),
     }
 
 
@@ -118,20 +99,9 @@ def delete_conversation(
     user_id: int = Depends(get_current_user_id),
 ):
     # 软删除
-    rows = exe_sql(
-        sql_statement="""
-        UPDATE conversations
-        SET deleted_at = now(),
-            updated_at = now()
-        WHERE id = %s
-          AND user_id = %s
-          AND deleted_at IS NULL
-        RETURNING id;
-        """,
-        args_tuple=(conversation_id, user_id),
-    )
+    conversation = soft_delete_conversation(conversation_id, user_id)
     # 会话是否存在
-    if not rows:
+    if conversation is None:
         raise HTTPException(status_code=404, detail="会话不存在")
 
     return {
@@ -146,16 +116,12 @@ def create_conversation(
     req: CreateConversationRequest,
     user_id: int = Depends(get_current_user_id),
 ):
-    rows = exe_sql(
-        sql_statement="""
-        INSERT INTO conversations (user_id, title)
-        VALUES (%s, %s)
-        RETURNING id, user_id, title, created_at, updated_at;
-        """,
-        args_tuple=(user_id, req.title),
-    )
+    conversation = create_conversation_record(user_id, req.title)
+    if conversation is None:
+        raise HTTPException(status_code=500, detail="会话创建失败")
+
     return {
         "success": True,
         "message": "会话创建成功",
-        "conversation": dict(rows[0]),
+        "conversation": dict(conversation),
     }

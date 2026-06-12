@@ -2,8 +2,11 @@ from fastapi import APIRouter, HTTPException
 from pwdlib import PasswordHash
 
 from app.core.security import create_access_token
+from app.repositories.auth_repository import (
+    create_user_with_default_knowledge_base,
+    get_user_by_username,
+)
 from app.schemas.auth import LoginRequest, RegisterRequest
-from SqlStatement.query import exe_sql
 
 
 router = APIRouter(tags=["auth"])
@@ -16,38 +19,13 @@ def register(req: RegisterRequest):
     password_hash = PasswordHash.recommended().hash(req.password)
 
     # 向数据库中插入注册用户的信息，并为用户注册默认知识库
-    # 使用Common Table Expression（公共表表达式）
-    sql = """
-    WITH new_user AS (
-        INSERT INTO users (username, password_hash)
-        VALUES (%s, %s)
-        RETURNING id, username, created_at
-    ),
-    new_knowledge_base AS (
-        INSERT INTO knowledge_bases (user_id, name, is_default)
-        SELECT id, '默认知识库', TRUE
-        FROM new_user
-        RETURNING id, user_id, name, is_default, created_at
-    )
-    SELECT
-        new_user.id AS user_id,
-        new_user.username,
-        new_knowledge_base.id AS knowledge_base_id,
-        new_knowledge_base.name AS knowledge_base_name
-    FROM new_user
-    JOIN new_knowledge_base
-      ON new_knowledge_base.user_id = new_user.id
-    """
-    rows = exe_sql(
-        sql_statement=sql,
-        args_tuple=(req.username, password_hash),
+    user = create_user_with_default_knowledge_base(
+        req.username,
+        password_hash,
     )
     # 检查是否注册成功
-    if not rows:
+    if user is None:
         raise HTTPException(status_code=500, detail="注册失败")
-
-    # 取出数据
-    user = rows[0]
 
     # 生成token
     token = create_access_token(
@@ -77,20 +55,11 @@ def login(req: LoginRequest):
         raise HTTPException(status_code=400, detail="密码不能为空")
 
     # 从数据库中查询id、username、password_hash
-    rows = exe_sql(
-        sql_statement="""
-        SELECT u.id, u.username, u.password_hash
-        FROM users AS u
-        WHERE u.username = %s
-        """,
-        args_tuple=(req.username,),
-    )
+    user = get_user_by_username(req.username)
     # 判断是否存在用户
-    if not rows:
+    if user is None:
         raise HTTPException(status_code=401, detail="用户或密码错误")
 
-    # 取出用户信息，只有一条数据
-    user = rows[0]
     stored_hash = user.get("password_hash")
 
     # 查到用户，但是没有密码
