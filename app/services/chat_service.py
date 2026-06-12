@@ -1,6 +1,6 @@
 from collections.abc import Iterator
 
-from assistant import get_answer
+from app.services.rag_service import get_answer
 from SqlStatement.query import exe_sql
 
 

@@ -1,7 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 
-from assistant import get_chain
 from app.core.security import get_current_user_id
 from app.schemas.chat import ChatRequest
 from app.services.chat_service import (
@@ -9,6 +8,7 @@ from app.services.chat_service import (
     save_message,
     stream_answer_and_save,
 )
+from app.services.rag_service import get_chain
 from SqlStatement.query import exe_sql
 
 
