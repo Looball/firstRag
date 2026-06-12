@@ -15,14 +15,17 @@ from SqlStatement.query import exe_sql
 router = APIRouter(tags=["chat"])
 
 
+# 请求聊天接口
 @router.post("/chat")
 def chat(
     req: ChatRequest,
     user_id: int = Depends(get_current_user_id),
 ) -> StreamingResponse:
+    # 取出请求体中的数据并检查消息内容
     if not req.message:
         raise HTTPException(status_code=400, detail="message不能为空")
 
+    # 检查会话存在且属于当前用户
     conversation_exists = exe_sql(
         sql_statement="""
         SELECT id
@@ -34,10 +37,16 @@ def chat(
     if not conversation_exists:
         raise HTTPException(status_code=404, detail="会话不存在")
 
+    # 取出历史记录
     history = load_chat_history(req.conversation_id)
+
+    # 保存用户输入
     save_message(req.conversation_id, "user", req.message)
+
+    # 创建检索链
     chain = get_chain()
 
+    # 返回流式响应
     return StreamingResponse(
         stream_answer_and_save(
             chain=chain,

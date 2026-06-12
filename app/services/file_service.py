@@ -6,6 +6,7 @@ from fastapi import UploadFile
 from app.core.config import UPLOAD_ROOT
 
 
+# 组装文件存储路径
 def build_storage_path(
     user_id: int,
     file_id: str,
@@ -24,6 +25,7 @@ def build_storage_path(
     )
 
 
+# 异步分批计算单个文件hash值
 async def calculate_file_hash(file: UploadFile) -> tuple[str, int]:
     sha256 = hashlib.sha256()
     size_bytes = 0

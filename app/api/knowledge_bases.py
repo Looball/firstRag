@@ -10,8 +10,10 @@ from SqlStatement.query import exe_sql
 router = APIRouter(prefix="/chat", tags=["knowledge-bases"])
 
 
+# 获取用户的知识库
 @router.get("/knowledge-bases")
 def get_knowledge_bases(user_id: int = Depends(get_current_user_id)):
+    # 查询当前用户未删除的知识库及文件数量
     rows = exe_sql(
         sql_statement="""
         SELECT
@@ -52,15 +54,18 @@ def get_knowledge_bases(user_id: int = Depends(get_current_user_id)):
     }
 
 
+# 新建知识库
 @router.post("/knowledge-base")
 def create_knowledge_base(
     req: CreateKnowledgeBaseRequest,
     user_id: int = Depends(get_current_user_id),
 ):
+    # 去除知识库名称首尾空格
     name = req.name.strip()
     if not name:
         raise HTTPException(status_code=400, detail="知识库名称不能为空")
 
+    # 创建知识库
     rows = exe_sql(
         sql_statement="""
         INSERT INTO knowledge_bases (user_id, name, is_default)
@@ -83,6 +88,7 @@ def create_knowledge_base(
     }
 
 
+# 获取当前知识库的文件信息
 @router.get("/knowledge-base/{knowledge_base_id}/files")
 def get_knowledge_base_files(
     knowledge_base_id: UUID,
@@ -129,12 +135,14 @@ def get_knowledge_base_files(
     }
 
 
+# 解除数据库与文件的关联
 @router.delete("/knowledge-base/{knowledge_base_id}/files/{knowledge_file_id}")
 def remove_file_from_knowledge_base(
     knowledge_base_id: UUID,
     knowledge_file_id: UUID,
     user_id: int = Depends(get_current_user_id),
 ):
+    # 解除关联
     rows = exe_sql(
         sql_statement="""
         DELETE FROM knowledge_base_files AS kbf
@@ -166,12 +174,14 @@ def remove_file_from_knowledge_base(
     }
 
 
+# 增加文件和知识库的关联
 @router.post("/knowledge-base/{knowledge_base_id}/files/{knowledge_file_id}")
 def add_file_to_knowledge_base(
     knowledge_base_id: UUID,
     knowledge_file_id: UUID,
     user_id: int = Depends(get_current_user_id),
 ):
+    # 仅为属于当前用户且未删除的知识库和文件建立关联
     rows = exe_sql(
         sql_statement="""
         INSERT INTO knowledge_base_files (
@@ -198,6 +208,7 @@ def add_file_to_knowledge_base(
             user_id,
         ),
     )
+    # 可能是资源不存在，也可能已经关联
     if not rows:
         check_rows = exe_sql(
             sql_statement="""

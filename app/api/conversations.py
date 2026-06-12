@@ -13,8 +13,24 @@ from SqlStatement.query import exe_sql
 router = APIRouter(prefix="/chat", tags=["conversations"])
 
 
+# 加载当前用户全部会话
 @router.get("/conversations")
 def get_conversations(user_id: int = Depends(get_current_user_id)):
+    """
+    返回的数据结构：
+    {
+        "success": true,
+        "conversations": [{
+            "id": "会话UUID",
+            "title": "会话标题",
+            "messages": [
+                {"role": "user", "content": "你好"},
+                {"role": "assistant", "content": "你好，有什么可以帮你？"}
+            ]
+        }]
+    }
+    """
+    # 查询数据
     rows = exe_sql(
         sql_statement="""
         SELECT
@@ -36,9 +52,13 @@ def get_conversations(user_id: int = Depends(get_current_user_id)):
         args_tuple=(user_id,),
     )
 
+    # 组建返回体消息
     conversations = {}
     for row in rows:
+        # 获取会话id
         conversation_id = row["conversation_id"]
+
+        # 第一次检查时创建会话结构
         if conversation_id not in conversations:
             conversations[conversation_id] = {
                 "id": conversation_id,
@@ -48,6 +68,7 @@ def get_conversations(user_id: int = Depends(get_current_user_id)):
                 "messages": [],
             }
 
+        # 将消息添加到"messages"
         if row["message_id"] is not None:
             conversations[conversation_id]["messages"].append({
                 "id": row["message_id"],
@@ -56,18 +77,21 @@ def get_conversations(user_id: int = Depends(get_current_user_id)):
                 "created_at": row["message_created_at"],
             })
 
+    # 返回数据
     return {
         "success": True,
         "conversations": list(conversations.values()),
     }
 
 
+# 会话重命名功能
 @router.patch("/conversation/{conversation_id}")
 def rename_conversation(
     conversation_id: UUID,
     req: RenameConversationRequest,
     user_id: int = Depends(get_current_user_id),
 ):
+    # 更新数据库数据
     rows = exe_sql(
         sql_statement="""
         UPDATE conversations
@@ -87,11 +111,13 @@ def rename_conversation(
     }
 
 
+# 软删除会话
 @router.delete("/conversation/{conversation_id}")
 def delete_conversation(
     conversation_id: UUID,
     user_id: int = Depends(get_current_user_id),
 ):
+    # 软删除
     rows = exe_sql(
         sql_statement="""
         UPDATE conversations
@@ -104,6 +130,7 @@ def delete_conversation(
         """,
         args_tuple=(conversation_id, user_id),
     )
+    # 会话是否存在
     if not rows:
         raise HTTPException(status_code=404, detail="会话不存在")
 
@@ -113,6 +140,7 @@ def delete_conversation(
     }
 
 
+# 新建会话
 @router.post("/conversation")
 def create_conversation(
     req: CreateConversationRequest,

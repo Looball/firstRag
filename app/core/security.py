@@ -10,6 +10,7 @@ from app.core.config import (
 )
 
 
+# 生成token
 def create_access_token(user_id: int, username: str) -> str:
     if not JWT_SECRET_KEY:
         raise RuntimeError("缺少环境变量 JWT_SECRET_KEY")
@@ -25,6 +26,7 @@ def create_access_token(user_id: int, username: str) -> str:
     return jwt.encode(payload, JWT_SECRET_KEY, algorithm=JWT_ALGORITHM)
 
 
+# 解析token，验证token
 def decode_access_token(token: str) -> dict:
     if not JWT_SECRET_KEY:
         raise RuntimeError("缺少环境变量 JWT_SECRET_KEY")
@@ -41,6 +43,7 @@ def decode_access_token(token: str) -> dict:
         raise HTTPException(status_code=401, detail="无效 token") from exc
 
 
+# 从token中获取payload
 def get_current_user_payload(authorization: str = Header(...)) -> dict:
     if not authorization.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="认证格式错误")
@@ -49,6 +52,7 @@ def get_current_user_payload(authorization: str = Header(...)) -> dict:
     return decode_access_token(token)
 
 
+# 从payload中解析user_id
 def get_current_user_id(authorization: str = Header(...)) -> int:
     payload = get_current_user_payload(authorization)
     return int(payload["sub"])

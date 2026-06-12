@@ -4,6 +4,7 @@ from assistant import get_answer
 from SqlStatement.query import exe_sql
 
 
+# 定义存储聊天消息的函数
 def save_message(conversation_id: str, role: str, content: str) -> None:
     sql = """
     INSERT INTO messages (conversation_id, role, content)
@@ -13,6 +14,7 @@ def save_message(conversation_id: str, role: str, content: str) -> None:
     exe_sql(sql_statement=sql, args_tuple=(conversation_id, role, content))
 
 
+# 返回answer流式消息生成器，在生成器迭代完后，将answer保存到messages表
 def stream_answer_and_save(
     chain,
     user_input: str,
@@ -28,6 +30,7 @@ def stream_answer_and_save(
     save_message(conversation_id, "assistant", full_answer)
 
 
+# 将聊天历史转换为LangChain能够处理的元组列表格式
 def load_chat_history(conversation_id: str) -> list[tuple[str, str]]:
     sql = """
     SELECT role, content
