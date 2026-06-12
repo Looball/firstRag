@@ -1,0 +1,1 @@
+"""FirstRAG API application package."""
