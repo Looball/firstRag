@@ -4,7 +4,7 @@ from app.db.executor import Row, fetch_all, fetch_one
 
 
 def get_user_knowledge_bases(user_id: int) -> list[Row]:
-    """查询用户的知识库及文件数量。"""
+    """查询用户的知识库、文件数量及其会话。"""
     return fetch_all(
         """
         SELECT
@@ -13,19 +13,28 @@ def get_user_knowledge_bases(user_id: int) -> list[Row]:
             kb.is_default,
             kb.created_at,
             kb.updated_at,
-            COUNT(kbf.knowledge_file_id) AS file_count
+            COALESCE(file_counts.file_count, 0) AS file_count,
+            c.id AS conversation_id,
+            c.title AS conversation_title
         FROM knowledge_bases AS kb
-        LEFT JOIN knowledge_base_files AS kbf
-          ON kbf.knowledge_base_id = kb.id
+        LEFT JOIN (
+            SELECT
+                knowledge_base_id,
+                COUNT(knowledge_file_id) AS file_count
+            FROM knowledge_base_files
+            GROUP BY knowledge_base_id
+        ) AS file_counts
+          ON file_counts.knowledge_base_id = kb.id
+        LEFT JOIN conversations AS c
+          ON c.knowledge_base_id = kb.id
+         AND c.user_id = kb.user_id
+         AND c.deleted_at IS NULL
         WHERE kb.user_id = %s
           AND kb.deleted_at IS NULL
-        GROUP BY
-            kb.id,
-            kb.name,
-            kb.is_default,
-            kb.created_at,
-            kb.updated_at
-        ORDER BY kb.is_default DESC, kb.created_at ASC;
+        ORDER BY
+            kb.is_default DESC,
+            kb.created_at ASC,
+            c.updated_at DESC;
         """,
         (user_id,),
     )

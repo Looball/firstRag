@@ -20,21 +20,32 @@ router = APIRouter(prefix="/chat", tags=["knowledge-bases"])
 # 获取用户的知识库
 @router.get("/knowledge-bases")
 def get_knowledge_bases(user_id: int = Depends(get_current_user_id)):
-    # 查询当前用户未删除的知识库及文件数量
+    # 查询当前用户未删除的知识库、文件数量及所属会话
     rows = get_user_knowledge_bases(user_id)
-    return {
-        "success": True,
-        "knowledge_bases": [
-            {
-                "id": str(row["id"]),
+
+    knowledge_bases = {}
+    for row in rows:
+        knowledge_base_id = row["id"]
+        if knowledge_base_id not in knowledge_bases:
+            knowledge_bases[knowledge_base_id] = {
+                "id": str(knowledge_base_id),
                 "name": row["name"],
                 "is_default": row["is_default"],
                 "file_count": row["file_count"],
                 "created_at": row["created_at"],
                 "updated_at": row["updated_at"],
+                "conversations": [],
             }
-            for row in rows
-        ],
+
+        if row["conversation_id"] is not None:
+            knowledge_bases[knowledge_base_id]["conversations"].append({
+                "id": str(row["conversation_id"]),
+                "title": row["conversation_title"],
+            })
+
+    return {
+        "success": True,
+        "knowledge_bases": list(knowledge_bases.values()),
     }
 
 
