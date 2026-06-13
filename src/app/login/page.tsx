@@ -59,16 +59,61 @@ export default function LoginPage() {
       localStorage.removeItem(LEGACY_SESSION_STORAGE_KEY);
       localStorage.removeItem(LEGACY_CURRENT_SESSION_KEY);
 
-      const conversationResponse = await fetch("/api/chat/conversation", {
-        method: "POST",
+      const knowledgeBasesResponse = await fetch("/api/chat/knowledge-bases", {
+        method: "GET",
         headers: {
           Authorization: buildAuthorizationHeader(data),
-          "Content-Type": "application/json",
         },
-        body: JSON.stringify({
-          title: "新对话",
-        }),
+        cache: "no-store",
       });
+
+      if (!knowledgeBasesResponse.ok) {
+        throw new Error("读取默认知识库失败，请稍后再试。");
+      }
+
+      const knowledgeBasesData = (await knowledgeBasesResponse.json()) as {
+        knowledge_bases?: Array<{
+          id?: unknown;
+          is_default?: unknown;
+        }>;
+      };
+      const knowledgeBases = Array.isArray(
+        knowledgeBasesData.knowledge_bases
+      )
+        ? knowledgeBasesData.knowledge_bases
+        : [];
+      const defaultKnowledgeBase =
+        knowledgeBases.find(
+          (knowledgeBase) =>
+            knowledgeBase.is_default === true &&
+            typeof knowledgeBase.id === "string"
+        ) ||
+        knowledgeBases.find(
+          (knowledgeBase) => typeof knowledgeBase.id === "string"
+        );
+
+      if (
+        !defaultKnowledgeBase ||
+        typeof defaultKnowledgeBase.id !== "string"
+      ) {
+        throw new Error("当前账号没有可用知识库。");
+      }
+
+      const conversationResponse = await fetch(
+        `/api/chat/knowledge-bases/${encodeURIComponent(
+          defaultKnowledgeBase.id
+        )}/conversations`,
+        {
+          method: "POST",
+          headers: {
+            Authorization: buildAuthorizationHeader(data),
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            title: "新对话",
+          }),
+        }
+      );
 
       if (!conversationResponse.ok) {
         const errorText = await conversationResponse.text();
@@ -98,6 +143,7 @@ export default function LoginPage() {
 
       router.replace("/");
     } catch (loginError) {
+      localStorage.removeItem(AUTH_STORAGE_KEY);
       setError(
         loginError instanceof Error
           ? loginError.message

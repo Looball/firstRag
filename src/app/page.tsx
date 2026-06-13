@@ -22,8 +22,10 @@ type Message = {
 
 type ChatSession = {
   id: string;
+  knowledgeBaseId: string;
   title: string;
   messages: Message[];
+  messagesLoaded: boolean;
 };
 
 type KnowledgeBase = {
@@ -64,6 +66,7 @@ type KnowledgeBaseFile = {
 
 type BackendConversation = {
   id?: unknown;
+  knowledge_base_id?: unknown;
   title?: unknown;
   messages?: unknown;
 };
@@ -81,6 +84,13 @@ type CreateConversationResponse = {
 type ListConversationsResponse = {
   conversations?: unknown;
   answer?: string;
+  detail?: string;
+  error?: string;
+  message?: string;
+};
+
+type ListMessagesResponse = {
+  messages?: unknown;
   detail?: string;
   error?: string;
   message?: string;
@@ -275,7 +285,10 @@ function removeLegacyInitialMessage(messages: Message[]) {
   return messages;
 }
 
-function toChatSession(value: unknown): ChatSession | null {
+function toChatSession(
+  value: unknown,
+  fallbackKnowledgeBaseId = ""
+): ChatSession | null {
   if (typeof value !== "object" || value === null) {
     return null;
   }
@@ -289,14 +302,21 @@ function toChatSession(value: unknown): ChatSession | null {
   const messages = Array.isArray(conversation.messages)
     ? removeLegacyInitialMessage(conversation.messages.filter(isMessage))
     : [];
+  const knowledgeBaseId =
+    typeof conversation.knowledge_base_id === "string" &&
+    conversation.knowledge_base_id.trim()
+      ? conversation.knowledge_base_id.trim()
+      : fallbackKnowledgeBaseId;
 
   return {
     id: conversation.id,
+    knowledgeBaseId,
     title:
       typeof conversation.title === "string" && conversation.title.trim()
         ? conversation.title.trim()
         : "新对话",
     messages,
+    messagesLoaded: Array.isArray(conversation.messages),
   };
 }
 
@@ -696,8 +716,13 @@ export default function Home() {
   const previousMessageCountRef = useRef(0);
   const previousLoadingRef = useRef(false);
 
+  const visibleSessions = sessions.filter(
+    (session) => session.knowledgeBaseId === selectedKnowledgeBaseId
+  );
   const currentSession =
-    sessions.find((session) => session.id === currentSessionId) || sessions[0] || null;
+    visibleSessions.find((session) => session.id === currentSessionId) ||
+    visibleSessions[0] ||
+    null;
   const isCurrentSessionLoading = currentSession
     ? Boolean(loadingSessions[currentSession.id])
     : false;
@@ -1147,7 +1172,10 @@ export default function Home() {
     }
   }
 
-  async function createBackendSession(title = "新对话") {
+  async function createBackendSession(
+    knowledgeBaseId: string,
+    title = "新对话"
+  ) {
     const authState = parseAuthState(localStorage.getItem(AUTH_STORAGE_KEY));
 
     if (!authState) {
@@ -1156,14 +1184,19 @@ export default function Home() {
       throw new Error("登录已失效，请重新登录。");
     }
 
-    const response = await fetch("/api/chat/conversation", {
-      method: "POST",
-      headers: {
-        Authorization: buildAuthorizationHeader(authState),
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ title }),
-    });
+    const response = await fetch(
+      `/api/chat/knowledge-bases/${encodeURIComponent(
+        knowledgeBaseId
+      )}/conversations`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: buildAuthorizationHeader(authState),
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ title }),
+      }
+    );
 
     if (!response.ok) {
       const errorText = await response.text();
@@ -1182,15 +1215,17 @@ export default function Home() {
 
     return {
       id: conversationId,
+      knowledgeBaseId,
       title:
         typeof conversation.title === "string" && conversation.title.trim()
           ? conversation.title.trim()
           : title,
       messages: [],
+      messagesLoaded: true,
     };
   }
 
-  async function loadBackendSessions() {
+  async function loadBackendSessions(knowledgeBaseId: string) {
     const authState = parseAuthState(localStorage.getItem(AUTH_STORAGE_KEY));
 
     if (!authState) {
@@ -1199,13 +1234,18 @@ export default function Home() {
       throw new Error("登录已失效，请重新登录。");
     }
 
-    const response = await fetch("/api/chat/conversations", {
-      method: "GET",
-      headers: {
-        Authorization: buildAuthorizationHeader(authState),
-      },
-      cache: "no-store",
-    });
+    const response = await fetch(
+      `/api/chat/knowledge-bases/${encodeURIComponent(
+        knowledgeBaseId
+      )}/conversations`,
+      {
+        method: "GET",
+        headers: {
+          Authorization: buildAuthorizationHeader(authState),
+        },
+        cache: "no-store",
+      }
+    );
 
     if (!response.ok) {
       const errorText = await response.text();
@@ -1220,8 +1260,70 @@ export default function Home() {
       : [];
 
     return conversations
-      .map(toChatSession)
+      .map((conversation) => toChatSession(conversation, knowledgeBaseId))
       .filter((session): session is ChatSession => session !== null);
+  }
+
+  async function loadBackendMessages(conversationId: string) {
+    const authState = parseAuthState(localStorage.getItem(AUTH_STORAGE_KEY));
+
+    if (!authState) {
+      localStorage.removeItem(AUTH_STORAGE_KEY);
+      window.location.href = "/login";
+      throw new Error("登录已失效，请重新登录。");
+    }
+
+    const response = await fetch(
+      `/api/chat/conversations/${encodeURIComponent(conversationId)}/messages`,
+      {
+        method: "GET",
+        headers: {
+          Authorization: buildAuthorizationHeader(authState),
+        },
+        cache: "no-store",
+      }
+    );
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(
+        getResponseErrorMessage(errorText, "读取会话消息失败，请稍后再试。")
+      );
+    }
+
+    const data = (await response.json()) as ListMessagesResponse;
+    return Array.isArray(data.messages)
+      ? removeLegacyInitialMessage(data.messages.filter(isMessage))
+      : [];
+  }
+
+  async function handleSelectSession(session: ChatSession) {
+    setCurrentSessionId(session.id);
+
+    if (session.messagesLoaded) {
+      return;
+    }
+
+    setSessionErrors((prev) => ({ ...prev, [session.id]: "" }));
+
+    try {
+      const messages = await loadBackendMessages(session.id);
+      setSessions((prev) =>
+        prev.map((candidate) =>
+          candidate.id === session.id
+            ? { ...candidate, messages, messagesLoaded: true }
+            : candidate
+        )
+      );
+    } catch (error) {
+      setSessionErrors((prev) => ({
+        ...prev,
+        [session.id]:
+          error instanceof Error
+            ? error.message
+            : "读取会话消息失败，请稍后再试。",
+      }));
+    }
   }
 
   async function loadBackendKnowledgeBases() {
@@ -1285,50 +1387,66 @@ export default function Home() {
     let isCancelled = false;
 
     async function restoreSessions() {
-      let nextSessions: ChatSession[] = [];
-      let didLoadSessions = false;
-
       try {
-        nextSessions = await loadBackendSessions();
-        didLoadSessions = true;
+        const nextSessions = await loadBackendSessions(
+          selectedKnowledgeBaseId
+        );
+
+        if (isCancelled) {
+          return;
+        }
+
+        setSessions((previousSessions) => [
+          ...previousSessions.filter(
+            (session) =>
+              session.knowledgeBaseId !== selectedKnowledgeBaseId
+          ),
+          ...nextSessions,
+        ]);
+        setCurrentSessionId(nextSessions[0]?.id || "");
+        setPageError("");
+
+        if (nextSessions[0] && !nextSessions[0].messagesLoaded) {
+          const firstSession = nextSessions[0];
+          const messages = await loadBackendMessages(firstSession.id);
+
+          if (isCancelled) {
+            return;
+          }
+
+          setSessions((previousSessions) =>
+            previousSessions.map((session) =>
+              session.id === firstSession.id
+                ? { ...session, messages, messagesLoaded: true }
+                : session
+            )
+          );
+        }
       } catch (error) {
         console.error("Failed to load saved sessions:", error);
-        setPageError(
-          error instanceof Error
-            ? error.message
-            : "读取会话列表失败，请稍后再试。"
-        );
-      }
 
-      if (didLoadSessions && nextSessions.length === 0) {
-        try {
-          nextSessions = [await createBackendSession()];
-        } catch (error) {
-          console.error("Failed to create initial session:", error);
+        if (!isCancelled) {
           setPageError(
             error instanceof Error
               ? error.message
-              : "创建初始对话失败，请稍后再试。"
+              : "读取会话列表失败，请稍后再试。"
           );
         }
       }
-
-      if (isCancelled) {
-        return;
-      }
-
-      setSessions(nextSessions);
-      setCurrentSessionId(nextSessions[0]?.id || "");
     }
 
-    if (hasCheckedAuth) {
+    if (
+      hasCheckedAuth &&
+      selectedKnowledgeBaseId &&
+      selectedKnowledgeBaseId !== DEFAULT_KNOWLEDGE_BASE_ID
+    ) {
       void restoreSessions();
     }
 
     return () => {
       isCancelled = true;
     };
-  }, [hasCheckedAuth]);
+  }, [hasCheckedAuth, selectedKnowledgeBaseId]);
 
   useEffect(() => {
     if (!hasCheckedAuth || !selectedKnowledgeBaseId) {
@@ -1406,11 +1524,19 @@ export default function Home() {
   }
 
   async function handleCreateSession() {
+    if (
+      !selectedKnowledgeBaseId ||
+      selectedKnowledgeBaseId === DEFAULT_KNOWLEDGE_BASE_ID
+    ) {
+      setPageError("请先选择一个知识库。");
+      return;
+    }
+
     setIsCreatingSession(true);
     setPageError("");
 
     try {
-      const newSession = await createBackendSession();
+      const newSession = await createBackendSession(selectedKnowledgeBaseId);
 
       setSessions((prev) => [newSession, ...prev]);
       setCurrentSessionId(newSession.id);
@@ -1441,8 +1567,15 @@ export default function Home() {
     setPageError("");
 
     try {
+      const session = sessions.find(
+        (candidate) => candidate.id === sessionId
+      );
+      const knowledgeBaseId =
+        session?.knowledgeBaseId || selectedKnowledgeBaseId;
       const response = await fetch(
-        `/api/chat/conversation/${encodeURIComponent(sessionId)}`,
+        `/api/chat/knowledge-bases/${encodeURIComponent(
+          knowledgeBaseId
+        )}/conversations/${encodeURIComponent(sessionId)}`,
         {
           method: "DELETE",
           headers: {
@@ -1458,11 +1591,14 @@ export default function Home() {
         );
       }
 
-      const remainingSessions = sessions.filter(
+      const allRemainingSessions = sessions.filter(
         (session) => session.id !== sessionId
       );
+      const remainingVisibleSessions = allRemainingSessions.filter(
+        (session) => session.knowledgeBaseId === knowledgeBaseId
+      );
 
-      setSessions(remainingSessions);
+      setSessions(allRemainingSessions);
       setLoadingSessions((prev) => {
         const next = { ...prev };
         delete next[sessionId];
@@ -1479,15 +1615,11 @@ export default function Home() {
         setEditingTitle("");
       }
 
-      if (remainingSessions.length === 0) {
+      if (remainingVisibleSessions.length === 0) {
         setCurrentSessionId("");
         setInput("");
-
-        const newSession = await createBackendSession();
-        setSessions([newSession]);
-        setCurrentSessionId(newSession.id);
       } else if (currentSessionId === sessionId) {
-        setCurrentSessionId(remainingSessions[0].id);
+        setCurrentSessionId(remainingVisibleSessions[0].id);
         setInput("");
       }
     } catch (error) {
@@ -1510,6 +1642,11 @@ export default function Home() {
     }
 
     const normalizedTitle = editingTitle.trim() || "新对话";
+    const session = sessions.find(
+      (candidate) => candidate.id === editingSessionId
+    );
+    const knowledgeBaseId =
+      session?.knowledgeBaseId || selectedKnowledgeBaseId;
     const authState = parseAuthState(localStorage.getItem(AUTH_STORAGE_KEY));
 
     if (!authState) {
@@ -1526,7 +1663,9 @@ export default function Home() {
 
     try {
       const response = await fetch(
-        `/api/chat/conversation/${encodeURIComponent(editingSessionId)}`,
+        `/api/chat/knowledge-bases/${encodeURIComponent(
+          knowledgeBaseId
+        )}/conversations/${encodeURIComponent(editingSessionId)}`,
         {
           method: "PATCH",
           headers: {
@@ -1710,6 +1849,7 @@ export default function Home() {
         },
         body: JSON.stringify({
           conversation_id: activeSessionId,
+          knowledge_base_id: currentSession.knowledgeBaseId,
           message: messageContent,
         }),
       });
@@ -1911,12 +2051,17 @@ export default function Home() {
               Conversation Index
             </p>
             <p className="font-utility text-[10px] text-[#72807b]">
-              {String(sessions.length).padStart(2, "0")}
+              {String(visibleSessions.length).padStart(2, "0")}
             </p>
           </div>
 
           <div className="mt-2 min-h-0 min-w-0 flex-1 space-y-2 overflow-y-auto pr-1">
-            {sessions.map((session) => {
+            {visibleSessions.length === 0 && (
+              <div className="border border-[#cbd5d1] bg-[#fcfdfb] px-4 py-5 text-center text-xs text-[#72807b]">
+                当前知识库暂无会话
+              </div>
+            )}
+            {visibleSessions.map((session) => {
               const isActive = session.id === currentSession?.id;
 
               return (
@@ -1971,7 +2116,7 @@ export default function Home() {
                       ) : (
                         <button
                           onClick={() => {
-                            setCurrentSessionId(session.id);
+                            void handleSelectSession(session);
                           }}
                           className="min-w-0 w-full text-left"
                         >
@@ -2267,7 +2412,10 @@ export default function Home() {
                   const fileCount =
                     localFileCount || knowledgeBase.fileCount || 0;
                   const conversationCount =
-                    knowledgeBase.isDefault ? sessions.length : 0;
+                    sessions.filter(
+                      (session) =>
+                        session.knowledgeBaseId === knowledgeBase.id
+                    ).length;
 
                   return (
                     <button
