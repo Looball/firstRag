@@ -6,9 +6,10 @@ from app.repositories.message_repository import (
 )
 from app.services.rag_service import get_answer
 
+from uuid import UUID
 
 # 定义存储聊天消息的函数
-def save_message(conversation_id: str, role: str, content: str) -> None:
+def save_message(conversation_id: UUID, role: str, content: str) -> None:
     create_message(conversation_id, role, content)
 
 
@@ -17,7 +18,7 @@ def stream_answer_and_save(
     chain,
     user_input: str,
     history: list,
-    conversation_id: str,
+    conversation_id: UUID,
 ) -> Iterator[str]:
     full_answer = ""
 
@@ -29,7 +30,7 @@ def stream_answer_and_save(
 
 
 # 将聊天历史转换为LangChain能够处理的元组列表格式
-def load_chat_history(conversation_id: str) -> list[tuple[str, str]]:
+def load_chat_history(conversation_id: UUID) -> list[tuple[str, str]]:
     rows = get_conversation_messages(conversation_id)
     role_map = {
         "user": "human",

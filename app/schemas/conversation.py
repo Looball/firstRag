@@ -1,5 +1,5 @@
 from pydantic import BaseModel
-
+from uuid import UUID
 
 # 会话重命名请求体
 class RenameConversationRequest(BaseModel):

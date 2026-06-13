@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 
 from app.core.security import get_current_user_id
-from app.repositories.conversation_repository import conversation_exists
+from app.repositories.conversation_repository import conversation_exists,conversation_belongs_base
 from app.schemas.chat import ChatRequest
 from app.services.chat_service import (
     load_chat_history,
@@ -28,6 +28,10 @@ def chat(
     # 检查会话存在且属于当前用户
     if not conversation_exists(user_id, req.conversation_id):
         raise HTTPException(status_code=404, detail="会话不存在")
+
+    # 检查会话是否属于当前知识库
+    if not conversation_belongs_base(user_id, req.knowledge_base_id, req.conversation_id):
+        raise HTTPException(status_code=404, detail="禁止跨知识库提问")
 
     # 取出历史记录
     history = load_chat_history(req.conversation_id)
