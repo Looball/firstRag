@@ -12,34 +12,37 @@ def conversation_exists(
         """
         SELECT id
         FROM conversations
-        WHERE user_id = %s AND id = %s
+        WHERE user_id = %s AND id = %s AND deleted_at IS NULL;
         """,
         (user_id, conversation_id),
     )
     return row is not None
 
 
-def get_user_conversations(user_id: int) -> list[Row]:
-    """查询用户的会话及其消息。"""
+def get_knowledge_base_conversations(
+    user_id: int,
+    knowledge_base_id: UUID,
+) -> list[Row]:
+    """查询当前用户指定知识库下的会话。"""
     return fetch_all(
         """
         SELECT
             c.id AS conversation_id,
+            c.knowledge_base_id,
             c.title,
             c.created_at AS conversation_created_at,
-            c.updated_at AS conversation_updated_at,
-            m.id AS message_id,
-            m.role,
-            m.content,
-            m.created_at AS message_created_at
+            c.updated_at AS conversation_updated_at
         FROM conversations AS c
-        LEFT JOIN messages AS m
-          ON m.conversation_id = c.id
+        JOIN knowledge_bases AS kb
+          ON kb.id = c.knowledge_base_id
         WHERE c.user_id = %s
+          AND c.knowledge_base_id = %s
           AND c.deleted_at IS NULL
-        ORDER BY c.updated_at DESC, m.created_at ASC, m.id ASC;
+          AND kb.user_id = %s
+          AND kb.deleted_at IS NULL
+        ORDER BY c.updated_at DESC;
         """,
-        (user_id,),
+        (user_id, knowledge_base_id, user_id),
     )
 
 
@@ -80,13 +83,54 @@ def soft_delete_conversation(
     )
 
 
-def create_conversation(user_id: int, title: str | None) -> Row | None:
+def create_conversation(
+    user_id: int,
+    knowledge_base_id: UUID,
+    title: str | None,
+) -> Row | None:
     """创建新会话。"""
     return fetch_one(
         """
-        INSERT INTO conversations (user_id, title)
-        VALUES (%s, %s)
-        RETURNING id, user_id, title, created_at, updated_at;
+        INSERT INTO conversations (
+            user_id,
+            knowledge_base_id,
+            title
+        )
+        SELECT
+            %s,
+            kb.id,
+            %s
+        FROM knowledge_bases AS kb
+        WHERE kb.id = %s
+          AND kb.user_id = %s
+          AND kb.deleted_at IS NULL
+        RETURNING id, user_id, knowledge_base_id, title, created_at, updated_at;
         """,
-        (user_id, title),
+        (user_id, title, knowledge_base_id, user_id),
     )
+
+
+def conversation_belongs_base(
+    user_id: int,
+    knowledge_base_id: UUID,
+    conversation_id: UUID,
+) -> bool:
+    """检查会话是否属于当前知识库。"""
+    row = fetch_one(
+        """
+        SELECT 1
+        FROM conversations AS c
+        JOIN knowledge_bases AS kb
+          ON kb.id = c.knowledge_base_id
+        WHERE c.id = %s
+          AND c.user_id = %s
+          AND c.knowledge_base_id = %s
+          AND c.deleted_at IS NULL
+          AND kb.user_id = %s
+          AND kb.deleted_at IS NULL
+        LIMIT 1;
+        """,
+        (conversation_id, user_id, knowledge_base_id, user_id),
+    )
+
+    return row is not None
