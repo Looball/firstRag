@@ -151,6 +151,32 @@ const DEFAULT_KNOWLEDGE_BASE_ID = "default";
 const LEGACY_INITIAL_MESSAGE =
   "你好，我是你的 AI 学习助手。你可以问我任何关于 AI 的问题。";
 
+function redirectToLogin() {
+  localStorage.removeItem(AUTH_STORAGE_KEY);
+  localStorage.removeItem(STORAGE_KEY);
+  localStorage.removeItem(CURRENT_SESSION_KEY);
+
+  if (window.location.pathname !== "/login") {
+    window.location.href = "/login";
+  }
+}
+
+function isAuthExpiredMessage(message: string) {
+  const normalizedMessage = message.toLowerCase();
+
+  return (
+    message.includes("登录已过期") ||
+    message.includes("登录过期") ||
+    message.includes("登录已失效") ||
+    message.includes("请重新登录") ||
+    normalizedMessage.includes("unauthorized") ||
+    normalizedMessage.includes("not authenticated") ||
+    normalizedMessage.includes("could not validate credentials") ||
+    normalizedMessage.includes("invalid token") ||
+    normalizedMessage.includes("token expired")
+  );
+}
+
 function formatFileSize(size: number) {
   if (size < 1024) {
     return `${size} B`;
@@ -190,9 +216,17 @@ function isMessage(value: unknown): value is Message {
   );
 }
 
-function getResponseErrorMessage(errorText: string, fallback: string) {
+function getResponseErrorMessage(
+  errorText: string,
+  fallback: string,
+  status?: number
+) {
   const getStringValue = (value: unknown) =>
     typeof value === "string" && value.trim() ? value.trim() : "";
+
+  if (status === 401 || status === 403 || isAuthExpiredMessage(errorText)) {
+    redirectToLogin();
+  }
 
   try {
     const errorData = JSON.parse(errorText) as {
@@ -208,6 +242,10 @@ function getResponseErrorMessage(errorText: string, fallback: string) {
       getStringValue(errorData.message);
 
     if (directMessage) {
+      if (isAuthExpiredMessage(directMessage)) {
+        redirectToLogin();
+      }
+
       return directMessage;
     }
 
@@ -242,13 +280,25 @@ function getResponseErrorMessage(errorText: string, fallback: string) {
         .filter(Boolean);
 
       if (detailMessages.length > 0) {
-        return detailMessages.join("；");
+        const detailMessage = detailMessages.join("；");
+
+        if (isAuthExpiredMessage(detailMessage)) {
+          redirectToLogin();
+        }
+
+        return detailMessage;
       }
     }
 
     return fallback;
   } catch {
-    return errorText.trim() || fallback;
+    const message = errorText.trim() || fallback;
+
+    if (isAuthExpiredMessage(message)) {
+      redirectToLogin();
+    }
+
+    return message;
   }
 }
 
@@ -1045,7 +1095,8 @@ export default function Home() {
           throw new Error(
             getResponseErrorMessage(
               errorText,
-              "读取知识库文件失败，请稍后再试。"
+              "读取知识库文件失败，请稍后再试。",
+              response.status
             )
           );
         }
@@ -1136,7 +1187,8 @@ export default function Home() {
         throw new Error(
           getResponseErrorMessage(
             errorText,
-            "读取用户文件列表失败，请稍后再试。"
+            "读取用户文件列表失败，请稍后再试。",
+            response.status
           )
         );
       }
@@ -1203,7 +1255,11 @@ export default function Home() {
       if (!response.ok) {
         const errorText = await response.text();
         throw new Error(
-          getResponseErrorMessage(errorText, "创建知识库失败，请稍后再试。")
+          getResponseErrorMessage(
+            errorText,
+            "创建知识库失败，请稍后再试。",
+            response.status
+          )
         );
       }
 
@@ -1275,7 +1331,11 @@ export default function Home() {
       if (!response.ok) {
         const errorText = await response.text();
         throw new Error(
-          getResponseErrorMessage(errorText, "上传文件失败，请稍后再试。")
+          getResponseErrorMessage(
+            errorText,
+            "上传文件失败，请稍后再试。",
+            response.status
+          )
         );
       }
 
@@ -1349,7 +1409,8 @@ export default function Home() {
         throw new Error(
           getResponseErrorMessage(
             errorText,
-            "添加文件关联失败，请稍后再试。"
+            "添加文件关联失败，请稍后再试。",
+            response.status
           )
         );
       }
@@ -1407,7 +1468,8 @@ export default function Home() {
         throw new Error(
           getResponseErrorMessage(
             errorText,
-            "解除文件关联失败，请稍后再试。"
+            "解除文件关联失败，请稍后再试。",
+            response.status
           )
         );
       }
@@ -1445,7 +1507,11 @@ export default function Home() {
     if (!response.ok) {
       const errorText = await response.text();
       throw new Error(
-        getResponseErrorMessage(errorText, "查询向量化任务失败，请稍后再试。")
+        getResponseErrorMessage(
+          errorText,
+          "查询向量化任务失败，请稍后再试。",
+          response.status
+        )
       );
     }
 
@@ -1524,7 +1590,11 @@ export default function Home() {
       if (!response.ok) {
         const errorText = await response.text();
         throw new Error(
-          getResponseErrorMessage(errorText, "提交文件向量化失败，请稍后再试。")
+          getResponseErrorMessage(
+            errorText,
+            "提交文件向量化失败，请稍后再试。",
+            response.status
+          )
         );
       }
 
@@ -1595,7 +1665,11 @@ export default function Home() {
       if (!response.ok) {
         const errorText = await response.text();
         throw new Error(
-          getResponseErrorMessage(errorText, "提交知识库向量化失败，请稍后再试。")
+          getResponseErrorMessage(
+            errorText,
+            "提交知识库向量化失败，请稍后再试。",
+            response.status
+          )
         );
       }
 
@@ -1654,7 +1728,11 @@ export default function Home() {
     if (!response.ok) {
       const errorText = await response.text();
       throw new Error(
-        getResponseErrorMessage(errorText, "创建对话失败，请稍后再试。")
+        getResponseErrorMessage(
+          errorText,
+          "创建对话失败，请稍后再试。",
+          response.status
+        )
       );
     }
 
@@ -1701,7 +1779,11 @@ export default function Home() {
     if (!response.ok) {
       const errorText = await response.text();
       throw new Error(
-        getResponseErrorMessage(errorText, "读取会话消息失败，请稍后再试。")
+        getResponseErrorMessage(
+          errorText,
+          "读取会话消息失败，请稍后再试。",
+          response.status
+        )
       );
     }
 
@@ -1760,7 +1842,11 @@ export default function Home() {
     if (!response.ok) {
       const errorText = await response.text();
       throw new Error(
-        getResponseErrorMessage(errorText, "读取知识库列表失败，请稍后再试。")
+        getResponseErrorMessage(
+          errorText,
+          "读取知识库列表失败，请稍后再试。",
+          response.status
+        )
       );
     }
 
@@ -2028,7 +2114,11 @@ export default function Home() {
       if (!response.ok) {
         const errorText = await response.text();
         throw new Error(
-          getResponseErrorMessage(errorText, "删除会话失败，请稍后再试。")
+          getResponseErrorMessage(
+            errorText,
+            "删除会话失败，请稍后再试。",
+            response.status
+          )
         );
       }
 
@@ -2122,7 +2212,11 @@ export default function Home() {
       if (!response.ok) {
         const errorText = await response.text();
         throw new Error(
-          getResponseErrorMessage(errorText, "重命名失败，请稍后再试。")
+          getResponseErrorMessage(
+            errorText,
+            "重命名失败，请稍后再试。",
+            response.status
+          )
         );
       }
 
@@ -2375,7 +2469,8 @@ export default function Home() {
         const errorText = await response.text();
         const errorMessage = getResponseErrorMessage(
           errorText,
-          "请求失败了，请稍后再试。"
+          "请求失败了，请稍后再试。",
+          response.status
         );
 
         setSessionErrors((prev) => ({
