@@ -1,38 +1,39 @@
-# 导入变量声明
-from langchain_core.vectorstores.base import VectorStoreRetriever
 from typing import Any
+
 from langchain_core.documents import Document
+from langchain_core.vectorstores.base import VectorStoreRetriever
 
-# 导入Chroma和Zhipu词嵌入模型
-from langchain_chroma import Chroma
-from app.services.vectors.embedding_model import ZhipuAIEmbeddings
+from app.services.vectors.vector_index_service import (
+    DEFAULT_COLLECTION_NAME,
+    DEFAULT_VECTOR_STORE_PATH,
+    get_vector_store,
+)
 
 
-# 创建向量知识库检索器
 def get_retriever(
-        store_path: str = "./vector_db/chroma",
-        **kwargs: Any
+    store_path: str = DEFAULT_VECTOR_STORE_PATH,
+    collection_name: str = DEFAULT_COLLECTION_NAME,
+    search_type: str = "similarity",
+    search_kwargs: dict[str, Any] | None = None,
+    **kwargs: Any,
 ) -> VectorStoreRetriever:
-    """
-    从本地Chroma向量数据库创建检索器。
-
-    使用环境变量：ZAI_EMD_API
-    """
-    embedding = ZhipuAIEmbeddings()
-    vectordb = Chroma(
+    """从本地 Chroma 向量数据库创建检索器。"""
+    vectordb = get_vector_store(
         persist_directory=store_path,
-        embedding_function=embedding,
+        collection_name=collection_name,
     )
-    return vectordb.as_retriever(**kwargs)
+    return vectordb.as_retriever(
+        search_type=search_type,
+        search_kwargs=search_kwargs or {"k": 5},
+        **kwargs,
+    )
 
 
-# 提取检索器文本
 def get_res_doc(inputs: dict[str, Any]) -> str:
+    """提取检索器返回文档的正文。"""
     docs = inputs.get("context", [])
     return "\n\n".join(
         doc.page_content
         for doc in docs
         if isinstance(doc, Document)
     )
-
-

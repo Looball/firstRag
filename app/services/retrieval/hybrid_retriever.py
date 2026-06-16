@@ -4,6 +4,7 @@ from uuid import UUID
 from langchain_core.documents import Document
 
 from app.services.retrieval.fulltext_retriever import get_fulltext_documents
+from app.services.retrieval.reranker import get_reranker
 from app.services.retrieval.rrf import reciprocal_rank_fusion
 from app.services.vectors.vector_index_service import get_vector_store
 
@@ -60,12 +61,15 @@ def get_hybrid_documents(
     user_id: int,
     file_ids: Sequence[UUID | str] | None = None,
     k: int = 5,
-    vector_k: int = 8,
-    fulltext_k: int = 8,
+    vector_k: int = 20,
+    fulltext_k: int = 20,
+    rrf_k: int = 20,
     vector_weight: float = 1.0,
     fulltext_weight: float = 1.0,
+    rerank: bool = True,
+    reranker_model: str = "BAAI/bge-reranker-base",
 ) -> list[Document]:
-    """执行向量检索和全文检索，并使用 RRF 融合结果。"""
+    """执行混合召回、RRF 融合，并可选使用 Cross-Encoder 精排序。"""
     vector_documents = get_vector_documents(
         query=query,
         user_id=user_id,
@@ -79,14 +83,23 @@ def get_hybrid_documents(
         k=fulltext_k,
     )
 
-    return reciprocal_rank_fusion(
+    fused_documents = reciprocal_rank_fusion(
         ranked_results=[
             vector_documents,
             fulltext_documents,
         ],
-        k=k,
+        k=rrf_k if rerank else k,
         weights=[
             vector_weight,
             fulltext_weight,
         ],
+    )
+
+    if not rerank:
+        return fused_documents
+
+    return get_reranker(reranker_model).rerank(
+        query=query,
+        documents=fused_documents,
+        top_k=k,
     )

@@ -98,8 +98,10 @@ def retrieve_documents(inputs: ChainInput) -> RetrievedDocs:
         user_id=user_id,
         file_ids=file_ids,
         k=5,
-        vector_k=8,
-        fulltext_k=8,
+        vector_k=20,
+        fulltext_k=20,
+        rrf_k=20,
+        rerank=True,
     )
 
 
