@@ -1,3 +1,21 @@
+"""Reciprocal Rank Fusion 排名融合。
+
+RRF 用于融合多个召回器返回的有序结果列表，例如向量检索和全文检索。
+它的核心思想是：一个文档在某个召回器中排名越靠前，贡献越高；
+如果同一个文档被多个召回器同时召回，它的贡献会累加。
+
+公式：
+
+    score(d) = sum(weight_i / (rank_constant + rank_i(d)))
+
+其中 rank_i(d) 是文档 d 在第 i 个召回器中的排名。rank_constant
+用于平滑排名差距，默认 60 是常见经验值，可以避免某一路检索的第一名
+过度压制其他结果。
+
+RRF 不直接使用原始检索分数，因此适合融合分数尺度不同的结果：
+向量相似度、全文检索 rank、BM25 分数或其他召回器的输出。
+"""
+
 from collections import defaultdict
 from collections.abc import Sequence
 
@@ -25,7 +43,12 @@ def reciprocal_rank_fusion(
     rank_constant: int = 60,
     weights: Sequence[float] | None = None,
 ) -> list[Document]:
-    """使用 Reciprocal Rank Fusion 融合多个有序检索结果列表。"""
+    """使用 RRF 融合多个有序检索结果列表。
+
+    本函数先根据 chunk_id 或 user_id:file_id:chunk_index 去重，
+    再累加不同召回器给同一文档带来的倒数排名分数，最后按融合分数
+    返回 top-k。
+    """
     if weights is None:
         weights = [1.0] * len(ranked_results)
     if len(weights) != len(ranked_results):

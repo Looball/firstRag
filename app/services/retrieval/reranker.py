@@ -1,3 +1,21 @@
+"""本地 Cross-Encoder 精排序。
+
+bi-encoder 向量检索会分别编码 query 和 document，再用向量相似度做粗召回。
+这种方式速度快，适合在大量 chunk 中找候选，但 query 和 document 之间
+没有充分交互，因此排序精度有限。
+
+Cross-Encoder 会把 query 和 document 拼成一对输入，同送入 Transformer，
+模型可以在 token 级别同时观察问题和候选片段，输出一个相关性 logits。
+它通常比 bi-encoder 排序更准确，但计算成本更高，无法直接用于全库检索。
+
+因此本项目只在 RRF 融合后的少量候选上使用 Cross-Encoder：
+
+    粗召回 -> RRF 融合候选 -> Cross-Encoder 精排 -> top-k 上下文
+
+BAAI/bge-reranker-base 输出的是 raw relevance score。排序只需要比较分数
+大小，因此直接使用 logits，不额外做 sigmoid。
+"""
+
 from functools import lru_cache
 
 import torch
@@ -32,7 +50,11 @@ class LocalCrossEncoderReranker:
         batch_size: int = 8,
         max_length: int = 512,
     ) -> list[float]:
-        """计算 query 与多个文档的相关性分数。"""
+        """计算 query 与多个文档的相关性分数。
+
+        每个候选会以 `(query, document.page_content)` 的形式输入模型。
+        返回值是模型 logits，值越大表示候选和问题越相关。
+        """
         scores: list[float] = []
 
         for start in range(0, len(documents), batch_size):

@@ -1,3 +1,14 @@
+"""Chroma 向量粗召回。
+
+向量检索使用 bi-encoder 思路：文档 chunk 在入库时提前编码成向量，
+用户查询时只编码 query，再通过向量相似度快速召回候选 chunk。
+
+这种方式适合做第一阶段粗召回，因为它可以在较大的向量库中快速查找
+语义相近的片段。但 bi-encoder 的 query 和 document 是分开编码的，
+交互不充分，所以召回结果不应该直接作为最终排序。当前项目会将向量
+召回结果与全文检索结果通过 RRF 融合，再交给 Cross-Encoder 精排序。
+"""
+
 from typing import Any
 
 from langchain_core.documents import Document

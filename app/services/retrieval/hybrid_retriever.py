@@ -1,3 +1,20 @@
+"""混合检索流水线。
+
+本模块采用三阶段检索策略：
+
+1. 粗召回：使用 Chroma 向量检索和 PostgreSQL 全文检索分别召回候选。
+   向量检索擅长语义相似，全文检索擅长精确关键词、专有名词和编号。
+   两者都是低成本召回器，目标是尽量提高候选覆盖率，而不是最终排序。
+
+2. RRF 融合：将不同召回器的有序结果列表做去重和排名融合。
+   RRF 只依赖各召回器内部排名，不直接比较向量距离和全文检索分数，
+   因此适合融合分数尺度不同的检索结果。
+
+3. Cross-Encoder 精排序：对融合后的少量候选逐条计算 query-document
+   相关性分数。Cross-Encoder 比 bi-encoder 更准确但更慢，所以只用于
+   最终候选池，而不是直接对全库或每一路大量结果排序。
+"""
+
 from collections.abc import Sequence
 from uuid import UUID
 
@@ -69,7 +86,12 @@ def get_hybrid_documents(
     rerank: bool = True,
     reranker_model: str = "BAAI/bge-reranker-base",
 ) -> list[Document]:
-    """执行混合召回、RRF 融合，并可选使用 Cross-Encoder 精排序。"""
+    """执行混合召回、RRF 融合，并可选使用 Cross-Encoder 精排序。
+
+    检索顺序是先多路粗召回，再 RRF 融合候选，最后统一精排序。
+    这样可以让向量检索和全文检索召回到的片段都有机会进入
+    Cross-Encoder，而不是只精排某一路召回结果。
+    """
     vector_documents = get_vector_documents(
         query=query,
         user_id=user_id,
