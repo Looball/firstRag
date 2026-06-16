@@ -5,6 +5,7 @@ from uuid import UUID
 from langchain_chroma import Chroma
 from langchain_core.documents import Document
 
+from app.repositories.knowledge_chunk_repository import replace_file_chunks
 from app.services.documents.document_service import (
     load_document,
     split_documents,
@@ -75,9 +76,16 @@ def index_file_vectors(
             ]
         }
     )
+    chunk_ids = build_chunk_ids(chunks)
     vectordb.add_documents(
         documents=chunks,
-        ids=build_chunk_ids(chunks),
+        ids=chunk_ids,
+    )
+    replace_file_chunks(
+        user_id=user_id,
+        file_id=file_id,
+        chunks=chunks,
+        chunk_ids=chunk_ids,
     )
 
     return {
