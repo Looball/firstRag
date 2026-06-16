@@ -29,7 +29,7 @@ def serialize_knowledge_file(
     """将知识文件数据库记录转换为接口响应结构。"""
     status = row["status"]
     if index_job is not None:
-        status = "queued"
+        status = index_job.get("status", "queued")
 
     return {
         "id": str(row["id"]),

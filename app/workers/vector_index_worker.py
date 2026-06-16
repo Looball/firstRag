@@ -27,6 +27,17 @@ def process_next_vector_index_job(worker_id: str) -> bool:
         if file_record is None:
             raise FileNotFoundError(f"文件不存在：{file_id}")
 
+        if file_record["status"] == "indexed":
+            result = {
+                "file_id": str(file_id),
+                "status": "indexed",
+                "skipped": True,
+                "message": "文件已完成向量化，跳过重复任务",
+            }
+            mark_vector_index_job_succeeded(UUID(str(job_id)), result)
+            print(f"[{worker_id}] skipped indexed file={file_id} job={job_id}")
+            return True
+
         result = index_knowledge_file_record(file_record, user_id)
         mark_vector_index_job_succeeded(UUID(str(job_id)), result)
         print(f"[{worker_id}] indexed file={file_id} job={job_id}")

@@ -35,7 +35,7 @@ def index_knowledge_file_vectors(
 
     return {
         "success": True,
-        "message": "文件向量化任务已提交",
+        "message": job.get("message") or "文件向量化任务已提交",
         "job": job,
     }
 
