@@ -3,7 +3,7 @@
 from app.services.documents.document_service import (
     build_vector_store,
     get_document_paths,
-    load_documents,
+    load_document,
     split_documents,
 )
 from app.services.vectors.embedding_model import ZhipuAIEmbeddings
@@ -12,7 +12,7 @@ __all__ = [
     "ZhipuAIEmbeddings",
     "build_vector_store",
     "get_document_paths",
-    "load_documents",
+    "load_document",
     "split_documents",
 ]
 
