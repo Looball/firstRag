@@ -52,6 +52,18 @@ type KnowledgeFile = {
   usageCount: number | null;
 };
 
+type VectorIndexJobStatus =
+  | "queued"
+  | "processing"
+  | "succeeded"
+  | "failed";
+
+type VectorIndexJob = {
+  id: string;
+  status: VectorIndexJobStatus;
+  errorMessage: string;
+};
+
 type BackendKnowledgeFile = {
   id?: unknown;
   original_name?: unknown;
@@ -111,6 +123,20 @@ type UploadKnowledgeFilesResponse = {
 };
 
 type ListKnowledgeFilesResponse = UploadKnowledgeFilesResponse;
+
+type VectorIndexResponse = {
+  id?: unknown;
+  job_id?: unknown;
+  status?: unknown;
+  error_message?: unknown;
+  job?: unknown;
+  jobs?: unknown;
+  vector_index_job?: unknown;
+  vector_index_jobs?: unknown;
+  detail?: string;
+  error?: string;
+  message?: string;
+};
 
 const STORAGE_KEY = "ai-learning-assistant-sessions";
 const CURRENT_SESSION_KEY = "ai-learning-assistant-current-session";
@@ -371,6 +397,80 @@ function toKnowledgeFile(
     status: knowledgeFile.status === "ready" ? "ready" : "processing",
     usageCount: Number.isFinite(usageCount) ? usageCount : null,
   };
+}
+
+function toVectorIndexJob(value: unknown): VectorIndexJob | null {
+  if (typeof value !== "object" || value === null) {
+    return null;
+  }
+
+  const job = value as {
+    id?: unknown;
+    job_id?: unknown;
+    status?: unknown;
+    error_message?: unknown;
+  };
+  const id =
+    typeof job.id === "string" && job.id.trim()
+      ? job.id.trim()
+      : typeof job.job_id === "string" && job.job_id.trim()
+        ? job.job_id.trim()
+        : "";
+
+  if (!id) {
+    return null;
+  }
+
+  const status =
+    job.status === "processing" ||
+    job.status === "succeeded" ||
+    job.status === "failed"
+      ? job.status
+      : "queued";
+
+  return {
+    id,
+    status,
+    errorMessage:
+      typeof job.error_message === "string" ? job.error_message : "",
+  };
+}
+
+function getVectorIndexJobs(value: unknown) {
+  if (typeof value !== "object" || value === null) {
+    return [];
+  }
+
+  const data = value as VectorIndexResponse;
+  const candidates = [
+    data.job,
+    data.vector_index_job,
+    data,
+    ...(Array.isArray(data.jobs) ? data.jobs : []),
+    ...(Array.isArray(data.vector_index_jobs) ? data.vector_index_jobs : []),
+  ];
+
+  const jobsById = new Map<string, VectorIndexJob>();
+
+  candidates.forEach((candidate) => {
+    const job = toVectorIndexJob(candidate);
+
+    if (job) {
+      jobsById.set(job.id, job);
+    }
+  });
+
+  return Array.from(jobsById.values());
+}
+
+function isVectorIndexJobDone(job: VectorIndexJob) {
+  return job.status === "succeeded" || job.status === "failed";
+}
+
+function wait(ms: number) {
+  return new Promise<void>((resolve) => {
+    window.setTimeout(resolve, ms);
+  });
 }
 
 function waitForNextPaint() {
@@ -680,6 +780,13 @@ export default function Home() {
   const [isLoadingReusableFiles, setIsLoadingReusableFiles] =
     useState(false);
   const [reusableFileLoadError, setReusableFileLoadError] = useState("");
+  const [vectorIndexingFileIds, setVectorIndexingFileIds] = useState<
+    Record<string, boolean>
+  >({});
+  const [isIndexingKnowledgeBase, setIsIndexingKnowledgeBase] =
+    useState(false);
+  const [vectorIndexMessage, setVectorIndexMessage] = useState("");
+  const [vectorIndexError, setVectorIndexError] = useState("");
   const [pageError, setPageError] = useState("");
   const [currentUsername, setCurrentUsername] = useState("");
   const [knowledgeBases, setKnowledgeBases] = useState<KnowledgeBase[]>([
@@ -1166,6 +1273,204 @@ export default function Home() {
       );
     } finally {
       setDetachingKnowledgeFileId("");
+    }
+  }
+
+  async function loadVectorIndexJob(
+    jobId: string,
+    authState: NonNullable<ReturnType<typeof parseAuthState>>
+  ) {
+    const response = await fetch(
+      `/api/chat/vector-index-jobs/${encodeURIComponent(jobId)}`,
+      {
+        method: "GET",
+        headers: {
+          Authorization: buildAuthorizationHeader(authState),
+        },
+        cache: "no-store",
+      }
+    );
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(
+        getResponseErrorMessage(errorText, "查询向量化任务失败，请稍后再试。")
+      );
+    }
+
+    const data = (await response.json()) as VectorIndexResponse;
+    return getVectorIndexJobs(data)[0] || null;
+  }
+
+  async function waitForVectorIndexJobs(
+    jobs: VectorIndexJob[],
+    authState: NonNullable<ReturnType<typeof parseAuthState>>
+  ) {
+    if (jobs.length === 0) {
+      return [];
+    }
+
+    let latestJobs = jobs;
+
+    for (let attempt = 0; attempt < 45; attempt += 1) {
+      if (latestJobs.every(isVectorIndexJobDone)) {
+        return latestJobs;
+      }
+
+      await wait(2000);
+
+      const nextJobs = await Promise.all(
+        latestJobs.map(async (job) => {
+          if (isVectorIndexJobDone(job)) {
+            return job;
+          }
+
+          return (await loadVectorIndexJob(job.id, authState)) || job;
+        })
+      );
+
+      latestJobs = nextJobs;
+    }
+
+    return latestJobs;
+  }
+
+  async function refreshKnowledgeFiles() {
+    await Promise.all([
+      loadKnowledgeBaseFiles(selectedKnowledgeBaseId),
+      loadAllKnowledgeFiles(),
+    ]);
+  }
+
+  async function handleIndexKnowledgeFile(fileId: string) {
+    if (!fileId || vectorIndexingFileIds[fileId]) {
+      return;
+    }
+
+    const authState = parseAuthState(localStorage.getItem(AUTH_STORAGE_KEY));
+
+    if (!authState) {
+      localStorage.removeItem(AUTH_STORAGE_KEY);
+      window.location.href = "/login";
+      return;
+    }
+
+    setVectorIndexingFileIds((prev) => ({ ...prev, [fileId]: true }));
+    setVectorIndexError("");
+    setVectorIndexMessage("");
+
+    try {
+      const response = await fetch(
+        `/api/chat/knowledge-files/${encodeURIComponent(fileId)}/vectors`,
+        {
+          method: "POST",
+          headers: {
+            Authorization: buildAuthorizationHeader(authState),
+          },
+        }
+      );
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(
+          getResponseErrorMessage(errorText, "提交文件向量化失败，请稍后再试。")
+        );
+      }
+
+      const data = (await response.json()) as VectorIndexResponse;
+      const jobs = getVectorIndexJobs(data);
+
+      setVectorIndexMessage("文件向量化任务已提交。");
+
+      const finishedJobs = await waitForVectorIndexJobs(jobs, authState);
+      const failedJob = finishedJobs.find((job) => job.status === "failed");
+
+      if (failedJob) {
+        throw new Error(failedJob.errorMessage || "文件向量化失败。");
+      }
+
+      if (finishedJobs.length > 0) {
+        setVectorIndexMessage("文件向量化完成。");
+      }
+
+      await refreshKnowledgeFiles();
+    } catch (error) {
+      setVectorIndexError(
+        error instanceof Error ? error.message : "文件向量化失败，请稍后再试。"
+      );
+    } finally {
+      setVectorIndexingFileIds((prev) => {
+        const next = { ...prev };
+        delete next[fileId];
+        return next;
+      });
+    }
+  }
+
+  async function handleIndexKnowledgeBase() {
+    if (
+      !selectedKnowledgeBaseId ||
+      selectedKnowledgeBaseId === DEFAULT_KNOWLEDGE_BASE_ID ||
+      isIndexingKnowledgeBase
+    ) {
+      return;
+    }
+
+    const authState = parseAuthState(localStorage.getItem(AUTH_STORAGE_KEY));
+
+    if (!authState) {
+      localStorage.removeItem(AUTH_STORAGE_KEY);
+      window.location.href = "/login";
+      return;
+    }
+
+    setIsIndexingKnowledgeBase(true);
+    setVectorIndexError("");
+    setVectorIndexMessage("");
+
+    try {
+      const response = await fetch(
+        `/api/chat/knowledge-base/${encodeURIComponent(
+          selectedKnowledgeBaseId
+        )}/vectors`,
+        {
+          method: "POST",
+          headers: {
+            Authorization: buildAuthorizationHeader(authState),
+          },
+        }
+      );
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(
+          getResponseErrorMessage(errorText, "提交知识库向量化失败，请稍后再试。")
+        );
+      }
+
+      const data = (await response.json()) as VectorIndexResponse;
+      const jobs = getVectorIndexJobs(data);
+
+      setVectorIndexMessage("知识库向量化任务已提交。");
+
+      const finishedJobs = await waitForVectorIndexJobs(jobs, authState);
+      const failedJob = finishedJobs.find((job) => job.status === "failed");
+
+      if (failedJob) {
+        throw new Error(failedJob.errorMessage || "知识库向量化失败。");
+      }
+
+      if (finishedJobs.length > 0) {
+        setVectorIndexMessage("知识库向量化完成。");
+      }
+
+      await refreshKnowledgeFiles();
+    } catch (error) {
+      setVectorIndexError(
+        error instanceof Error ? error.message : "知识库向量化失败，请稍后再试。"
+      );
+    } finally {
+      setIsIndexingKnowledgeBase(false);
     }
   }
 
@@ -2594,6 +2899,23 @@ export default function Home() {
                     : "请先创建知识库"}
               </button>
 
+              <button
+                type="button"
+                onClick={() => {
+                  void handleIndexKnowledgeBase();
+                }}
+                disabled={
+                  selectedKnowledgeFiles.length === 0 ||
+                  isIndexingKnowledgeBase ||
+                  isUploadingKnowledgeFiles
+                }
+                className="mt-3 w-full border border-[#176b62] bg-[#fcfdfb] px-4 py-3 text-sm font-semibold text-[#176b62] transition hover:bg-[#e4f0ec] disabled:border-[#cbd5d1] disabled:text-[#9ba8a3]"
+              >
+                {isIndexingKnowledgeBase
+                  ? "知识库向量化中..."
+                  : "向量化当前知识库"}
+              </button>
+
               {knowledgeFileUploadError && (
                 <p
                   role="alert"
@@ -2639,6 +2961,21 @@ export default function Home() {
                 </p>
               )}
 
+              {vectorIndexMessage && (
+                <p className="mt-3 border-l-4 border-[#176b62] bg-[#edf7f3] px-4 py-3 text-sm text-[#176b62]">
+                  {vectorIndexMessage}
+                </p>
+              )}
+
+              {vectorIndexError && (
+                <p
+                  role="alert"
+                  className="mt-3 border-l-4 border-[#e36b4f] bg-[#fff1ed] px-4 py-3 text-sm text-[#9b3c29]"
+                >
+                  {vectorIndexError}
+                </p>
+              )}
+
               <div className="mt-6">
                 <div className="flex items-center justify-between gap-4">
                   <p className="font-utility text-[10px] font-semibold uppercase text-[#176b62]">
@@ -2662,6 +2999,9 @@ export default function Home() {
                           (association) =>
                             association.knowledgeFileId === file.id
                         ).length;
+                      const isFileIndexing = Boolean(
+                        vectorIndexingFileIds[file.id]
+                      );
 
                       return (
                         <div
@@ -2679,18 +3019,32 @@ export default function Home() {
                                 : `${usageCount} 个知识库正在使用`}
                             </p>
                           </div>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              void handleRemoveKnowledgeFile(file.id);
-                            }}
-                            disabled={Boolean(detachingKnowledgeFileId)}
-                            className="shrink-0 px-2 py-1 text-xs font-semibold text-[#72807b] transition hover:bg-[#fff1ed] hover:text-[#9b3c29] disabled:cursor-not-allowed disabled:text-[#aab3b0]"
-                          >
-                            {detachingKnowledgeFileId === file.id
-                              ? "解除中..."
-                              : "解除关联"}
-                          </button>
+                          <div className="flex shrink-0 items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                void handleIndexKnowledgeFile(file.id);
+                              }}
+                              disabled={
+                                isFileIndexing || isIndexingKnowledgeBase
+                              }
+                              className="px-2 py-1 text-xs font-semibold text-[#176b62] transition hover:bg-[#e4f0ec] disabled:cursor-not-allowed disabled:text-[#aab3b0]"
+                            >
+                              {isFileIndexing ? "向量化中..." : "向量化"}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                void handleRemoveKnowledgeFile(file.id);
+                              }}
+                              disabled={Boolean(detachingKnowledgeFileId)}
+                              className="px-2 py-1 text-xs font-semibold text-[#72807b] transition hover:bg-[#fff1ed] hover:text-[#9b3c29] disabled:cursor-not-allowed disabled:text-[#aab3b0]"
+                            >
+                              {detachingKnowledgeFileId === file.id
+                                ? "解除中..."
+                                : "解除关联"}
+                            </button>
+                          </div>
                         </div>
                       );
                     })
@@ -2730,6 +3084,9 @@ export default function Home() {
                           (association) =>
                             association.knowledgeFileId === file.id
                         ).length;
+                      const isFileIndexing = Boolean(
+                        vectorIndexingFileIds[file.id]
+                      );
 
                       return (
                         <div
@@ -2745,18 +3102,32 @@ export default function Home() {
                               个知识库
                             </p>
                           </div>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              void handleAttachKnowledgeFile(file.id);
-                            }}
-                            disabled={Boolean(attachingKnowledgeFileId)}
-                            className="shrink-0 bg-[#176b62] px-3 py-2 text-xs font-semibold text-white transition hover:bg-[#105149] disabled:cursor-not-allowed disabled:bg-[#91aaa4]"
-                          >
-                            {attachingKnowledgeFileId === file.id
-                              ? "添加中..."
-                              : "添加"}
-                          </button>
+                          <div className="flex shrink-0 items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                void handleIndexKnowledgeFile(file.id);
+                              }}
+                              disabled={
+                                isFileIndexing || isIndexingKnowledgeBase
+                              }
+                              className="px-2 py-1 text-xs font-semibold text-[#176b62] transition hover:bg-[#e4f0ec] disabled:cursor-not-allowed disabled:text-[#aab3b0]"
+                            >
+                              {isFileIndexing ? "向量化中..." : "向量化"}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                void handleAttachKnowledgeFile(file.id);
+                              }}
+                              disabled={Boolean(attachingKnowledgeFileId)}
+                              className="bg-[#176b62] px-3 py-2 text-xs font-semibold text-white transition hover:bg-[#105149] disabled:cursor-not-allowed disabled:bg-[#91aaa4]"
+                            >
+                              {attachingKnowledgeFileId === file.id
+                                ? "添加中..."
+                                : "添加"}
+                            </button>
+                          </div>
                         </div>
                       );
                     })
