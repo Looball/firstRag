@@ -14,7 +14,7 @@ from app.repositories.knowledge_file_repository import (
     get_user_knowledge_files,
 )
 from app.services.file_service import build_storage_path, calculate_file_hash
-from app.services.vectors.vector_index_service import index_knowledge_file_record
+from app.services.vectors.vector_index_queue_service import enqueue_file_vector_index
 
 
 router = APIRouter(prefix="/chat", tags=["knowledge-files"])
@@ -24,12 +24,12 @@ def serialize_knowledge_file(
     row: Row | dict,
     reused: bool = False,
     already_in_knowledge_base: bool = False,
-    index_result: dict | None = None,
+    index_job: dict | None = None,
 ) -> dict:
     """将知识文件数据库记录转换为接口响应结构。"""
     status = row["status"]
-    if index_result is not None:
-        status = index_result.get("status", status)
+    if index_job is not None:
+        status = "queued"
 
     return {
         "id": str(row["id"]),
@@ -41,15 +41,20 @@ def serialize_knowledge_file(
         "updated_at": row["updated_at"],
         "reused": reused,
         "already_in_knowledge_base": already_in_knowledge_base,
-        "index_result": index_result,
+        "index_job": index_job,
     }
 
 
-def try_index_uploaded_file(file_record: Row | dict, user_id: int) -> dict | None:
-    """上传接口可选触发向量化，失败时交给调用方转换为 HTTP 错误。"""
-    return index_knowledge_file_record(
+def enqueue_uploaded_file_index(
+    file_record: Row | dict,
+    user_id: int,
+    knowledge_base_id: UUID,
+) -> dict:
+    """上传接口可选提交向量化任务。"""
+    return enqueue_file_vector_index(
         file_record=file_record,
         user_id=user_id,
+        knowledge_base_id=knowledge_base_id,
     )
 
 
@@ -64,9 +69,8 @@ async def upload_knowledge_files(
 ):
     """上传文件到知识库。
 
-    `auto_index=True` 时，文件保存或复用成功后会立即解析、切分并写入
-    Chroma 和 PostgreSQL 全文检索表。文件较大时建议前端单独调用
-    `/knowledge-files/{knowledge_file_id}/vectors`，避免上传请求耗时过长。
+    `auto_index=True` 时，文件保存或复用成功后只提交向量化任务，
+    实际解析、切分、embedding 和入库由独立 worker 异步执行。
     """
     # 检查知识库存在且属于当前用户
     if not knowledge_base_exists(knowledge_base_id, user_id):
@@ -91,30 +95,20 @@ async def upload_knowledge_files(
                 knowledge_base_id,
                 existing_file["id"],
             )
-            index_result = None
+            index_job = None
             if auto_index:
-                try:
-                    index_result = try_index_uploaded_file(
-                        existing_file,
-                        user_id,
-                    )
-                except FileNotFoundError as exc:
-                    raise HTTPException(
-                        status_code=404,
-                        detail=str(exc),
-                    ) from exc
-                except ValueError as exc:
-                    raise HTTPException(
-                        status_code=400,
-                        detail=str(exc),
-                    ) from exc
+                index_job = enqueue_uploaded_file_index(
+                    existing_file,
+                    user_id,
+                    knowledge_base_id,
+                )
 
             uploaded_files.append(
                 serialize_knowledge_file(
                     existing_file,
                     reused=True,
                     already_in_knowledge_base=not relation_created,
-                    index_result=index_result,
+                    index_job=index_job,
                 )
             )
             await file.close()
@@ -158,28 +152,18 @@ async def upload_knowledge_files(
             if file_record is None:
                 raise RuntimeError("文件记录创建失败")
 
-            index_result = None
+            index_job = None
             if auto_index:
-                try:
-                    index_result = try_index_uploaded_file(
-                        file_record,
-                        user_id,
-                    )
-                except FileNotFoundError as exc:
-                    raise HTTPException(
-                        status_code=404,
-                        detail=str(exc),
-                    ) from exc
-                except ValueError as exc:
-                    raise HTTPException(
-                        status_code=400,
-                        detail=str(exc),
-                    ) from exc
+                index_job = enqueue_uploaded_file_index(
+                    file_record,
+                    user_id,
+                    knowledge_base_id,
+                )
 
             uploaded_files.append(
                 serialize_knowledge_file(
                     file_record,
-                    index_result=index_result,
+                    index_job=index_job,
                 )
             )
         except Exception:

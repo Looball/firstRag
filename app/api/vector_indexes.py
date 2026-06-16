@@ -8,7 +8,11 @@ from app.repositories.knowledge_file_repository import (
     get_knowledge_base_files_for_indexing,
     get_user_knowledge_file,
 )
-from app.services.vectors.vector_index_service import index_knowledge_file_record
+from app.repositories.vector_index_job_repository import get_user_vector_index_job
+from app.services.vectors.vector_index_queue_service import (
+    enqueue_file_vector_index,
+    serialize_vector_index_job,
+)
 
 
 router = APIRouter(prefix="/chat", tags=["vector-indexes"])
@@ -19,21 +23,20 @@ def index_knowledge_file_vectors(
     knowledge_file_id: UUID,
     user_id: int = Depends(get_current_user_id),
 ):
-    """将当前用户的单个知识文件向量化并写入 Chroma。"""
+    """提交单个知识文件向量化任务。"""
     file_record = get_user_knowledge_file(user_id, knowledge_file_id)
     if file_record is None:
         raise HTTPException(status_code=404, detail="文件不存在")
 
-    try:
-        indexed_file = index_knowledge_file_record(file_record, user_id)
-    except FileNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    job = enqueue_file_vector_index(
+        file_record=file_record,
+        user_id=user_id,
+    )
 
     return {
         "success": True,
-        "file": indexed_file,
+        "message": "文件向量化任务已提交",
+        "job": job,
     }
 
 
@@ -42,7 +45,7 @@ def index_knowledge_base_vectors(
     knowledge_base_id: UUID,
     user_id: int = Depends(get_current_user_id),
 ):
-    """将当前知识库关联的所有文件向量化并写入 Chroma。"""
+    """提交当前知识库下所有文件的向量化任务。"""
     if not knowledge_base_exists(knowledge_base_id, user_id):
         raise HTTPException(status_code=404, detail="知识库不存在")
 
@@ -54,29 +57,38 @@ def index_knowledge_base_vectors(
         return {
             "success": True,
             "knowledge_base_id": str(knowledge_base_id),
-            "indexed_files": [],
-            "failed_files": [],
+            "jobs": [],
             "message": "知识库中没有可向量化的文件",
         }
 
-    indexed_files = []
-    failed_files = []
-
+    jobs = []
     for file_record in file_records:
-        try:
-            indexed_files.append(
-                index_knowledge_file_record(file_record, user_id)
+        jobs.append(
+            enqueue_file_vector_index(
+                file_record=file_record,
+                user_id=user_id,
+                knowledge_base_id=knowledge_base_id,
             )
-        except Exception as exc:
-            failed_files.append({
-                "id": str(file_record["id"]),
-                "original_name": file_record["original_name"],
-                "error": str(exc),
-            })
+        )
 
     return {
-        "success": not failed_files,
+        "success": True,
         "knowledge_base_id": str(knowledge_base_id),
-        "indexed_files": indexed_files,
-        "failed_files": failed_files,
+        "jobs": jobs,
+    }
+
+
+@router.get("/vector-index-jobs/{job_id}")
+def get_vector_index_job(
+    job_id: UUID,
+    user_id: int = Depends(get_current_user_id),
+):
+    """查询当前用户的向量化任务状态。"""
+    job = get_user_vector_index_job(user_id, job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="任务不存在")
+
+    return {
+        "success": True,
+        "job": serialize_vector_index_job(job),
     }
