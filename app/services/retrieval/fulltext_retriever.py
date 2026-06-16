@@ -24,6 +24,7 @@ def get_fulltext_documents(
     for row in rows:
         metadata = dict(row["metadata"] or {})
         metadata.update({
+            "chunk_id": row["chunk_id"],
             "file_id": str(row["file_id"]),
             "chunk_index": row["chunk_index"],
             "fulltext_score": float(row["score"] or 0.0),
