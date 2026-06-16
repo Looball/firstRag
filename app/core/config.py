@@ -5,6 +5,15 @@ from pathlib import Path
 # 设置文件存储路径
 UPLOAD_ROOT = Path("./uploads")
 
+# 设置Chroma向量库存储路径和集合名称
+VECTOR_STORE_PATH = Path(
+    os.environ.get("VECTOR_STORE_PATH", "./vector_db/chroma")
+)
+CHROMA_COLLECTION_NAME = os.environ.get(
+    "CHROMA_COLLECTION_NAME",
+    "langchain",
+)
+
 # 设置JWT配置信息，环境变量中需要有 JWT_SECRET_KEY
 JWT_SECRET_KEY = os.environ.get("JWT_SECRET_KEY")
 JWT_ALGORITHM = "HS256"

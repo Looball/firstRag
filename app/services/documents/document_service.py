@@ -18,6 +18,7 @@ from langchain_text_splitters import (
     RecursiveCharacterTextSplitter,
 )
 
+from app.core.config import VECTOR_STORE_PATH
 from app.services.vectors.embedding_model import ZhipuAIEmbeddings
 
 
@@ -167,7 +168,7 @@ def split_documents(documents: list[Document]) -> list[Document]:
 
 def build_vector_store(
     folder_path: str | Path = "./local_doc",
-    persist_directory: str = "./vector_db/chroma",
+    persist_directory: str | Path = VECTOR_STORE_PATH,
 ) -> Chroma:
     """加载、切分本地文档并写入Chroma向量数据库。"""
     file_paths = get_document_paths(folder_path)
@@ -189,7 +190,7 @@ def build_vector_store(
     vectordb = Chroma.from_documents(
         documents=split_docs,
         embedding=ZhipuAIEmbeddings(),
-        persist_directory=persist_directory,
+        persist_directory=str(persist_directory),
     )
     print(f"向量库中存储的数量：{vectordb._collection.count()}")
     return vectordb

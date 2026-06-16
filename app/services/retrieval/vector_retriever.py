@@ -14,16 +14,13 @@ from typing import Any
 from langchain_core.documents import Document
 from langchain_core.vectorstores.base import VectorStoreRetriever
 
-from app.services.vectors.vector_index_service import (
-    DEFAULT_COLLECTION_NAME,
-    DEFAULT_VECTOR_STORE_PATH,
-    get_vector_store,
-)
+from app.core.config import CHROMA_COLLECTION_NAME, VECTOR_STORE_PATH
+from app.services.vectors.vector_index_service import get_vector_store
 
 
 def get_retriever(
-    store_path: str = DEFAULT_VECTOR_STORE_PATH,
-    collection_name: str = DEFAULT_COLLECTION_NAME,
+    store_path: str = str(VECTOR_STORE_PATH),
+    collection_name: str = CHROMA_COLLECTION_NAME,
     search_type: str = "similarity",
     search_kwargs: dict[str, Any] | None = None,
     **kwargs: Any,

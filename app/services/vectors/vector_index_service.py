@@ -5,6 +5,7 @@ from uuid import UUID
 from langchain_chroma import Chroma
 from langchain_core.documents import Document
 
+from app.core.config import CHROMA_COLLECTION_NAME, VECTOR_STORE_PATH
 from app.repositories.knowledge_chunk_repository import replace_file_chunks
 from app.services.documents.document_service import (
     load_document,
@@ -13,18 +14,14 @@ from app.services.documents.document_service import (
 from app.services.vectors.embedding_model import ZhipuAIEmbeddings
 
 
-DEFAULT_VECTOR_STORE_PATH = "./vector_db/chroma"
-DEFAULT_COLLECTION_NAME = "langchain"
-
-
 def get_vector_store(
-    persist_directory: str = DEFAULT_VECTOR_STORE_PATH,
-    collection_name: str = DEFAULT_COLLECTION_NAME,
+    persist_directory: str | Path = VECTOR_STORE_PATH,
+    collection_name: str = CHROMA_COLLECTION_NAME,
 ) -> Chroma:
     """创建或打开 Chroma 向量库。"""
     return Chroma(
         collection_name=collection_name,
-        persist_directory=persist_directory,
+        persist_directory=str(persist_directory),
         embedding_function=ZhipuAIEmbeddings(),
     )
 
@@ -44,8 +41,8 @@ def index_file_vectors(
     user_id: int,
     file_id: UUID | str,
     storage_path: str | Path,
-    persist_directory: str = DEFAULT_VECTOR_STORE_PATH,
-    collection_name: str = DEFAULT_COLLECTION_NAME,
+    persist_directory: str | Path = VECTOR_STORE_PATH,
+    collection_name: str = CHROMA_COLLECTION_NAME,
 ) -> dict[str, Any]:
     """将单个知识文件解析、切分并写入 Chroma。"""
     file_path = Path(storage_path)
@@ -96,5 +93,5 @@ def index_file_vectors(
             for chunk in chunks
         ),
         "collection_name": collection_name,
-        "persist_directory": persist_directory,
+        "persist_directory": str(persist_directory),
     }
