@@ -6,7 +6,7 @@ from app.services.rag_service import (
     get_res_doc,
     get_retriever,
 )
-from app.services.streamlit_service import render_stream, run_streamlit_app
+from app.services.streamfast.streamlit_service import render_stream, run_streamlit_app
 
 __all__ = [
     "get_answer",

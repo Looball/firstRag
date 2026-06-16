@@ -16,7 +16,7 @@ from langchain_core.vectorstores.base import VectorStoreRetriever
 from langchain_deepseek import ChatDeepSeek
 from pydantic import SecretStr
 
-from app.services.embedding_service import ZhipuAIEmbeddings
+from app.services.vectors.embedding_model import ZhipuAIEmbeddings
 
 
 type RetrievedDocs = list[Document]
