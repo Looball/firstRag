@@ -994,6 +994,7 @@ export default function Home() {
     const formData = new FormData();
     selectedFiles.forEach((file) => formData.append("files", file));
     formData.append("description", "");
+    formData.append("auto_index", "false");
 
     setIsUploadingKnowledgeFiles(true);
     setKnowledgeFileUploadError("");
