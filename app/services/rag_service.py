@@ -1,4 +1,3 @@
-import os
 from typing import Any, cast
 from uuid import UUID
 
@@ -15,11 +14,11 @@ from langchain_core.runnables import (
 from langchain_deepseek import ChatDeepSeek
 from pydantic import SecretStr
 
+from app.core.config import DEEPSEEK_API_KEY
 from app.repositories.knowledge_base_repository import (
     get_knowledge_base_files,
 )
 from app.services.retrieval.hybrid_retriever import get_hybrid_documents
-from app.services.retrieval.vector_retriever import get_retriever
 
 
 type RetrievedDocs = list[Document]
@@ -28,8 +27,7 @@ type ChainInput = dict[str, Any]
 
 def create_chat_model() -> ChatDeepSeek:
     """创建 DeepSeek 聊天模型。"""
-    deepseek_api_key = os.environ.get("DEEPSEEK_API_KEY")
-    if not deepseek_api_key:
+    if not DEEPSEEK_API_KEY:
         raise ValueError("缺少环境变量 DEEPSEEK_API_KEY")
 
     return ChatDeepSeek(
@@ -39,7 +37,7 @@ def create_chat_model() -> ChatDeepSeek:
         timeout=None,
         max_retries=2,
         streaming=True,
-        api_key=SecretStr(deepseek_api_key),
+        api_key=SecretStr(DEEPSEEK_API_KEY),
     )
 
 
