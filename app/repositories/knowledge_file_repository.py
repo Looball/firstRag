@@ -7,7 +7,16 @@ def get_file_by_hash(user_id: int, file_hash: str) -> Row | None:
     """查询用户是否已经上传过相同内容的文件。"""
     return fetch_one(
         """
-        SELECT id, original_name, size_bytes, status
+        SELECT
+            id,
+            user_id,
+            original_name,
+            storage_path,
+            mime_type,
+            size_bytes,
+            status,
+            created_at,
+            updated_at
         FROM knowledge_files
         WHERE user_id = %s
           AND file_hash = %s
@@ -43,7 +52,16 @@ def create_file_with_relation(
                 status
             )
             VALUES (%s, %s, %s, %s, %s, %s, %s, 'pending')
-            RETURNING id, original_name, size_bytes, status
+            RETURNING
+                id,
+                user_id,
+                original_name,
+                storage_path,
+                mime_type,
+                size_bytes,
+                status,
+                created_at,
+                updated_at
         ),
         new_relation AS (
             INSERT INTO knowledge_base_files (

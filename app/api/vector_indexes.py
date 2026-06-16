@@ -7,39 +7,11 @@ from app.repositories.knowledge_base_repository import knowledge_base_exists
 from app.repositories.knowledge_file_repository import (
     get_knowledge_base_files_for_indexing,
     get_user_knowledge_file,
-    update_knowledge_file_status,
 )
-from app.services.vectors.vector_index_service import index_file_vectors
+from app.services.vectors.vector_index_service import index_knowledge_file_record
 
 
 router = APIRouter(prefix="/chat", tags=["vector-indexes"])
-
-
-def index_knowledge_file_record(
-    file_record: dict,
-    user_id: int,
-) -> dict:
-    """索引单条知识文件记录，并同步文件处理状态。"""
-    file_id = file_record["id"]
-    update_knowledge_file_status(user_id, file_id, "indexing")
-
-    try:
-        index_result = index_file_vectors(
-            user_id=user_id,
-            file_id=file_id,
-            storage_path=file_record["storage_path"],
-        )
-    except Exception:
-        update_knowledge_file_status(user_id, file_id, "failed")
-        raise
-
-    update_knowledge_file_status(user_id, file_id, "indexed")
-    return {
-        "id": str(file_id),
-        "original_name": file_record["original_name"],
-        "status": "indexed",
-        **index_result,
-    }
 
 
 @router.post("/knowledge-files/{knowledge_file_id}/vectors")
@@ -78,6 +50,15 @@ def index_knowledge_base_vectors(
         user_id=user_id,
         knowledge_base_id=knowledge_base_id,
     )
+    if not file_records:
+        return {
+            "success": True,
+            "knowledge_base_id": str(knowledge_base_id),
+            "indexed_files": [],
+            "failed_files": [],
+            "message": "知识库中没有可向量化的文件",
+        }
+
     indexed_files = []
     failed_files = []
 

@@ -6,7 +6,9 @@ from langchain_chroma import Chroma
 from langchain_core.documents import Document
 
 from app.core.config import CHROMA_COLLECTION_NAME, VECTOR_STORE_PATH
+from app.db.executor import Row
 from app.repositories.knowledge_chunk_repository import replace_file_chunks
+from app.repositories.knowledge_file_repository import update_knowledge_file_status
 from app.services.documents.document_service import (
     load_document,
     split_documents,
@@ -94,4 +96,35 @@ def index_file_vectors(
         ),
         "collection_name": collection_name,
         "persist_directory": str(persist_directory),
+    }
+
+
+def index_knowledge_file_record(
+    file_record: Row | dict[str, Any],
+    user_id: int,
+) -> dict[str, Any]:
+    """索引单条知识文件记录，并同步文件处理状态。
+
+    API 层只负责权限校验和 HTTP 错误转换；文件解析、切分、向量入库、
+    全文 chunk 入库和文件状态流转统一放在这里。
+    """
+    file_id = file_record["id"]
+    update_knowledge_file_status(user_id, file_id, "indexing")
+
+    try:
+        index_result = index_file_vectors(
+            user_id=user_id,
+            file_id=file_id,
+            storage_path=file_record["storage_path"],
+        )
+    except Exception:
+        update_knowledge_file_status(user_id, file_id, "failed")
+        raise
+
+    update_knowledge_file_status(user_id, file_id, "indexed")
+    return {
+        "id": str(file_id),
+        "original_name": file_record["original_name"],
+        "status": "indexed",
+        **index_result,
     }
