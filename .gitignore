@@ -1,6 +1,7 @@
 # Local documents and generated vector store
 /demo/local_doc/
 /vector_db/
+/models/
 
 .vscode
 

@@ -22,8 +22,10 @@ import torch
 from langchain_core.documents import Document
 from transformers import AutoModelForSequenceClassification, AutoTokenizer
 
+from app.core.config import RERANKER_MODEL_PATH
 
-DEFAULT_RERANKER_MODEL = "BAAI/bge-reranker-base"
+
+DEFAULT_RERANKER_MODEL = str(RERANKER_MODEL_PATH)
 
 
 class LocalCrossEncoderReranker:
@@ -37,9 +39,13 @@ class LocalCrossEncoderReranker:
         self.device = device or (
             "cuda" if torch.cuda.is_available() else "cpu"
         )
-        self.tokenizer = AutoTokenizer.from_pretrained(model_name)
+        self.tokenizer = AutoTokenizer.from_pretrained(
+            model_name,
+            local_files_only=True,
+        )
         self.model = AutoModelForSequenceClassification.from_pretrained(
             model_name,
+            local_files_only=True,
         ).to(self.device)
         self.model.eval()
 

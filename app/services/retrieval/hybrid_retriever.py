@@ -21,7 +21,7 @@ from uuid import UUID
 from langchain_core.documents import Document
 
 from app.services.retrieval.fulltext_retriever import get_fulltext_documents
-from app.services.retrieval.reranker import get_reranker
+from app.services.retrieval.reranker import DEFAULT_RERANKER_MODEL, get_reranker
 from app.services.retrieval.rrf import reciprocal_rank_fusion
 from app.services.vectors.vector_index_service import get_vector_store
 
@@ -84,7 +84,7 @@ def get_hybrid_documents(
     vector_weight: float = 1.0,
     fulltext_weight: float = 1.0,
     rerank: bool = True,
-    reranker_model: str = "BAAI/bge-reranker-base",
+    reranker_model: str = DEFAULT_RERANKER_MODEL,
 ) -> list[Document]:
     """执行混合召回、RRF 融合，并可选使用 Cross-Encoder 精排序。
 

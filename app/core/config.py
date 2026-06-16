@@ -20,6 +20,14 @@ CHROMA_COLLECTION_NAME = os.environ.get(
     "langchain",
 )
 
+# 设置本地 Cross-Encoder 精排序模型路径
+RERANKER_MODEL_PATH = Path(
+    os.environ.get(
+        "RERANKER_MODEL_PATH",
+        "models/rerankers/bge-reranker-base",
+    )
+)
+
 # 设置JWT配置信息，环境变量中需要有 JWT_SECRET_KEY
 JWT_SECRET_KEY = os.environ.get("JWT_SECRET_KEY")
 JWT_ALGORITHM = "HS256"
