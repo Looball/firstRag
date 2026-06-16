@@ -1,3 +1,4 @@
+from collections.abc import Iterator
 from typing import Any, cast
 from uuid import UUID
 
@@ -23,6 +24,7 @@ from app.services.retrieval.hybrid_retriever import get_hybrid_documents
 
 type RetrievedDocs = list[Document]
 type ChainInput = dict[str, Any]
+type RagStreamEvent = dict[str, Any]
 
 
 def create_chat_model() -> ChatDeepSeek:
@@ -61,6 +63,32 @@ def get_res_doc(inputs: dict[str, Any]) -> str:
         )
 
     return "\n\n".join(context_parts)
+
+
+def serialize_reference_documents(docs: list[Document]) -> list[dict[str, Any]]:
+    """将检索到的文档片段转换为前端可展示的引用结构。"""
+    references = []
+    for index, doc in enumerate(docs, start=1):
+        if not isinstance(doc, Document):
+            continue
+
+        metadata = doc.metadata
+        references.append({
+            "index": index,
+            "content": doc.page_content,
+            "metadata": {
+                "source": metadata.get("source"),
+                "file_id": metadata.get("file_id"),
+                "file_name": metadata.get("file_name"),
+                "file_type": metadata.get("file_type"),
+                "chunk_index": metadata.get("chunk_index"),
+                "retrieval_sources": metadata.get("retrieval_sources"),
+                "rrf_score": metadata.get("rrf_score"),
+                "rerank_score": metadata.get("rerank_score"),
+            },
+        })
+
+    return references
 
 
 def get_knowledge_base_file_ids(
@@ -189,8 +217,27 @@ def get_answer(
     chat_history: list,
     user_id: int,
     knowledge_base_id: UUID,
-):
+) -> Iterator[str]:
     """流式返回 LCEL 链生成的答案。"""
+    for event in stream_rag_response(
+        chain=chain,
+        user_input=user_input,
+        chat_history=chat_history,
+        user_id=user_id,
+        knowledge_base_id=knowledge_base_id,
+    ):
+        if event["type"] == "answer":
+            yield event["content"]
+
+
+def stream_rag_response(
+    chain: RunnableSerializable,
+    user_input: str,
+    chat_history: list,
+    user_id: int,
+    knowledge_base_id: UUID,
+) -> Iterator[RagStreamEvent]:
+    """流式返回 RAG 事件，包括引用文档和答案片段。"""
     response = chain.stream({
         "input": user_input,
         "chat_history": chat_history,
@@ -198,6 +245,17 @@ def get_answer(
         "knowledge_base_id": knowledge_base_id,
     })
 
+    sources_sent = False
     for chunk in response:
+        if "context" in chunk and not sources_sent:
+            yield {
+                "type": "sources",
+                "sources": serialize_reference_documents(chunk["context"]),
+            }
+            sources_sent = True
+
         if "answer" in chunk:
-            yield chunk["answer"]
+            yield {
+                "type": "answer",
+                "content": chunk["answer"],
+            }

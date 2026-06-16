@@ -52,5 +52,9 @@ def chat(
             user_id=user_id,
             knowledge_base_id=req.knowledge_base_id,
         ),
-        media_type="text/plain; charset=utf-8",
+        media_type="text/event-stream; charset=utf-8",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
     )
