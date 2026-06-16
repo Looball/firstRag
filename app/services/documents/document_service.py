@@ -58,16 +58,22 @@ def convert_docx2md(docx_path) -> str:
     return markdownify(result.value, heading_style="ATX")
 
 
-def load_document(file_path: Path, file_id: UUID | str) -> list[Document]:
+def load_document(
+    file_path: Path,
+    file_id: UUID | str,
+    user_id: int | str | None = None,
+) -> list[Document]:
     """根据文件类型加载单个本地文档。"""
     suffix = file_path.suffix.lower()
 
     base_metadata = {
         "source": str(file_path),
         "file_name": file_path.name,
-        "file_id": file_id,
+        "file_id": str(file_id),
         "file_type": suffix.removeprefix("."),
     }
+    if user_id is not None:
+        base_metadata["user_id"] = str(user_id)
 
     if suffix == ".pdf":
         markdown_text = pymupdf4llm.to_markdown(str(file_path))
