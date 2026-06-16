@@ -71,6 +71,11 @@ type VectorIndexJob = {
   errorMessage: string;
 };
 
+type VectorIndexQueueItem = VectorIndexJob & {
+  targetName: string;
+  targetType: "file" | "knowledge-base";
+};
+
 type BackendKnowledgeFile = {
   id?: unknown;
   original_name?: unknown;
@@ -668,6 +673,22 @@ function isVectorIndexJobDone(job: VectorIndexJob) {
   return job.status === "succeeded" || job.status === "failed";
 }
 
+function getVectorIndexStatusText(status: VectorIndexJobStatus) {
+  if (status === "queued") {
+    return "排队中";
+  }
+
+  if (status === "processing") {
+    return "处理中";
+  }
+
+  if (status === "succeeded") {
+    return "已完成";
+  }
+
+  return "失败";
+}
+
 function wait(ms: number) {
   return new Promise<void>((resolve) => {
     window.setTimeout(resolve, ms);
@@ -984,6 +1005,9 @@ export default function Home() {
   const [vectorIndexingFileIds, setVectorIndexingFileIds] = useState<
     Record<string, boolean>
   >({});
+  const [vectorIndexQueue, setVectorIndexQueue] = useState<
+    VectorIndexQueueItem[]
+  >([]);
   const [isIndexingKnowledgeBase, setIsIndexingKnowledgeBase] =
     useState(false);
   const [vectorIndexMessage, setVectorIndexMessage] = useState("");
@@ -1519,15 +1543,45 @@ export default function Home() {
     return getVectorIndexJobs(data)[0] || null;
   }
 
+  function updateVectorIndexQueue(
+    jobs: VectorIndexJob[],
+    target: Pick<VectorIndexQueueItem, "targetName" | "targetType">
+  ) {
+    if (jobs.length === 0) {
+      return;
+    }
+
+    setVectorIndexQueue((prev) => {
+      const nextJobs = new Map<string, VectorIndexQueueItem>(
+        prev.map((job) => [job.id, job])
+      );
+
+      jobs.forEach((job) => {
+        const previousJob = nextJobs.get(job.id);
+
+        nextJobs.set(job.id, {
+          ...(previousJob || {}),
+          ...job,
+          targetName: previousJob?.targetName || target.targetName,
+          targetType: previousJob?.targetType || target.targetType,
+        });
+      });
+
+      return Array.from(nextJobs.values());
+    });
+  }
+
   async function waitForVectorIndexJobs(
     jobs: VectorIndexJob[],
-    authState: NonNullable<ReturnType<typeof parseAuthState>>
+    authState: NonNullable<ReturnType<typeof parseAuthState>>,
+    onJobsUpdated?: (jobs: VectorIndexJob[]) => void
   ) {
     if (jobs.length === 0) {
       return [];
     }
 
     let latestJobs = jobs;
+    onJobsUpdated?.(latestJobs);
 
     for (let attempt = 0; attempt < 45; attempt += 1) {
       if (latestJobs.every(isVectorIndexJobDone)) {
@@ -1547,6 +1601,7 @@ export default function Home() {
       );
 
       latestJobs = nextJobs;
+      onJobsUpdated?.(latestJobs);
     }
 
     return latestJobs;
@@ -1564,6 +1619,11 @@ export default function Home() {
       return;
     }
 
+    const targetFile = knowledgeFiles.find((file) => file.id === fileId);
+    const target = {
+      targetName: targetFile?.name || "知识库文件",
+      targetType: "file" as const,
+    };
     const authState = parseAuthState(localStorage.getItem(AUTH_STORAGE_KEY));
 
     if (!authState) {
@@ -1600,10 +1660,15 @@ export default function Home() {
 
       const data = (await response.json()) as VectorIndexResponse;
       const jobs = getVectorIndexJobs(data);
+      updateVectorIndexQueue(jobs, target);
 
       setVectorIndexMessage("文件向量化任务已提交。");
 
-      const finishedJobs = await waitForVectorIndexJobs(jobs, authState);
+      const finishedJobs = await waitForVectorIndexJobs(
+        jobs,
+        authState,
+        (latestJobs) => updateVectorIndexQueue(latestJobs, target)
+      );
       const failedJob = finishedJobs.find((job) => job.status === "failed");
 
       if (failedJob) {
@@ -1650,6 +1715,10 @@ export default function Home() {
     setVectorIndexMessage("");
 
     try {
+      const target = {
+        targetName: selectedKnowledgeBase?.name || "当前知识库",
+        targetType: "knowledge-base" as const,
+      };
       const response = await fetch(
         `/api/chat/knowledge-base/${encodeURIComponent(
           selectedKnowledgeBaseId
@@ -1675,10 +1744,15 @@ export default function Home() {
 
       const data = (await response.json()) as VectorIndexResponse;
       const jobs = getVectorIndexJobs(data);
+      updateVectorIndexQueue(jobs, target);
 
       setVectorIndexMessage("知识库向量化任务已提交。");
 
-      const finishedJobs = await waitForVectorIndexJobs(jobs, authState);
+      const finishedJobs = await waitForVectorIndexJobs(
+        jobs,
+        authState,
+        (latestJobs) => updateVectorIndexQueue(latestJobs, target)
+      );
       const failedJob = finishedJobs.find((job) => job.status === "failed");
 
       if (failedJob) {
@@ -3364,6 +3438,83 @@ export default function Home() {
                   {vectorIndexError}
                 </p>
               )}
+
+              <div className="mt-6 border border-[#cbd5d1] bg-[#f7faf8]">
+                <div className="flex items-center justify-between gap-4 border-b border-[#d5ded9] px-4 py-3">
+                  <div>
+                    <p className="font-utility text-[10px] font-semibold uppercase text-[#176b62]">
+                      任务队列
+                    </p>
+                    <p className="mt-1 text-xs text-[#72807b]">
+                      向量化任务会在这里显示处理状态
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <span className="font-utility text-[10px] text-[#72807b]">
+                      {String(vectorIndexQueue.length).padStart(2, "0")}
+                    </span>
+                    {vectorIndexQueue.some(isVectorIndexJobDone) && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setVectorIndexQueue((prev) =>
+                            prev.filter((job) => !isVectorIndexJobDone(job))
+                          );
+                        }}
+                        className="text-xs font-semibold text-[#72807b] underline decoration-[#d9aa2f] underline-offset-4 transition hover:text-[#176b62]"
+                      >
+                        清除完成
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                {vectorIndexQueue.length > 0 ? (
+                  <div className="divide-y divide-[#d5ded9]">
+                    {vectorIndexQueue.map((job) => {
+                      const isFailed = job.status === "failed";
+                      const isSucceeded = job.status === "succeeded";
+
+                      return (
+                        <div
+                          key={job.id}
+                          className="flex items-start justify-between gap-4 px-4 py-3"
+                        >
+                          <div className="min-w-0">
+                            <p className="truncate text-sm font-semibold text-[#17201f]">
+                              {job.targetName}
+                            </p>
+                            <p className="mt-1 font-utility text-[10px] uppercase text-[#72807b]">
+                              {job.targetType === "file" ? "File" : "Knowledge Base"} ·{" "}
+                              {job.id.slice(0, 8)}
+                            </p>
+                            {job.errorMessage && (
+                              <p className="mt-2 text-xs text-[#9b3c29]">
+                                {job.errorMessage}
+                              </p>
+                            )}
+                          </div>
+                          <span
+                            className={`shrink-0 border px-2 py-1 text-xs font-semibold ${
+                              isFailed
+                                ? "border-[#e36b4f] bg-[#fff1ed] text-[#9b3c29]"
+                                : isSucceeded
+                                  ? "border-[#176b62] bg-[#edf7f3] text-[#176b62]"
+                                  : "border-[#d9aa2f] bg-[#fff7df] text-[#7a5a12]"
+                            }`}
+                          >
+                            {getVectorIndexStatusText(job.status)}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <p className="px-4 py-5 text-center text-sm text-[#72807b]">
+                    暂无向量化任务
+                  </p>
+                )}
+              </div>
 
               <div className="mt-6">
                 <div className="flex items-center justify-between gap-4">
