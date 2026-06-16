@@ -49,6 +49,8 @@ def chat(
             user_input=req.message,
             history=history,
             conversation_id=req.conversation_id,
+            user_id=user_id,
+            knowledge_base_id=req.knowledge_base_id,
         ),
         media_type="text/plain; charset=utf-8",
     )

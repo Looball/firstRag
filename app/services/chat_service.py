@@ -19,10 +19,18 @@ def stream_answer_and_save(
     user_input: str,
     history: list,
     conversation_id: UUID,
+    user_id: int,
+    knowledge_base_id: UUID,
 ) -> Iterator[str]:
     full_answer = ""
 
-    for chunk in get_answer(chain, user_input, history):
+    for chunk in get_answer(
+        chain=chain,
+        user_input=user_input,
+        chat_history=history,
+        user_id=user_id,
+        knowledge_base_id=knowledge_base_id,
+    ):
         full_answer += chunk
         yield chunk
 
