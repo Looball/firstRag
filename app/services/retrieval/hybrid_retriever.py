@@ -15,6 +15,7 @@
    最终候选池，而不是直接对全库或每一路大量结果排序。
 """
 
+import logging
 from collections.abc import Sequence
 from uuid import UUID
 
@@ -24,6 +25,8 @@ from app.services.retrieval.fulltext_retriever import get_fulltext_documents
 from app.services.retrieval.reranker import DEFAULT_RERANKER_MODEL, get_reranker
 from app.services.retrieval.rrf import reciprocal_rank_fusion
 from app.services.vectors.vector_index_service import get_vector_store
+
+logger = logging.getLogger(__name__)
 
 
 def build_chroma_filter(
@@ -56,16 +59,24 @@ def get_vector_documents(
     file_ids: Sequence[UUID | str] | None = None,
     k: int = 5,
 ) -> list[Document]:
-    """从 Chroma 中按用户和文件范围做向量检索。"""
+    """从 Chroma 中按用户和文件范围做向量检索。
+
+    ChromaDB 1.5.x 的 Rust backend 偶发 HNSW 内部错误（Error finding id），
+    此处捕获异常并降级为空结果，让全文检索仍可独立工作。
+    """
     vectordb = get_vector_store()
-    documents = vectordb.similarity_search(
-        query=query,
-        k=k,
-        filter=build_chroma_filter(
-            user_id=user_id,
-            file_ids=file_ids,
-        ),
-    )
+    try:
+        documents = vectordb.similarity_search(
+            query=query,
+            k=k,
+            filter=build_chroma_filter(
+                user_id=user_id,
+                file_ids=file_ids,
+            ),
+        )
+    except Exception:
+        logger.exception("Chroma 向量检索失败，降级为空结果")
+        return []
 
     for document in documents:
         document.metadata["retrieval_source"] = "vector"

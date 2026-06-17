@@ -29,8 +29,13 @@ def stream_answer_and_save(
     user_id: int,
     knowledge_base_id: UUID,
 ) -> Iterator[str]:
-    """流式返回答案和引用文档，并在结束后保存助手回答。"""
+    """流式返回答案和引用文档，并在结束后保存助手回答。
+
+    流式过程中先发送 sources 事件（引用文档），再逐片发送 answer
+    事件。流式结束后 done 事件携带完整答案和引用来源，方便前端直接使用。
+    """
     full_answer = ""
+    sources: list[dict] = []
 
     for event in stream_rag_response(
         chain=chain,
@@ -40,8 +45,9 @@ def stream_answer_and_save(
         knowledge_base_id=knowledge_base_id,
     ):
         if event["type"] == "sources":
+            sources = event["sources"]
             yield format_sse_event("sources", {
-                "sources": event["sources"],
+                "sources": sources,
             })
             continue
 
@@ -55,6 +61,8 @@ def stream_answer_and_save(
     save_message(conversation_id, "assistant", full_answer)
     yield format_sse_event("done", {
         "message": "回答完成",
+        "answer": full_answer,
+        "sources": sources,
     })
 
 

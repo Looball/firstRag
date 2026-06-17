@@ -65,27 +65,52 @@ def get_res_doc(inputs: dict[str, Any]) -> str:
     return "\n\n".join(context_parts)
 
 
-def serialize_reference_documents(docs: list[Document]) -> list[dict[str, Any]]:
-    """将检索到的文档片段转换为前端可展示的引用结构。"""
+def serialize_reference_documents(
+    docs: list[Document],
+    user_id: int | None = None,
+) -> list[dict[str, Any]]:
+    """将检索到的文档片段转换为前端可展示的引用结构。
+
+    返回的每个引用对象将来源信息和排序分数扁平放在顶层，
+    方便前端直接读取。file_name 使用数据库中用户上传的原始文件名，
+    而非磁盘存储的统称名。
+    """
+    from app.repositories.knowledge_file_repository import (
+        get_file_original_names,
+    )
+
+    # 批量查询 file_id → 原始文件名 映射
+    file_ids = list({
+        doc.metadata.get("file_id")
+        for doc in docs
+        if isinstance(doc, Document) and doc.metadata.get("file_id")
+    })
+    original_names = (
+        get_file_original_names(user_id, file_ids)
+        if user_id is not None and file_ids
+        else {}
+    )
+
     references = []
     for index, doc in enumerate(docs, start=1):
         if not isinstance(doc, Document):
             continue
 
         metadata = doc.metadata
+        doc_file_id = metadata.get("file_id", "")
+
         references.append({
             "index": index,
             "content": doc.page_content,
-            "metadata": {
-                "source": metadata.get("source"),
-                "file_id": metadata.get("file_id"),
-                "file_name": metadata.get("file_name"),
-                "file_type": metadata.get("file_type"),
-                "chunk_index": metadata.get("chunk_index"),
-                "retrieval_sources": metadata.get("retrieval_sources"),
-                "rrf_score": metadata.get("rrf_score"),
-                "rerank_score": metadata.get("rerank_score"),
-            },
+            "source": metadata.get("source"),
+            "file_id": doc_file_id,
+            "file_name": original_names.get(doc_file_id)
+                          or metadata.get("file_name"),
+            "file_type": metadata.get("file_type"),
+            "chunk_index": metadata.get("chunk_index"),
+            "retrieval_sources": metadata.get("retrieval_sources"),
+            "rrf_score": metadata.get("rrf_score"),
+            "rerank_score": metadata.get("rerank_score"),
         })
 
     return references
@@ -95,7 +120,11 @@ def get_knowledge_base_file_ids(
     user_id: int,
     knowledge_base_id: UUID,
 ) -> list[str]:
-    """查询知识库关联的文件 ID 列表。"""
+    """查询知识库中已完成向量化的文件 ID 列表。
+
+    只返回 status='indexed' 的文件，避免 ChromaDB 查找未向量化
+    文件 ID 时触发 HNSW 内部错误。
+    """
     rows = get_knowledge_base_files(
         knowledge_base_id=knowledge_base_id,
         user_id=user_id,
@@ -103,6 +132,7 @@ def get_knowledge_base_file_ids(
     return [
         str(row["id"])
         for row in rows
+        if row.get("status") == "indexed"
     ]
 
 
@@ -250,7 +280,10 @@ def stream_rag_response(
         if "context" in chunk and not sources_sent:
             yield {
                 "type": "sources",
-                "sources": serialize_reference_documents(chunk["context"]),
+                "sources": serialize_reference_documents(
+                    chunk["context"],
+                    user_id=user_id,
+                ),
             }
             sources_sent = True
 

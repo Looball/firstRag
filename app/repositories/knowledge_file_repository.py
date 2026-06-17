@@ -193,3 +193,27 @@ def update_knowledge_file_status(
         """,
         (status, knowledge_file_id, user_id),
     )
+
+
+def get_file_original_names(
+    user_id: int,
+    file_ids: list[str],
+) -> dict[str, str]:
+    """批量查询 file_id → original_name 映射。
+
+    用于检索结果序列化时，将磁盘存储文件名替换为用户上传的原始文件名。
+    """
+    if not file_ids:
+        return {}
+
+    rows = fetch_all(
+        """
+        SELECT id, original_name
+        FROM knowledge_files
+        WHERE user_id = %s
+          AND id = ANY(%s::uuid[])
+          AND deleted_at IS NULL;
+        """,
+        (user_id, file_ids),
+    )
+    return {str(row["id"]): row["original_name"] for row in rows}
