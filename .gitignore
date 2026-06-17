@@ -19,6 +19,7 @@ __pycache__/
 # agent
 .agents/
 AGENTS.md
+CLAUDE.md
 
 # 忽略上传文件夹
 uploads
