@@ -4,15 +4,18 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from app.core.security import get_current_user_id
 from app.repositories.knowledge_base_repository import knowledge_base_exists
+from app.repositories.knowledge_chunk_repository import delete_file_chunks
 from app.repositories.knowledge_file_repository import (
     get_knowledge_base_files_for_indexing,
     get_user_knowledge_file,
+    update_knowledge_file_status,
 )
 from app.repositories.vector_index_job_repository import get_user_vector_index_job
 from app.services.vectors.vector_index_queue_service import (
     enqueue_file_vector_index,
     serialize_vector_index_job,
 )
+from app.services.vectors.vector_index_service import get_vector_store
 
 
 router = APIRouter(prefix="/chat", tags=["vector-indexes"])
@@ -91,4 +94,52 @@ def get_vector_index_job(
     return {
         "success": True,
         "job": serialize_vector_index_job(job),
+    }
+
+
+@router.delete("/knowledge-files/{knowledge_file_id}/vectors")
+def delete_knowledge_file_vectors(
+    knowledge_file_id: UUID,
+    user_id: int = Depends(get_current_user_id),
+):
+    """删除单个知识文件的向量化存储。
+
+    同时清理 Chroma 向量库和 PostgreSQL 全文检索分块，
+    并将文件状态重置为 pending，允许重新向量化。
+    """
+    file_record = get_user_knowledge_file(user_id, knowledge_file_id)
+    if file_record is None:
+        raise HTTPException(status_code=404, detail="文件不存在")
+
+    normalized_user_id = str(user_id)
+    normalized_file_id = str(knowledge_file_id)
+
+    # 1. 从 Chroma 向量库删除
+    try:
+        vectordb = get_vector_store()
+        vectordb.delete(
+            where={
+                "$and": [
+                    {"user_id": normalized_user_id},
+                    {"file_id": normalized_file_id},
+                ]
+            }
+        )
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=f"删除向量存储失败: {exc}",
+        ) from exc
+
+    # 2. 从 PostgreSQL 删除全文检索分块
+    chunks_deleted = delete_file_chunks(user_id, knowledge_file_id)
+
+    # 3. 重置文件状态为 pending
+    update_knowledge_file_status(user_id, knowledge_file_id, "pending")
+
+    return {
+        "success": True,
+        "message": "向量化存储已删除",
+        "file_id": normalized_file_id,
+        "chunks_deleted": chunks_deleted,
     }
