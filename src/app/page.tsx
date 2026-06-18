@@ -1368,7 +1368,22 @@ export default function Home() {
       return;
     }
 
+    const MAX_FILE_SIZE = 200 * 1024 * 1024;
     const selectedFiles = Array.from(files);
+    const oversizedFiles = selectedFiles.filter(
+      (file) => file.size > MAX_FILE_SIZE
+    );
+
+    if (oversizedFiles.length > 0) {
+      const names = oversizedFiles
+        .map((file) => file.name)
+        .join("、");
+      setKnowledgeFileUploadError(
+        `以下文件超过 200MB 限制，请压缩后重新上传：${names}。`
+      );
+      return;
+    }
+
     const authState = parseAuthState(localStorage.getItem(AUTH_STORAGE_KEY));
 
     if (!authState) {
