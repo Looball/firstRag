@@ -11,6 +11,11 @@ load_dotenv(PROJECT_ROOT / ".env")
 # 设置文件存储路径
 UPLOAD_ROOT = Path("./uploads")
 
+# 设置上传文件大小限制，默认 200MB，与前端限制保持一致
+MAX_UPLOAD_FILE_SIZE_BYTES = int(
+    os.environ.get("MAX_UPLOAD_FILE_SIZE_BYTES", str(200 * 1024 * 1024))
+)
+
 # 设置Chroma向量库存储路径和集合名称
 VECTOR_STORE_PATH = Path(
     os.environ.get("VECTOR_STORE_PATH", "./vector_db/chroma")

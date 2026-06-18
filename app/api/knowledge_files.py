@@ -13,7 +13,11 @@ from app.repositories.knowledge_file_repository import (
     get_file_by_hash,
     get_user_knowledge_files,
 )
-from app.services.file_service import build_storage_path, calculate_file_hash
+from app.services.file_service import (
+    FileTooLargeError,
+    build_storage_path,
+    calculate_file_hash,
+)
 from app.services.vectors.vector_index_queue_service import enqueue_file_vector_index
 
 
@@ -85,7 +89,11 @@ async def upload_knowledge_files(
             raise HTTPException(status_code=400, detail="文件名不能为空")
 
         # 计算文件hash值和文件大小
-        file_hash, size_bytes = await calculate_file_hash(file)
+        try:
+            file_hash, size_bytes = await calculate_file_hash(file)
+        except FileTooLargeError as exc:
+            await file.close()
+            raise HTTPException(status_code=413, detail=str(exc)) from exc
 
         # 同一用户上传过相同内容时，复用已有文件，只补充知识库关联
         existing_file = get_file_by_hash(user_id, file_hash)
