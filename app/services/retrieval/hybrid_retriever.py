@@ -24,6 +24,7 @@ from langchain_core.documents import Document
 from app.services.retrieval.fulltext_retriever import get_fulltext_documents
 from app.services.retrieval.reranker import DEFAULT_RERANKER_MODEL, get_reranker
 from app.services.retrieval.rrf import reciprocal_rank_fusion
+from app.services.vectors.embedding_model import ZhipuAIEmbeddings
 from app.services.vectors.vector_index_service import get_vector_store
 
 logger = logging.getLogger(__name__)
@@ -61,22 +62,46 @@ def get_vector_documents(
 ) -> list[Document]:
     """从 Chroma 中按用户和文件范围做向量检索。
 
-    ChromaDB 1.5.x 的 Rust backend 偶发 HNSW 内部错误（Error finding id），
-    此处捕获异常并降级为空结果，让全文检索仍可独立工作。
+    ChromaDB 1.5.x Rust backend 在内部调用 embedding 函数（query_texts
+    路径）时会触发 SSL 超时或 HNSW Error finding id。本函数改为在外部
+    预计算 query embedding，通过 query_embeddings 路径查询，完全绕过
+    ChromaDB 内部 embedding 调用链。
+
+    同时只用 user_id 做简单过滤，在 Python 侧按 file_ids 筛选，避免
+    $and + $in 复杂过滤器。
     """
     vectordb = get_vector_store()
+    normalized_file_ids = (
+        {str(fid) for fid in file_ids}
+        if file_ids
+        else None
+    )
+
+    chroma_filter = {"user_id": str(user_id)}
+    fetch_k = max(k * 3, 30) if normalized_file_ids else k
+
     try:
-        documents = vectordb.similarity_search(
-            query=query,
-            k=k,
-            filter=build_chroma_filter(
-                user_id=user_id,
-                file_ids=file_ids,
-            ),
+        # 外部预计算 embedding，绕过 ChromaDB query_texts 路径
+        embedding_model = ZhipuAIEmbeddings()
+        query_embedding = embedding_model.embed_query(query)
+
+        candidates = vectordb.similarity_search_by_vector(
+            embedding=query_embedding,
+            k=fetch_k,
+            filter=chroma_filter,
         )
     except Exception:
         logger.exception("Chroma 向量检索失败，降级为空结果")
         return []
+
+    # Python 侧按 file_ids 筛选
+    if normalized_file_ids:
+        documents = [
+            doc for doc in candidates
+            if doc.metadata.get("file_id") in normalized_file_ids
+        ][:k]
+    else:
+        documents = candidates[:k]
 
     for document in documents:
         document.metadata["retrieval_source"] = "vector"
