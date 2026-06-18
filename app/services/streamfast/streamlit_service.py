@@ -1,14 +1,53 @@
+"""Streamlit 兼容演示服务。"""
+
 from collections.abc import Iterable
+from typing import Any
 from uuid import UUID
 
 import streamlit as st
 from streamlit.delta_generator import DeltaGenerator
 
-from app.services.rag_service import get_answer, get_chain
+from app.services.rag_service import get_chain, stream_rag_response
 
 
-def render_stream(stream: Iterable) -> str:
-    """将回答流逐步渲染到Streamlit页面。"""
+def render_sources(sources: list[dict[str, Any]]) -> None:
+    """在 Streamlit 中渲染检索到的引用片段。"""
+    if not sources:
+        return
+
+    with st.expander("参考片段", expanded=False):
+        for source in sources:
+            file_name = source.get("file_name") or source.get("source") or "未知来源"
+            chunk_index = source.get("chunk_index")
+            title = f"{file_name}"
+            if chunk_index is not None:
+                title += f" · chunk {chunk_index}"
+
+            st.markdown(f"**{title}**")
+            st.caption(
+                " | ".join(
+                    str(item)
+                    for item in [
+                        f"RRF: {source['rrf_score']:.4f}"
+                        if isinstance(source.get("rrf_score"), int | float)
+                        else None,
+                        f"Rerank: {source['rerank_score']:.4f}"
+                        if isinstance(source.get("rerank_score"), int | float)
+                        else None,
+                    ]
+                    if item
+                )
+            )
+            st.markdown(source.get("content") or "")
+
+
+def render_stream(stream: Iterable[Any]) -> str:
+    """将回答流逐步渲染到 Streamlit 页面。
+
+    兼容两种输入：
+    1. 旧版 `Iterator[str]`
+    2. 新版 `stream_rag_response` 返回的事件流
+    """
     output = ""
     placeholder: DeltaGenerator | None = None
 
@@ -16,16 +55,26 @@ def render_stream(stream: Iterable) -> str:
         if chunk is None:
             continue
 
-        output += str(chunk)
+        if isinstance(chunk, dict):
+            event_type = chunk.get("type")
+            if event_type == "sources":
+                # 新版 RAG 会先产出引用来源，再产出答案分片。
+                render_sources(chunk.get("sources") or [])
+                continue
+            if event_type != "answer":
+                continue
+            content = str(chunk.get("content") or "")
+        else:
+            content = str(chunk)
+
+        output += content
         if placeholder is None:
             placeholder = st.empty()
-        else:
-            placeholder.markdown(output)
+        placeholder.markdown(output)
 
     return output
 
 
-# 展示页面 Streamlit
 def run_streamlit_app() -> None:
     """Streamlit启动程序。"""
     st.markdown("### 🦜🔗 RAG本地知识库Demo")
@@ -73,7 +122,7 @@ def run_streamlit_app() -> None:
         with messages.chat_message("human"):
             st.markdown(prompt)
 
-        answer = get_answer(
+        answer_stream = stream_rag_response(
             chain=st.session_state.qa_history_chain,
             user_input=prompt,
             chat_history=history_for_chain,
@@ -81,8 +130,7 @@ def run_streamlit_app() -> None:
             knowledge_base_id=knowledge_base_id,
         )
 
-        # 流式输出
         with messages.chat_message("ai"):
-            output = render_stream(answer)
+            output = render_stream(answer_stream)
 
         st.session_state.messages.append(("ai", output))
