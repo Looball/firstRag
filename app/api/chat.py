@@ -36,11 +36,17 @@ def chat(
     # 取出历史记录
     history = load_chat_history(req.conversation_id)
 
-    # 保存用户输入
-    save_message(req.conversation_id, "user", req.message)
-
     # 创建检索链
     chain = get_chain()
+
+    # 创建链成功后再持久化本轮消息，避免配置错误留下孤立用户消息。
+    save_message(req.conversation_id, "user", req.message)
+    assistant_message = save_message(
+        req.conversation_id,
+        "assistant",
+        "",
+        status="generating",
+    )
 
     # 返回流式响应
     return StreamingResponse(
@@ -49,6 +55,7 @@ def chat(
             user_input=req.message,
             history=history,
             conversation_id=req.conversation_id,
+            assistant_message_id=assistant_message["id"],
             user_id=user_id,
             knowledge_base_id=req.knowledge_base_id,
         ),
