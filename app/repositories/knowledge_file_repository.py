@@ -15,6 +15,7 @@ def get_file_by_hash(user_id: int, file_hash: str) -> Row | None:
             mime_type,
             size_bytes,
             status,
+            index_version,
             created_at,
             updated_at
         FROM knowledge_files
@@ -60,6 +61,7 @@ def create_file_with_relation(
                 mime_type,
                 size_bytes,
                 status,
+                index_version,
                 created_at,
                 updated_at
         ),
@@ -97,6 +99,7 @@ def get_user_knowledge_files(user_id: int) -> list[Row]:
             kf.mime_type,
             kf.size_bytes,
             kf.status,
+            kf.index_version,
             kf.created_at,
             COUNT(kbf.knowledge_base_id) AS usage_count
         FROM knowledge_files AS kf
@@ -132,6 +135,7 @@ def get_user_knowledge_file(
             mime_type,
             size_bytes,
             status,
+            index_version,
             created_at,
             updated_at
         FROM knowledge_files
@@ -158,6 +162,7 @@ def get_knowledge_base_files_for_indexing(
             kf.mime_type,
             kf.size_bytes,
             kf.status,
+            kf.index_version,
             kf.created_at,
             kf.updated_at
         FROM knowledge_base_files AS kbf
@@ -180,18 +185,46 @@ def update_knowledge_file_status(
     user_id: int,
     knowledge_file_id: UUID,
     status: str,
+    expected_index_version: int | None = None,
 ) -> int:
     """更新属于当前用户的知识文件处理状态。"""
+    version_filter = ""
+    params: list[object] = [status, knowledge_file_id, user_id]
+    if expected_index_version is not None:
+        version_filter = "AND index_version = %s"
+        params.append(expected_index_version)
+
     return execute(
-        """
+        f"""
         UPDATE knowledge_files
         SET status = %s,
             updated_at = now()
         WHERE id = %s
           AND user_id = %s
-          AND deleted_at IS NULL;
+          AND deleted_at IS NULL
+          {version_filter};
         """,
-        (status, knowledge_file_id, user_id),
+        params,
+    )
+
+
+def reset_file_index_state(
+    user_id: int,
+    knowledge_file_id: UUID,
+) -> Row | None:
+    """递增索引版本并将文件重置为待索引状态。"""
+    return fetch_one(
+        """
+        UPDATE knowledge_files
+        SET index_version = index_version + 1,
+            status = 'pending',
+            updated_at = now()
+        WHERE id = %s
+          AND user_id = %s
+          AND deleted_at IS NULL
+        RETURNING id, index_version, status, updated_at;
+        """,
+        (knowledge_file_id, user_id),
     )
 
 

@@ -6,6 +6,7 @@ from uuid import UUID
 from app.repositories.knowledge_file_repository import get_user_knowledge_file
 from app.repositories.vector_index_job_repository import (
     claim_next_vector_index_job,
+    mark_vector_index_job_cancelled,
     mark_vector_index_job_failed,
     mark_vector_index_job_succeeded,
     reclaim_expired_vector_index_jobs,
@@ -26,11 +27,20 @@ def process_next_vector_index_job(worker_id: str) -> bool:
     job_id = job["id"]
     user_id = job["user_id"]
     file_id = job["knowledge_file_id"]
+    index_version = job.get("index_version", 0)
 
     try:
         file_record = get_user_knowledge_file(user_id, file_id)
         if file_record is None:
             raise FileNotFoundError(f"文件不存在：{file_id}")
+
+        if file_record.get("index_version", 0) != index_version:
+            mark_vector_index_job_cancelled(
+                UUID(str(job_id)),
+                "文件索引版本已更新，旧任务已取消",
+            )
+            print(f"[{worker_id}] cancelled stale file={file_id} job={job_id}")
+            return True
 
         if file_record["status"] == "indexed":
             result = {
@@ -43,7 +53,11 @@ def process_next_vector_index_job(worker_id: str) -> bool:
             print(f"[{worker_id}] skipped indexed file={file_id} job={job_id}")
             return True
 
-        result = index_knowledge_file_record(file_record, user_id)
+        result = index_knowledge_file_record(
+            file_record,
+            user_id,
+            index_version,
+        )
         mark_vector_index_job_succeeded(UUID(str(job_id)), result)
         print(f"[{worker_id}] indexed file={file_id} job={job_id}")
     except Exception as exc:

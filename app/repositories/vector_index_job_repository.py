@@ -14,6 +14,7 @@ def enqueue_vector_index_job(
     user_id: int,
     knowledge_file_id: UUID,
     knowledge_base_id: UUID | None = None,
+    index_version: int = 0,
     priority: int = 100,
 ) -> Row:
     """创建文件向量化任务；如果已有活跃任务，则返回已有任务。"""
@@ -27,15 +28,17 @@ def enqueue_vector_index_job(
                     user_id,
                     knowledge_file_id,
                     knowledge_base_id,
+                    index_version,
                     priority
                 )
-                VALUES (%s, %s, %s, %s, %s)
+                VALUES (%s, %s, %s, %s, %s, %s)
                 ON CONFLICT DO NOTHING
                 RETURNING
                     id,
                     user_id,
                     knowledge_file_id,
                     knowledge_base_id,
+                    index_version,
                     status,
                     attempts,
                     max_attempts,
@@ -49,6 +52,7 @@ def enqueue_vector_index_job(
                     user_id,
                     knowledge_file_id,
                     knowledge_base_id,
+                    index_version,
                     priority,
                 ),
             )
@@ -65,6 +69,7 @@ def enqueue_vector_index_job(
                     user_id,
                     knowledge_file_id,
                     knowledge_base_id,
+                    index_version,
                     status,
                     attempts,
                     max_attempts,
@@ -102,6 +107,7 @@ def get_user_vector_index_job(
             user_id,
             knowledge_file_id,
             knowledge_base_id,
+            index_version,
             status,
             attempts,
             max_attempts,
@@ -149,6 +155,7 @@ def claim_next_vector_index_job(worker_id: str) -> Row | None:
                     job.user_id,
                     job.knowledge_file_id,
                     job.knowledge_base_id,
+                    job.index_version,
                     job.status,
                     job.attempts,
                     job.max_attempts,
@@ -228,6 +235,7 @@ def mark_vector_index_job_succeeded(
                     finished_at = now(),
                     updated_at = now()
                 WHERE id = %s
+                  AND status = 'processing'
                 RETURNING id, status, result, updated_at, finished_at;
                 """,
                 (Jsonb(result), job_id),
@@ -270,6 +278,7 @@ def mark_vector_index_job_failed(
                     END,
                     updated_at = now()
                 WHERE id = %s
+                  AND status = 'processing'
                 RETURNING
                     id,
                     status,
@@ -280,6 +289,60 @@ def mark_vector_index_job_failed(
                     finished_at;
                 """,
                 (error_message[:2000], job_id),
+            )
+            row = cursor.fetchone()
+            return dict(row) if row is not None else None
+
+
+def cancel_active_vector_index_jobs(
+    user_id: int,
+    knowledge_file_id: UUID,
+    reason: str,
+) -> int:
+    """取消同一文件尚未完成的旧版本索引任务。"""
+    with get_connection() as connection:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """
+                UPDATE vector_index_jobs
+                SET status = 'cancelled',
+                    error_message = %s,
+                    locked_by = NULL,
+                    locked_at = NULL,
+                    heartbeat_at = NULL,
+                    finished_at = now(),
+                    updated_at = now()
+                WHERE user_id = %s
+                  AND knowledge_file_id = %s
+                  AND status IN ('queued', 'processing')
+                """,
+                (reason[:2000], user_id, knowledge_file_id),
+            )
+            return cursor.rowcount
+
+
+def mark_vector_index_job_cancelled(
+    job_id: UUID,
+    reason: str,
+) -> Row | None:
+    """将已领取但过期的索引任务标记为 cancelled。"""
+    with get_connection() as connection:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """
+                UPDATE vector_index_jobs
+                SET status = 'cancelled',
+                    error_message = %s,
+                    locked_by = NULL,
+                    locked_at = NULL,
+                    heartbeat_at = NULL,
+                    finished_at = now(),
+                    updated_at = now()
+                WHERE id = %s
+                  AND status = 'processing'
+                RETURNING id, status, error_message, updated_at, finished_at;
+                """,
+                (reason[:2000], job_id),
             )
             row = cursor.fetchone()
             return dict(row) if row is not None else None

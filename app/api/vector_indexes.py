@@ -3,14 +3,18 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException
 
 from app.core.security import get_current_user_id
+from app.db.locks import file_index_lock
 from app.repositories.knowledge_base_repository import knowledge_base_exists
 from app.repositories.knowledge_chunk_repository import delete_file_chunks
 from app.repositories.knowledge_file_repository import (
     get_knowledge_base_files_for_indexing,
     get_user_knowledge_file,
-    update_knowledge_file_status,
+    reset_file_index_state,
 )
-from app.repositories.vector_index_job_repository import get_user_vector_index_job
+from app.repositories.vector_index_job_repository import (
+    cancel_active_vector_index_jobs,
+    get_user_vector_index_job,
+)
 from app.services.vectors.vector_index_queue_service import (
     enqueue_file_vector_index,
     serialize_vector_index_job,
@@ -114,28 +118,34 @@ def delete_knowledge_file_vectors(
     normalized_user_id = str(user_id)
     normalized_file_id = str(knowledge_file_id)
 
-    # 1. 从 Chroma 向量库删除
-    try:
-        vectordb = get_vector_store()
-        vectordb.delete(
-            where={
-                "$and": [
-                    {"user_id": normalized_user_id},
-                    {"file_id": normalized_file_id},
-                ]
-            }
+    with file_index_lock(user_id, knowledge_file_id):
+        # 1. 使尚未完成的旧任务失效，避免其在删除后再次写回数据。
+        cancel_active_vector_index_jobs(
+            user_id,
+            knowledge_file_id,
+            "用户删除了该文件的向量化结果",
         )
-    except Exception as exc:
-        raise HTTPException(
-            status_code=500,
-            detail=f"删除向量存储失败: {exc}",
-        ) from exc
 
-    # 2. 从 PostgreSQL 删除全文检索分块
-    chunks_deleted = delete_file_chunks(user_id, knowledge_file_id)
+        # 2. 从 Chroma 向量库删除
+        try:
+            vectordb = get_vector_store()
+            vectordb.delete(
+                where={
+                    "$and": [
+                        {"user_id": normalized_user_id},
+                        {"file_id": normalized_file_id},
+                    ]
+                }
+            )
+        except Exception as exc:
+            raise HTTPException(
+                status_code=500,
+                detail=f"删除向量存储失败: {exc}",
+            ) from exc
 
-    # 3. 重置文件状态为 pending
-    update_knowledge_file_status(user_id, knowledge_file_id, "pending")
+        # 3. 从 PostgreSQL 删除全文检索分块并递增版本。
+        chunks_deleted = delete_file_chunks(user_id, knowledge_file_id)
+        reset_file_index_state(user_id, knowledge_file_id)
 
     return {
         "success": True,

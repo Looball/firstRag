@@ -17,6 +17,7 @@ def serialize_vector_index_job(job: Row | dict[str, Any]) -> dict[str, Any]:
             if job.get("knowledge_base_id") is not None
             else None
         ),
+        "index_version": job.get("index_version", 0),
         "status": job["status"],
         "attempts": job["attempts"],
         "max_attempts": job["max_attempts"],
@@ -64,8 +65,14 @@ def enqueue_file_vector_index(
         user_id=user_id,
         knowledge_file_id=file_record["id"],
         knowledge_base_id=knowledge_base_id,
+        index_version=file_record.get("index_version", 0),
     )
     if job["status"] == "queued":
-        update_knowledge_file_status(user_id, file_record["id"], "queued")
+        update_knowledge_file_status(
+            user_id,
+            file_record["id"],
+            "queued",
+            expected_index_version=file_record.get("index_version", 0),
+        )
 
     return serialize_vector_index_job(job)

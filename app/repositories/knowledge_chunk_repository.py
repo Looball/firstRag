@@ -12,6 +12,7 @@ from app.db.executor import Row, fetch_all
 def replace_file_chunks(
     user_id: int,
     file_id: UUID | str,
+    index_version: int,
     chunks: list[Document],
     chunk_ids: list[str],
 ) -> int:
@@ -25,6 +26,7 @@ def replace_file_chunks(
             chunk_id,
             user_id,
             normalized_file_id,
+            index_version,
             chunk.metadata["chunk_index"],
             chunk.page_content,
             Jsonb(chunk.metadata),
@@ -52,11 +54,12 @@ def replace_file_chunks(
                     chunk_id,
                     user_id,
                     knowledge_file_id,
+                    index_version,
                     chunk_index,
                     content,
                     metadata
                 )
-                VALUES (%s, %s, %s, %s, %s, %s);
+                VALUES (%s, %s, %s, %s, %s, %s, %s);
                 """,
                 rows,
             )
