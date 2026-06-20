@@ -54,6 +54,20 @@ def build_chroma_filter(
     }
 
 
+def build_file_chroma_filter(user_id: int, file_id: UUID | str) -> dict:
+    """构造单文件的 Chroma metadata 过滤条件。
+
+    不使用 `$in` 批量过滤，规避当前 Chroma Rust backend 的复杂过滤问题；
+    单文件等值过滤仍由 Chroma 在向量召回前执行。
+    """
+    return {
+        "$and": [
+            {"user_id": str(user_id)},
+            {"file_id": str(file_id)},
+        ]
+    }
+
+
 def get_vector_documents(
     query: str,
     user_id: int,
@@ -67,44 +81,43 @@ def get_vector_documents(
     预计算 query embedding，通过 query_embeddings 路径查询，完全绕过
     ChromaDB 内部 embedding 调用链。
 
-    同时只用 user_id 做简单过滤，在 Python 侧按 file_ids 筛选，避免
-    $and + $in 复杂过滤器。
+    指定知识库文件范围时，逐个文件在 Chroma 侧进行等值过滤，再按向量
+    距离合并排序。这样不会因其它知识库的高分文档占满固定候选池而漏召回。
     """
     vectordb = get_vector_store()
-    normalized_file_ids = (
-        {str(fid) for fid in file_ids}
-        if file_ids
-        else None
-    )
-
-    chroma_filter = {"user_id": str(user_id)}
-    fetch_k = max(k * 3, 30) if normalized_file_ids else k
-
     try:
         # 外部预计算 embedding，绕过 ChromaDB query_texts 路径
         embedding_model = ZhipuAIEmbeddings()
         query_embedding = embedding_model.embed_query(query)
 
-        candidates = vectordb.similarity_search_by_vector(
-            embedding=query_embedding,
-            k=fetch_k,
-            filter=chroma_filter,
-        )
+        if file_ids:
+            scored_candidates = []
+            for file_id in {str(file_id) for file_id in file_ids}:
+                scored_candidates.extend(
+                    vectordb.similarity_search_by_vector_with_relevance_scores(
+                        embedding=query_embedding,
+                        k=k,
+                        filter=build_file_chroma_filter(user_id, file_id),
+                    )
+                )
+            # Chroma 返回的是距离，数值越小语义越相近。
+            scored_candidates.sort(key=lambda item: item[1])
+            candidates = scored_candidates[:k]
+        else:
+            candidates = vectordb.similarity_search_by_vector_with_relevance_scores(
+                embedding=query_embedding,
+                k=k,
+                filter={"user_id": str(user_id)},
+            )
     except Exception:
         logger.exception("Chroma 向量检索失败，降级为空结果")
         return []
 
-    # Python 侧按 file_ids 筛选
-    if normalized_file_ids:
-        documents = [
-            doc for doc in candidates
-            if doc.metadata.get("file_id") in normalized_file_ids
-        ][:k]
-    else:
-        documents = candidates[:k]
-
-    for document in documents:
+    documents = []
+    for document, score in candidates:
         document.metadata["retrieval_source"] = "vector"
+        document.metadata["vector_score"] = float(score)
+        documents.append(document)
 
     return documents
 
