@@ -7,6 +7,9 @@ from app.db.connection import get_connection
 from app.db.executor import Row, fetch_one
 
 
+DEFAULT_JOB_LEASE_SECONDS = 15 * 60
+
+
 def enqueue_vector_index_job(
     user_id: int,
     knowledge_file_id: UUID,
@@ -126,6 +129,7 @@ def claim_next_vector_index_job(worker_id: str) -> Row | None:
                     SELECT id
                     FROM vector_index_jobs
                     WHERE status = 'queued'
+                      AND available_at <= now()
                     ORDER BY priority ASC, created_at ASC
                     FOR UPDATE SKIP LOCKED
                     LIMIT 1
@@ -135,6 +139,7 @@ def claim_next_vector_index_job(worker_id: str) -> Row | None:
                     attempts = attempts + 1,
                     locked_by = %s,
                     locked_at = now(),
+                    heartbeat_at = now(),
                     started_at = COALESCE(started_at, now()),
                     updated_at = now()
                 FROM next_job
@@ -158,6 +163,52 @@ def claim_next_vector_index_job(worker_id: str) -> Row | None:
             return dict(row) if row is not None else None
 
 
+def reclaim_expired_vector_index_jobs(
+    lease_seconds: int = DEFAULT_JOB_LEASE_SECONDS,
+) -> int:
+    """回收超过租约时间仍未完成的任务。
+
+    worker 异常退出时不会执行失败回调。该函数将过期 processing 任务
+    重新排队；已耗尽重试次数的任务则标记为 failed，避免永久卡住文件。
+    """
+    if lease_seconds <= 0:
+        raise ValueError("lease_seconds 必须大于 0")
+
+    with get_connection() as connection:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """
+                UPDATE vector_index_jobs
+                SET status = CASE
+                        WHEN attempts >= max_attempts THEN 'failed'
+                        ELSE 'queued'
+                    END,
+                    error_message = CASE
+                        WHEN attempts >= max_attempts THEN
+                            '任务执行超时，已达到最大重试次数'
+                        ELSE error_message
+                    END,
+                    locked_by = NULL,
+                    locked_at = NULL,
+                    heartbeat_at = NULL,
+                    available_at = CASE
+                        WHEN attempts >= max_attempts THEN available_at
+                        ELSE now()
+                    END,
+                    finished_at = CASE
+                        WHEN attempts >= max_attempts THEN now()
+                        ELSE finished_at
+                    END,
+                    updated_at = now()
+                WHERE status = 'processing'
+                  AND COALESCE(heartbeat_at, locked_at, started_at)
+                      < now() - make_interval(secs => %s)
+                """,
+                (lease_seconds,),
+            )
+            return cursor.rowcount
+
+
 def mark_vector_index_job_succeeded(
     job_id: UUID,
     result: dict[str, Any],
@@ -173,6 +224,7 @@ def mark_vector_index_job_succeeded(
                     error_message = NULL,
                     locked_by = NULL,
                     locked_at = NULL,
+                    heartbeat_at = NULL,
                     finished_at = now(),
                     updated_at = now()
                 WHERE id = %s
@@ -201,6 +253,17 @@ def mark_vector_index_job_failed(
                     error_message = %s,
                     locked_by = NULL,
                     locked_at = NULL,
+                    heartbeat_at = NULL,
+                    available_at = CASE
+                        WHEN attempts < max_attempts THEN
+                            now() + make_interval(
+                                secs => LEAST(
+                                    300,
+                                    (5 * power(2, attempts))::integer
+                                )
+                            )
+                        ELSE available_at
+                    END,
                     finished_at = CASE
                         WHEN attempts >= max_attempts THEN now()
                         ELSE finished_at

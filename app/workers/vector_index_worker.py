@@ -8,12 +8,17 @@ from app.repositories.vector_index_job_repository import (
     claim_next_vector_index_job,
     mark_vector_index_job_failed,
     mark_vector_index_job_succeeded,
+    reclaim_expired_vector_index_jobs,
 )
 from app.services.vectors.vector_index_service import index_knowledge_file_record
 
 
 def process_next_vector_index_job(worker_id: str) -> bool:
     """领取并处理一个向量化任务；没有任务时返回 False。"""
+    reclaimed_count = reclaim_expired_vector_index_jobs()
+    if reclaimed_count:
+        print(f"[{worker_id}] reclaimed expired jobs={reclaimed_count}")
+
     job = claim_next_vector_index_job(worker_id)
     if job is None:
         return False
