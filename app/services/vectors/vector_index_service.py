@@ -1,3 +1,4 @@
+import logging
 from pathlib import Path
 from typing import Any
 from uuid import UUID
@@ -8,13 +9,19 @@ from langchain_core.documents import Document
 from app.core.config import CHROMA_COLLECTION_NAME, VECTOR_STORE_PATH
 from app.db.locks import file_index_lock
 from app.db.executor import Row
-from app.repositories.knowledge_chunk_repository import replace_file_chunks
+from app.repositories.knowledge_chunk_repository import (
+    delete_file_chunks,
+    replace_file_chunks,
+)
 from app.repositories.knowledge_file_repository import update_knowledge_file_status
 from app.services.documents.document_service import (
     load_document,
     split_documents,
 )
 from app.services.vectors.embedding_model import ZhipuAIEmbeddings
+
+
+logger = logging.getLogger(__name__)
 
 
 def get_vector_store(
@@ -39,6 +46,43 @@ def build_chunk_ids(chunks: list[Document]) -> list[str]:
         index_version = chunk.metadata["index_version"]
         chunk_ids.append(f"{user_id}:{file_id}:v{index_version}:{chunk_index}")
     return chunk_ids
+
+
+def build_file_vector_filter(user_id: int, file_id: UUID | str) -> dict:
+    """构造删除单个文件所有 Chroma 向量的 metadata 条件。"""
+    return {
+        "$and": [
+            {"user_id": str(user_id)},
+            {"file_id": str(file_id)},
+        ]
+    }
+
+
+def delete_file_vector_entries(
+    user_id: int,
+    file_id: UUID | str,
+    vectordb: Chroma | None = None,
+) -> None:
+    """删除单个文件在 Chroma 中的全部索引版本。"""
+    resolved_vectordb = vectordb or get_vector_store()
+    resolved_vectordb.delete(where=build_file_vector_filter(user_id, file_id))
+
+
+def compensate_failed_file_index(
+    user_id: int,
+    file_id: UUID | str,
+    vectordb: Chroma | None = None,
+) -> None:
+    """尽力清除一次失败索引留下的 Chroma 与全文检索分块。"""
+    try:
+        delete_file_vector_entries(user_id, file_id, vectordb)
+    except Exception:
+        logger.exception("补偿清理 Chroma 向量失败 file_id=%s", file_id)
+
+    try:
+        delete_file_chunks(user_id, file_id)
+    except Exception:
+        logger.exception("补偿清理全文分块失败 file_id=%s", file_id)
 
 
 def index_file_vectors(
@@ -66,33 +110,34 @@ def index_file_vectors(
     for chunk in chunks:
         chunk.metadata["index_version"] = index_version
 
-    vectordb = get_vector_store(
-        persist_directory=persist_directory,
-        collection_name=collection_name,
-    )
-
-    normalized_user_id = str(user_id)
     normalized_file_id = str(file_id)
-    vectordb.delete(
-        where={
-            "$and": [
-                {"user_id": normalized_user_id},
-                {"file_id": normalized_file_id},
-            ]
-        }
-    )
-    chunk_ids = build_chunk_ids(chunks)
-    vectordb.add_documents(
-        documents=chunks,
-        ids=chunk_ids,
-    )
-    replace_file_chunks(
-        user_id=user_id,
-        file_id=file_id,
-        index_version=index_version,
-        chunks=chunks,
-        chunk_ids=chunk_ids,
-    )
+    vectordb: Chroma | None = None
+    try:
+        vectordb = get_vector_store(
+            persist_directory=persist_directory,
+            collection_name=collection_name,
+        )
+        delete_file_vector_entries(user_id, file_id, vectordb)
+        chunk_ids = build_chunk_ids(chunks)
+        vectordb.add_documents(
+            documents=chunks,
+            ids=chunk_ids,
+        )
+        replace_file_chunks(
+            user_id=user_id,
+            file_id=file_id,
+            index_version=index_version,
+            chunks=chunks,
+            chunk_ids=chunk_ids,
+        )
+    except Exception:
+        # 两套存储不能参与同一事务；失败时清空半成品并保持 failed 状态。
+        compensate_failed_file_index(
+            user_id,
+            file_id,
+            vectordb,
+        )
+        raise
 
     return {
         "file_id": normalized_file_id,
