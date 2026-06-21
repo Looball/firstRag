@@ -21,7 +21,7 @@ class CreateConversationTests(unittest.TestCase):
 
     def tearDown(self) -> None:
         """清理路由依赖覆盖，避免污染其他测试。"""
-        app.dependency_overrides.clear()
+        app.dependency_overrides.pop(get_current_user_id, None)
         self.client.close()
 
     def test_create_conversation_returns_404_for_inaccessible_knowledge_base(
