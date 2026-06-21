@@ -12,13 +12,12 @@ from langchain_core.runnables import (
     RunnablePassthrough,
     RunnableSerializable,
 )
-from langchain_deepseek import ChatDeepSeek
-from pydantic import SecretStr
+from langchain_openai import ChatOpenAI
 
-from app.core.config import DEEPSEEK_API_KEY
 from app.repositories.knowledge_base_repository import (
     get_knowledge_base_files,
 )
+from app.services.llm_service import create_system_chat_model
 from app.services.retrieval.hybrid_retriever import get_hybrid_documents
 
 
@@ -27,20 +26,9 @@ type ChainInput = dict[str, Any]
 type RagStreamEvent = dict[str, Any]
 
 
-def create_chat_model() -> ChatDeepSeek:
-    """创建 DeepSeek 聊天模型。"""
-    if not DEEPSEEK_API_KEY:
-        raise ValueError("缺少环境变量 DEEPSEEK_API_KEY")
-
-    return ChatDeepSeek(
-        model="deepseek-v4-flash",
-        temperature=0.2,
-        max_tokens=8000,
-        timeout=None,
-        max_retries=2,
-        streaming=True,
-        api_key=SecretStr(DEEPSEEK_API_KEY),
-    )
+def create_chat_model() -> ChatOpenAI:
+    """创建系统配置的 OpenAI 兼容聊天模型。"""
+    return create_system_chat_model()
 
 
 def get_res_doc(inputs: dict[str, Any]) -> str:
