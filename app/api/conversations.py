@@ -144,9 +144,13 @@ def create_conversation(
     req: CreateConversationRequest,
     user_id: int = Depends(get_current_user_id),
 ):
+    """在当前用户的知识库中创建会话。"""
+    if not knowledge_base_exists(knowledge_base_id, user_id):
+        raise HTTPException(status_code=404, detail="知识库不存在")
+
     conversation = create_conversation_record(user_id, knowledge_base_id, req.title)
     if conversation is None:
-        raise HTTPException(status_code=500, detail="会话创建失败")
+        raise HTTPException(status_code=404, detail="知识库不存在")
 
     return {
         "success": True,
