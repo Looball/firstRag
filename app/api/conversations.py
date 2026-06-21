@@ -150,7 +150,7 @@ def create_conversation(
 
     conversation = create_conversation_record(user_id, knowledge_base_id, req.title)
     if conversation is None:
-        raise HTTPException(status_code=500, detail="会话创建失败")
+        raise HTTPException(status_code=404, detail="知识库不存在")
 
     return {
         "success": True,
