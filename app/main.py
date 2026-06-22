@@ -6,6 +6,7 @@ from app.api import (
     conversations,
     knowledge_bases,
     knowledge_files,
+    user_settings,
     vector_indexes,
 )
 
@@ -17,6 +18,7 @@ def create_app() -> FastAPI:
     app.include_router(conversations.router)
     app.include_router(knowledge_bases.router)
     app.include_router(knowledge_files.router)
+    app.include_router(user_settings.router)
     app.include_router(vector_indexes.router)
     return app
 

@@ -17,7 +17,8 @@ from langchain_openai import ChatOpenAI
 from app.repositories.knowledge_base_repository import (
     get_knowledge_base_files,
 )
-from app.services.llm_service import create_system_chat_model
+from app.services.user_settings_service import get_effective_chat_model_settings
+from app.services.llm_service import create_openai_compatible_chat_model
 from app.services.retrieval.hybrid_retriever import get_hybrid_documents
 
 
@@ -26,9 +27,10 @@ type ChainInput = dict[str, Any]
 type RagStreamEvent = dict[str, Any]
 
 
-def create_chat_model() -> ChatOpenAI:
-    """创建系统配置的 OpenAI 兼容聊天模型。"""
-    return create_system_chat_model()
+def create_chat_model(user_id: int) -> ChatOpenAI:
+    """创建当前用户生效的 OpenAI 兼容聊天模型。"""
+    settings = get_effective_chat_model_settings(user_id)
+    return create_openai_compatible_chat_model(settings)
 
 
 def get_res_doc(inputs: dict[str, Any]) -> str:
@@ -150,14 +152,14 @@ def retrieve_documents(inputs: ChainInput) -> RetrievedDocs:
 
 
 # 组建问答链
-def get_chain() -> RunnableSerializable:
+def get_chain(user_id: int) -> RunnableSerializable:
     """
     创建模型、提示词模板和输出解析器，组建 LCEL 问答链。
 
     第一次调用由 LLM 补充用户问题，再在当前知识库范围内混合检索。
     第二次调用将检索上下文和用户问题交给 LLM 生成答案。
     """
-    model = create_chat_model()
+    model = create_chat_model(user_id)
 
     # 第一次调用：由LLM补充用户提问，再进行混合检索
     condense_question_system_template = (

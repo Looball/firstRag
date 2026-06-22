@@ -57,6 +57,18 @@ export ZAI_EMD_API="你的智谱 embedding API Key"
 `LLM_MODEL` 和 `LLM_API_KEY` 即可；需要自定义地址时额外设置
 `LLM_BASE_URL`。旧的 `DEEPSEEK_API_KEY` 仍可作为 DeepSeek 的兼容回退。
 
+如需允许用户配置自己的模型 Key，还需要生成并配置独立的加密主密钥：
+
+```bash
+python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+export USER_SETTINGS_ENCRYPTION_KEY="上一步生成的值"
+```
+
+后端提供 `GET /user/settings`、`PATCH /user/settings` 和
+`POST /user/settings/test` 三个已认证接口。用户 API Key 仅以密文保存，
+读取接口只会返回 `has_api_key` 状态。为避免 SSRF，用户自定义
+`base_url` 默认关闭；预设厂商不受影响。
+
 ## 使用方式
 
 1. 将需要作为知识库的 PDF 或 Markdown 文件放入 `local_doc/`。

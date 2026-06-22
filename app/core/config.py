@@ -49,3 +49,12 @@ LLM_TEMPERATURE = float(os.environ.get("LLM_TEMPERATURE", "0.2"))
 LLM_MAX_TOKENS = int(os.environ.get("LLM_MAX_TOKENS", "8000"))
 LLM_TIMEOUT_SECONDS = float(os.environ.get("LLM_TIMEOUT_SECONDS", "60"))
 LLM_MAX_RETRIES = int(os.environ.get("LLM_MAX_RETRIES", "2"))
+
+# 用户自带 API Key 的加密主密钥，必须与 JWT 密钥分离配置。
+USER_SETTINGS_ENCRYPTION_KEY = os.environ.get(
+    "USER_SETTINGS_ENCRYPTION_KEY"
+)
+ALLOW_USER_CUSTOM_LLM_BASE_URL = os.environ.get(
+    "ALLOW_USER_CUSTOM_LLM_BASE_URL",
+    "false",
+).lower() == "true"

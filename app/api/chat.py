@@ -37,7 +37,7 @@ def chat(
     history = load_chat_history(req.conversation_id)
 
     # 创建检索链
-    chain = get_chain()
+    chain = get_chain(user_id)
 
     # 创建链成功后再持久化本轮消息，避免配置错误留下孤立用户消息。
     save_message(req.conversation_id, "user", req.message)
