@@ -2,7 +2,10 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 
 from app.core.security import get_current_user_id
-from app.repositories.conversation_repository import conversation_exists,conversation_belongs_base
+from app.repositories.conversation_repository import (
+    conversation_belongs_base,
+    conversation_exists,
+)
 from app.schemas.chat import ChatRequest
 from app.services.chat_service import (
     load_chat_history,
@@ -36,8 +39,14 @@ def chat(
     # 取出历史记录
     history = load_chat_history(req.conversation_id)
 
-    # 创建检索链
-    chain = get_chain(user_id)
+    # 先验证模型配置；失败时不写入本轮消息，避免产生孤立记录。
+    try:
+        chain = get_chain(user_id)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail=f"模型配置无效：{exc}",
+        ) from exc
 
     # 创建链成功后再持久化本轮消息，避免配置错误留下孤立用户消息。
     save_message(req.conversation_id, "user", req.message)
