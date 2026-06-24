@@ -234,6 +234,9 @@ def _merge_settings_record(
 
     provider = _validate_provider(provider)
     base_url = _validate_user_base_url(provider, base_url)
+    normalized_model = model.strip()
+    if not normalized_model:
+        raise ValueError("用户模式必须配置非空 model")
 
     if "api_key" in updates:
         api_key_ciphertext = encrypt_secret(updates["api_key"])
@@ -249,7 +252,7 @@ def _merge_settings_record(
     return {
         "credential_mode": USER_CREDENTIAL_MODE,
         "provider": provider,
-        "model": model.strip(),
+        "model": normalized_model,
         "base_url": base_url,
         "api_key_ciphertext": api_key_ciphertext,
         "encryption_key_version": 1,

@@ -25,7 +25,7 @@ def chat(
     user_id: int = Depends(get_current_user_id),
 ) -> StreamingResponse:
     # 取出请求体中的数据并检查消息内容
-    if not req.message:
+    if not req.message.strip():
         raise HTTPException(status_code=400, detail="message不能为空")
 
     # 检查会话存在且属于当前用户
