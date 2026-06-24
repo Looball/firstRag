@@ -239,10 +239,6 @@ def _merge_settings_record(
         "provider",
         current_record.get("provider") if current_record else None,
     )
-    model = updates.get(
-        "model",
-        current_record.get("model") if current_record else None,
-    )
     base_url = updates.get(
         "base_url",
         current_record.get("base_url") if current_record else None,
@@ -252,6 +248,18 @@ def _merge_settings_record(
 
     provider = _validate_provider(provider)
     base_url = _validate_user_base_url(provider, base_url)
+    current_provider = (
+        _validate_provider(current_record["provider"])
+        if current_record and current_record.get("provider")
+        else None
+    )
+    # 切换厂商后旧模型名通常无效，不能在测试请求中静默沿用。
+    model = updates.get(
+        "model",
+        "" if current_provider != provider else (
+            current_record.get("model") if current_record else None
+        ),
+    )
     normalized_model = model.strip() if model else ""
     if require_model and not normalized_model:
         raise ValueError("用户模式必须配置非空 model")

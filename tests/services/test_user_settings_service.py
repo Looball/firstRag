@@ -151,6 +151,43 @@ class UserLLMSettingsServiceTests(unittest.TestCase):
         self.assertTrue(result["api_key_saved"])
         create_model.assert_not_called()
 
+    def test_provider_change_does_not_reuse_previous_model(self) -> None:
+        """切换厂商时，未提交模型名应获取新厂商列表而非调用旧模型。"""
+        record = build_user_record()
+        record["provider"] = "qwen"
+        record["model"] = "qwen3.7-max"
+        with patch(
+            "app.services.user_settings_service.get_user_llm_settings",
+            return_value=record,
+        ), patch(
+            "app.services.user_settings_service.encrypt_secret",
+            return_value="encrypted-key",
+        ), patch(
+            "app.services.user_settings_service.decrypt_secret",
+            return_value="plain-key",
+        ), patch(
+            "app.services.user_settings_service.upsert_user_llm_settings",
+            return_value=record,
+        ) as upsert_settings, patch(
+            "app.services.user_settings_service._list_available_models",
+            return_value=["deepseek-v4-flash"],
+        ), patch(
+            "app.services.user_settings_service.create_openai_compatible_chat_model",
+        ) as create_model:
+            result = test_user_llm_settings(
+                1,
+                {
+                    "credential_mode": "user",
+                    "provider": "deepseek",
+                    "api_key": "new-plain-key",
+                },
+            )
+
+        persisted_settings = upsert_settings.call_args.args[1]
+        self.assertEqual(persisted_settings["model"], "")
+        self.assertEqual(result["models"], ["deepseek-v4-flash"])
+        create_model.assert_not_called()
+
     def test_selected_model_can_pass_when_models_endpoint_is_unavailable(self) -> None:
         """不支持 /models 的兼容服务仍应允许已选模型完成连通性测试。"""
         record = build_user_record()
