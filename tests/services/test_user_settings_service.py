@@ -5,6 +5,7 @@ import unittest
 from unittest.mock import patch
 
 from app.services.user_settings_service import (
+    _merge_settings_record,
     _validate_user_base_url,
     get_serialized_user_llm_settings,
     update_user_llm_settings,
@@ -84,6 +85,13 @@ class UserLLMSettingsServiceTests(unittest.TestCase):
                 "openai_compatible",
                 "https://llm.example.com/v1",
             )
+
+    def test_user_mode_rejects_whitespace_only_model(self) -> None:
+        """仅由空白组成的模型名不能被持久化为无效用户配置。"""
+        record = build_user_record()
+
+        with self.assertRaisesRegex(ValueError, "非空 model"):
+            _merge_settings_record(record, {"model": "   "})
 
 
 if __name__ == "__main__":
