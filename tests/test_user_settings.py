@@ -76,6 +76,7 @@ class UserLLMSettingsApiTests(unittest.TestCase):
                 "message": "模型连接测试成功",
                 "models": ["deepseek-v4-flash"],
                 "model_list_available": True,
+                "api_key_saved": False,
             },
         ) as test_settings:
             response = self.client.post("/user/settings/test")

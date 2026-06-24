@@ -109,6 +109,9 @@ class UserLLMSettingsServiceTests(unittest.TestCase):
             "app.services.user_settings_service._list_available_models",
             return_value=["deepseek-chat", "deepseek-reasoner"],
         ), patch(
+            "app.services.user_settings_service.upsert_user_llm_settings",
+            return_value=build_user_record(),
+        ), patch(
             "app.services.user_settings_service.create_openai_compatible_chat_model",
         ) as create_model:
             result = test_user_llm_settings(
@@ -125,6 +128,7 @@ class UserLLMSettingsServiceTests(unittest.TestCase):
             ["deepseek-chat", "deepseek-reasoner"],
         )
         self.assertTrue(result["model_list_available"])
+        self.assertTrue(result["api_key_saved"])
         create_model.assert_not_called()
 
     def test_selected_model_can_pass_when_models_endpoint_is_unavailable(self) -> None:
@@ -149,6 +153,46 @@ class UserLLMSettingsServiceTests(unittest.TestCase):
         self.assertFalse(result["model_list_available"])
         self.assertEqual(result["models"], [])
         model.invoke.assert_called_once_with("请只回复：OK")
+
+    def test_test_failure_keeps_new_api_key_draft(self) -> None:
+        """模型调用失败时，新输入的 API Key 也应已经加密保存。"""
+        model = MagicMock()
+        model.invoke.side_effect = RuntimeError("model unavailable")
+        with patch(
+            "app.services.user_settings_service.get_user_llm_settings",
+            return_value=None,
+        ), patch(
+            "app.services.user_settings_service.encrypt_secret",
+            return_value="encrypted-key",
+        ), patch(
+            "app.services.user_settings_service.decrypt_secret",
+            return_value="plain-key",
+        ), patch(
+            "app.services.user_settings_service.upsert_user_llm_settings",
+            return_value=build_user_record(),
+        ) as upsert_settings, patch(
+            "app.services.user_settings_service._list_available_models",
+            return_value=["deepseek-v4-flash"],
+        ), patch(
+            "app.services.user_settings_service.create_openai_compatible_chat_model",
+            return_value=model,
+        ):
+            with self.assertRaisesRegex(RuntimeError, "model unavailable"):
+                test_user_llm_settings(
+                    1,
+                    {
+                        "credential_mode": "user",
+                        "provider": "deepseek",
+                        "model": "deepseek-v4-flash",
+                        "api_key": "plain-key",
+                    },
+                )
+
+        persisted_settings = upsert_settings.call_args.args[1]
+        self.assertEqual(
+            persisted_settings["api_key_ciphertext"],
+            "encrypted-key",
+        )
 
 
 if __name__ == "__main__":

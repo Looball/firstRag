@@ -285,8 +285,9 @@ def test_user_llm_settings(
     user_id: int,
     updates: dict[str, Any],
 ) -> dict[str, Any]:
-    """测试配置并返回厂商可见的模型列表，不写入数据库。"""
+    """保存个人模式草稿后测试配置，并返回厂商可见的模型列表。"""
     current_record = get_user_llm_settings(user_id)
+    api_key_saved = False
     if updates:
         settings_record = _merge_settings_record(
             current_record,
@@ -296,6 +297,11 @@ def test_user_llm_settings(
         if settings_record["credential_mode"] == PLATFORM_CREDENTIAL_MODE:
             settings = _build_platform_settings(settings_record)
         else:
+            # 先持久化用户刚填写的 Key；模型列表或模型调用失败时仍可保留草稿。
+            saved_record = upsert_user_llm_settings(user_id, settings_record)
+            if saved_record is None:
+                raise RuntimeError("保存用户模型设置草稿失败")
+            api_key_saved = True
             settings = _build_user_settings(settings_record)
     else:
         settings = get_effective_chat_model_settings(user_id)
@@ -315,6 +321,7 @@ def test_user_llm_settings(
             "message": "模型列表获取成功，请选择一个模型",
             "models": models,
             "model_list_available": True,
+            "api_key_saved": api_key_saved,
         }
 
     model = create_openai_compatible_chat_model(settings)
@@ -328,6 +335,7 @@ def test_user_llm_settings(
         ),
         "models": models,
         "model_list_available": model_list_available,
+        "api_key_saved": api_key_saved,
     }
 
 
