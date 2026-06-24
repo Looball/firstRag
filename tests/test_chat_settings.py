@@ -54,6 +54,28 @@ class ChatSettingsTests(unittest.TestCase):
         )
         save_message.assert_not_called()
 
+    def test_whitespace_only_message_is_rejected_before_database_access(
+        self,
+    ) -> None:
+        """空白消息不应触发会话查询、模型调用或消息写入。"""
+        with patch("app.api.chat.conversation_exists") as conversation_exists, patch(
+            "app.api.chat.get_chain",
+        ) as get_chain, patch("app.api.chat.save_message") as save_message:
+            response = self.client.post(
+                "/chat",
+                json={
+                    "conversation_id": str(uuid4()),
+                    "knowledge_base_id": str(uuid4()),
+                    "message": " \t\n ",
+                },
+            )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json(), {"detail": "message不能为空"})
+        conversation_exists.assert_not_called()
+        get_chain.assert_not_called()
+        save_message.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()
