@@ -90,6 +90,26 @@ setModelCandidates([]);
 - 若 `has_api_key` 为 `false`，要求输入新 Key。
 - 禁止调用接口以获取完整 Key；禁止将 Key 写入 `localStorage`、`sessionStorage`、URL、日志或错误上报。
 
+若选中厂商的 `has_api_key` 为 `true`，切换完成后自动调用：
+
+```http
+POST /api/settings/providers/{provider}/models
+```
+
+它映射至 `POST /user/settings/providers/{provider}/models`，只使用该厂商
+的已保存 Key 获取模型列表，不保存草稿、不改变当前聊天设置。响应示例：
+
+```json
+{
+  "success": true,
+  "provider": "qwen",
+  "models": ["qwen-plus", "qwen-turbo"]
+}
+```
+
+为避免用户快速切换时旧请求覆盖新选项，前端应使用 `AbortController` 或请求
+序号，仅接受最后一次厂商切换的响应。
+
 ## 获取模型列表与测试连接
 
 用户模式下，第一次测试可不传 `model`：

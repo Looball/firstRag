@@ -73,6 +73,21 @@ class UserLLMSettingsApiTests(unittest.TestCase):
             {"success": True, "providers": providers},
         )
 
+    def test_get_provider_models_uses_saved_credential(self) -> None:
+        """厂商模型列表接口应通过该厂商的已保存凭据读取。"""
+        with patch(
+            "app.api.user_settings.get_saved_provider_models",
+            return_value=["qwen-plus"],
+        ) as get_models:
+            response = self.client.post("/user/settings/providers/qwen/models")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.json(),
+            {"success": True, "provider": "qwen", "models": ["qwen-plus"]},
+        )
+        get_models.assert_called_once_with(1, "qwen")
+
     def test_test_settings_without_body_uses_saved_settings(self) -> None:
         """空请求体应测试已保存设置，而不是要求重复提交 API Key。"""
         with patch(

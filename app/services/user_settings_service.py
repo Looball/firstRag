@@ -256,6 +256,40 @@ def get_serialized_user_llm_providers(user_id: int) -> list[dict[str, Any]]:
     return providers
 
 
+def get_saved_provider_models(
+    user_id: int,
+    provider: str,
+) -> list[str]:
+    """使用当前用户指定厂商已保存的凭据读取模型列表，不修改活动设置。"""
+    normalized_provider = _validate_provider(provider)
+    credential = get_user_llm_provider_credential(
+        user_id,
+        normalized_provider,
+    )
+    if credential is None:
+        raise ValueError("该厂商尚未保存 API Key")
+
+    current_record = get_user_llm_settings(user_id)
+    base_url = (
+        current_record.get("base_url")
+        if current_record
+        and current_record.get("provider") == normalized_provider
+        else None
+    )
+    if normalized_provider == OPENAI_COMPATIBLE_PROVIDER and not base_url:
+        raise ValueError("自定义兼容服务需要先保存 base_url")
+
+    defaults = build_system_chat_model_settings()
+    settings = replace(
+        defaults,
+        provider=normalized_provider,
+        model="",
+        api_key=decrypt_secret(credential["api_key_ciphertext"]),
+        base_url=base_url,
+    )
+    return _list_available_models(settings)
+
+
 def _merge_settings_record(
     current_record: dict[str, Any] | None,
     updates: dict[str, Any],

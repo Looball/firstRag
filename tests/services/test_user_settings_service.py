@@ -8,6 +8,7 @@ from app.services.user_settings_service import (
     _merge_settings_record,
     _validate_user_base_url,
     get_serialized_user_llm_settings,
+    get_saved_provider_models,
     test_user_llm_settings,
     update_user_llm_settings,
 )
@@ -137,6 +138,34 @@ class UserLLMSettingsServiceTests(unittest.TestCase):
         self.assertEqual(deepseek["api_key_hint"], "••••abcd")
         self.assertFalse(qwen["has_api_key"])
         self.assertIsNone(qwen["api_key_hint"])
+
+    def test_saved_provider_models_does_not_modify_active_settings(self) -> None:
+        """切换厂商读取模型列表时不应改写当前活动模型设置。"""
+        credential = {
+            "provider": "qwen",
+            "api_key_ciphertext": "encrypted-qwen-key",
+            "api_key_hint": "••••qwen",
+            "encryption_key_version": 1,
+        }
+        with patch(
+            "app.services.user_settings_service.get_user_llm_provider_credential",
+            return_value=credential,
+        ), patch(
+            "app.services.user_settings_service.get_user_llm_settings",
+            return_value=build_user_record(),
+        ), patch(
+            "app.services.user_settings_service.decrypt_secret",
+            return_value="plain-qwen-key",
+        ), patch(
+            "app.services.user_settings_service._list_available_models",
+            return_value=["qwen-plus", "qwen-turbo"],
+        ) as list_models:
+            models = get_saved_provider_models(1, "qwen")
+
+        self.assertEqual(models, ["qwen-plus", "qwen-turbo"])
+        settings = list_models.call_args.args[0]
+        self.assertEqual(settings.provider, "qwen")
+        self.assertEqual(settings.model, "")
 
     def test_custom_user_base_url_is_disabled_by_default(self) -> None:
         """未开启开关时，用户不应能设置任意兼容接口地址。"""

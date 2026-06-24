@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from app.core.security import get_current_user_id
 from app.schemas.user_settings import UpdateUserLLMSettingsRequest
 from app.services.user_settings_service import (
+    get_saved_provider_models,
     get_serialized_user_llm_settings,
     get_serialized_user_llm_providers,
     test_user_llm_settings,
@@ -24,6 +25,25 @@ def get_user_settings_providers(
         "success": True,
         "providers": get_serialized_user_llm_providers(user_id),
     }
+
+
+@router.post("/settings/providers/{provider}/models")
+def get_provider_models(
+    provider: str,
+    user_id: int = Depends(get_current_user_id),
+):
+    """读取指定厂商已保存 Key 可访问的模型列表，不修改当前设置。"""
+    try:
+        models = get_saved_provider_models(user_id, provider)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(
+            status_code=502,
+            detail="获取厂商模型列表失败，请检查 API Key 和网络",
+        ) from exc
+
+    return {"success": True, "provider": provider, "models": models}
 
 
 @router.get("/settings")
