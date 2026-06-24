@@ -23,6 +23,7 @@ import {
 } from "@/lib/user-settings";
 
 type RequestState = "idle" | "loading" | "success" | "error";
+const CUSTOM_MODEL_VALUE = "__custom_model__";
 
 function getResponseData(response: Response) {
   return response.json().catch(() => null) as Promise<unknown>;
@@ -36,6 +37,7 @@ export function ModelSettingsForm() {
   const [apiKey, setApiKey] = useState("");
   const [showApiKey, setShowApiKey] = useState(false);
   const [modelCandidates, setModelCandidates] = useState<string[]>([]);
+  const [isCustomModel, setIsCustomModel] = useState(false);
   const [providerPresets, setProviderPresets] = useState<ModelProviderPreset[]>(
     FALLBACK_PROVIDER_PRESETS
   );
@@ -141,6 +143,7 @@ export function ModelSettingsForm() {
       baseUrl: nextProvider?.baseUrl || "",
     }));
     setModelCandidates([]);
+    setIsCustomModel(false);
     setNotice("");
   }
 
@@ -203,6 +206,11 @@ export function ModelSettingsForm() {
       }
 
       setModelCandidates(testResult.models);
+      setIsCustomModel(
+        Boolean(settings.model.trim()) &&
+          testResult.models.length > 0 &&
+          !testResult.models.includes(settings.model)
+      );
       setTestState("success");
       setNotice(
         testResult.modelListAvailable && !settings.model.trim()
@@ -213,6 +221,16 @@ export function ModelSettingsForm() {
       setTestState("error");
       setNotice(error instanceof Error ? error.message : "连接测试失败，请检查配置。");
     }
+  }
+
+  function handleModelSelection(model: string) {
+    if (model === CUSTOM_MODEL_VALUE) {
+      setIsCustomModel(true);
+      return;
+    }
+
+    setIsCustomModel(false);
+    setSettings((current) => ({ ...current, model }));
   }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -300,9 +318,19 @@ export function ModelSettingsForm() {
               </select>
             </label>
             <label className="font-utility text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--ink-muted)]">模型名
-              <input list="discovered-models" value={settings.model} onChange={(event) => setSettings((current) => ({ ...current, model: event.target.value }))} placeholder="先获取模型列表，或直接输入模型名称" className="research-focus mt-2 w-full border border-[var(--line)] bg-white px-3 py-3 text-sm normal-case tracking-normal text-[var(--foreground)]" />
-              <datalist id="discovered-models">{modelCandidates.map((model) => <option key={model} value={model} />)}</datalist>
-              {modelCandidates.length > 0 && <span className="mt-2 block text-xs normal-case tracking-normal text-[var(--research)]">已获取 {modelCandidates.length} 个可选模型。</span>}
+              {modelCandidates.length > 0 ? (
+                <>
+                  <select value={isCustomModel ? CUSTOM_MODEL_VALUE : settings.model} onChange={(event) => handleModelSelection(event.target.value)} className="research-focus mt-2 w-full border border-[var(--line)] bg-white px-3 py-3 text-sm normal-case tracking-normal text-[var(--foreground)]">
+                    <option value="" disabled>请选择模型</option>
+                    {modelCandidates.map((model) => <option key={model} value={model}>{model}</option>)}
+                    <option value={CUSTOM_MODEL_VALUE}>手动输入模型名</option>
+                  </select>
+                  {isCustomModel && <input value={settings.model} onChange={(event) => setSettings((current) => ({ ...current, model: event.target.value }))} placeholder="输入模型名称" className="research-focus mt-3 w-full border border-[var(--line)] bg-white px-3 py-3 text-sm normal-case tracking-normal text-[var(--foreground)]" />}
+                  <span className="mt-2 block text-xs normal-case tracking-normal text-[var(--research)]">已获取 {modelCandidates.length} 个可选模型，可重新展开选择。</span>
+                </>
+              ) : (
+                <input value={settings.model} onChange={(event) => setSettings((current) => ({ ...current, model: event.target.value }))} placeholder="先获取模型列表，或直接输入模型名称" className="research-focus mt-2 w-full border border-[var(--line)] bg-white px-3 py-3 text-sm normal-case tracking-normal text-[var(--foreground)]" />
+              )}
             </label>
           </section>}
 
