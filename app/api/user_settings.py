@@ -63,7 +63,7 @@ def test_user_settings(
 ):
     """测试已保存或临时提交的模型设置，不会保存临时配置。"""
     try:
-        test_user_llm_settings(
+        test_result = test_user_llm_settings(
             user_id,
             req.model_dump(exclude_unset=True) if req else {},
         )
@@ -75,4 +75,4 @@ def test_user_settings(
             detail="模型连接测试失败，请检查模型配置和 API Key",
         ) from exc
 
-    return {"success": True, "message": "模型连接测试成功"}
+    return {"success": True, **test_result}

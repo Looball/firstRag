@@ -6,6 +6,8 @@ from ipaddress import ip_address
 from typing import Any
 from urllib.parse import urlparse
 
+from openai import OpenAI
+
 from app.core.config import ALLOW_USER_CUSTOM_LLM_BASE_URL
 from app.core.secret_cipher import decrypt_secret, encrypt_secret
 from app.repositories.user_llm_settings_repository import (
@@ -168,6 +170,8 @@ def get_serialized_user_llm_settings(user_id: int) -> dict[str, Any]:
 def _merge_settings_record(
     current_record: dict[str, Any] | None,
     updates: dict[str, Any],
+    *,
+    require_model: bool = True,
 ) -> dict[str, Any]:
     """合并局部更新并生成可直接持久化的用户设置记录。"""
     current_mode = (
@@ -229,13 +233,13 @@ def _merge_settings_record(
         "base_url",
         current_record.get("base_url") if current_record else None,
     )
-    if not provider or not model:
-        raise ValueError("用户模式必须配置 provider 和 model")
+    if not provider:
+        raise ValueError("用户模式必须配置 provider")
 
     provider = _validate_provider(provider)
     base_url = _validate_user_base_url(provider, base_url)
-    normalized_model = model.strip()
-    if not normalized_model:
+    normalized_model = model.strip() if model else ""
+    if require_model and not normalized_model:
         raise ValueError("用户模式必须配置非空 model")
 
     if "api_key" in updates:
@@ -280,11 +284,15 @@ def update_user_llm_settings(
 def test_user_llm_settings(
     user_id: int,
     updates: dict[str, Any],
-) -> None:
-    """测试已保存或临时提交的用户聊天模型配置，不写入数据库。"""
+) -> dict[str, Any]:
+    """测试配置并返回厂商可见的模型列表，不写入数据库。"""
     current_record = get_user_llm_settings(user_id)
     if updates:
-        settings_record = _merge_settings_record(current_record, updates)
+        settings_record = _merge_settings_record(
+            current_record,
+            updates,
+            require_model=False,
+        )
         if settings_record["credential_mode"] == PLATFORM_CREDENTIAL_MODE:
             settings = _build_platform_settings(settings_record)
         else:
@@ -292,6 +300,48 @@ def test_user_llm_settings(
     else:
         settings = get_effective_chat_model_settings(user_id)
 
+    model_list_available = True
+    try:
+        models = _list_available_models(settings)
+    except Exception:
+        # 不是每个兼容厂商都实现 /models；已选模型仍可继续完成对话连通性测试。
+        model_list_available = False
+        models = []
+
+    if not settings.model:
+        if not model_list_available:
+            raise ValueError("该厂商未返回模型列表，请手动填写模型名称")
+        return {
+            "message": "模型列表获取成功，请选择一个模型",
+            "models": models,
+            "model_list_available": True,
+        }
+
     model = create_openai_compatible_chat_model(settings)
     # 使用最小请求验证认证、模型名称、地址和流式前的基本连通性。
     model.invoke("请只回复：OK")
+    return {
+        "message": (
+            "模型连接测试成功"
+            if model_list_available
+            else "模型连接测试成功，但当前厂商未提供模型列表"
+        ),
+        "models": models,
+        "model_list_available": model_list_available,
+    }
+
+
+def _list_available_models(settings: ChatModelSettings) -> list[str]:
+    """通过 OpenAI 兼容的 /models 接口读取 API Key 可访问的模型 ID。"""
+    client = OpenAI(
+        api_key=settings.api_key,
+        base_url=resolve_base_url(settings.provider, settings.base_url),
+        timeout=settings.timeout_seconds,
+        max_retries=settings.max_retries,
+    )
+    model_ids = {
+        model.id
+        for model in client.models.list().data
+        if model.id
+    }
+    return sorted(model_ids)

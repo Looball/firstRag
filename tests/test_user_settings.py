@@ -72,10 +72,19 @@ class UserLLMSettingsApiTests(unittest.TestCase):
         """空请求体应测试已保存设置，而不是要求重复提交 API Key。"""
         with patch(
             "app.api.user_settings.test_user_llm_settings",
+            return_value={
+                "message": "模型连接测试成功",
+                "models": ["deepseek-v4-flash"],
+                "model_list_available": True,
+            },
         ) as test_settings:
             response = self.client.post("/user/settings/test")
 
         self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.json()["models"],
+            ["deepseek-v4-flash"],
+        )
         test_settings.assert_called_once_with(1, {})
 
 

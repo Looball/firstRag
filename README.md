@@ -70,6 +70,10 @@ export USER_SETTINGS_ENCRYPTION_KEY="上一步生成的值"
 仅以密文保存，读取接口只会返回 `has_api_key` 状态。为避免 SSRF，用户
 自定义 `base_url` 默认关闭；预设厂商不受影响。
 
+`POST /user/settings/test` 会优先尝试读取当前 API Key 可访问的模型列表，
+并在用户已选择模型时继续执行最小对话请求。部分兼容服务不支持模型列表
+接口；此时前端应允许用户手动输入模型名。
+
 ## 使用方式
 
 1. 将需要作为知识库的 PDF 或 Markdown 文件放入 `local_doc/`。

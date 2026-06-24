@@ -2,12 +2,13 @@
 
 from decimal import Decimal
 import unittest
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from app.services.user_settings_service import (
     _merge_settings_record,
     _validate_user_base_url,
     get_serialized_user_llm_settings,
+    test_user_llm_settings,
     update_user_llm_settings,
 )
 
@@ -92,6 +93,62 @@ class UserLLMSettingsServiceTests(unittest.TestCase):
 
         with self.assertRaisesRegex(ValueError, "非空 model"):
             _merge_settings_record(record, {"model": "   "})
+
+    def test_test_settings_returns_models_without_a_selected_model(self) -> None:
+        """临时测试可先获取模型列表，再由用户选择具体聊天模型。"""
+        with patch(
+            "app.services.user_settings_service.get_user_llm_settings",
+            return_value=None,
+        ), patch(
+            "app.services.user_settings_service.encrypt_secret",
+            return_value="encrypted-key",
+        ), patch(
+            "app.services.user_settings_service.decrypt_secret",
+            return_value="plain-key",
+        ), patch(
+            "app.services.user_settings_service._list_available_models",
+            return_value=["deepseek-chat", "deepseek-reasoner"],
+        ), patch(
+            "app.services.user_settings_service.create_openai_compatible_chat_model",
+        ) as create_model:
+            result = test_user_llm_settings(
+                1,
+                {
+                    "credential_mode": "user",
+                    "provider": "deepseek",
+                    "api_key": "plain-key",
+                },
+            )
+
+        self.assertEqual(
+            result["models"],
+            ["deepseek-chat", "deepseek-reasoner"],
+        )
+        self.assertTrue(result["model_list_available"])
+        create_model.assert_not_called()
+
+    def test_selected_model_can_pass_when_models_endpoint_is_unavailable(self) -> None:
+        """不支持 /models 的兼容服务仍应允许已选模型完成连通性测试。"""
+        record = build_user_record()
+        model = MagicMock()
+        with patch(
+            "app.services.user_settings_service.get_user_llm_settings",
+            return_value=record,
+        ), patch(
+            "app.services.user_settings_service.decrypt_secret",
+            return_value="plain-key",
+        ), patch(
+            "app.services.user_settings_service._list_available_models",
+            side_effect=RuntimeError("unsupported"),
+        ), patch(
+            "app.services.user_settings_service.create_openai_compatible_chat_model",
+            return_value=model,
+        ):
+            result = test_user_llm_settings(1, {})
+
+        self.assertFalse(result["model_list_available"])
+        self.assertEqual(result["models"], [])
+        model.invoke.assert_called_once_with("请只回复：OK")
 
 
 if __name__ == "__main__":
