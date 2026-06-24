@@ -62,7 +62,7 @@ class UserLLMSettingsApiTests(unittest.TestCase):
             }
         ]
         with patch(
-            "app.api.user_settings.get_supported_llm_providers",
+            "app.api.user_settings.get_serialized_user_llm_providers",
             return_value=providers,
         ):
             response = self.client.get("/user/settings/providers")

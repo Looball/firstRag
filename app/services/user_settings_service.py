@@ -18,12 +18,18 @@ from app.repositories.user_llm_settings_repository import (
     get_user_llm_settings,
     upsert_user_llm_settings,
 )
+from app.repositories.user_llm_provider_credential_repository import (
+    get_user_llm_provider_credential,
+    get_user_llm_provider_credentials,
+    upsert_user_llm_provider_credential,
+)
 from app.services.llm_service import (
     ChatModelSettings,
     OPENAI_COMPATIBLE_PROVIDER,
     PROVIDER_BASE_URLS,
     build_system_chat_model_settings,
     create_openai_compatible_chat_model,
+    get_supported_llm_providers,
     resolve_base_url,
 )
 
@@ -145,13 +151,61 @@ def _build_user_settings(
     )
 
 
+def _apply_provider_credential(
+    record: dict[str, Any],
+    credential: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """优先使用厂商凭据表中的 Key，兼容旧设置表中保留的活动 Key。"""
+    if credential is None:
+        return record
+
+    return {
+        **record,
+        "api_key_ciphertext": credential["api_key_ciphertext"],
+        "api_key_hint": credential.get("api_key_hint"),
+        "encryption_key_version": credential["encryption_key_version"],
+    }
+
+
+def _get_requested_provider(
+    current_record: dict[str, Any] | None,
+    updates: dict[str, Any],
+) -> str | None:
+    """从局部更新或当前设置中取得本次要使用的厂商标识。"""
+    provider = updates.get(
+        "provider",
+        current_record.get("provider") if current_record else None,
+    )
+    return _validate_provider(provider) if provider else None
+
+
+def _get_provider_credential_for_updates(
+    user_id: int,
+    current_record: dict[str, Any] | None,
+    updates: dict[str, Any],
+) -> dict[str, Any] | None:
+    """在用户模式下查询本次厂商已有凭据，以便切换时自动复用。"""
+    credential_mode = updates.get(
+        "credential_mode",
+        current_record.get("credential_mode")
+        if current_record
+        else PLATFORM_CREDENTIAL_MODE,
+    )
+    provider = _get_requested_provider(current_record, updates)
+    if credential_mode != USER_CREDENTIAL_MODE or not provider:
+        return None
+
+    return get_user_llm_provider_credential(user_id, provider)
+
+
 def get_effective_chat_model_settings(user_id: int) -> ChatModelSettings:
     """获取当前用户实际生效的聊天模型设置。"""
     record = get_user_llm_settings(user_id)
     if record is None or record["credential_mode"] == PLATFORM_CREDENTIAL_MODE:
         return _build_platform_settings(record)
 
-    return _build_user_settings(record)
+    credential = get_user_llm_provider_credential(user_id, record["provider"])
+    return _build_user_settings(_apply_provider_credential(record, credential))
 
 
 def get_serialized_user_llm_settings(user_id: int) -> dict[str, Any]:
@@ -165,6 +219,8 @@ def get_serialized_user_llm_settings(user_id: int) -> dict[str, Any]:
             bool(settings.api_key),
         )
 
+    credential = get_user_llm_provider_credential(user_id, record["provider"])
+    record = _apply_provider_credential(record, credential)
     settings = _build_user_settings(record, decrypt_api_key=False)
     api_key_hint = record.get("api_key_hint")
     if not api_key_hint and record["api_key_ciphertext"]:
@@ -180,12 +236,33 @@ def get_serialized_user_llm_settings(user_id: int) -> dict[str, Any]:
     )
 
 
+def get_serialized_user_llm_providers(user_id: int) -> list[dict[str, Any]]:
+    """返回厂商目录及当前用户在每个厂商下的凭据保存状态。"""
+    credentials_by_provider = {
+        row["provider"]: row
+        for row in get_user_llm_provider_credentials(user_id)
+    }
+    providers = []
+    for provider in get_supported_llm_providers():
+        credential = credentials_by_provider.get(provider["id"])
+        providers.append({
+            **provider,
+            "has_api_key": credential is not None,
+            "api_key_hint": (
+                credential.get("api_key_hint") if credential else None
+            ),
+        })
+
+    return providers
+
+
 def _merge_settings_record(
     current_record: dict[str, Any] | None,
     updates: dict[str, Any],
     *,
     require_model: bool = True,
     clear_missing_model: bool = False,
+    provider_credential: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """合并局部更新并生成可直接持久化的用户设置记录。"""
     current_mode = (
@@ -268,6 +345,9 @@ def _merge_settings_record(
     if "api_key" in updates:
         api_key_ciphertext = encrypt_secret(updates["api_key"])
         api_key_hint = build_secret_hint(updates["api_key"])
+    elif provider_credential is not None:
+        api_key_ciphertext = provider_credential["api_key_ciphertext"]
+        api_key_hint = provider_credential.get("api_key_hint")
     else:
         api_key_ciphertext = (
             current_record.get("api_key_ciphertext")
@@ -303,7 +383,24 @@ def update_user_llm_settings(
 ) -> dict[str, Any]:
     """更新当前用户设置，并返回不含 API Key 的生效配置。"""
     current_record = get_user_llm_settings(user_id)
-    settings_record = _merge_settings_record(current_record, updates)
+    provider_credential = _get_provider_credential_for_updates(
+        user_id,
+        current_record,
+        updates,
+    )
+    settings_record = _merge_settings_record(
+        current_record,
+        updates,
+        provider_credential=provider_credential,
+    )
+    if settings_record["credential_mode"] == USER_CREDENTIAL_MODE:
+        saved_credential = upsert_user_llm_provider_credential(
+            user_id,
+            settings_record["provider"],
+            settings_record,
+        )
+        if saved_credential is None:
+            raise RuntimeError("保存用户厂商凭据失败")
     saved_record = upsert_user_llm_settings(user_id, settings_record)
     if saved_record is None:
         raise RuntimeError("保存用户模型设置失败")
@@ -317,6 +414,11 @@ def test_user_llm_settings(
 ) -> dict[str, Any]:
     """保存个人模式草稿后测试配置，并返回厂商可见的模型列表。"""
     current_record = get_user_llm_settings(user_id)
+    provider_credential = _get_provider_credential_for_updates(
+        user_id,
+        current_record,
+        updates,
+    )
     api_key_saved = False
     if updates:
         settings_record = _merge_settings_record(
@@ -324,11 +426,19 @@ def test_user_llm_settings(
             updates,
             require_model=False,
             clear_missing_model=True,
+            provider_credential=provider_credential,
         )
         if settings_record["credential_mode"] == PLATFORM_CREDENTIAL_MODE:
             settings = _build_platform_settings(settings_record)
         else:
             # 先持久化用户刚填写的 Key；模型列表或模型调用失败时仍可保留草稿。
+            saved_credential = upsert_user_llm_provider_credential(
+                user_id,
+                settings_record["provider"],
+                settings_record,
+            )
+            if saved_credential is None:
+                raise RuntimeError("保存用户厂商凭据失败")
             saved_record = upsert_user_llm_settings(user_id, settings_record)
             if saved_record is None:
                 raise RuntimeError("保存用户模型设置草稿失败")

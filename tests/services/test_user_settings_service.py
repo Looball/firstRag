@@ -34,6 +34,21 @@ def build_user_record() -> dict:
 class UserLLMSettingsServiceTests(unittest.TestCase):
     """验证用户模型设置的密钥保护与更新规则。"""
 
+    def setUp(self) -> None:
+        """默认隔离厂商凭据仓库，避免单元测试连接真实数据库。"""
+        self.get_provider_credential = patch(
+            "app.services.user_settings_service.get_user_llm_provider_credential",
+            return_value=None,
+        )
+        self.upsert_provider_credential = patch(
+            "app.services.user_settings_service.upsert_user_llm_provider_credential",
+            return_value=build_user_record(),
+        )
+        self.get_provider_credential.start()
+        self.upsert_provider_credential.start()
+        self.addCleanup(self.get_provider_credential.stop)
+        self.addCleanup(self.upsert_provider_credential.stop)
+
     def test_get_settings_never_decrypts_api_key(self) -> None:
         """读取设置页只能返回是否配置 Key，不能解密 Key。"""
         record = build_user_record()
@@ -98,6 +113,30 @@ class UserLLMSettingsServiceTests(unittest.TestCase):
         self.assertEqual(settings["api_key_hint"], "••••1234")
         self.assertNotIn("sk-live-1234", str(settings))
         decrypt_secret.assert_called_once_with("encrypted-key")
+
+    def test_provider_catalog_marks_saved_credentials(self) -> None:
+        """厂商目录应只返回已保存凭据状态和脱敏提示。"""
+        from app.services.user_settings_service import (
+            get_serialized_user_llm_providers,
+        )
+
+        with patch(
+            "app.services.user_settings_service.get_user_llm_provider_credentials",
+            return_value=[
+                {
+                    "provider": "deepseek",
+                    "api_key_hint": "••••abcd",
+                }
+            ],
+        ):
+            providers = get_serialized_user_llm_providers(1)
+
+        deepseek = next(item for item in providers if item["id"] == "deepseek")
+        qwen = next(item for item in providers if item["id"] == "qwen")
+        self.assertTrue(deepseek["has_api_key"])
+        self.assertEqual(deepseek["api_key_hint"], "••••abcd")
+        self.assertFalse(qwen["has_api_key"])
+        self.assertIsNone(qwen["api_key_hint"])
 
     def test_custom_user_base_url_is_disabled_by_default(self) -> None:
         """未开启开关时，用户不应能设置任意兼容接口地址。"""

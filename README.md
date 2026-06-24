@@ -71,6 +71,10 @@ export USER_SETTINGS_ENCRYPTION_KEY="上一步生成的值"
 `api_key_hint`，绝不返回明文。为避免 SSRF，用户自定义 `base_url` 默认
 关闭；预设厂商不受影响。
 
+每个用户可按厂商保存独立 API Key。`/user/settings/providers` 会为每个
+厂商返回 `has_api_key` 与 `api_key_hint`，前端切换厂商时据此复用已保存
+凭据，无需获取或重新传输完整 Key。
+
 `POST /user/settings/test` 会优先尝试读取当前 API Key 可访问的模型列表，
 并在用户已选择模型时继续执行最小对话请求。部分兼容服务不支持模型列表
 接口；此时前端应允许用户手动输入模型名。
