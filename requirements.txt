@@ -27,6 +27,9 @@ zai-sdk==0.2.2
 # Document loaders
 PyMuPDF==1.27.2.3
 unstructured[md]==0.22.27
+mammoth==1.12.0
+markdownify==1.2.2
+pymupdf4llm==1.27.2.3
 
 # Compatibility pins
 numpy==1.26.4
