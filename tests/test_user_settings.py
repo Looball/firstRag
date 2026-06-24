@@ -45,6 +45,29 @@ class UserLLMSettingsApiTests(unittest.TestCase):
         self.assertTrue(response.json()["success"])
         self.assertNotIn("api_key", response.json()["settings"])
 
+    def test_get_providers_returns_backend_catalog(self) -> None:
+        """厂商选项应由后端统一提供，前端无需维护硬编码清单。"""
+        providers = [
+            {
+                "id": "deepseek",
+                "name": "DeepSeek",
+                "base_url": "https://api.deepseek.com/v1",
+                "requires_base_url": False,
+                "enabled": True,
+            }
+        ]
+        with patch(
+            "app.api.user_settings.get_supported_llm_providers",
+            return_value=providers,
+        ):
+            response = self.client.get("/user/settings/providers")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.json(),
+            {"success": True, "providers": providers},
+        )
+
     def test_test_settings_without_body_uses_saved_settings(self) -> None:
         """空请求体应测试已保存设置，而不是要求重复提交 API Key。"""
         with patch(

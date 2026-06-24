@@ -64,10 +64,11 @@ python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().d
 export USER_SETTINGS_ENCRYPTION_KEY="上一步生成的值"
 ```
 
-后端提供 `GET /user/settings`、`PATCH /user/settings` 和
-`POST /user/settings/test` 三个已认证接口。用户 API Key 仅以密文保存，
-读取接口只会返回 `has_api_key` 状态。为避免 SSRF，用户自定义
-`base_url` 默认关闭；预设厂商不受影响。
+后端提供 `GET /user/settings/providers`、`GET /user/settings`、
+`PATCH /user/settings` 和 `POST /user/settings/test` 四个已认证接口。
+厂商列表和预设地址由 `/user/settings/providers` 统一提供，用户 API Key
+仅以密文保存，读取接口只会返回 `has_api_key` 状态。为避免 SSRF，用户
+自定义 `base_url` 默认关闭；预设厂商不受影响。
 
 ## 使用方式
 

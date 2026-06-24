@@ -21,6 +21,15 @@ PROVIDER_BASE_URLS = {
     "minimax": "https://api.minimaxi.com/v1",
 }
 
+PROVIDER_DISPLAY_NAMES = {
+    "deepseek": "DeepSeek",
+    "qwen": "通义千问",
+    "zhipu": "智谱 GLM",
+    "kimi": "Kimi",
+    "doubao": "豆包",
+    "minimax": "MiniMax",
+}
+
 
 @dataclass(frozen=True)
 class ChatModelSettings:
@@ -34,6 +43,31 @@ class ChatModelSettings:
     max_tokens: int
     timeout_seconds: float
     max_retries: int
+
+
+def get_supported_llm_providers() -> list[dict[str, object]]:
+    """返回供前端展示的厂商预设与自定义地址能力。"""
+    providers = [
+        {
+            "id": provider_id,
+            "name": PROVIDER_DISPLAY_NAMES[provider_id],
+            "base_url": base_url,
+            "requires_base_url": False,
+            "enabled": True,
+        }
+        for provider_id, base_url in PROVIDER_BASE_URLS.items()
+    ]
+    providers.append(
+        {
+            "id": OPENAI_COMPATIBLE_PROVIDER,
+            "name": "自定义 OpenAI 兼容服务",
+            "base_url": None,
+            "requires_base_url": True,
+            # 自定义地址由用户输入，默认关闭以避免后端被用作 SSRF 跳板。
+            "enabled": config.ALLOW_USER_CUSTOM_LLM_BASE_URL,
+        }
+    )
+    return providers
 
 
 def build_system_chat_model_settings() -> ChatModelSettings:

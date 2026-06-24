@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from app.core.security import get_current_user_id
 from app.schemas.user_settings import UpdateUserLLMSettingsRequest
+from app.services.llm_service import get_supported_llm_providers
 from app.services.user_settings_service import (
     get_serialized_user_llm_settings,
     test_user_llm_settings,
@@ -12,6 +13,17 @@ from app.services.user_settings_service import (
 
 
 router = APIRouter(prefix="/user", tags=["user-settings"])
+
+
+@router.get("/settings/providers")
+def get_user_settings_providers(
+    user_id: int = Depends(get_current_user_id),
+):
+    """返回可供当前用户选择的模型厂商预设。"""
+    return {
+        "success": True,
+        "providers": get_supported_llm_providers(),
+    }
 
 
 @router.get("/settings")
