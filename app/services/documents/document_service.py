@@ -44,7 +44,8 @@ def get_document_paths(folder_path: str | Path = "./local_doc") -> list[Path]:
             if file_path.suffix.lower() in supported_extensions:
                 document_paths.append(file_path)
 
-    return document_paths
+    # 文件系统遍历顺序不保证稳定；固定排序可避免批量建库时文件 ID 随运行变化。
+    return sorted(document_paths)
 
 
 def convert_docx2md(docx_path) -> str:
