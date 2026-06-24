@@ -22,6 +22,7 @@ def build_user_record() -> dict:
         "model": "deepseek-v4-flash",
         "base_url": None,
         "api_key_ciphertext": "encrypted-key",
+        "api_key_hint": "••••-key",
         "encryption_key_version": 1,
         "temperature": Decimal("0.20"),
         "max_tokens": 8000,
@@ -45,6 +46,7 @@ class UserLLMSettingsServiceTests(unittest.TestCase):
             settings = get_serialized_user_llm_settings(1)
 
         self.assertTrue(settings["has_api_key"])
+        self.assertEqual(settings["api_key_hint"], "••••-key")
         self.assertNotIn("api_key", settings)
         decrypt_secret.assert_not_called()
 
@@ -76,8 +78,26 @@ class UserLLMSettingsServiceTests(unittest.TestCase):
             persisted_settings["api_key_ciphertext"],
             "new-encrypted-key",
         )
+        self.assertEqual(persisted_settings["api_key_hint"], "••••-key")
         self.assertEqual(settings["model"], "deepseek-chat")
         decrypt_secret.assert_not_called()
+
+    def test_legacy_saved_key_returns_only_a_masked_hint(self) -> None:
+        """旧记录没有提示字段时，也只能向设置页返回脱敏标识。"""
+        record = build_user_record()
+        record["api_key_hint"] = None
+        with patch(
+            "app.services.user_settings_service.get_user_llm_settings",
+            return_value=record,
+        ), patch(
+            "app.services.user_settings_service.decrypt_secret",
+            return_value="sk-live-1234",
+        ) as decrypt_secret:
+            settings = get_serialized_user_llm_settings(1)
+
+        self.assertEqual(settings["api_key_hint"], "••••1234")
+        self.assertNotIn("sk-live-1234", str(settings))
+        decrypt_secret.assert_called_once_with("encrypted-key")
 
     def test_custom_user_base_url_is_disabled_by_default(self) -> None:
         """未开启开关时，用户不应能设置任意兼容接口地址。"""

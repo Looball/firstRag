@@ -35,3 +35,13 @@ def decrypt_secret(cipher_text: str) -> str:
         return _get_cipher().decrypt(cipher_text.encode("utf-8")).decode("utf-8")
     except InvalidToken as exc:
         raise ValueError("用户 API Key 密文无效或加密密钥已变更") from exc
+
+
+def build_secret_hint(plain_text: str) -> str:
+    """生成不暴露完整敏感值的末尾提示，用于设置页确认已保存凭据。"""
+    if not plain_text:
+        return ""
+    if len(plain_text) <= 4:
+        return "••••"
+
+    return f"••••{plain_text[-4:]}"

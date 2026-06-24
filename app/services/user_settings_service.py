@@ -9,7 +9,11 @@ from urllib.parse import urlparse
 from openai import OpenAI
 
 from app.core.config import ALLOW_USER_CUSTOM_LLM_BASE_URL
-from app.core.secret_cipher import decrypt_secret, encrypt_secret
+from app.core.secret_cipher import (
+    build_secret_hint,
+    decrypt_secret,
+    encrypt_secret,
+)
 from app.repositories.user_llm_settings_repository import (
     get_user_llm_settings,
     upsert_user_llm_settings,
@@ -86,6 +90,7 @@ def _serialize_settings(
     settings: ChatModelSettings,
     credential_mode: str,
     has_api_key: bool,
+    api_key_hint: str | None = None,
 ) -> dict[str, Any]:
     """将生效设置转换为不会泄露 API Key 的响应结构。"""
     return {
@@ -94,6 +99,7 @@ def _serialize_settings(
         "model": settings.model,
         "base_url": resolve_base_url(settings.provider, settings.base_url),
         "has_api_key": has_api_key,
+        "api_key_hint": api_key_hint,
         "temperature": settings.temperature,
         "max_tokens": settings.max_tokens,
         "timeout_seconds": settings.timeout_seconds,
@@ -160,10 +166,17 @@ def get_serialized_user_llm_settings(user_id: int) -> dict[str, Any]:
         )
 
     settings = _build_user_settings(record, decrypt_api_key=False)
+    api_key_hint = record.get("api_key_hint")
+    if not api_key_hint and record["api_key_ciphertext"]:
+        # 兼容已保存的旧记录：仅在服务端计算脱敏提示，不向前端传输明文。
+        api_key_hint = build_secret_hint(
+            decrypt_secret(record["api_key_ciphertext"])
+        )
     return _serialize_settings(
         settings,
         USER_CREDENTIAL_MODE,
         bool(record["api_key_ciphertext"]),
+        api_key_hint,
     )
 
 
@@ -214,6 +227,7 @@ def _merge_settings_record(
             "model": None,
             "base_url": None,
             "api_key_ciphertext": None,
+            "api_key_hint": None,
             "encryption_key_version": 1,
             "temperature": temperature,
             "max_tokens": max_tokens,
@@ -244,9 +258,15 @@ def _merge_settings_record(
 
     if "api_key" in updates:
         api_key_ciphertext = encrypt_secret(updates["api_key"])
+        api_key_hint = build_secret_hint(updates["api_key"])
     else:
         api_key_ciphertext = (
             current_record.get("api_key_ciphertext")
+            if current_record is not None
+            else None
+        )
+        api_key_hint = (
+            current_record.get("api_key_hint")
             if current_record is not None
             else None
         )
@@ -259,6 +279,7 @@ def _merge_settings_record(
         "model": normalized_model,
         "base_url": base_url,
         "api_key_ciphertext": api_key_ciphertext,
+        "api_key_hint": api_key_hint,
         "encryption_key_version": 1,
         "temperature": temperature,
         "max_tokens": max_tokens,

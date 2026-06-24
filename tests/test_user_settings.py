@@ -30,6 +30,7 @@ class UserLLMSettingsApiTests(unittest.TestCase):
             "model": "deepseek-v4-flash",
             "base_url": "https://api.deepseek.com/v1",
             "has_api_key": True,
+            "api_key_hint": "••••abcd",
             "temperature": 0.2,
             "max_tokens": 8000,
             "timeout_seconds": 60.0,
@@ -44,6 +45,10 @@ class UserLLMSettingsApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertTrue(response.json()["success"])
         self.assertNotIn("api_key", response.json()["settings"])
+        self.assertEqual(
+            response.json()["settings"]["api_key_hint"],
+            "••••abcd",
+        )
 
     def test_get_providers_returns_backend_catalog(self) -> None:
         """厂商选项应由后端统一提供，前端无需维护硬编码清单。"""

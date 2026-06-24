@@ -16,6 +16,7 @@ def get_user_llm_settings(user_id: int) -> Row | None:
             model,
             base_url,
             api_key_ciphertext,
+            api_key_hint,
             encryption_key_version,
             temperature,
             max_tokens,
@@ -44,6 +45,7 @@ def upsert_user_llm_settings(
             model,
             base_url,
             api_key_ciphertext,
+            api_key_hint,
             encryption_key_version,
             temperature,
             max_tokens,
@@ -51,7 +53,7 @@ def upsert_user_llm_settings(
             max_retries
         )
         VALUES (
-            %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
+            %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
         )
         ON CONFLICT (user_id) DO UPDATE
         SET
@@ -60,6 +62,7 @@ def upsert_user_llm_settings(
             model = EXCLUDED.model,
             base_url = EXCLUDED.base_url,
             api_key_ciphertext = EXCLUDED.api_key_ciphertext,
+            api_key_hint = EXCLUDED.api_key_hint,
             encryption_key_version = EXCLUDED.encryption_key_version,
             temperature = EXCLUDED.temperature,
             max_tokens = EXCLUDED.max_tokens,
@@ -73,6 +76,7 @@ def upsert_user_llm_settings(
             model,
             base_url,
             api_key_ciphertext,
+            api_key_hint,
             encryption_key_version,
             temperature,
             max_tokens,
@@ -88,6 +92,7 @@ def upsert_user_llm_settings(
             settings["model"],
             settings["base_url"],
             settings["api_key_ciphertext"],
+            settings["api_key_hint"],
             settings["encryption_key_version"],
             settings["temperature"],
             settings["max_tokens"],
