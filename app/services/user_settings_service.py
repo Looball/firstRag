@@ -185,6 +185,7 @@ def _merge_settings_record(
     updates: dict[str, Any],
     *,
     require_model: bool = True,
+    clear_missing_model: bool = False,
 ) -> dict[str, Any]:
     """合并局部更新并生成可直接持久化的用户设置记录。"""
     current_mode = (
@@ -256,7 +257,7 @@ def _merge_settings_record(
     # 切换厂商后旧模型名通常无效，不能在测试请求中静默沿用。
     model = updates.get(
         "model",
-        "" if current_provider != provider else (
+        "" if clear_missing_model or current_provider != provider else (
             current_record.get("model") if current_record else None
         ),
     )
@@ -322,6 +323,7 @@ def test_user_llm_settings(
             current_record,
             updates,
             require_model=False,
+            clear_missing_model=True,
         )
         if settings_record["credential_mode"] == PLATFORM_CREDENTIAL_MODE:
             settings = _build_platform_settings(settings_record)

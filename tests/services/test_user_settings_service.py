@@ -151,10 +151,10 @@ class UserLLMSettingsServiceTests(unittest.TestCase):
         self.assertTrue(result["api_key_saved"])
         create_model.assert_not_called()
 
-    def test_provider_change_does_not_reuse_previous_model(self) -> None:
-        """切换厂商时，未提交模型名应获取新厂商列表而非调用旧模型。"""
+    def test_model_discovery_does_not_reuse_previous_model(self) -> None:
+        """未提交模型名时，应获取列表而非调用设置页中遗留的旧模型。"""
         record = build_user_record()
-        record["provider"] = "qwen"
+        record["provider"] = "deepseek"
         record["model"] = "qwen3.7-max"
         with patch(
             "app.services.user_settings_service.get_user_llm_settings",
