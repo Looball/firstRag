@@ -117,6 +117,51 @@ class KnowledgeFileListTests(unittest.TestCase):
         self.assertEqual(latest_job["status"], "queued")
         self.assertEqual(latest_job["max_attempts"], 3)
 
+    def test_latest_index_job_normalizes_succeeded_status(self) -> None:
+        """文件列表应把内部 succeeded 状态归一化为前端协议的 completed。"""
+        file_id = uuid4()
+        job_id = uuid4()
+        with patch(
+            "app.api.knowledge_files.get_user_knowledge_files",
+            return_value=[
+                {
+                    "id": file_id,
+                    "original_name": "demo.md",
+                    "mime_type": "text/markdown",
+                    "size_bytes": 123,
+                    "status": "indexed",
+                    "usage_count": 1,
+                    "created_at": "2026-06-25T00:00:00+08:00",
+                }
+            ],
+        ), patch(
+            "app.api.knowledge_files.get_latest_vector_index_jobs_by_file_ids",
+            return_value={
+                str(file_id): {
+                    "id": job_id,
+                    "user_id": 1,
+                    "knowledge_file_id": file_id,
+                    "knowledge_base_id": None,
+                    "index_version": 1,
+                    "status": "succeeded",
+                    "attempts": 1,
+                    "max_attempts": 3,
+                    "error_message": None,
+                    "result": {"chunk_count": 3},
+                    "created_at": "2026-06-25T00:00:00+08:00",
+                    "updated_at": "2026-06-25T00:00:02+08:00",
+                    "started_at": "2026-06-25T00:00:01+08:00",
+                    "finished_at": "2026-06-25T00:00:02+08:00",
+                }
+            },
+        ):
+            response = self.client.get("/chat/knowledge-files")
+
+        self.assertEqual(response.status_code, 200)
+        latest_job = response.json()["files"][0]["latest_index_job"]
+        self.assertEqual(latest_job["id"], str(job_id))
+        self.assertEqual(latest_job["status"], "completed")
+
 
 if __name__ == "__main__":
     unittest.main()

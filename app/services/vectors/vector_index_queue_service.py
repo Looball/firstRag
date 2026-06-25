@@ -44,7 +44,12 @@ def serialize_latest_vector_index_job(
     if job is None:
         return None
 
-    return serialize_vector_index_job(job)
+    serialized_job = serialize_vector_index_job(job)
+    # vector_index_jobs 内部完成态是 succeeded；文件列表接口对外统一成前端协议的 completed。
+    if serialized_job["status"] == "succeeded":
+        serialized_job["status"] = "completed"
+
+    return serialized_job
 
 
 def enqueue_file_vector_index(
