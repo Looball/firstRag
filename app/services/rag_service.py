@@ -27,21 +27,55 @@ type ChainInput = dict[str, Any]
 type RagStreamEvent = dict[str, Any]
 
 
+REFERENCE_RERANK_SCORE_THRESHOLD = 0.0
+
+
 def create_chat_model(user_id: int) -> ChatOpenAI:
     """创建当前用户生效的 OpenAI 兼容聊天模型。"""
     settings = get_effective_chat_model_settings(user_id)
     return create_openai_compatible_chat_model(settings)
 
 
+def is_reference_document_relevant(
+    doc: Document,
+    rerank_score_threshold: float = REFERENCE_RERANK_SCORE_THRESHOLD,
+) -> bool:
+    """判断检索片段是否足够可信，可以进入上下文和前端引用。
+
+    BGE Cross-Encoder reranker 输出 raw logits，分数越大越相关。
+    当前混合检索默认启用 reranker，因此低于 0 的片段通常是弱相关或
+    误召回片段，不应在用户只问“你好”这类问题时展示成来源。
+    如果历史数据或降级路径没有 rerank_score，则保持兼容，暂不拦截。
+    """
+    score = doc.metadata.get("rerank_score")
+    if score is None:
+        return True
+
+    try:
+        return float(score) >= rerank_score_threshold
+    except (TypeError, ValueError):
+        return True
+
+
+def filter_relevant_reference_documents(
+    docs: list[Document],
+    rerank_score_threshold: float = REFERENCE_RERANK_SCORE_THRESHOLD,
+) -> list[Document]:
+    """过滤掉低相关检索片段，避免误展示 Sources。"""
+    return [
+        doc
+        for doc in docs
+        if isinstance(doc, Document)
+        and is_reference_document_relevant(doc, rerank_score_threshold)
+    ]
+
+
 def get_res_doc(inputs: dict[str, Any]) -> str:
     """将检索到的文档列表格式化为提示词上下文。"""
-    docs = inputs.get("context", [])
+    docs = filter_relevant_reference_documents(inputs.get("context", []))
     context_parts = []
 
     for index, doc in enumerate(docs, start=1):
-        if not isinstance(doc, Document):
-            continue
-
         metadata = doc.metadata
         source = metadata.get("file_name") or metadata.get("source", "")
         chunk_index = metadata.get("chunk_index", "")
@@ -82,10 +116,8 @@ def serialize_reference_documents(
     )
 
     references = []
-    for index, doc in enumerate(docs, start=1):
-        if not isinstance(doc, Document):
-            continue
-
+    relevant_docs = filter_relevant_reference_documents(docs)
+    for index, doc in enumerate(relevant_docs, start=1):
         metadata = doc.metadata
         doc_file_id = metadata.get("file_id", "")
 
@@ -268,13 +300,16 @@ def stream_rag_response(
     sources_sent = False
     for chunk in response:
         if "context" in chunk and not sources_sent:
-            yield {
-                "type": "sources",
-                "sources": serialize_reference_documents(
-                    chunk["context"],
-                    user_id=user_id,
-                ),
-            }
+            sources = serialize_reference_documents(
+                chunk["context"],
+                user_id=user_id,
+            )
+            # 没有可信引用时不发送 sources 事件，避免前端展示空 Sources。
+            if sources:
+                yield {
+                    "type": "sources",
+                    "sources": sources,
+                }
             sources_sent = True
 
         if "answer" in chunk:
