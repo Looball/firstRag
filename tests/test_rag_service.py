@@ -4,10 +4,12 @@ import unittest
 from uuid import uuid4
 
 from langchain_core.documents import Document
+from langchain_core.language_models.fake_chat_models import FakeListChatModel
 
 from app.services.rag_service import (
     build_knowledge_base_profile,
     get_res_doc,
+    get_chain,
     normalize_retrieval_decision,
     parse_retrieval_decision,
     retrieve_documents,
@@ -191,6 +193,34 @@ class RagQueryRouterTests(unittest.TestCase):
 
         self.assertIn("民事诉讼法.pdf", profile)
         self.assertNotIn("未处理.txt", profile)
+
+    def test_get_chain_stream_renders_router_prompt_json_example(self) -> None:
+        """真实链路应能渲染 Router Prompt 中的 JSON 示例。"""
+        model = FakeListChatModel(responses=[
+            (
+                '{"need_retrieval": false, '
+                '"rewritten_query": "你好", '
+                '"reason": "普通问候"}'
+            ),
+            "你好！有什么可以帮你的吗？",
+        ])
+
+        with unittest.mock.patch(
+            "app.services.rag_service.create_chat_model",
+            return_value=model,
+        ), unittest.mock.patch(
+            "app.services.rag_service.get_knowledge_base_files",
+            return_value=[],
+        ):
+            chain = get_chain(user_id=1)
+            chunks = list(chain.stream({
+                "input": "你好",
+                "chat_history": [],
+                "user_id": 1,
+                "knowledge_base_id": uuid4(),
+            }))
+
+        self.assertTrue(any("answer" in chunk for chunk in chunks))
 
 
 if __name__ == "__main__":

@@ -351,8 +351,8 @@ def get_chain(user_id: int) -> RunnableSerializable:
         "根据当前知识库事实回答，need_retrieval=true。"
         "如果不确定，必须选择 need_retrieval=true。"
         "请只输出 JSON，不要 Markdown，不要解释。JSON 格式："
-        '{"need_retrieval": true, "rewritten_query": "用于检索的中文问题", '
-        '"reason": "一句话原因"}'
+        '{{"need_retrieval": true, "rewritten_query": "用于检索的中文问题", '
+        '"reason": "一句话原因"}}'
         "\n\n当前知识库文件画像：\n{knowledge_profile}"
     )
     router_prompt = ChatPromptTemplate([
