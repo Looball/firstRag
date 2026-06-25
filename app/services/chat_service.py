@@ -58,6 +58,16 @@ def stream_answer_and_save(
             user_id=user_id,
             knowledge_base_id=knowledge_base_id,
         ):
+            if event["type"] == "retrieval":
+                yield format_sse_event("retrieval", {
+                    "need_retrieval": event["need_retrieval"],
+                    "rewritten_query": event["rewritten_query"],
+                    "reason": event["reason"],
+                    "retrieved_count": event["retrieved_count"],
+                    "source_count": event["source_count"],
+                })
+                continue
+
             if event["type"] == "sources":
                 sources = event["sources"]
                 yield format_sse_event("sources", {

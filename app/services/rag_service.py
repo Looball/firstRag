@@ -443,12 +443,32 @@ def stream_rag_response(
     })
 
     sources_sent = False
+    retrieval_sent = False
+    retrieval_decision: RetrievalDecision | None = None
     for chunk in response:
+        if "retrieval_decision" in chunk:
+            retrieval_decision = normalize_retrieval_decision(
+                chunk["retrieval_decision"],
+            )
+
         if "context" in chunk and not sources_sent:
+            context = chunk["context"] or []
             sources = serialize_reference_documents(
-                chunk["context"],
+                context,
                 user_id=user_id,
             )
+            if not retrieval_sent:
+                decision = normalize_retrieval_decision(retrieval_decision)
+                yield {
+                    "type": "retrieval",
+                    "need_retrieval": decision["need_retrieval"],
+                    "rewritten_query": decision["rewritten_query"],
+                    "reason": decision["reason"],
+                    "retrieved_count": len(context),
+                    "source_count": len(sources),
+                }
+                retrieval_sent = True
+
             # 没有可信引用时不发送 sources 事件，避免前端展示空 Sources。
             if sources:
                 yield {

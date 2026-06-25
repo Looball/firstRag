@@ -88,9 +88,18 @@ class RagReferenceFilteringTests(unittest.TestCase):
         self.assertNotIn("不该进入上下文", context)
         self.assertIn("应该进入上下文", context)
 
-    def test_stream_rag_response_skips_empty_sources_event(self) -> None:
-        """全部引用被过滤时，不发送 sources 事件。"""
+    def test_stream_rag_response_reports_retrieval_without_sources(
+        self,
+    ) -> None:
+        """全部引用被过滤时，应报告检索状态但不发送 sources 事件。"""
         chain = FakeStreamingChain([
+            {
+                "retrieval_decision": {
+                    "need_retrieval": True,
+                    "rewritten_query": "你好",
+                    "reason": "测试路由",
+                }
+            },
             {
                 "context": [
                     Document(
@@ -112,9 +121,53 @@ class RagReferenceFilteringTests(unittest.TestCase):
 
         self.assertEqual(
             [event["type"] for event in events],
-            ["answer"],
+            ["retrieval", "answer"],
         )
-        self.assertEqual(events[0]["content"], "你好！")
+        self.assertTrue(events[0]["need_retrieval"])
+        self.assertEqual(events[0]["retrieved_count"], 1)
+        self.assertEqual(events[0]["source_count"], 0)
+        self.assertEqual(events[1]["content"], "你好！")
+
+    def test_stream_rag_response_sends_sources_after_retrieval_event(
+        self,
+    ) -> None:
+        """有可信引用时，应先报告检索状态，再发送 sources。"""
+        chain = FakeStreamingChain([
+            {
+                "retrieval_decision": {
+                    "need_retrieval": True,
+                    "rewritten_query": "民事诉讼法",
+                    "reason": "问题涉及知识库文件",
+                }
+            },
+            {
+                "context": [
+                    Document(
+                        page_content="相关内容",
+                        metadata={
+                            "file_name": "民事诉讼法.pdf",
+                            "rerank_score": 0.5,
+                        },
+                    )
+                ]
+            },
+            {"answer": "根据资料回答。"},
+        ])
+
+        events = list(stream_rag_response(
+            chain=chain,
+            user_input="民事诉讼法是什么",
+            chat_history=[],
+            user_id=1,
+            knowledge_base_id=uuid4(),
+        ))
+
+        self.assertEqual(
+            [event["type"] for event in events],
+            ["retrieval", "sources", "answer"],
+        )
+        self.assertEqual(events[0]["source_count"], 1)
+        self.assertEqual(events[1]["sources"][0]["content"], "相关内容")
 
 
 class RagQueryRouterTests(unittest.TestCase):
@@ -220,6 +273,7 @@ class RagQueryRouterTests(unittest.TestCase):
                 "knowledge_base_id": uuid4(),
             }))
 
+        self.assertTrue(any("retrieval_decision" in chunk for chunk in chunks))
         self.assertTrue(any("answer" in chunk for chunk in chunks))
 
 
