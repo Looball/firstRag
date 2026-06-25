@@ -2325,15 +2325,12 @@ export default function Home() {
     return latestJobs;
   }
 
-  const refreshKnowledgeFiles = useCallback(
-    async (options?: { showLoading?: boolean }) => {
-      await Promise.all([
-        loadKnowledgeBaseFiles(selectedKnowledgeBaseId, options),
-        loadAllKnowledgeFiles(options),
-      ]);
-    },
-    [loadAllKnowledgeFiles, loadKnowledgeBaseFiles, selectedKnowledgeBaseId]
-  );
+  async function refreshKnowledgeFiles(options?: { showLoading?: boolean }) {
+    await Promise.all([
+      loadKnowledgeBaseFiles(selectedKnowledgeBaseId, options),
+      loadAllKnowledgeFiles(options),
+    ]);
+  }
 
   async function handleIndexKnowledgeFile(fileId: string) {
     if (!fileId || vectorIndexingFileIds[fileId]) {
@@ -2758,8 +2755,13 @@ export default function Home() {
     }
 
     const intervalId = window.setInterval(() => {
-      void refreshKnowledgeFiles({ showLoading: false });
-      void loadVectorIndexHealth({ showLoading: false });
+      void Promise.all([
+        loadKnowledgeBaseFiles(selectedKnowledgeBaseId, {
+          showLoading: false,
+        }),
+        loadAllKnowledgeFiles({ showLoading: false }),
+        loadVectorIndexHealth({ showLoading: false }),
+      ]);
     }, 2500);
 
     return () => {
@@ -2768,8 +2770,10 @@ export default function Home() {
   }, [
     hasCheckedAuth,
     hasPollingIndexJobs,
+    loadAllKnowledgeFiles,
+    loadKnowledgeBaseFiles,
     loadVectorIndexHealth,
-    refreshKnowledgeFiles,
+    selectedKnowledgeBaseId,
   ]);
 
   useEffect(() => {
