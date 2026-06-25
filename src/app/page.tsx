@@ -16,8 +16,11 @@ import {
 } from "@/lib/auth";
 
 type Message = {
+  id?: string;
   role: "user" | "assistant";
   content: string;
+  status?: string;
+  errorMessage?: string | null;
   sources?: ChatSource[];
   retrieval?: RetrievalState;
 };
@@ -26,6 +29,14 @@ type ChatSource = {
   title: string;
   content: string;
   metadata: string;
+  index?: number;
+  fileId?: string;
+  fileName?: string;
+  fileType?: string;
+  chunkIndex?: number;
+  rerankScore?: number;
+  rrfScore?: number;
+  retrievalSources?: string[];
 };
 
 type RetrievalState = {
@@ -224,17 +235,55 @@ function buildSessionTitle(input: string) {
   return normalized.length > 24 ? `${normalized.slice(0, 24)}...` : normalized;
 }
 
-function isMessage(value: unknown): value is Message {
+function toMessage(value: unknown): Message | null {
   if (typeof value !== "object" || value === null) {
-    return false;
+    return null;
   }
 
-  const candidate = value as Partial<Message>;
+  const candidate = value as Record<string, unknown>;
+  const role = candidate.role;
 
-  return (
-    (candidate.role === "user" || candidate.role === "assistant") &&
-    typeof candidate.content === "string"
-  );
+  if (
+    (role !== "user" && role !== "assistant") ||
+    typeof candidate.content !== "string"
+  ) {
+    return null;
+  }
+
+  const sourceContainer = Array.isArray(candidate.sources)
+    ? { sources: candidate.sources }
+    : Array.isArray(candidate.documents)
+      ? { documents: candidate.documents }
+      : Array.isArray(candidate.refs)
+        ? { refs: candidate.refs }
+        : null;
+  const sources = sourceContainer ? getChatSources(sourceContainer) : [];
+  const retrieval = getRetrievalState(candidate);
+  const id = typeof candidate.id === "string" ? candidate.id : undefined;
+  const status =
+    typeof candidate.status === "string" ? candidate.status : undefined;
+  const errorMessage =
+    typeof candidate.error_message === "string"
+      ? candidate.error_message
+      : candidate.error_message === null
+        ? null
+        : undefined;
+
+  return {
+    ...(id ? { id } : {}),
+    role,
+    content: candidate.content,
+    ...(status ? { status } : {}),
+    ...(errorMessage !== undefined ? { errorMessage } : {}),
+    ...(sources.length > 0 ? { sources } : {}),
+    ...(retrieval ? { retrieval } : {}),
+  };
+}
+
+function toMessages(values: unknown[]) {
+  return values
+    .map(toMessage)
+    .filter((message): message is Message => message !== null);
 }
 
 function getResponseErrorMessage(
@@ -395,6 +444,29 @@ function getNumberField(value: Record<string, unknown>, fieldName: string) {
   return 0;
 }
 
+function getOptionalNumberField(
+  value: Record<string, unknown>,
+  fieldNames: string[]
+) {
+  for (const fieldName of fieldNames) {
+    const fieldValue = value[fieldName];
+
+    if (typeof fieldValue === "number" && Number.isFinite(fieldValue)) {
+      return fieldValue;
+    }
+
+    if (typeof fieldValue === "string" && fieldValue.trim()) {
+      const parsedValue = Number(fieldValue);
+
+      if (Number.isFinite(parsedValue)) {
+        return parsedValue;
+      }
+    }
+  }
+
+  return undefined;
+}
+
 function getRetrievalState(value: unknown): RetrievalState | undefined {
   const parsedValue = typeof value === "string" ? parseJsonValue(value) : value;
 
@@ -460,6 +532,17 @@ function getRecordField(
     : null;
 }
 
+function getStringArrayField(value: Record<string, unknown>, fieldName: string) {
+  const fieldValue = value[fieldName];
+
+  return Array.isArray(fieldValue)
+    ? fieldValue
+        .filter((item): item is string => typeof item === "string")
+        .map((item) => item.trim())
+        .filter(Boolean)
+    : [];
+}
+
 function toChatSource(value: unknown, index: number): ChatSource | null {
   if (typeof value === "string") {
     const normalized = value.trim();
@@ -479,6 +562,48 @@ function toChatSource(value: unknown, index: number): ChatSource | null {
 
   const source = value as Record<string, unknown>;
   const metadataRecord = getRecordField(source, "metadata");
+  const sourceIndex = getOptionalNumberField(source, ["index"]);
+  const chunkIndex = getOptionalNumberField(source, [
+    "chunk_index",
+    "chunk_id",
+  ]);
+  const rerankScore = getOptionalNumberField(source, [
+    "rerank_score",
+    "score",
+  ]);
+  const rrfScore = getOptionalNumberField(source, ["rrf_score"]);
+  const fileId =
+    getStringField(source, ["file_id", "knowledge_file_id", "document_id"]) ||
+    (metadataRecord
+      ? getStringField(metadataRecord, [
+          "file_id",
+          "knowledge_file_id",
+          "document_id",
+        ])
+      : "");
+  const fileName =
+    getStringField(source, [
+      "file_name",
+      "filename",
+      "original_name",
+      "document_name",
+      "knowledge_file_name",
+    ]) ||
+    (metadataRecord
+      ? getStringField(metadataRecord, [
+          "file_name",
+          "filename",
+          "original_name",
+          "document_name",
+          "knowledge_file_name",
+        ])
+      : "");
+  const fileType =
+    getStringField(source, ["file_type", "type"]) ||
+    (metadataRecord
+      ? getStringField(metadataRecord, ["file_type", "type"])
+      : "");
+  const retrievalSources = getStringArrayField(source, "retrieval_sources");
   const title =
     getStringField(source, [
       "title",
@@ -491,6 +616,7 @@ function toChatSource(value: unknown, index: number): ChatSource | null {
       "source",
       "document",
     ]) ||
+    fileName ||
     (metadataRecord
       ? getStringField(metadataRecord, [
           "title",
@@ -530,9 +656,6 @@ function toChatSource(value: unknown, index: number): ChatSource | null {
       : "");
 
   const metadataParts: string[] = [];
-  const chunkIndex = source["chunk_index"] ?? source["chunk_id"];
-  const rerankScore = source["rerank_score"] ?? source["score"];
-  const retrievalSources = source["retrieval_sources"];
   const createdAt = source["created_at"];
   const pageNumber =
     source["page"] ??
@@ -541,24 +664,6 @@ function toChatSource(value: unknown, index: number): ChatSource | null {
     metadataRecord?.page ??
     metadataRecord?.page_number ??
     metadataRecord?.page_index;
-
-  if (
-    (typeof chunkIndex === "number" && Number.isFinite(chunkIndex)) ||
-    (typeof chunkIndex === "string" && chunkIndex.trim())
-  ) {
-    const chunkNum =
-      typeof chunkIndex === "number" ? chunkIndex : Number(chunkIndex);
-    metadataParts.push(
-      `片段 #${Number.isFinite(chunkNum) ? chunkNum + 1 : chunkIndex}`
-    );
-  }
-
-  if (
-    typeof rerankScore === "number" &&
-    Number.isFinite(rerankScore)
-  ) {
-    metadataParts.push(`相关性 ${rerankScore.toFixed(4)}`);
-  }
 
   if (
     (typeof pageNumber === "number" && Number.isFinite(pageNumber)) ||
@@ -572,26 +677,13 @@ function toChatSource(value: unknown, index: number): ChatSource | null {
   }
 
   if (
-    retrievalSources !== undefined &&
-    retrievalSources !== null &&
+    retrievalSources.length > 0 &&
     !metadataParts.length
   ) {
-    try {
-      metadataParts.push(JSON.stringify(retrievalSources));
-    } catch {
-      // ignore unstringifiable value
-    }
+    metadataParts.push(retrievalSources.join(" / "));
   }
 
-  const legacyMetadata =
-    getStringField(source, ["knowledge_file_id", "file_id", "document_id"]) ||
-    (metadataRecord
-      ? getStringField(metadataRecord, [
-          "knowledge_file_id",
-          "file_id",
-          "document_id",
-        ])
-      : "");
+  const legacyMetadata = fileId;
 
   const metadata =
     metadataParts.length > 0
@@ -602,6 +694,14 @@ function toChatSource(value: unknown, index: number): ChatSource | null {
     title,
     content,
     metadata,
+    ...(sourceIndex !== undefined ? { index: sourceIndex } : {}),
+    ...(fileId ? { fileId } : {}),
+    ...(fileName ? { fileName } : {}),
+    ...(fileType ? { fileType } : {}),
+    ...(chunkIndex !== undefined ? { chunkIndex } : {}),
+    ...(rerankScore !== undefined ? { rerankScore } : {}),
+    ...(rrfScore !== undefined ? { rrfScore } : {}),
+    ...(retrievalSources.length > 0 ? { retrievalSources } : {}),
   };
 }
 
@@ -611,8 +711,19 @@ function hasSourceShape(value: Record<string, unknown>) {
     "file_name",
     "filename",
     "original_name",
+    "file_id",
+    "file_type",
+    "knowledge_file_id",
+    "document_id",
+    "document_name",
+    "knowledge_file_name",
     "source",
     "document",
+    "index",
+    "chunk_index",
+    "rerank_score",
+    "rrf_score",
+    "retrieval_sources",
     "metadata",
     "content",
     "text",
@@ -704,7 +815,7 @@ function toChatSession(
   }
 
   const messages = Array.isArray(conversation.messages)
-    ? removeLegacyInitialMessage(conversation.messages.filter(isMessage))
+    ? removeLegacyInitialMessage(toMessages(conversation.messages))
     : [];
   const knowledgeBaseId =
     typeof conversation.knowledge_base_id === "string" &&
@@ -2159,7 +2270,7 @@ export default function Home() {
 
     const data = (await response.json()) as ListMessagesResponse;
     return Array.isArray(data.messages)
-      ? removeLegacyInitialMessage(data.messages.filter(isMessage))
+      ? removeLegacyInitialMessage(toMessages(data.messages))
       : [];
   }
 
@@ -3403,6 +3514,14 @@ export default function Home() {
                 const sourceCount = message.sources?.length ?? 0;
                 const shouldShowSources =
                   message.role === "assistant" && sourceCount > 0;
+                const displaySourceCount =
+                  message.retrieval && message.retrieval.source_count > 0
+                    ? message.retrieval.source_count
+                    : sourceCount;
+                const retrievedCount =
+                  message.retrieval && message.retrieval.retrieved_count > 0
+                    ? message.retrieval.retrieved_count
+                    : null;
                 const shouldShowRetrievalEmptyHint =
                   message.role === "assistant" &&
                   message.retrieval?.need_retrieval === true &&
@@ -3450,35 +3569,68 @@ export default function Home() {
 
                       {shouldShowSources && message.sources && (
                         <div className="mt-4 border-t border-[#d6dedb] pt-3">
-                          <p className="font-utility text-[10px] font-semibold uppercase text-[#64716d]">
-                            Sources
-                          </p>
+                          <div className="flex flex-wrap items-baseline justify-between gap-2">
+                            <p className="font-utility text-[10px] font-semibold uppercase text-[#64716d]">
+                              Sources
+                            </p>
+                            <p className="text-xs text-[#64716d]">
+                              可展示 {displaySourceCount} 条
+                              {retrievedCount !== null
+                                ? ` · 召回 ${retrievedCount} 段`
+                                : ""}
+                            </p>
+                          </div>
                           <div className="mt-2 space-y-2">
                             {message.sources.map((source, sourceIndex) => (
-                                <div
-                                  key={`${messageKey}-source-${sourceIndex}`}
-                                  className="border border-[#d5ded9] bg-[#fcfdfb] px-3 py-2 text-xs text-[#46514e]"
-                                >
-                                  <div className="flex items-start justify-between gap-3">
-                                    <p className="min-w-0 truncate font-semibold text-[#17201f]">
-                                      {source.title}
-                                    </p>
-                                    {source.metadata && (
-                                      <span className="font-utility shrink-0 text-[10px] text-[#72807b]">
-                                        {source.metadata}
+                              <div
+                                key={`${messageKey}-source-${
+                                  source.index ?? sourceIndex
+                                }`}
+                                className="border border-[#d5ded9] bg-[#fcfdfb] px-3 py-2 text-xs text-[#46514e]"
+                              >
+                                <div className="flex items-start justify-between gap-3">
+                                  <p className="min-w-0 truncate font-semibold text-[#17201f]">
+                                    {source.title}
+                                  </p>
+                                  <div className="font-utility flex shrink-0 flex-wrap justify-end gap-2 text-[10px] text-[#72807b]">
+                                    {source.chunkIndex !== undefined && (
+                                      <span>片段 #{source.chunkIndex}</span>
+                                    )}
+                                    {source.rerankScore !== undefined && (
+                                      <span>
+                                        相关性{" "}
+                                        {source.rerankScore.toFixed(4)}
                                       </span>
                                     )}
+                                    {source.metadata && (
+                                      <span>{source.metadata}</span>
+                                    )}
                                   </div>
-                                  {source.content && (
-                                    <p className="mt-1 max-h-10 overflow-hidden leading-5 text-[#64716d]">
-                                      {source.content}
-                                    </p>
-                                  )}
                                 </div>
-                              ))}
-                            </div>
+                                {source.content && (
+                                  <p className="mt-1 max-h-10 overflow-hidden leading-5 text-[#64716d]">
+                                    {source.content}
+                                  </p>
+                                )}
+                                {((source.fileName &&
+                                  source.fileName !== source.title) ||
+                                  source.fileType) && (
+                                  <p className="mt-1 truncate text-[11px] text-[#72807b]">
+                                    {[
+                                      source.fileName !== source.title
+                                        ? source.fileName
+                                        : "",
+                                      source.fileType,
+                                    ]
+                                      .filter(Boolean)
+                                      .join(" · ")}
+                                  </p>
+                                )}
+                              </div>
+                            ))}
                           </div>
-                        )}
+                        </div>
+                      )}
 
                       {message.role === "assistant" && message.content && (
                         <div className="mt-4 flex justify-end border-t border-[#d6dedb] pt-3">
