@@ -19,12 +19,21 @@ type Message = {
   role: "user" | "assistant";
   content: string;
   sources?: ChatSource[];
+  retrieval?: RetrievalState;
 };
 
 type ChatSource = {
   title: string;
   content: string;
   metadata: string;
+};
+
+type RetrievalState = {
+  need_retrieval: boolean;
+  rewritten_query: string;
+  reason: string;
+  retrieved_count: number;
+  source_count: number;
 };
 
 type ChatSession = {
@@ -361,6 +370,57 @@ function parseJsonValue(value: string) {
   } catch {
     return value;
   }
+}
+
+function getNumberField(value: Record<string, unknown>, fieldName: string) {
+  const fieldValue = value[fieldName];
+
+  if (typeof fieldValue === "number" && Number.isFinite(fieldValue)) {
+    return fieldValue;
+  }
+
+  if (typeof fieldValue === "string" && fieldValue.trim()) {
+    const parsedValue = Number(fieldValue);
+
+    return Number.isFinite(parsedValue) ? parsedValue : 0;
+  }
+
+  return 0;
+}
+
+function getRetrievalState(value: unknown): RetrievalState | undefined {
+  const parsedValue = typeof value === "string" ? parseJsonValue(value) : value;
+
+  if (typeof parsedValue !== "object" || parsedValue === null) {
+    return undefined;
+  }
+
+  const candidate = parsedValue as Record<string, unknown>;
+  const retrievalValue =
+    typeof candidate.retrieval === "object" && candidate.retrieval !== null
+      ? candidate.retrieval
+      : candidate;
+
+  if (typeof retrievalValue !== "object" || retrievalValue === null) {
+    return undefined;
+  }
+
+  const retrieval = retrievalValue as Record<string, unknown>;
+
+  if (typeof retrieval.need_retrieval !== "boolean") {
+    return undefined;
+  }
+
+  return {
+    need_retrieval: retrieval.need_retrieval,
+    rewritten_query:
+      typeof retrieval.rewritten_query === "string"
+        ? retrieval.rewritten_query
+        : "",
+    reason: typeof retrieval.reason === "string" ? retrieval.reason : "",
+    retrieved_count: getNumberField(retrieval, "retrieved_count"),
+    source_count: getNumberField(retrieval, "source_count"),
+  };
 }
 
 function getStringField(
@@ -2648,6 +2708,37 @@ export default function Home() {
       );
     };
 
+    const setAssistantRetrieval = (retrieval: RetrievalState) => {
+      setSessions((prev) =>
+        prev.map((session) => {
+          if (session.id !== activeSessionId) {
+            return session;
+          }
+
+          const messages = [...session.messages];
+          const lastMessage = messages[messages.length - 1];
+
+          if (lastMessage?.role === "assistant") {
+            messages[messages.length - 1] = {
+              ...lastMessage,
+              retrieval,
+            };
+          } else {
+            messages.push({
+              role: "assistant",
+              content: "",
+              retrieval,
+            });
+          }
+
+          return {
+            ...session,
+            messages,
+          };
+        })
+      );
+    };
+
     const setAssistantFallback = (content: string) => {
       setSessions((prev) =>
         prev.map((session) => {
@@ -2710,7 +2801,11 @@ export default function Home() {
         const data = (await response.json()) as unknown;
         const answer = getAssistantContent(data);
         const sources = getChatSources(data);
+        const retrieval = getRetrievalState(data);
 
+        if (retrieval) {
+          setAssistantRetrieval(retrieval);
+        }
         setAssistantSources(sources);
         setAssistantFallback(answer || "模型暂时没有返回内容。");
         return;
@@ -2731,6 +2826,16 @@ export default function Home() {
       const handleSseBlock = (block: string) => {
         const { event, data } = parseSseBlock(block);
 
+        if (event === "retrieval") {
+          const retrieval = getRetrievalState(data);
+
+          if (retrieval) {
+            setAssistantRetrieval(retrieval);
+          }
+
+          return false;
+        }
+
         if (event === "sources") {
           setAssistantSources(getChatSources(data));
           return false;
@@ -2749,7 +2854,13 @@ export default function Home() {
 
         if (event === "done") {
           const parsedData = parseJsonValue(data);
+          const retrieval = getRetrievalState(parsedData);
           const doneSources = getChatSources(parsedData);
+
+          if (retrieval) {
+            setAssistantRetrieval(retrieval);
+          }
+
           setAssistantSources(doneSources);
 
           const doneAnswer = getAssistantContent(parsedData);
@@ -3168,6 +3279,17 @@ export default function Home() {
                   index === currentSession.messages.length - 1 &&
                   isCurrentSessionLoading &&
                   !message.content;
+                const sourceCount = message.sources?.length ?? 0;
+                const shouldShowSources =
+                  message.role === "assistant" &&
+                  sourceCount > 0 &&
+                  message.retrieval?.need_retrieval !== false &&
+                  message.retrieval?.source_count !== 0;
+                const shouldShowRetrievalEmptyHint =
+                  message.role === "assistant" &&
+                  message.retrieval?.need_retrieval === true &&
+                  message.retrieval.source_count === 0 &&
+                  !shouldShowSources;
 
                 return (
                   <div
@@ -3200,15 +3322,21 @@ export default function Home() {
                         isUserMessage={message.role === "user"}
                       />
 
-                      {message.role === "assistant" &&
-                        message.sources &&
-                        message.sources.length > 0 && (
-                          <div className="mt-4 border-t border-[#d6dedb] pt-3">
-                            <p className="font-utility text-[10px] font-semibold uppercase text-[#64716d]">
-                              Sources
-                            </p>
-                            <div className="mt-2 space-y-2">
-                              {message.sources.map((source, sourceIndex) => (
+                      {shouldShowRetrievalEmptyHint && (
+                        <div className="mt-4 border-t border-[#d6dedb] pt-3">
+                          <p className="text-xs leading-5 text-[#64716d]">
+                            已检索知识库，但没有找到高相关引用
+                          </p>
+                        </div>
+                      )}
+
+                      {shouldShowSources && message.sources && (
+                        <div className="mt-4 border-t border-[#d6dedb] pt-3">
+                          <p className="font-utility text-[10px] font-semibold uppercase text-[#64716d]">
+                            Sources
+                          </p>
+                          <div className="mt-2 space-y-2">
+                            {message.sources.map((source, sourceIndex) => (
                                 <div
                                   key={`${messageKey}-source-${sourceIndex}`}
                                   className="border border-[#d5ded9] bg-[#fcfdfb] px-3 py-2 text-xs text-[#46514e]"
