@@ -13,12 +13,18 @@ from app.repositories.knowledge_file_repository import (
     get_file_by_hash,
     get_user_knowledge_files,
 )
+from app.repositories.vector_index_job_repository import (
+    get_latest_vector_index_jobs_by_file_ids,
+)
 from app.services.file_service import (
     FileTooLargeError,
     build_storage_path,
     calculate_file_hash,
 )
-from app.services.vectors.vector_index_queue_service import enqueue_file_vector_index
+from app.services.vectors.vector_index_queue_service import (
+    enqueue_file_vector_index,
+    serialize_latest_vector_index_job,
+)
 
 
 router = APIRouter(prefix="/chat", tags=["knowledge-files"])
@@ -192,6 +198,10 @@ async def upload_knowledge_files(
 @router.get("/knowledge-files")
 def get_all_knowledge_files(user_id: int = Depends(get_current_user_id)):
     rows = get_user_knowledge_files(user_id)
+    latest_jobs = get_latest_vector_index_jobs_by_file_ids(
+        user_id=user_id,
+        file_ids=[str(row["id"]) for row in rows],
+    )
     return {
         "success": True,
         "files": [
@@ -203,6 +213,9 @@ def get_all_knowledge_files(user_id: int = Depends(get_current_user_id)):
                 "status": row["status"],
                 "usage_count": row["usage_count"],
                 "created_at": row["created_at"],
+                "latest_index_job": serialize_latest_vector_index_job(
+                    latest_jobs.get(str(row["id"])),
+                ),
             }
             for row in rows
         ],

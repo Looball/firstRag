@@ -11,7 +11,13 @@ from app.repositories.knowledge_base_repository import (
     get_user_knowledge_bases,
     remove_file_relation,
 )
+from app.repositories.vector_index_job_repository import (
+    get_latest_vector_index_jobs_by_file_ids,
+)
 from app.schemas.knowledge import CreateKnowledgeBaseRequest
+from app.services.vectors.vector_index_queue_service import (
+    serialize_latest_vector_index_job,
+)
 
 
 router = APIRouter(prefix="/chat", tags=["knowledge-bases"])
@@ -88,6 +94,10 @@ def get_knowledge_base_files(
         knowledge_base_id,
         user_id,
     )
+    latest_jobs = get_latest_vector_index_jobs_by_file_ids(
+        user_id=user_id,
+        file_ids=[str(row["id"]) for row in rows],
+    )
     return {
         "success": True,
         "files": [
@@ -99,6 +109,9 @@ def get_knowledge_base_files(
                 "status": row["status"],
                 "created_at": row["created_at"],
                 "updated_at": row["updated_at"],
+                "latest_index_job": serialize_latest_vector_index_job(
+                    latest_jobs.get(str(row["id"])),
+                ),
             }
             for row in rows
         ],

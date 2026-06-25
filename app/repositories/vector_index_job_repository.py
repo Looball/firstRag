@@ -4,7 +4,7 @@ from uuid import UUID, uuid4
 from psycopg.types.json import Jsonb
 
 from app.db.connection import get_connection
-from app.db.executor import Row, fetch_one
+from app.db.executor import Row, fetch_all, fetch_one
 
 
 DEFAULT_JOB_LEASE_SECONDS = 15 * 60
@@ -123,6 +123,44 @@ def get_user_vector_index_job(
         """,
         (job_id, user_id),
     )
+
+
+def get_latest_vector_index_jobs_by_file_ids(
+    user_id: int,
+    file_ids: list[str],
+) -> dict[str, Row]:
+    """批量查询每个文件最近一次向量化任务。"""
+    if not file_ids:
+        return {}
+
+    rows = fetch_all(
+        """
+        SELECT DISTINCT ON (knowledge_file_id)
+            id,
+            user_id,
+            knowledge_file_id,
+            knowledge_base_id,
+            index_version,
+            status,
+            attempts,
+            max_attempts,
+            error_message,
+            result,
+            created_at,
+            updated_at,
+            started_at,
+            finished_at
+        FROM vector_index_jobs
+        WHERE user_id = %s
+          AND knowledge_file_id = ANY(%s::uuid[])
+        ORDER BY knowledge_file_id, created_at DESC, id DESC;
+        """,
+        (user_id, file_ids),
+    )
+    return {
+        str(row["knowledge_file_id"]): row
+        for row in rows
+    }
 
 
 def claim_next_vector_index_job(worker_id: str) -> Row | None:

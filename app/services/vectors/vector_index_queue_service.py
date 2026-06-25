@@ -8,6 +8,9 @@ from app.repositories.vector_index_job_repository import enqueue_vector_index_jo
 
 def serialize_vector_index_job(job: Row | dict[str, Any]) -> dict[str, Any]:
     """将向量化任务记录转换为接口响应结构。"""
+    if not job:
+        return {}
+
     return {
         "id": str(job["id"]) if job.get("id") is not None else None,
         "user_id": job["user_id"],
@@ -29,7 +32,19 @@ def serialize_vector_index_job(job: Row | dict[str, Any]) -> dict[str, Any]:
         "result": job.get("result"),
         "created_at": job.get("created_at"),
         "updated_at": job.get("updated_at"),
+        "started_at": job.get("started_at"),
+        "finished_at": job.get("finished_at"),
     }
+
+
+def serialize_latest_vector_index_job(
+    job: Row | dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    """序列化文件列表中的最近一次向量化任务。"""
+    if job is None:
+        return None
+
+    return serialize_vector_index_job(job)
 
 
 def enqueue_file_vector_index(
