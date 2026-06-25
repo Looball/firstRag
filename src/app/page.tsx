@@ -131,6 +131,30 @@ type VectorStatus = {
   errorMessage?: string;
 };
 
+type VectorIndexHealthResponse = {
+  worker: {
+    status: "idle" | "waiting" | "active" | "attention_needed" | "unknown";
+    isHealthy: boolean;
+    hasRecentActivity: boolean;
+    lastJobUpdatedAt: string | null;
+    lastProcessingHeartbeatAt: string | null;
+    staleQueued: number;
+    staleProcessing: number;
+    checkedAt: string;
+  };
+  queue: {
+    total: number;
+    active: number;
+    queued: number;
+    processing: number;
+    succeeded: number;
+    failed: number;
+    cancelled: number;
+  };
+};
+
+type WorkerHealthTone = "muted" | "warning" | "success" | "danger";
+
 type VectorIndexJob = {
   id: string;
   status: VectorIndexJobStatus;
@@ -1069,6 +1093,134 @@ function getVectorStatus(file: KnowledgeFile): VectorStatus {
   };
 }
 
+function getWorkerStatus(value: unknown): VectorIndexHealthResponse["worker"]["status"] {
+  if (
+    value === "idle" ||
+    value === "waiting" ||
+    value === "active" ||
+    value === "attention_needed"
+  ) {
+    return value;
+  }
+
+  return "unknown";
+}
+
+function parseVectorIndexHealth(value: unknown): VectorIndexHealthResponse | null {
+  if (typeof value !== "object" || value === null) {
+    return null;
+  }
+
+  const candidate = value as Record<string, unknown>;
+
+  if (candidate.success !== true) {
+    return null;
+  }
+
+  const worker = getRecordField(candidate, "worker");
+  const queue = getRecordField(candidate, "queue");
+
+  if (!worker || !queue) {
+    return null;
+  }
+
+  return {
+    worker: {
+      status: getWorkerStatus(worker.status),
+      isHealthy: worker.is_healthy === true,
+      hasRecentActivity: worker.has_recent_activity === true,
+      lastJobUpdatedAt:
+        typeof worker.last_job_updated_at === "string"
+          ? worker.last_job_updated_at
+          : null,
+      lastProcessingHeartbeatAt:
+        typeof worker.last_processing_heartbeat_at === "string"
+          ? worker.last_processing_heartbeat_at
+          : null,
+      staleQueued: getNumberField(worker, "stale_queued"),
+      staleProcessing: getNumberField(worker, "stale_processing"),
+      checkedAt: typeof worker.checked_at === "string" ? worker.checked_at : "",
+    },
+    queue: {
+      total: getNumberField(queue, "total"),
+      active: getNumberField(queue, "active"),
+      queued: getNumberField(queue, "queued"),
+      processing: getNumberField(queue, "processing"),
+      succeeded: getNumberField(queue, "succeeded"),
+      failed: getNumberField(queue, "failed"),
+      cancelled: getNumberField(queue, "cancelled"),
+    },
+  };
+}
+
+function getWorkerHealthLabel(
+  health: VectorIndexHealthResponse | null,
+  errorMessage: string
+): { label: string; tone: WorkerHealthTone } {
+  if (errorMessage) {
+    return {
+      label: "任务状态暂不可用",
+      tone: "muted",
+    };
+  }
+
+  if (!health) {
+    return {
+      label: "任务状态加载中",
+      tone: "muted",
+    };
+  }
+
+  if (health.worker.status === "idle") {
+    return {
+      label: "暂无向量化任务",
+      tone: "muted",
+    };
+  }
+
+  if (health.worker.status === "waiting") {
+    return {
+      label: `任务排队中：${health.queue.queued} 个`,
+      tone: "warning",
+    };
+  }
+
+  if (health.worker.status === "active") {
+    return {
+      label: `Worker 正在处理：${health.queue.processing} 个`,
+      tone: "success",
+    };
+  }
+
+  if (health.worker.status === "attention_needed") {
+    return {
+      label: `任务可能卡住：排队 ${health.worker.staleQueued} 个，处理中 ${health.worker.staleProcessing} 个`,
+      tone: "danger",
+    };
+  }
+
+  return {
+    label: "任务状态未知",
+    tone: "muted",
+  };
+}
+
+function getWorkerHealthToneClass(tone: WorkerHealthTone) {
+  if (tone === "danger") {
+    return "border-[#e36b4f] bg-[#fff1ed] text-[#9b3c29]";
+  }
+
+  if (tone === "warning") {
+    return "border-[#d9aa2f] bg-[#fff7df] text-[#7a5a12]";
+  }
+
+  if (tone === "success") {
+    return "border-[#176b62] bg-[#edf7f3] text-[#176b62]";
+  }
+
+  return "border-[#d5ded9] bg-[#f7faf8] text-[#64716d]";
+}
+
 function toVectorIndexJob(value: unknown): VectorIndexJob | null {
   if (typeof value !== "object" || value === null) {
     return null;
@@ -1479,6 +1631,11 @@ export default function Home() {
     useState(false);
   const [vectorIndexMessage, setVectorIndexMessage] = useState("");
   const [vectorIndexError, setVectorIndexError] = useState("");
+  const [vectorIndexHealth, setVectorIndexHealth] =
+    useState<VectorIndexHealthResponse | null>(null);
+  const [vectorIndexHealthError, setVectorIndexHealthError] = useState("");
+  const [isLoadingVectorIndexHealth, setIsLoadingVectorIndexHealth] =
+    useState(false);
   const [pageError, setPageError] = useState("");
   const [currentUsername, setCurrentUsername] = useState("");
   const [knowledgeBases, setKnowledgeBases] = useState<KnowledgeBase[]>([
@@ -1552,6 +1709,11 @@ export default function Home() {
   );
   const selectedKnowledgeBaseFileCount =
     selectedKnowledgeFiles.length || selectedKnowledgeBase?.fileCount || 0;
+  const workerHealthLabel = getWorkerHealthLabel(
+    vectorIndexHealth,
+    vectorIndexHealthError
+  );
+  const vectorQueueCount = vectorIndexHealth?.queue.total ?? vectorIndexQueue.length;
 
   const loadKnowledgeBaseFiles = useCallback(
     async (knowledgeBaseId: string, options?: { showLoading?: boolean }) => {
@@ -1722,11 +1884,68 @@ export default function Home() {
     }
   }, []);
 
+  const loadVectorIndexHealth = useCallback(
+    async (options?: { showLoading?: boolean }) => {
+      const authState = parseAuthState(localStorage.getItem(AUTH_STORAGE_KEY));
+
+      if (!authState) {
+        localStorage.removeItem(AUTH_STORAGE_KEY);
+        window.location.href = "/login";
+        return;
+      }
+
+      const shouldShowLoading = options?.showLoading !== false;
+
+      if (shouldShowLoading) {
+        setIsLoadingVectorIndexHealth(true);
+      }
+
+      try {
+        const response = await fetch("/api/chat/vector-index-jobs/health", {
+          method: "GET",
+          headers: {
+            Authorization: buildAuthorizationHeader(authState),
+          },
+          cache: "no-store",
+        });
+        const data = (await response.json().catch(() => null)) as unknown;
+
+        if (!response.ok) {
+          throw new Error(
+            getResponseErrorMessage(
+              JSON.stringify(data),
+              "任务状态暂不可用",
+              response.status
+            )
+          );
+        }
+
+        const health = parseVectorIndexHealth(data);
+
+        if (!health) {
+          throw new Error("任务状态暂不可用");
+        }
+
+        setVectorIndexHealth(health);
+        setVectorIndexHealthError("");
+      } catch {
+        setVectorIndexHealth(null);
+        setVectorIndexHealthError("任务状态暂不可用");
+      } finally {
+        if (shouldShowLoading) {
+          setIsLoadingVectorIndexHealth(false);
+        }
+      }
+    },
+    []
+  );
+
   async function handleOpenFileManager() {
     setIsFileManagerOpen(true);
     await Promise.all([
       loadKnowledgeBaseFiles(selectedKnowledgeBaseId),
       loadAllKnowledgeFiles(),
+      loadVectorIndexHealth(),
     ]);
   }
 
@@ -2540,6 +2759,7 @@ export default function Home() {
 
     const intervalId = window.setInterval(() => {
       void refreshKnowledgeFiles({ showLoading: false });
+      void loadVectorIndexHealth({ showLoading: false });
     }, 2500);
 
     return () => {
@@ -2548,6 +2768,7 @@ export default function Home() {
   }, [
     hasCheckedAuth,
     hasPollingIndexJobs,
+    loadVectorIndexHealth,
     refreshKnowledgeFiles,
   ]);
 
@@ -4158,12 +4379,14 @@ export default function Home() {
                       任务队列
                     </p>
                     <p className="mt-1 text-xs text-[#72807b]">
-                      向量化任务会在这里显示处理状态
+                      {isLoadingVectorIndexHealth
+                        ? "正在读取任务状态..."
+                        : workerHealthLabel.label}
                     </p>
                   </div>
                   <div className="flex items-center gap-3">
                     <span className="font-utility text-[10px] text-[#72807b]">
-                      {String(vectorIndexQueue.length).padStart(2, "0")}
+                      {String(vectorQueueCount).padStart(2, "0")}
                     </span>
                     {vectorIndexQueue.some(isVectorIndexJobDone) && (
                       <button
@@ -4177,6 +4400,29 @@ export default function Home() {
                       >
                         清除完成
                       </button>
+                    )}
+                  </div>
+                </div>
+
+                <div className="border-b border-[#d5ded9] px-4 py-3">
+                  <div
+                    className={`border px-3 py-2 text-xs ${getWorkerHealthToneClass(
+                      workerHealthLabel.tone
+                    )}`}
+                  >
+                    <p className="font-semibold">{workerHealthLabel.label}</p>
+                    {vectorIndexHealth && (
+                      <p className="mt-1 text-[11px]">
+                        排队 {vectorIndexHealth.queue.queued} · 处理中{" "}
+                        {vectorIndexHealth.queue.processing} · 失败{" "}
+                        {vectorIndexHealth.queue.failed} · 已完成{" "}
+                        {vectorIndexHealth.queue.succeeded}
+                      </p>
+                    )}
+                    {vectorIndexHealth?.worker.status === "attention_needed" && (
+                      <p className="mt-2 font-semibold">
+                        向量化任务可能卡住，请确认 worker 是否已启动
+                      </p>
                     )}
                   </div>
                 </div>
