@@ -76,6 +76,7 @@ type KnowledgeFile = {
   size: number;
   fingerprint: string;
   status: KnowledgeFileStatus;
+  latestIndexJob: LatestIndexJob | null;
   usageCount: number | null;
 };
 
@@ -91,6 +92,44 @@ type VectorIndexJobStatus =
   | "processing"
   | "succeeded"
   | "failed";
+
+type LatestIndexJobStatus =
+  | "queued"
+  | "processing"
+  | "completed"
+  | "failed"
+  | "unknown";
+
+type LatestIndexJob = {
+  id: string;
+  userId: number | null;
+  knowledgeFileId: string;
+  knowledgeBaseId: string | null;
+  indexVersion: number | null;
+  status: LatestIndexJobStatus;
+  attempts: number | null;
+  maxAttempts: number | null;
+  errorMessage: string | null;
+  createdAt: string;
+  updatedAt: string;
+  startedAt: string | null;
+  finishedAt: string | null;
+};
+
+type VectorStatus = {
+  label: string;
+  type:
+    | "idle"
+    | "pending"
+    | "processing"
+    | "completed"
+    | "failed"
+    | "unknown";
+  canVectorize: boolean;
+  canDeleteVector: boolean;
+  canPoll: boolean;
+  errorMessage?: string;
+};
 
 type VectorIndexJob = {
   id: string;
@@ -109,6 +148,7 @@ type BackendKnowledgeFile = {
   size_bytes?: unknown;
   status?: unknown;
   usage_count?: unknown;
+  latest_index_job?: unknown;
 };
 
 type KnowledgeBaseFile = {
@@ -883,6 +923,7 @@ function toKnowledgeFile(
   const size = Number(knowledgeFile.size_bytes);
   const usageCount = Number(knowledgeFile.usage_count);
   const status = getKnowledgeFileStatus(knowledgeFile.status);
+  const latestIndexJob = toLatestIndexJob(knowledgeFile.latest_index_job);
 
   return {
     id: knowledgeFile.id,
@@ -892,8 +933,57 @@ function toKnowledgeFile(
       ? getFileFingerprint(sourceFile)
       : knowledgeFile.id,
     status,
+    latestIndexJob,
     usageCount: Number.isFinite(usageCount) ? usageCount : null,
   };
+}
+
+function toLatestIndexJob(value: unknown): LatestIndexJob | null {
+  if (typeof value !== "object" || value === null) {
+    return null;
+  }
+
+  const job = value as Record<string, unknown>;
+  const id = typeof job.id === "string" ? job.id : "";
+  const status = getLatestIndexJobStatus(job.status);
+  const userId = Number(job.user_id);
+  const indexVersion = Number(job.index_version);
+  const attempts = Number(job.attempts);
+  const maxAttempts = Number(job.max_attempts);
+
+  return {
+    id,
+    userId: Number.isFinite(userId) ? userId : null,
+    knowledgeFileId:
+      typeof job.knowledge_file_id === "string" ? job.knowledge_file_id : "",
+    knowledgeBaseId:
+      typeof job.knowledge_base_id === "string" ? job.knowledge_base_id : null,
+    indexVersion: Number.isFinite(indexVersion) ? indexVersion : null,
+    status,
+    attempts: Number.isFinite(attempts) ? attempts : null,
+    maxAttempts: Number.isFinite(maxAttempts) ? maxAttempts : null,
+    errorMessage:
+      typeof job.error_message === "string" && job.error_message.trim()
+        ? job.error_message.trim()
+        : null,
+    createdAt: typeof job.created_at === "string" ? job.created_at : "",
+    updatedAt: typeof job.updated_at === "string" ? job.updated_at : "",
+    startedAt: typeof job.started_at === "string" ? job.started_at : null,
+    finishedAt: typeof job.finished_at === "string" ? job.finished_at : null,
+  };
+}
+
+function getLatestIndexJobStatus(value: unknown): LatestIndexJobStatus {
+  if (
+    value === "queued" ||
+    value === "processing" ||
+    value === "completed" ||
+    value === "failed"
+  ) {
+    return value;
+  }
+
+  return "unknown";
 }
 
 function getKnowledgeFileStatus(value: unknown): KnowledgeFileStatus {
@@ -916,32 +1006,67 @@ function getKnowledgeFileStatus(value: unknown): KnowledgeFileStatus {
   return "pending";
 }
 
-function getKnowledgeFileStatusText(status: KnowledgeFileStatus) {
-  if (status === "queued") {
-    return "排队中";
+function getVectorStatus(file: KnowledgeFile): VectorStatus {
+  const job = file.latestIndexJob;
+
+  if (!job) {
+    return {
+      label: "未向量化",
+      type: "idle",
+      canVectorize: true,
+      canDeleteVector: false,
+      canPoll: false,
+    };
   }
 
-  if (status === "processing") {
-    return "处理中";
+  if (job.status === "queued") {
+    return {
+      label: "排队中",
+      type: "pending",
+      canVectorize: false,
+      canDeleteVector: false,
+      canPoll: true,
+    };
   }
 
-  if (status === "indexed") {
-    return "已向量化";
+  if (job.status === "processing") {
+    return {
+      label: "处理中",
+      type: "processing",
+      canVectorize: false,
+      canDeleteVector: false,
+      canPoll: true,
+    };
   }
 
-  if (status === "failed") {
-    return "向量化失败";
+  if (job.status === "completed") {
+    return {
+      label: "已向量化",
+      type: "completed",
+      canVectorize: true,
+      canDeleteVector: true,
+      canPoll: false,
+    };
   }
 
-  return "未向量化";
-}
+  if (job.status === "failed") {
+    return {
+      label: "向量化失败",
+      type: "failed",
+      canVectorize: true,
+      canDeleteVector: false,
+      canPoll: false,
+      ...(job.errorMessage ? { errorMessage: job.errorMessage } : {}),
+    };
+  }
 
-function canDeleteKnowledgeFileVectors(status: KnowledgeFileStatus) {
-  return status === "indexed";
-}
-
-function isKnowledgeFileIndexingStatus(status: KnowledgeFileStatus) {
-  return status === "queued" || status === "processing";
+  return {
+    label: "未知状态",
+    type: "unknown",
+    canVectorize: true,
+    canDeleteVector: false,
+    canPoll: false,
+  };
 }
 
 function toVectorIndexJob(value: unknown): VectorIndexJob | null {
@@ -967,11 +1092,13 @@ function toVectorIndexJob(value: unknown): VectorIndexJob | null {
   }
 
   const status =
-    job.status === "processing" ||
-    job.status === "succeeded" ||
-    job.status === "failed"
-      ? job.status
-      : "queued";
+    job.status === "completed"
+      ? "succeeded"
+      : job.status === "processing" ||
+          job.status === "succeeded" ||
+          job.status === "failed"
+        ? job.status
+        : "queued";
 
   return {
     id,
@@ -1420,11 +1547,14 @@ export default function Home() {
   const reusableKnowledgeFiles = knowledgeFiles.filter(
     (file) => !selectedKnowledgeFileIds.has(file.id)
   );
+  const hasPollingIndexJobs = knowledgeFiles.some(
+    (file) => getVectorStatus(file).canPoll
+  );
   const selectedKnowledgeBaseFileCount =
     selectedKnowledgeFiles.length || selectedKnowledgeBase?.fileCount || 0;
 
   const loadKnowledgeBaseFiles = useCallback(
-    async (knowledgeBaseId: string) => {
+    async (knowledgeBaseId: string, options?: { showLoading?: boolean }) => {
       if (!knowledgeBaseId || knowledgeBaseId === DEFAULT_KNOWLEDGE_BASE_ID) {
         return;
       }
@@ -1437,7 +1567,12 @@ export default function Home() {
         return;
       }
 
-      setIsLoadingKnowledgeFiles(true);
+      const shouldShowLoading = options?.showLoading !== false;
+
+      if (shouldShowLoading) {
+        setIsLoadingKnowledgeFiles(true);
+      }
+
       setKnowledgeFileLoadError("");
 
       try {
@@ -1519,13 +1654,15 @@ export default function Home() {
             : "读取知识库文件失败，请稍后再试。"
         );
       } finally {
-        setIsLoadingKnowledgeFiles(false);
+        if (shouldShowLoading) {
+          setIsLoadingKnowledgeFiles(false);
+        }
       }
     },
     []
   );
 
-  const loadAllKnowledgeFiles = useCallback(async () => {
+  const loadAllKnowledgeFiles = useCallback(async (options?: { showLoading?: boolean }) => {
     const authState = parseAuthState(localStorage.getItem(AUTH_STORAGE_KEY));
 
     if (!authState) {
@@ -1534,7 +1671,12 @@ export default function Home() {
       return;
     }
 
-    setIsLoadingReusableFiles(true);
+    const shouldShowLoading = options?.showLoading !== false;
+
+    if (shouldShowLoading) {
+      setIsLoadingReusableFiles(true);
+    }
+
     setReusableFileLoadError("");
 
     try {
@@ -1574,7 +1716,9 @@ export default function Home() {
           : "读取用户文件列表失败，请稍后再试。"
       );
     } finally {
-      setIsLoadingReusableFiles(false);
+      if (shouldShowLoading) {
+        setIsLoadingReusableFiles(false);
+      }
     }
   }, []);
 
@@ -1962,12 +2106,15 @@ export default function Home() {
     return latestJobs;
   }
 
-  async function refreshKnowledgeFiles() {
-    await Promise.all([
-      loadKnowledgeBaseFiles(selectedKnowledgeBaseId),
-      loadAllKnowledgeFiles(),
-    ]);
-  }
+  const refreshKnowledgeFiles = useCallback(
+    async (options?: { showLoading?: boolean }) => {
+      await Promise.all([
+        loadKnowledgeBaseFiles(selectedKnowledgeBaseId, options),
+        loadAllKnowledgeFiles(options),
+      ]);
+    },
+    [loadAllKnowledgeFiles, loadKnowledgeBaseFiles, selectedKnowledgeBaseId]
+  );
 
   async function handleIndexKnowledgeFile(fileId: string) {
     if (!fileId || vectorIndexingFileIds[fileId]) {
@@ -2018,22 +2165,6 @@ export default function Home() {
       updateVectorIndexQueue(jobs, target);
 
       setVectorIndexMessage("文件向量化任务已提交。");
-
-      const finishedJobs = await waitForVectorIndexJobs(
-        jobs,
-        authState,
-        (latestJobs) => updateVectorIndexQueue(latestJobs, target)
-      );
-      const failedJob = finishedJobs.find((job) => job.status === "failed");
-
-      if (failedJob) {
-        throw new Error(failedJob.errorMessage || "文件向量化失败。");
-      }
-
-      if (finishedJobs.length > 0) {
-        setVectorIndexMessage("文件向量化完成。");
-      }
-
       await refreshKnowledgeFiles();
     } catch (error) {
       setVectorIndexError(
@@ -2400,6 +2531,24 @@ export default function Home() {
     hasCheckedAuth,
     loadKnowledgeBaseFiles,
     selectedKnowledgeBaseId,
+  ]);
+
+  useEffect(() => {
+    if (!hasCheckedAuth || !hasPollingIndexJobs) {
+      return;
+    }
+
+    const intervalId = window.setInterval(() => {
+      void refreshKnowledgeFiles({ showLoading: false });
+    }, 2500);
+
+    return () => {
+      window.clearInterval(intervalId);
+    };
+  }, [
+    hasCheckedAuth,
+    hasPollingIndexJobs,
+    refreshKnowledgeFiles,
   ]);
 
   useEffect(() => {
@@ -4099,8 +4248,7 @@ export default function Home() {
                       const isFileIndexing = Boolean(
                         vectorIndexingFileIds[file.id]
                       );
-                      const isFileIndexingInBackend =
-                        isKnowledgeFileIndexingStatus(file.status);
+                      const vectorStatus = getVectorStatus(file);
 
                       return (
                         <div
@@ -4113,11 +4261,16 @@ export default function Home() {
                             </p>
                             <p className="mt-1 text-xs text-[#72807b]">
                               {formatFileSize(file.size)} ·{" "}
-                              {getKnowledgeFileStatusText(file.status)}
+                              {vectorStatus.label}
                             </p>
+                            {vectorStatus.errorMessage && (
+                              <p className="mt-1 text-xs text-[#9b3c29]">
+                                {vectorStatus.errorMessage}
+                              </p>
+                            )}
                           </div>
                           <div className="flex shrink-0 items-center gap-2">
-                            {canDeleteKnowledgeFileVectors(file.status) && (
+                            {vectorStatus.canDeleteVector && (
                               <button
                                 type="button"
                                 onClick={() => {
@@ -4125,7 +4278,6 @@ export default function Home() {
                                 }}
                                 disabled={
                                   isFileIndexing ||
-                                  isFileIndexingInBackend ||
                                   isIndexingKnowledgeBase ||
                                   Boolean(deletingVectorFileId)
                                 }
@@ -4143,12 +4295,12 @@ export default function Home() {
                               }}
                               disabled={
                                 isFileIndexing ||
-                                isFileIndexingInBackend ||
+                                !vectorStatus.canVectorize ||
                                 isIndexingKnowledgeBase
                               }
                               className="px-2 py-1 text-xs font-semibold text-[#176b62] transition hover:bg-[#e4f0ec] disabled:cursor-not-allowed disabled:text-[#aab3b0]"
                             >
-                              {isFileIndexing || isFileIndexingInBackend
+                              {isFileIndexing || vectorStatus.canPoll
                                 ? "向量化中..."
                                 : "向量化"}
                             </button>
@@ -4201,8 +4353,7 @@ export default function Home() {
                       const isFileIndexing = Boolean(
                         vectorIndexingFileIds[file.id]
                       );
-                      const isFileIndexingInBackend =
-                        isKnowledgeFileIndexingStatus(file.status);
+                      const vectorStatus = getVectorStatus(file);
 
                       return (
                         <div
@@ -4215,11 +4366,16 @@ export default function Home() {
                             </p>
                             <p className="mt-1 text-xs text-[#72807b]">
                               {formatFileSize(file.size)} ·{" "}
-                              {getKnowledgeFileStatusText(file.status)}
+                              {vectorStatus.label}
                             </p>
+                            {vectorStatus.errorMessage && (
+                              <p className="mt-1 text-xs text-[#9b3c29]">
+                                {vectorStatus.errorMessage}
+                              </p>
+                            )}
                           </div>
                           <div className="flex shrink-0 items-center gap-2">
-                            {canDeleteKnowledgeFileVectors(file.status) && (
+                            {vectorStatus.canDeleteVector && (
                               <button
                                 type="button"
                                 onClick={() => {
@@ -4227,7 +4383,6 @@ export default function Home() {
                                 }}
                                 disabled={
                                   isFileIndexing ||
-                                  isFileIndexingInBackend ||
                                   isIndexingKnowledgeBase ||
                                   Boolean(deletingVectorFileId)
                                 }
@@ -4245,12 +4400,12 @@ export default function Home() {
                               }}
                               disabled={
                                 isFileIndexing ||
-                                isFileIndexingInBackend ||
+                                !vectorStatus.canVectorize ||
                                 isIndexingKnowledgeBase
                               }
                               className="px-2 py-1 text-xs font-semibold text-[#176b62] transition hover:bg-[#e4f0ec] disabled:cursor-not-allowed disabled:text-[#aab3b0]"
                             >
-                              {isFileIndexing || isFileIndexingInBackend
+                              {isFileIndexing || vectorStatus.canPoll
                                 ? "向量化中..."
                                 : "向量化"}
                             </button>
