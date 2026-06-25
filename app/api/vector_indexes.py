@@ -15,9 +15,11 @@ from app.repositories.knowledge_file_repository import (
 from app.repositories.vector_index_job_repository import (
     cancel_active_vector_index_jobs,
     get_user_vector_index_job,
+    get_user_vector_index_job_health,
 )
 from app.services.vectors.vector_index_queue_service import (
     enqueue_file_vector_index,
+    serialize_vector_index_job_health,
     serialize_vector_index_job,
 )
 from app.services.vectors.vector_index_service import delete_file_vector_entries
@@ -83,6 +85,18 @@ def index_knowledge_base_vectors(
         "success": True,
         "knowledge_base_id": str(knowledge_base_id),
         "jobs": jobs,
+    }
+
+
+@router.get("/vector-index-jobs/health")
+def get_vector_index_jobs_health(
+    user_id: int = Depends(get_current_user_id),
+):
+    """查询当前用户向量化任务队列健康状态。"""
+    health = get_user_vector_index_job_health(user_id)
+    return {
+        "success": True,
+        **serialize_vector_index_job_health(health),
     }
 
 

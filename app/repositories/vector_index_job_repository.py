@@ -163,6 +163,45 @@ def get_latest_vector_index_jobs_by_file_ids(
     }
 
 
+def get_user_vector_index_job_health(
+    user_id: int,
+    stale_after_seconds: int = DEFAULT_JOB_LEASE_SECONDS,
+) -> Row:
+    """统计当前用户向量化任务队列健康状态。"""
+    return fetch_one(
+        """
+        SELECT
+            now() AS checked_at,
+            COUNT(*)::integer AS total,
+            COUNT(*) FILTER (WHERE status = 'queued')::integer AS queued,
+            COUNT(*) FILTER (WHERE status = 'processing')::integer AS processing,
+            COUNT(*) FILTER (WHERE status = 'succeeded')::integer AS succeeded,
+            COUNT(*) FILTER (WHERE status = 'failed')::integer AS failed,
+            COUNT(*) FILTER (WHERE status = 'cancelled')::integer AS cancelled,
+            COUNT(*) FILTER (
+                WHERE status = 'queued'
+                  AND available_at <= now()
+                  AND created_at < now() - make_interval(secs => %s)
+            )::integer AS stale_queued,
+            COUNT(*) FILTER (
+                WHERE status = 'processing'
+                  AND COALESCE(heartbeat_at, locked_at, started_at, updated_at)
+                      < now() - make_interval(secs => %s)
+            )::integer AS stale_processing,
+            MAX(updated_at) AS last_job_updated_at,
+            MAX(heartbeat_at) FILTER (
+                WHERE status = 'processing'
+            ) AS last_processing_heartbeat_at,
+            MIN(created_at) FILTER (
+                WHERE status IN ('queued', 'processing')
+            ) AS oldest_active_created_at
+        FROM vector_index_jobs
+        WHERE user_id = %s;
+        """,
+        (stale_after_seconds, stale_after_seconds, user_id),
+    ) or {}
+
+
 def claim_next_vector_index_job(worker_id: str) -> Row | None:
     """原子领取一个待处理任务，支持多 worker 并发消费。"""
     with get_connection() as connection:

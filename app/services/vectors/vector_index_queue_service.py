@@ -52,6 +52,54 @@ def serialize_latest_vector_index_job(
     return serialized_job
 
 
+def serialize_vector_index_job_health(
+    health: Row | dict[str, Any],
+) -> dict[str, Any]:
+    """将向量化队列健康统计转换为接口响应结构。"""
+    queued = int(health.get("queued") or 0)
+    processing = int(health.get("processing") or 0)
+    succeeded = int(health.get("succeeded") or 0)
+    failed = int(health.get("failed") or 0)
+    cancelled = int(health.get("cancelled") or 0)
+    stale_queued = int(health.get("stale_queued") or 0)
+    stale_processing = int(health.get("stale_processing") or 0)
+    active = queued + processing
+
+    # 没有独立 worker 心跳表时，用任务是否长期停留在活跃态来判断是否需要关注。
+    if stale_queued > 0 or stale_processing > 0:
+        worker_status = "attention_needed"
+    elif processing > 0:
+        worker_status = "active"
+    elif queued > 0:
+        worker_status = "waiting"
+    else:
+        worker_status = "idle"
+
+    return {
+        "worker": {
+            "status": worker_status,
+            "is_healthy": worker_status != "attention_needed",
+            "has_recent_activity": processing > 0 and stale_processing == 0,
+            "last_job_updated_at": health.get("last_job_updated_at"),
+            "last_processing_heartbeat_at": health.get(
+                "last_processing_heartbeat_at",
+            ),
+            "stale_queued": stale_queued,
+            "stale_processing": stale_processing,
+            "checked_at": health.get("checked_at"),
+        },
+        "queue": {
+            "total": int(health.get("total") or 0),
+            "active": active,
+            "queued": queued,
+            "processing": processing,
+            "succeeded": succeeded,
+            "failed": failed,
+            "cancelled": cancelled,
+        },
+    }
+
+
 def enqueue_file_vector_index(
     file_record: Row | dict[str, Any],
     user_id: int,
