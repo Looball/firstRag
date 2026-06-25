@@ -87,6 +87,7 @@ def stream_answer_and_save(
             full_answer,
             "cancelled",
             "客户端中断了流式连接",
+            sources,
         )
         raise
     except Exception:
@@ -96,6 +97,7 @@ def stream_answer_and_save(
             full_answer,
             "failed",
             "回答生成失败，请稍后重试",
+            sources,
         )
         yield format_sse_event("error", {
             "message": "回答生成失败，请稍后重试",
@@ -103,7 +105,12 @@ def stream_answer_and_save(
         })
         return
 
-    finish_assistant_message(assistant_message_id, full_answer, "completed")
+    finish_assistant_message(
+        assistant_message_id,
+        full_answer,
+        "completed",
+        sources=sources,
+    )
     yield format_sse_event("done", {
         "message": "回答完成",
         "answer": full_answer,

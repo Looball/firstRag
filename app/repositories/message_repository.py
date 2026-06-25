@@ -1,5 +1,7 @@
 from uuid import UUID
 
+from psycopg.types.json import Jsonb
+
 from app.db.executor import Row, fetch_all, fetch_one
 
 
@@ -25,21 +27,24 @@ def finish_assistant_message(
     content: str,
     status: str,
     error_message: str | None = None,
+    sources: list[dict] | None = None,
 ) -> Row | None:
     """写入流式助手消息的最终内容和结束状态。"""
+    serialized_sources = sources if sources is not None else []
     return fetch_one(
         """
         UPDATE messages
         SET content = %s,
             status = %s,
             error_message = %s,
+            sources = %s,
             completed_at = now()
         WHERE id = %s
           AND role = 'assistant'
           AND status = 'generating'
-        RETURNING id, status, content, error_message, completed_at;
+        RETURNING id, status, content, error_message, sources, completed_at;
         """,
-        (content, status, error_message, message_id),
+        (content, status, error_message, Jsonb(serialized_sources), message_id),
     )
 
 
@@ -70,6 +75,7 @@ def get_user_conversation_messages(
             m.content,
             m.status,
             m.error_message,
+            m.sources,
             m.created_at
         FROM messages AS m
         JOIN conversations AS c

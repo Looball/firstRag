@@ -71,6 +71,40 @@ class CreateConversationTests(unittest.TestCase):
             "测试会话",
         )
 
+    def test_get_messages_returns_persisted_sources(self) -> None:
+        """历史消息接口应返回已持久化的助手引用来源。"""
+        conversation_id = uuid4()
+        sources = [
+            {
+                "index": 1,
+                "file_name": "民事诉讼法.pdf",
+                "content": "相关片段",
+            }
+        ]
+        with patch(
+            "app.api.conversations.conversation_exists",
+            return_value=True,
+        ), patch(
+            "app.api.conversations.get_user_conversation_messages",
+            return_value=[
+                {
+                    "id": uuid4(),
+                    "role": "assistant",
+                    "content": "回答",
+                    "status": "completed",
+                    "error_message": None,
+                    "sources": sources,
+                    "created_at": "2026-06-25T00:00:00+08:00",
+                }
+            ],
+        ):
+            response = self.client.get(
+                f"/chat/conversations/{conversation_id}/messages",
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["messages"][0]["sources"], sources)
+
 
 if __name__ == "__main__":
     unittest.main()

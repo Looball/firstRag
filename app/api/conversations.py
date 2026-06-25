@@ -78,6 +78,7 @@ def get_messages(
                 "content": row["content"],
                 "status": row["status"],
                 "error_message": row["error_message"],
+                "sources": row["sources"] or [],
                 "created_at": row["created_at"],
             }
             for row in rows
