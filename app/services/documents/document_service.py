@@ -1,5 +1,6 @@
-from pathlib import Path
+import logging
 import os
+from pathlib import Path
 from uuid import UUID
 
 from langchain_chroma import Chroma
@@ -21,6 +22,8 @@ from langchain_text_splitters import (
 from app.core.config import VECTOR_STORE_PATH
 from app.services.vectors.embedding_model import ZhipuAIEmbeddings
 
+
+logger = logging.getLogger(__name__)
 
 MARKDOWN_HEADERS_TO_SPLIT_ON = [
     ("#", "h1"),
@@ -173,27 +176,29 @@ def build_vector_store(
 ) -> Chroma:
     """加载、切分本地文档并写入Chroma向量数据库。"""
     file_paths = get_document_paths(folder_path)
-    print([str(path) for path in file_paths[:3]])
+    logger.info("发现可入库文档数量：%s", len(file_paths))
+    logger.debug("文档发现样例：%s", [str(path) for path in file_paths[:3]])
 
     documents = []
     for index, file_path in enumerate(file_paths):
         documents.extend(load_document(file_path, file_id=str(index)))
 
     split_docs = split_documents(documents)
+    character_count = sum(len(doc.page_content) for doc in split_docs)
 
-    print(split_docs)
-    print(f"切分后的文件数量：{len(split_docs)}")
-    print(
-        "切分后的字符数（可以用来大致评估 token 数）："
-        f"{sum(len(doc.page_content) for doc in split_docs)}"
+    logger.info(
+        "文档切分完成：chunks=%s characters=%s",
+        len(split_docs),
+        character_count,
     )
+    logger.debug("文档切分样例：%s", split_docs[:3])
 
     vectordb = Chroma.from_documents(
         documents=split_docs,
         embedding=ZhipuAIEmbeddings(),
         persist_directory=str(persist_directory),
     )
-    print(f"向量库中存储的数量：{vectordb._collection.count()}")
+    logger.info("向量库中存储的数量：%s", vectordb._collection.count())
     return vectordb
 
 
