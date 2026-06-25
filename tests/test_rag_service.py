@@ -6,7 +6,11 @@ from uuid import uuid4
 from langchain_core.documents import Document
 
 from app.services.rag_service import (
+    build_knowledge_base_profile,
     get_res_doc,
+    normalize_retrieval_decision,
+    parse_retrieval_decision,
+    retrieve_documents,
     serialize_reference_documents,
     stream_rag_response,
 )
@@ -109,6 +113,84 @@ class RagReferenceFilteringTests(unittest.TestCase):
             ["answer"],
         )
         self.assertEqual(events[0]["content"], "你好！")
+
+
+class RagQueryRouterTests(unittest.TestCase):
+    """验证 Query Router 的解析、画像和检索开关行为。"""
+
+    def test_parse_retrieval_decision_accepts_json_block(self) -> None:
+        """Router 输出 JSON 代码块时也应能解析为结构化结果。"""
+        decision = parse_retrieval_decision(
+            '```json\n'
+            '{"need_retrieval": false, '
+            '"rewritten_query": "你好", '
+            '"reason": "普通问候"}\n'
+            '```'
+        )
+
+        self.assertFalse(decision["need_retrieval"])
+        self.assertEqual(decision["rewritten_query"], "你好")
+        self.assertEqual(decision["reason"], "普通问候")
+
+    def test_invalid_router_output_falls_back_to_retrieval(self) -> None:
+        """Router 输出不可解析时，应保守执行检索。"""
+        decision = parse_retrieval_decision("我觉得不用检索")
+
+        self.assertTrue(decision["need_retrieval"])
+
+    def test_normalize_retrieval_decision_keeps_rewritten_query(self) -> None:
+        """路由结果应保留用于检索的问题改写。"""
+        decision = normalize_retrieval_decision({
+            "need_retrieval": True,
+            "rewritten_query": "民事诉讼法 起诉条件",
+            "reason": "问题涉及法律文档",
+        })
+
+        self.assertTrue(decision["need_retrieval"])
+        self.assertEqual(
+            decision["rewritten_query"],
+            "民事诉讼法 起诉条件",
+        )
+
+    def test_retrieve_documents_skips_when_router_says_no(self) -> None:
+        """Router 判断无需知识库时，不应执行后续混合检索。"""
+        docs = retrieve_documents({
+            "user_id": 1,
+            "knowledge_base_id": uuid4(),
+            "standalone_question": "你好",
+            "retrieval_decision": {
+                "need_retrieval": False,
+                "rewritten_query": "你好",
+                "reason": "普通问候",
+            },
+        })
+
+        self.assertEqual(docs, [])
+
+    def test_build_knowledge_base_profile_uses_indexed_files(self) -> None:
+        """知识库画像应只使用已索引文件，供 Router 识别知识库范围。"""
+        with unittest.mock.patch(
+            "app.services.rag_service.get_knowledge_base_files",
+            return_value=[
+                {
+                    "original_name": "民事诉讼法.pdf",
+                    "mime_type": "application/pdf",
+                    "status": "indexed",
+                },
+                {
+                    "original_name": "未处理.txt",
+                    "mime_type": "text/plain",
+                    "status": "pending",
+                },
+            ],
+        ):
+            profile = build_knowledge_base_profile({
+                "user_id": 1,
+                "knowledge_base_id": uuid4(),
+            })
+
+        self.assertIn("民事诉讼法.pdf", profile)
+        self.assertNotIn("未处理.txt", profile)
 
 
 if __name__ == "__main__":

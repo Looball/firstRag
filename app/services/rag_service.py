@@ -1,3 +1,4 @@
+import json
 from collections.abc import Iterator
 from typing import Any, cast
 from uuid import UUID
@@ -25,9 +26,11 @@ from app.services.retrieval.hybrid_retriever import get_hybrid_documents
 type RetrievedDocs = list[Document]
 type ChainInput = dict[str, Any]
 type RagStreamEvent = dict[str, Any]
+type RetrievalDecision = dict[str, Any]
 
 
 REFERENCE_RERANK_SCORE_THRESHOLD = 0.0
+MAX_KNOWLEDGE_PROFILE_FILES = 30
 
 
 def create_chat_model(user_id: int) -> ChatOpenAI:
@@ -68,6 +71,109 @@ def filter_relevant_reference_documents(
         if isinstance(doc, Document)
         and is_reference_document_relevant(doc, rerank_score_threshold)
     ]
+
+
+def normalize_retrieval_decision(
+    decision: dict[str, Any] | None,
+) -> RetrievalDecision:
+    """规范化检索路由结果，异常或缺失时保守选择检索。"""
+    if not isinstance(decision, dict):
+        return {
+            "need_retrieval": True,
+            "rewritten_query": "",
+            "reason": "路由结果无效，保守执行知识库检索",
+        }
+
+    need_retrieval = decision.get("need_retrieval", True)
+    if isinstance(need_retrieval, str):
+        need_retrieval = need_retrieval.strip().lower()
+        need_retrieval = need_retrieval not in {"false", "0", "no", "否"}
+    rewritten_query = str(decision.get("rewritten_query") or "").strip()
+    reason = str(decision.get("reason") or "").strip()
+
+    return {
+        "need_retrieval": bool(need_retrieval),
+        "rewritten_query": rewritten_query,
+        "reason": reason or "未提供原因",
+    }
+
+
+def parse_retrieval_decision(raw_output: str) -> RetrievalDecision:
+    """解析 Router LLM 输出的 JSON 路由结果。
+
+    Router 可能因为模型格式漂移输出 Markdown 代码块或额外说明。
+    这里尽量抽取第一段 JSON；解析失败时保守走检索，避免知识库问题被误判。
+    """
+    text = raw_output.strip()
+    if text.startswith("```"):
+        text = text.strip("`").strip()
+        if text.lower().startswith("json"):
+            text = text[4:].strip()
+
+    json_start = text.find("{")
+    json_end = text.rfind("}")
+    if json_start >= 0 and json_end >= json_start:
+        text = text[json_start:json_end + 1]
+
+    try:
+        parsed = json.loads(text)
+    except json.JSONDecodeError:
+        return normalize_retrieval_decision(None)
+
+    return normalize_retrieval_decision(parsed)
+
+
+def build_knowledge_base_profile(inputs: ChainInput) -> str:
+    """根据当前知识库文件列表生成轻量知识库画像。
+
+    先不引入新的摘要表，使用文件名、类型和索引状态帮助 Router 判断
+    用户问题是否可能需要知识库。后续可以将这里替换为文件摘要/标签表。
+    """
+    rows = get_knowledge_base_files(
+        knowledge_base_id=inputs["knowledge_base_id"],
+        user_id=inputs["user_id"],
+    )
+    indexed_rows = [
+        row
+        for row in rows
+        if row.get("status") == "indexed"
+    ]
+    if not indexed_rows:
+        return "当前知识库没有已完成索引的文件。"
+
+    profile_lines = [
+        "当前知识库已索引文件：",
+    ]
+    for index, row in enumerate(
+        indexed_rows[:MAX_KNOWLEDGE_PROFILE_FILES],
+        start=1,
+    ):
+        file_name = row.get("original_name") or "未命名文件"
+        mime_type = row.get("mime_type") or "未知类型"
+        profile_lines.append(f"{index}. {file_name}（{mime_type}）")
+
+    remaining_count = len(indexed_rows) - MAX_KNOWLEDGE_PROFILE_FILES
+    if remaining_count > 0:
+        profile_lines.append(f"...另有 {remaining_count} 个已索引文件。")
+
+    return "\n".join(profile_lines)
+
+
+def format_route_info(inputs: ChainInput) -> str:
+    """将检索路由结果格式化为回答阶段的系统提示信息。"""
+    decision = normalize_retrieval_decision(
+        inputs.get("retrieval_decision"),
+    )
+    need_retrieval = "是" if decision["need_retrieval"] else "否"
+    query = decision["rewritten_query"] or inputs.get(
+        "standalone_question",
+        "",
+    )
+    return (
+        f"是否需要知识库检索：{need_retrieval}\n"
+        f"检索/改写问题：{query}\n"
+        f"判断原因：{decision['reason']}"
+    )
 
 
 def get_res_doc(inputs: dict[str, Any]) -> str:
@@ -162,7 +268,13 @@ def retrieve_documents(inputs: ChainInput) -> RetrievedDocs:
     """根据当前知识库范围执行混合检索。"""
     user_id = inputs["user_id"]
     knowledge_base_id = inputs["knowledge_base_id"]
-    query = inputs["standalone_question"]
+    decision = normalize_retrieval_decision(
+        inputs.get("retrieval_decision"),
+    )
+    if not decision["need_retrieval"]:
+        return []
+
+    query = decision["rewritten_query"] or inputs["standalone_question"]
 
     file_ids = get_knowledge_base_file_ids(
         user_id=user_id,
@@ -230,13 +342,43 @@ def get_chain(user_id: int) -> RunnableSerializable:
         RunnableLambda(retrieve_documents)
     )
 
+    router_system_prompt = (
+        "你是 RAG 问题路由器。请判断用户最新问题是否需要检索当前知识库。"
+        "你可以参考聊天记录、改写后的问题，以及当前知识库文件画像。"
+        "如果问题是问候、闲聊、让你介绍能力、或不依赖知识库的一般对话，"
+        "need_retrieval=false。"
+        "如果问题提到文档、文件、知识库、法律条文、技术资料，或可能需要"
+        "根据当前知识库事实回答，need_retrieval=true。"
+        "如果不确定，必须选择 need_retrieval=true。"
+        "请只输出 JSON，不要 Markdown，不要解释。JSON 格式："
+        '{"need_retrieval": true, "rewritten_query": "用于检索的中文问题", '
+        '"reason": "一句话原因"}'
+        "\n\n当前知识库文件画像：\n{knowledge_profile}"
+    )
+    router_prompt = ChatPromptTemplate([
+        ("system", router_system_prompt),
+        ("placeholder", "{chat_history}"),
+        ("human", "用户原始问题：{input}\n改写后的问题：{standalone_question}"),
+    ])
+    router_chain: RunnableSerializable[ChainInput, RetrievalDecision] = (
+        router_prompt
+        | model
+        | StrOutputParser()
+        | RunnableLambda(parse_retrieval_decision)
+    )
+
     # 第二次调用：由检索上下文和用户问题生成答案
     system_prompt = (
-        "你是一个问答任务的助手。 "
-        "请使用检索到的上下文片段回答这个问题。 "
-        "如果上下文中没有答案，就说不知道。 "
+        "你是一个问答助手。系统会先判断本轮是否需要检索知识库。"
+        "如果“是否需要知识库检索”为“否”，请直接自然回答用户，不要声称"
+        "参考了知识库。"
+        "如果“是否需要知识库检索”为“是”，请优先使用检索到的上下文片段"
+        "回答；如果上下文为空或没有答案，就说不知道。"
         "请使用简洁的话语回答用户。"
         "\n\n"
+        "路由信息：\n{route_info}"
+        "\n\n"
+        "检索上下文：\n"
         "{context}"
     )
     qa_prompt = ChatPromptTemplate([
@@ -246,6 +388,7 @@ def get_chain(user_id: int) -> RunnableSerializable:
     ])
     qa_chain = (
         RunnablePassthrough.assign(
+            route_info=RunnableLambda(format_route_info),
             context=RunnableLambda(get_res_doc)
         )
         | qa_prompt
@@ -257,6 +400,8 @@ def get_chain(user_id: int) -> RunnableSerializable:
         RunnablePassthrough.assign(
             standalone_question=standalone_question
         )
+        .assign(knowledge_profile=RunnableLambda(build_knowledge_base_profile))
+        .assign(retrieval_decision=router_chain)
         .assign(context=retrieve_docs)
         .assign(answer=qa_chain)
     )
