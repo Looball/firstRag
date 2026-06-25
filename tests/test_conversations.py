@@ -71,8 +71,8 @@ class CreateConversationTests(unittest.TestCase):
             "测试会话",
         )
 
-    def test_get_messages_returns_persisted_sources(self) -> None:
-        """历史消息接口应返回已持久化的助手引用来源。"""
+    def test_get_messages_returns_persisted_sources_and_retrieval(self) -> None:
+        """历史消息接口应返回已持久化的引用来源和检索状态。"""
         conversation_id = uuid4()
         sources = [
             {
@@ -81,6 +81,13 @@ class CreateConversationTests(unittest.TestCase):
                 "content": "相关片段",
             }
         ]
+        retrieval = {
+            "need_retrieval": True,
+            "rewritten_query": "诉讼法",
+            "reason": "问题涉及知识库",
+            "retrieved_count": 5,
+            "source_count": 1,
+        }
         with patch(
             "app.api.conversations.conversation_exists",
             return_value=True,
@@ -94,6 +101,7 @@ class CreateConversationTests(unittest.TestCase):
                     "status": "completed",
                     "error_message": None,
                     "sources": sources,
+                    "retrieval": retrieval,
                     "created_at": "2026-06-25T00:00:00+08:00",
                 }
             ],
@@ -104,6 +112,10 @@ class CreateConversationTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["messages"][0]["sources"], sources)
+        self.assertEqual(
+            response.json()["messages"][0]["retrieval"],
+            retrieval,
+        )
 
 
 if __name__ == "__main__":

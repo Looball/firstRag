@@ -49,6 +49,7 @@ def stream_answer_and_save(
     """
     full_answer = ""
     sources: list[dict] = []
+    retrieval: dict[str, Any] = {}
 
     try:
         for event in stream_rag_response(
@@ -59,12 +60,15 @@ def stream_answer_and_save(
             knowledge_base_id=knowledge_base_id,
         ):
             if event["type"] == "retrieval":
-                yield format_sse_event("retrieval", {
+                retrieval = {
                     "need_retrieval": event["need_retrieval"],
                     "rewritten_query": event["rewritten_query"],
                     "reason": event["reason"],
                     "retrieved_count": event["retrieved_count"],
                     "source_count": event["source_count"],
+                }
+                yield format_sse_event("retrieval", {
+                    **retrieval,
                 })
                 continue
 
@@ -88,6 +92,7 @@ def stream_answer_and_save(
             "cancelled",
             "客户端中断了流式连接",
             sources,
+            retrieval,
         )
         raise
     except Exception:
@@ -98,6 +103,7 @@ def stream_answer_and_save(
             "failed",
             "回答生成失败，请稍后重试",
             sources,
+            retrieval,
         )
         yield format_sse_event("error", {
             "message": "回答生成失败，请稍后重试",
@@ -110,6 +116,7 @@ def stream_answer_and_save(
         full_answer,
         "completed",
         sources=sources,
+        retrieval=retrieval,
     )
     yield format_sse_event("done", {
         "message": "回答完成",

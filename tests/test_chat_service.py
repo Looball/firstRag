@@ -10,10 +10,10 @@ from app.services.chat_service import stream_answer_and_save
 class ChatServiceSourcePersistenceTests(unittest.TestCase):
     """验证流式回答完成时会持久化引用来源。"""
 
-    def test_stream_answer_and_save_persists_sources_on_completion(
+    def test_stream_answer_and_save_persists_sources_and_retrieval(
         self,
     ) -> None:
-        """sources 事件中的引用应随助手消息最终内容一起保存。"""
+        """sources 和 retrieval 应随助手消息最终内容一起保存。"""
         sources = [
             {
                 "index": 1,
@@ -21,10 +21,18 @@ class ChatServiceSourcePersistenceTests(unittest.TestCase):
                 "content": "相关片段",
             }
         ]
+        retrieval = {
+            "need_retrieval": True,
+            "rewritten_query": "诉讼法",
+            "reason": "问题涉及知识库",
+            "retrieved_count": 5,
+            "source_count": 1,
+        }
 
         with patch(
             "app.services.chat_service.stream_rag_response",
             return_value=[
+                {"type": "retrieval", **retrieval},
                 {"type": "sources", "sources": sources},
                 {"type": "answer", "content": "回答"},
             ],
@@ -45,6 +53,10 @@ class ChatServiceSourcePersistenceTests(unittest.TestCase):
         self.assertTrue(any("event: done" in event for event in events))
         finish_message.assert_called_once()
         self.assertEqual(finish_message.call_args.kwargs["sources"], sources)
+        self.assertEqual(
+            finish_message.call_args.kwargs["retrieval"],
+            retrieval,
+        )
 
 
 if __name__ == "__main__":

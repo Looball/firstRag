@@ -28,9 +28,11 @@ def finish_assistant_message(
     status: str,
     error_message: str | None = None,
     sources: list[dict] | None = None,
+    retrieval: dict | None = None,
 ) -> Row | None:
     """写入流式助手消息的最终内容和结束状态。"""
     serialized_sources = sources if sources is not None else []
+    serialized_retrieval = retrieval if retrieval is not None else {}
     return fetch_one(
         """
         UPDATE messages
@@ -38,13 +40,28 @@ def finish_assistant_message(
             status = %s,
             error_message = %s,
             sources = %s,
+            retrieval = %s,
             completed_at = now()
         WHERE id = %s
           AND role = 'assistant'
           AND status = 'generating'
-        RETURNING id, status, content, error_message, sources, completed_at;
+        RETURNING
+            id,
+            status,
+            content,
+            error_message,
+            sources,
+            retrieval,
+            completed_at;
         """,
-        (content, status, error_message, Jsonb(serialized_sources), message_id),
+        (
+            content,
+            status,
+            error_message,
+            Jsonb(serialized_sources),
+            Jsonb(serialized_retrieval),
+            message_id,
+        ),
     )
 
 
@@ -76,6 +93,7 @@ def get_user_conversation_messages(
             m.status,
             m.error_message,
             m.sources,
+            m.retrieval,
             m.created_at
         FROM messages AS m
         JOIN conversations AS c

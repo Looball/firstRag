@@ -22,6 +22,26 @@ from app.schemas.conversation import (
 router = APIRouter(prefix="/chat", tags=["conversations"])
 
 
+def serialize_message_retrieval(row: dict) -> dict:
+    """序列化历史消息检索状态，兼容旧消息。"""
+    retrieval = row.get("retrieval") or {}
+    sources = row.get("sources") or []
+    if retrieval:
+        return retrieval
+
+    # 旧消息没有 retrieval 内容时，至少用 sources 数量恢复前端展示。
+    if sources:
+        return {
+            "need_retrieval": True,
+            "rewritten_query": "",
+            "reason": "",
+            "retrieved_count": len(sources),
+            "source_count": len(sources),
+        }
+
+    return {}
+
+
 # 加载当前用户指定知识库下的会话
 @router.get("/knowledge-bases/{knowledge_base_id}/conversations")
 def get_conversations(
@@ -79,6 +99,7 @@ def get_messages(
                 "status": row["status"],
                 "error_message": row["error_message"],
                 "sources": row["sources"] or [],
+                "retrieval": serialize_message_retrieval(row),
                 "created_at": row["created_at"],
             }
             for row in rows
