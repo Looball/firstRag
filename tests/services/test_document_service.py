@@ -1,10 +1,16 @@
 """文档发现与切分服务的单元测试。"""
 
+from contextlib import redirect_stdout
+from io import StringIO
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
+from unittest.mock import Mock, patch
 
-from app.services.documents.document_service import get_document_paths
+from app.services.documents.document_service import (
+    build_vector_store,
+    get_document_paths,
+)
 
 
 class DocumentServiceTests(unittest.TestCase):
@@ -38,6 +44,32 @@ class DocumentServiceTests(unittest.TestCase):
                 ]
             ),
         )
+
+    def test_build_vector_store_does_not_print_debug_output(self) -> None:
+        """批量建库应使用 logger 记录进度，避免默认污染 stdout。"""
+        with TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            (root / "sample.md").write_text("# 标题\n\n正文内容", encoding="utf-8")
+            persist_directory = root / "vector_db"
+
+            mock_vector_store = Mock()
+            mock_vector_store._collection.count.return_value = 1
+            stdout = StringIO()
+
+            with patch(
+                "app.services.documents.document_service.ZhipuAIEmbeddings",
+                return_value=Mock(),
+            ), patch(
+                "app.services.documents.document_service.Chroma.from_documents",
+                return_value=mock_vector_store,
+            ), redirect_stdout(stdout):
+                result = build_vector_store(
+                    folder_path=root,
+                    persist_directory=persist_directory,
+                )
+
+        self.assertIs(result, mock_vector_store)
+        self.assertEqual(stdout.getvalue(), "")
 
 
 if __name__ == "__main__":
