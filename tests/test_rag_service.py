@@ -8,6 +8,7 @@ from langchain_core.language_models.fake_chat_models import FakeListChatModel
 
 from app.services.rag_service import (
     build_knowledge_base_profile,
+    finalize_retrieval_decision,
     get_res_doc,
     get_chain,
     normalize_retrieval_decision,
@@ -206,6 +207,22 @@ class RagQueryRouterTests(unittest.TestCase):
             decision["rewritten_query"],
             "民事诉讼法 起诉条件",
         )
+
+    def test_finalize_retrieval_forces_profile_keyword_match(self) -> None:
+        """问题关键词命中文件画像时，应覆盖 Router 的免检索判断。"""
+        decision = finalize_retrieval_decision({
+            "standalone_question": "什么是诉讼法",
+            "knowledge_profile": "当前知识库已索引文件：\n1. 中华人民共和国民事诉讼法_20230901.pdf（application/pdf）",
+            "raw_retrieval_decision": {
+                "need_retrieval": False,
+                "rewritten_query": "什么是诉讼法",
+                "reason": "通用法律概念解释，无需检索当前知识库",
+            },
+        })
+
+        self.assertTrue(decision["need_retrieval"])
+        self.assertEqual(decision["rewritten_query"], "什么是诉讼法")
+        self.assertIn("强制检索", decision["reason"])
 
     def test_retrieve_documents_skips_when_router_says_no(self) -> None:
         """Router 判断无需知识库时，不应执行后续混合检索。"""

@@ -123,6 +123,81 @@ def parse_retrieval_decision(raw_output: str) -> RetrievalDecision:
     return normalize_retrieval_decision(parsed)
 
 
+def extract_chinese_ngrams(text: str, min_size: int = 2, max_size: int = 6) -> set[str]:
+    """提取中文 ngram，用于判断问题和知识库画像是否有主题重合。"""
+    terms: set[str] = set()
+    buffer = []
+    for char in text:
+        if "\u4e00" <= char <= "\u9fff":
+            buffer.append(char)
+            continue
+
+        if buffer:
+            terms.update(build_ngrams_from_chars(buffer, min_size, max_size))
+            buffer.clear()
+
+    if buffer:
+        terms.update(build_ngrams_from_chars(buffer, min_size, max_size))
+
+    return terms
+
+
+def build_ngrams_from_chars(
+    chars: list[str],
+    min_size: int,
+    max_size: int,
+) -> set[str]:
+    """从连续中文字符中生成 ngram 集合。"""
+    terms: set[str] = set()
+    length = len(chars)
+    for size in range(min_size, min(max_size, length) + 1):
+        for start in range(0, length - size + 1):
+            terms.add("".join(chars[start:start + size]))
+    return terms
+
+
+def should_force_retrieval_by_profile(question: str, profile: str) -> bool:
+    """当问题关键词命中知识库文件画像时，强制走检索。
+
+    Router 对“什么是诉讼法”这类问题可能判断成通用问答。但如果当前
+    知识库文件名里有“民事诉讼法”，用户通常期待基于知识库回答并展示引用。
+    因此这里用轻量 ngram 重合做确定性兜底。
+    """
+    question_terms = extract_chinese_ngrams(question)
+    if not question_terms:
+        return False
+
+    profile_terms = extract_chinese_ngrams(profile)
+    return bool(question_terms & profile_terms)
+
+
+def finalize_retrieval_decision(inputs: ChainInput) -> RetrievalDecision:
+    """结合 Router 结果和知识库画像生成最终检索决策。"""
+    decision = normalize_retrieval_decision(
+        inputs.get("raw_retrieval_decision"),
+    )
+    query = decision["rewritten_query"] or inputs.get(
+        "standalone_question",
+        "",
+    )
+    profile = str(inputs.get("knowledge_profile") or "")
+
+    if (
+        not decision["need_retrieval"]
+        and should_force_retrieval_by_profile(query, profile)
+    ):
+        return {
+            "need_retrieval": True,
+            "rewritten_query": query,
+            "reason": (
+                f"{decision['reason']}；问题关键词命中当前知识库文件画像，"
+                "已强制检索"
+            ),
+        }
+
+    return decision
+
+
 def build_knowledge_base_profile(inputs: ChainInput) -> str:
     """根据当前知识库文件列表生成轻量知识库画像。
 
@@ -401,7 +476,8 @@ def get_chain(user_id: int) -> RunnableSerializable:
             standalone_question=standalone_question
         )
         .assign(knowledge_profile=RunnableLambda(build_knowledge_base_profile))
-        .assign(retrieval_decision=router_chain)
+        .assign(raw_retrieval_decision=router_chain)
+        .assign(retrieval_decision=RunnableLambda(finalize_retrieval_decision))
         .assign(context=retrieve_docs)
         .assign(answer=qa_chain)
     )
