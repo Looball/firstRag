@@ -14,6 +14,28 @@ from app.services.rag_service import stream_rag_response
 logger = logging.getLogger(__name__)
 
 
+LOCAL_GREETING_RESPONSES = {
+    "你好": "你好！有什么可以帮你的吗？",
+    "您好": "您好！有什么可以帮您的吗？",
+    "嗨": "嗨！有什么可以帮你的吗？",
+    "hi": "Hi！有什么可以帮你的吗？",
+    "hello": "Hello！有什么可以帮你的吗？",
+}
+
+
+def normalize_local_chat_input(user_input: str) -> str:
+    """标准化本地短路判断使用的用户输入。"""
+    return user_input.strip().strip("。！？!?~～.，, ")
+
+
+def get_local_chat_response(user_input: str) -> str | None:
+    """返回无需模型调用的本地闲聊回复。"""
+    normalized_input = normalize_local_chat_input(user_input)
+    return LOCAL_GREETING_RESPONSES.get(normalized_input.lower()) or (
+        LOCAL_GREETING_RESPONSES.get(normalized_input)
+    )
+
+
 def save_message(
     conversation_id: UUID,
     role: str,
@@ -122,6 +144,36 @@ def stream_answer_and_save(
         "message": "回答完成",
         "answer": full_answer,
         "sources": sources,
+    })
+
+
+def stream_local_answer_and_save(
+    answer: str,
+    assistant_message_id: UUID,
+) -> Iterator[str]:
+    """流式返回本地短路答案，并完成助手消息保存。"""
+    retrieval = {
+        "need_retrieval": False,
+        "rewritten_query": "",
+        "reason": "本地识别为普通问候，跳过模型调用和知识库检索",
+        "retrieved_count": 0,
+        "source_count": 0,
+    }
+    yield format_sse_event("retrieval", retrieval)
+    yield format_sse_event("answer", {
+        "content": answer,
+    })
+    finish_assistant_message(
+        assistant_message_id,
+        answer,
+        "completed",
+        sources=[],
+        retrieval=retrieval,
+    )
+    yield format_sse_event("done", {
+        "message": "回答完成",
+        "answer": answer,
+        "sources": [],
     })
 
 

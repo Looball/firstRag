@@ -8,9 +8,11 @@ from app.repositories.conversation_repository import (
 )
 from app.schemas.chat import ChatRequest
 from app.services.chat_service import (
+    get_local_chat_response,
     load_chat_history,
     save_message,
     stream_answer_and_save,
+    stream_local_answer_and_save,
 )
 from app.services.rag_service import get_chain
 
@@ -35,6 +37,28 @@ def chat(
     # 检查会话是否属于当前知识库
     if not conversation_belongs_base(user_id, req.knowledge_base_id, req.conversation_id):
         raise HTTPException(status_code=404, detail="禁止跨知识库提问")
+
+    local_answer = get_local_chat_response(req.message)
+    if local_answer is not None:
+        # 本地可确定的问候类消息不需要构建 RAG 链，避免额外模型调用。
+        save_message(req.conversation_id, "user", req.message)
+        assistant_message = save_message(
+            req.conversation_id,
+            "assistant",
+            "",
+            status="generating",
+        )
+        return StreamingResponse(
+            stream_local_answer_and_save(
+                local_answer,
+                assistant_message["id"],
+            ),
+            media_type="text/event-stream; charset=utf-8",
+            headers={
+                "Cache-Control": "no-cache",
+                "X-Accel-Buffering": "no",
+            },
+        )
 
     # 取出历史记录
     history = load_chat_history(req.conversation_id)

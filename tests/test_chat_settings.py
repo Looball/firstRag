@@ -43,7 +43,7 @@ class ChatSettingsTests(unittest.TestCase):
                 json={
                     "conversation_id": str(uuid4()),
                     "knowledge_base_id": str(uuid4()),
-                    "message": "你好",
+                    "message": "什么是诉讼法",
                 },
             )
 
@@ -75,6 +75,42 @@ class ChatSettingsTests(unittest.TestCase):
         conversation_exists.assert_not_called()
         get_chain.assert_not_called()
         save_message.assert_not_called()
+
+    def test_greeting_uses_local_response_without_model_chain(self) -> None:
+        """普通问候应本地快速回复，不触发 RAG 链构建。"""
+        assistant_message_id = uuid4()
+        with patch(
+            "app.api.chat.conversation_exists",
+            return_value=True,
+        ), patch(
+            "app.api.chat.conversation_belongs_base",
+            return_value=True,
+        ), patch(
+            "app.api.chat.get_chain",
+        ) as get_chain, patch(
+            "app.api.chat.save_message",
+            side_effect=[
+                {"id": uuid4()},
+                {"id": assistant_message_id},
+            ],
+        ), patch(
+            "app.services.chat_service.finish_assistant_message",
+        ):
+            response = self.client.post(
+                "/chat",
+                json={
+                    "conversation_id": str(uuid4()),
+                    "knowledge_base_id": str(uuid4()),
+                    "message": "你好",
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        body = response.text
+        self.assertIn("event: retrieval", body)
+        self.assertIn('"need_retrieval": false', body)
+        self.assertIn("event: answer", body)
+        get_chain.assert_not_called()
 
 
 if __name__ == "__main__":
