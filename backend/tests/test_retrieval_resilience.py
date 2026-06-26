@@ -5,7 +5,11 @@ import unittest
 from langchain_core.documents import Document
 
 from app.repositories.knowledge_chunk_repository import build_search_terms
-from app.services.retrieval.hybrid_retriever import get_vector_documents
+from app.services.retrieval.hybrid_retriever import (
+    get_hybrid_documents,
+    get_retrieval_diagnostics,
+    get_vector_documents,
+)
 from app.services.retrieval.rrf import reciprocal_rank_fusion
 
 
@@ -27,11 +31,30 @@ class FakeVectorStore:
             (
                 Document(
                     page_content="第二条 民事诉讼法的任务...",
-                    metadata={"file_id": file_filter},
+                    metadata={
+                        "user_id": "6",
+                        "file_id": file_filter,
+                        "chunk_index": 2,
+                    },
                 ),
                 0.1,
             )
         ]
+
+
+class FakeReranker:
+    """模拟 CrossEncoder reranker，避免单元测试加载真实模型。"""
+
+    def rerank(
+        self,
+        query: str,
+        documents: list[Document],
+        top_k: int,
+    ) -> list[Document]:
+        """返回前 top_k 个文档，并写入测试用 rerank 分数。"""
+        for index, document in enumerate(documents, start=1):
+            document.metadata["rerank_score"] = float(index)
+        return documents[:top_k]
 
 
 class RetrievalResilienceTests(unittest.TestCase):
@@ -65,6 +88,57 @@ class RetrievalResilienceTests(unittest.TestCase):
         self.assertEqual(len(docs), 1)
         self.assertEqual(docs[0].metadata["file_id"], "good-file")
         self.assertEqual(docs[0].metadata["retrieval_source"], "vector")
+
+    def test_hybrid_retrieval_records_timing_diagnostics(self) -> None:
+        """混合检索应记录各阶段耗时，便于定位慢请求。"""
+        fulltext_doc = Document(
+            page_content="第二条 民事诉讼法的任务...",
+            metadata={
+                "user_id": "6",
+                "file_id": "good-file",
+                "chunk_index": 2,
+                "retrieval_source": "fulltext",
+            },
+        )
+        with unittest.mock.patch(
+            "app.services.retrieval.hybrid_retriever.ZhipuAIEmbeddings",
+        ) as embedding_cls, unittest.mock.patch(
+            "app.services.retrieval.hybrid_retriever.get_vector_store",
+            return_value=FakeVectorStore(),
+        ), unittest.mock.patch(
+            "app.services.retrieval.hybrid_retriever.get_fulltext_documents",
+            return_value=[fulltext_doc],
+        ), unittest.mock.patch(
+            "app.services.retrieval.hybrid_retriever.get_reranker",
+            return_value=FakeReranker(),
+        ):
+            embedding_cls.return_value.embed_query.return_value = [0.1, 0.2]
+
+            docs = get_hybrid_documents(
+                query="诉讼法的任务是什么",
+                user_id=6,
+                file_ids=["good-file"],
+                k=5,
+                rerank=True,
+            )
+
+        diagnostics = get_retrieval_diagnostics()
+
+        self.assertEqual(len(docs), 1)
+        self.assertIsNotNone(diagnostics)
+        assert diagnostics is not None
+        timing = diagnostics["timing"]
+        for key in (
+            "embedding_ms",
+            "vector_ms",
+            "fulltext_ms",
+            "rrf_ms",
+            "rerank_ms",
+            "retrieval_total_ms",
+        ):
+            self.assertIn(key, timing)
+            self.assertIsInstance(timing[key], float)
+            self.assertGreaterEqual(timing[key], 0.0)
 
     def test_rrf_deduplicates_vector_and_fulltext_same_chunk(self) -> None:
         """同一文件同一 chunk 被两路召回时，Sources 里只应展示一次。"""

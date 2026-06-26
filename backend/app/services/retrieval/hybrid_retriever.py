@@ -18,6 +18,7 @@
 import logging
 from collections.abc import Sequence
 from contextvars import ContextVar
+from time import perf_counter
 from typing import Any
 from uuid import UUID
 
@@ -47,6 +48,7 @@ def reset_retrieval_diagnostics() -> None:
         "fused_count": 0,
         "reranked_count": 0,
         "retrieval_sources": [],
+        "timing": {},
     })
 
 
@@ -75,6 +77,16 @@ def add_vector_diagnostic_error(message: str) -> None:
     diagnostics["vector_degraded"] = True
     errors = diagnostics.setdefault("vector_errors", [])
     errors.append(message)
+
+
+def record_retrieval_timing(name: str, started_at: float) -> None:
+    """记录当前请求检索阶段的耗时，单位为毫秒。"""
+    diagnostics = _RETRIEVAL_DIAGNOSTICS.get()
+    if diagnostics is None:
+        return
+
+    timing = diagnostics.setdefault("timing", {})
+    timing[f"{name}_ms"] = round((perf_counter() - started_at) * 1000, 2)
 
 
 def build_chroma_filter(
@@ -131,6 +143,7 @@ def get_vector_documents(
     指定知识库文件范围时，逐个文件在 Chroma 侧进行等值过滤，再按向量
     距离合并排序。这样不会因其它知识库的高分文档占满固定候选池而漏召回。
     """
+    embedding_started_at = perf_counter()
     try:
         # 外部预计算 embedding，绕过 ChromaDB query_texts 路径
         embedding_model = ZhipuAIEmbeddings()
@@ -138,9 +151,12 @@ def get_vector_documents(
     except Exception:
         logger.exception("查询向量生成失败，降级为空向量结果")
         add_vector_diagnostic_error("查询向量生成失败")
+        record_retrieval_timing("embedding", embedding_started_at)
         return []
+    record_retrieval_timing("embedding", embedding_started_at)
 
     vectordb = get_vector_store()
+    vector_started_at = perf_counter()
     try:
         if not file_ids:
             candidates = vectordb.similarity_search_by_vector_with_relevance_scores(
@@ -178,7 +194,9 @@ def get_vector_documents(
     except Exception:
         logger.exception("Chroma 向量检索失败，降级为空向量结果")
         add_vector_diagnostic_error("Chroma 向量检索失败")
+        record_retrieval_timing("vector", vector_started_at)
         return []
+    record_retrieval_timing("vector", vector_started_at)
 
     documents = []
     for document, score in candidates:
@@ -210,6 +228,7 @@ def get_hybrid_documents(
     Cross-Encoder，而不是只精排某一路召回结果。
     """
     reset_retrieval_diagnostics()
+    total_started_at = perf_counter()
 
     vector_documents = get_vector_documents(
         query=query,
@@ -217,17 +236,20 @@ def get_hybrid_documents(
         file_ids=file_ids,
         k=vector_k,
     )
+    fulltext_started_at = perf_counter()
     fulltext_documents = get_fulltext_documents(
         query=query,
         user_id=user_id,
         file_ids=file_ids,
         k=fulltext_k,
     )
+    record_retrieval_timing("fulltext", fulltext_started_at)
     update_retrieval_diagnostics(
         vector_count=len(vector_documents),
         fulltext_count=len(fulltext_documents),
     )
 
+    rrf_started_at = perf_counter()
     fused_documents = reciprocal_rank_fusion(
         ranked_results=[
             vector_documents,
@@ -239,6 +261,7 @@ def get_hybrid_documents(
             fulltext_weight,
         ],
     )
+    record_retrieval_timing("rrf", rrf_started_at)
     update_retrieval_diagnostics(
         fused_count=len(fused_documents),
         retrieval_sources=sorted({
@@ -253,12 +276,16 @@ def get_hybrid_documents(
     )
 
     if not rerank:
+        record_retrieval_timing("retrieval_total", total_started_at)
         return fused_documents
 
+    rerank_started_at = perf_counter()
     reranked_documents = get_reranker(reranker_model).rerank(
         query=query,
         documents=fused_documents,
         top_k=k,
     )
+    record_retrieval_timing("rerank", rerank_started_at)
+    record_retrieval_timing("retrieval_total", total_started_at)
     update_retrieval_diagnostics(reranked_count=len(reranked_documents))
     return reranked_documents
