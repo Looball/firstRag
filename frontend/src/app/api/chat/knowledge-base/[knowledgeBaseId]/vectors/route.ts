@@ -16,10 +16,10 @@ function getBackendUrl(knowledgeBaseId: string) {
 
 export async function POST(
   request: Request,
-  context: RouteContext<"/api/chat/knowledge-base/[knowledgeBaseId]/vectors">
+  { params }: { params: Promise<{ knowledgeBaseId: string }> }
 ) {
   try {
-    const { knowledgeBaseId } = await context.params;
+    const { knowledgeBaseId } = await params;
     const headers = new Headers({ Accept: "application/json" });
     const authorization = request.headers.get("Authorization");
 
