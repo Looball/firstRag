@@ -170,6 +170,59 @@ class RagReferenceFilteringTests(unittest.TestCase):
         self.assertEqual(events[0]["source_count"], 1)
         self.assertEqual(events[1]["sources"][0]["content"], "相关内容")
 
+    def test_stream_rag_response_includes_retrieval_diagnostics(self) -> None:
+        """检索事件应携带当前请求的混合检索诊断信息。"""
+        chain = FakeStreamingChain([
+            {
+                "retrieval_decision": {
+                    "need_retrieval": True,
+                    "rewritten_query": "诉讼法",
+                    "reason": "问题涉及知识库",
+                }
+            },
+            {
+                "context": [
+                    Document(
+                        page_content="相关内容",
+                        metadata={
+                            "file_name": "民事诉讼法.pdf",
+                            "rerank_score": 0.5,
+                        },
+                    )
+                ]
+            },
+            {"answer": "根据资料回答。"},
+        ])
+        diagnostics = {
+            "vector_degraded": True,
+            "vector_errors": ["Chroma 单文件向量检索失败：file-1"],
+            "vector_count": 0,
+            "fulltext_count": 5,
+            "fused_count": 5,
+            "reranked_count": 5,
+            "retrieval_sources": ["fulltext"],
+        }
+
+        with unittest.mock.patch(
+            "app.services.rag_service.get_retrieval_diagnostics",
+            return_value=diagnostics,
+        ):
+            events = list(stream_rag_response(
+                chain=chain,
+                user_input="民事诉讼法是什么",
+                chat_history=[],
+                user_id=1,
+                knowledge_base_id=uuid4(),
+            ))
+
+        self.assertEqual(events[0]["type"], "retrieval")
+        self.assertTrue(events[0]["vector_degraded"])
+        self.assertEqual(events[0]["retrieval_sources"], ["fulltext"])
+        self.assertEqual(
+            events[0]["diagnostics"]["vector_errors"],
+            ["Chroma 单文件向量检索失败：file-1"],
+        )
+
 
 class RagQueryRouterTests(unittest.TestCase):
     """验证 Query Router 的解析、画像和检索开关行为。"""

@@ -42,6 +42,62 @@ def serialize_message_retrieval(row: dict) -> dict:
     return {}
 
 
+def collect_source_retrieval_sources(sources: list[dict]) -> list[str]:
+    """从引用来源中汇总实际使用过的检索通道。"""
+    retrieval_sources = set()
+    for source in sources:
+        for retrieval_source in source.get("retrieval_sources") or []:
+            retrieval_sources.add(str(retrieval_source))
+    return sorted(retrieval_sources)
+
+
+def serialize_source_preview(source: dict) -> dict:
+    """序列化诊断接口中的引用预览，避免返回过多片段正文。"""
+    return {
+        "index": source.get("index"),
+        "file_id": source.get("file_id"),
+        "file_name": source.get("file_name"),
+        "chunk_index": source.get("chunk_index"),
+        "retrieval_sources": source.get("retrieval_sources") or [],
+        "rrf_score": source.get("rrf_score"),
+        "rerank_score": source.get("rerank_score"),
+    }
+
+
+def serialize_message_diagnostic(row: dict) -> dict:
+    """序列化单条助手消息的 RAG 诊断信息。"""
+    retrieval = serialize_message_retrieval(row)
+    sources = row.get("sources") or []
+    diagnostics = retrieval.get("diagnostics") or {}
+    retrieval_sources = (
+        retrieval.get("retrieval_sources")
+        or diagnostics.get("retrieval_sources")
+        or collect_source_retrieval_sources(sources)
+    )
+
+    return {
+        "message_id": str(row["id"]),
+        "status": row["status"],
+        "error_message": row["error_message"],
+        "created_at": row["created_at"],
+        "need_retrieval": retrieval.get("need_retrieval"),
+        "rewritten_query": retrieval.get("rewritten_query", ""),
+        "reason": retrieval.get("reason", ""),
+        "retrieved_count": retrieval.get("retrieved_count", 0),
+        "source_count": retrieval.get("source_count", len(sources)),
+        "retrieval_sources": retrieval_sources,
+        "vector_degraded": bool(
+            retrieval.get("vector_degraded")
+            or diagnostics.get("vector_degraded"),
+        ),
+        "diagnostics": diagnostics,
+        "sources_preview": [
+            serialize_source_preview(source)
+            for source in sources
+        ],
+    }
+
+
 # 加载当前用户指定知识库下的会话
 @router.get("/knowledge-bases/{knowledge_base_id}/conversations")
 def get_conversations(
@@ -74,6 +130,31 @@ def get_conversations(
                 "updated_at": row["conversation_updated_at"],
             }
             for row in rows
+        ],
+    }
+
+
+@router.get("/conversations/{conversation_id}/diagnostics")
+def get_conversation_diagnostics(
+    conversation_id: UUID,
+    user_id: int = Depends(get_current_user_id),
+):
+    """读取当前会话的 RAG 检索诊断信息。"""
+    if not conversation_exists(user_id, conversation_id):
+        raise HTTPException(status_code=404, detail="会话不存在")
+
+    rows = get_user_conversation_messages(user_id, conversation_id)
+    assistant_rows = [
+        row
+        for row in rows
+        if row["role"] == "assistant"
+    ]
+    return {
+        "success": True,
+        "conversation_id": str(conversation_id),
+        "diagnostics": [
+            serialize_message_diagnostic(row)
+            for row in assistant_rows
         ],
     }
 

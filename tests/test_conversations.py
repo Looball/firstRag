@@ -117,6 +117,85 @@ class CreateConversationTests(unittest.TestCase):
             retrieval,
         )
 
+    def test_get_conversation_diagnostics_returns_rag_debug_summary(
+        self,
+    ) -> None:
+        """诊断接口应返回助手消息的检索路径、降级状态和来源预览。"""
+        conversation_id = uuid4()
+        message_id = uuid4()
+        sources = [
+            {
+                "index": 1,
+                "file_id": "file-1",
+                "file_name": "民事诉讼法.pdf",
+                "chunk_index": 2,
+                "retrieval_sources": ["fulltext", "vector"],
+                "rrf_score": 0.03,
+                "rerank_score": 5.4,
+                "content": "较长正文不需要在诊断摘要中重复返回",
+            }
+        ]
+        retrieval = {
+            "need_retrieval": True,
+            "rewritten_query": "诉讼法的任务是什么",
+            "reason": "问题涉及知识库",
+            "retrieved_count": 5,
+            "source_count": 1,
+            "retrieval_sources": ["fulltext", "vector"],
+            "vector_degraded": False,
+            "diagnostics": {
+                "vector_count": 5,
+                "fulltext_count": 5,
+                "fused_count": 5,
+                "reranked_count": 5,
+                "vector_degraded": False,
+                "vector_errors": [],
+                "retrieval_sources": ["fulltext", "vector"],
+            },
+        }
+        with patch(
+            "app.api.conversations.conversation_exists",
+            return_value=True,
+        ), patch(
+            "app.api.conversations.get_user_conversation_messages",
+            return_value=[
+                {
+                    "id": uuid4(),
+                    "role": "user",
+                    "content": "诉讼法的任务是什么",
+                    "status": "completed",
+                    "error_message": None,
+                    "sources": [],
+                    "retrieval": {},
+                    "created_at": "2026-06-25T00:00:00+08:00",
+                },
+                {
+                    "id": message_id,
+                    "role": "assistant",
+                    "content": "回答",
+                    "status": "completed",
+                    "error_message": None,
+                    "sources": sources,
+                    "retrieval": retrieval,
+                    "created_at": "2026-06-25T00:00:01+08:00",
+                },
+            ],
+        ):
+            response = self.client.get(
+                f"/chat/conversations/{conversation_id}/diagnostics",
+            )
+
+        self.assertEqual(response.status_code, 200)
+        diagnostic = response.json()["diagnostics"][0]
+        self.assertEqual(diagnostic["message_id"], str(message_id))
+        self.assertEqual(diagnostic["retrieved_count"], 5)
+        self.assertEqual(diagnostic["source_count"], 1)
+        self.assertEqual(diagnostic["retrieval_sources"], ["fulltext", "vector"])
+        self.assertFalse(diagnostic["vector_degraded"])
+        self.assertEqual(diagnostic["diagnostics"]["vector_count"], 5)
+        self.assertNotIn("content", diagnostic["sources_preview"][0])
+        self.assertEqual(diagnostic["sources_preview"][0]["chunk_index"], 2)
+
 
 if __name__ == "__main__":
     unittest.main()

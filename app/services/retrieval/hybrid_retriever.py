@@ -17,6 +17,8 @@
 
 import logging
 from collections.abc import Sequence
+from contextvars import ContextVar
+from typing import Any
 from uuid import UUID
 
 from langchain_core.documents import Document
@@ -28,6 +30,51 @@ from app.services.vectors.embedding_model import ZhipuAIEmbeddings
 from app.services.vectors.vector_index_service import get_vector_store
 
 logger = logging.getLogger(__name__)
+
+_RETRIEVAL_DIAGNOSTICS: ContextVar[dict[str, Any] | None] = ContextVar(
+    "retrieval_diagnostics",
+    default=None,
+)
+
+
+def reset_retrieval_diagnostics() -> None:
+    """初始化当前请求的检索诊断信息。"""
+    _RETRIEVAL_DIAGNOSTICS.set({
+        "vector_degraded": False,
+        "vector_errors": [],
+        "vector_count": 0,
+        "fulltext_count": 0,
+        "fused_count": 0,
+        "reranked_count": 0,
+        "retrieval_sources": [],
+    })
+
+
+def get_retrieval_diagnostics() -> dict[str, Any] | None:
+    """读取当前请求最近一次混合检索产生的诊断信息。"""
+    diagnostics = _RETRIEVAL_DIAGNOSTICS.get()
+    if diagnostics is None:
+        return None
+    return dict(diagnostics)
+
+
+def update_retrieval_diagnostics(**values: Any) -> None:
+    """更新当前请求的检索诊断信息。"""
+    diagnostics = _RETRIEVAL_DIAGNOSTICS.get()
+    if diagnostics is None:
+        return
+    diagnostics.update(values)
+
+
+def add_vector_diagnostic_error(message: str) -> None:
+    """记录一次向量检索降级原因。"""
+    diagnostics = _RETRIEVAL_DIAGNOSTICS.get()
+    if diagnostics is None:
+        return
+
+    diagnostics["vector_degraded"] = True
+    errors = diagnostics.setdefault("vector_errors", [])
+    errors.append(message)
 
 
 def build_chroma_filter(
@@ -90,6 +137,7 @@ def get_vector_documents(
         query_embedding = embedding_model.embed_query(query)
     except Exception:
         logger.exception("查询向量生成失败，降级为空向量结果")
+        add_vector_diagnostic_error("查询向量生成失败")
         return []
 
     vectordb = get_vector_store()
@@ -119,6 +167,9 @@ def get_vector_documents(
                         "Chroma 单文件向量检索失败，跳过该文件 file_id=%s",
                         file_id,
                     )
+                    add_vector_diagnostic_error(
+                        f"Chroma 单文件向量检索失败：{file_id}",
+                    )
                     continue
 
             # Chroma 返回的是距离，数值越小语义越相近。
@@ -126,6 +177,7 @@ def get_vector_documents(
             candidates = scored_candidates[:k]
     except Exception:
         logger.exception("Chroma 向量检索失败，降级为空向量结果")
+        add_vector_diagnostic_error("Chroma 向量检索失败")
         return []
 
     documents = []
@@ -134,6 +186,7 @@ def get_vector_documents(
         document.metadata["vector_score"] = float(score)
         documents.append(document)
 
+    update_retrieval_diagnostics(vector_count=len(documents))
     return documents
 
 
@@ -156,6 +209,8 @@ def get_hybrid_documents(
     这样可以让向量检索和全文检索召回到的片段都有机会进入
     Cross-Encoder，而不是只精排某一路召回结果。
     """
+    reset_retrieval_diagnostics()
+
     vector_documents = get_vector_documents(
         query=query,
         user_id=user_id,
@@ -167,6 +222,10 @@ def get_hybrid_documents(
         user_id=user_id,
         file_ids=file_ids,
         k=fulltext_k,
+    )
+    update_retrieval_diagnostics(
+        vector_count=len(vector_documents),
+        fulltext_count=len(fulltext_documents),
     )
 
     fused_documents = reciprocal_rank_fusion(
@@ -180,12 +239,26 @@ def get_hybrid_documents(
             fulltext_weight,
         ],
     )
+    update_retrieval_diagnostics(
+        fused_count=len(fused_documents),
+        retrieval_sources=sorted({
+            source
+            for document in fused_documents
+            for source in (
+                document.metadata.get("retrieval_sources")
+                or [document.metadata.get("retrieval_source")]
+            )
+            if source
+        }),
+    )
 
     if not rerank:
         return fused_documents
 
-    return get_reranker(reranker_model).rerank(
+    reranked_documents = get_reranker(reranker_model).rerank(
         query=query,
         documents=fused_documents,
         top_k=k,
     )
+    update_retrieval_diagnostics(reranked_count=len(reranked_documents))
+    return reranked_documents

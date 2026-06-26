@@ -89,6 +89,13 @@ def stream_answer_and_save(
                     "retrieved_count": event["retrieved_count"],
                     "source_count": event["source_count"],
                 }
+                for optional_key in (
+                    "retrieval_sources",
+                    "vector_degraded",
+                    "diagnostics",
+                ):
+                    if optional_key in event:
+                        retrieval[optional_key] = event[optional_key]
                 yield format_sse_event("retrieval", {
                     **retrieval,
                 })

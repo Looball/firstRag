@@ -20,7 +20,10 @@ from app.repositories.knowledge_base_repository import (
 )
 from app.services.user_settings_service import get_effective_chat_model_settings
 from app.services.llm_service import create_openai_compatible_chat_model
-from app.services.retrieval.hybrid_retriever import get_hybrid_documents
+from app.services.retrieval.hybrid_retriever import (
+    get_hybrid_documents,
+    get_retrieval_diagnostics,
+)
 
 
 type RetrievedDocs = list[Document]
@@ -533,9 +536,10 @@ def stream_rag_response(
                 context,
                 user_id=user_id,
             )
+            diagnostics = get_retrieval_diagnostics()
             if not retrieval_sent:
                 decision = normalize_retrieval_decision(retrieval_decision)
-                yield {
+                retrieval_event = {
                     "type": "retrieval",
                     "need_retrieval": decision["need_retrieval"],
                     "rewritten_query": decision["rewritten_query"],
@@ -543,6 +547,15 @@ def stream_rag_response(
                     "retrieved_count": len(context),
                     "source_count": len(sources),
                 }
+                if diagnostics is not None:
+                    retrieval_event["diagnostics"] = diagnostics
+                    retrieval_event["retrieval_sources"] = (
+                        diagnostics.get("retrieval_sources") or []
+                    )
+                    retrieval_event["vector_degraded"] = bool(
+                        diagnostics.get("vector_degraded"),
+                    )
+                yield retrieval_event
                 retrieval_sent = True
 
             # 没有可信引用时不发送 sources 事件，避免前端展示空 Sources。
