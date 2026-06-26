@@ -17,7 +17,7 @@ yarn-error.log*
 /vector_db/
 /models/
 /uploads/
-/outputs/
+/buffer/
 
 # Local application settings
 .env
@@ -30,5 +30,3 @@ yarn-error.log*
 
 # Agent-local files
 .agents/
-AGENTS.md
-CLAUDE.md
