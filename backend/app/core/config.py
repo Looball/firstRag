@@ -8,6 +8,12 @@ PROJECT_ROOT = Path(__file__).resolve().parents[3]
 load_dotenv(PROJECT_ROOT / ".env")
 
 
+def resolve_project_path(value: str | os.PathLike[str], default: Path) -> Path:
+    """将配置中的相对路径统一解析到项目根目录，避免受启动目录影响。"""
+    path = Path(value or default)
+    return path if path.is_absolute() else PROJECT_ROOT / path
+
+
 # 设置文件存储路径
 UPLOAD_ROOT = PROJECT_ROOT / "uploads"
 
@@ -17,8 +23,9 @@ MAX_UPLOAD_FILE_SIZE_BYTES = int(
 )
 
 # 设置Chroma向量库存储路径和集合名称
-VECTOR_STORE_PATH = Path(
-    os.environ.get("VECTOR_STORE_PATH", PROJECT_ROOT / "vector_db/chroma")
+VECTOR_STORE_PATH = resolve_project_path(
+    os.environ.get("VECTOR_STORE_PATH", ""),
+    PROJECT_ROOT / "vector_db/chroma",
 )
 CHROMA_COLLECTION_NAME = os.environ.get(
     "CHROMA_COLLECTION_NAME",
@@ -26,11 +33,9 @@ CHROMA_COLLECTION_NAME = os.environ.get(
 )
 
 # 设置本地 Cross-Encoder 精排序模型路径
-RERANKER_MODEL_PATH = Path(
-    os.environ.get(
-        "RERANKER_MODEL_PATH",
-        PROJECT_ROOT / "models/rerankers/bge-reranker-base",
-    )
+RERANKER_MODEL_PATH = resolve_project_path(
+    os.environ.get("RERANKER_MODEL_PATH", ""),
+    PROJECT_ROOT / "models/rerankers/bge-reranker-base",
 )
 
 # 设置JWT配置信息，环境变量中需要有 JWT_SECRET_KEY

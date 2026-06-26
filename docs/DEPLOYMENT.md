@@ -21,7 +21,7 @@ cp .env.example .env
 | `LLM_API_KEY` | 平台模型 API Key。 |
 | `USER_SETTINGS_ENCRYPTION_KEY` | 用户 API Key 加密主密钥。 |
 | `ZAI_EMD_API` | 智谱 embedding API Key。 |
-| `VECTOR_STORE_PATH` | Chroma 持久化路径，默认 `./vector_db/chroma`。 |
+| `VECTOR_STORE_PATH` | Chroma 持久化路径，默认 `./vector_db/chroma`；相对路径会按项目根目录解析。 |
 | `RERANKER_MODEL_PATH` | 本地 reranker 模型路径。 |
 
 敏感信息不要提交到 Git。
@@ -72,4 +72,3 @@ deploy/
 ```
 
 `docker-compose.yml` 当前是占位骨架，后续可补充 PostgreSQL、后端、前端和 worker 服务。
-
