@@ -16,10 +16,10 @@ function getBackendUrl(jobId: string) {
 
 export async function GET(
   request: Request,
-  context: RouteContext<"/api/chat/vector-index-jobs/[jobId]">
+  { params }: { params: Promise<{ jobId: string }> }
 ) {
   try {
-    const { jobId } = await context.params;
+    const { jobId } = await params;
     const headers = new Headers({ Accept: "application/json" });
     const authorization = request.headers.get("Authorization");
 
