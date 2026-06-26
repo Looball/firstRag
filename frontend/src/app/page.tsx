@@ -520,6 +520,23 @@ function getAssistantContent(value: unknown) {
     : "";
 }
 
+function getAssistantMessageId(value: unknown) {
+  if (typeof value !== "object" || value === null) {
+    return "";
+  }
+
+  const candidate = value as Record<string, unknown>;
+  const nestedMessage =
+    typeof candidate.message === "object" && candidate.message !== null
+      ? (candidate.message as Record<string, unknown>)
+      : null;
+
+  return (
+    getStringField(candidate, ["message_id", "assistant_message_id", "id"]) ||
+    (nestedMessage ? getStringField(nestedMessage, ["id"]) : "")
+  );
+}
+
 function parseJsonValue(value: string) {
   try {
     return JSON.parse(value) as unknown;
@@ -3603,6 +3620,35 @@ export default function Home() {
       );
     };
 
+    const setAssistantMessageId = (messageId: string) => {
+      if (!messageId) {
+        return;
+      }
+
+      setSessions((prev) =>
+        prev.map((session) => {
+          if (session.id !== activeSessionId) {
+            return session;
+          }
+
+          const messages = [...session.messages];
+          const lastMessage = messages[messages.length - 1];
+
+          if (lastMessage?.role === "assistant") {
+            messages[messages.length - 1] = {
+              ...lastMessage,
+              id: messageId,
+            };
+          }
+
+          return {
+            ...session,
+            messages,
+          };
+        })
+      );
+    };
+
     const setAssistantFallback = (content: string) => {
       setSessions((prev) =>
         prev.map((session) => {
@@ -3666,10 +3712,12 @@ export default function Home() {
         const answer = getAssistantContent(data);
         const sources = getChatSources(data);
         const retrieval = getRetrievalState(data);
+        const messageId = getAssistantMessageId(data);
 
         if (retrieval) {
           setAssistantRetrieval(retrieval);
         }
+        setAssistantMessageId(messageId);
         setAssistantSources(sources);
         setAssistantFallback(answer || "模型暂时没有返回内容。");
         return;
@@ -3720,11 +3768,13 @@ export default function Home() {
           const parsedData = parseJsonValue(data);
           const retrieval = getRetrievalState(parsedData);
           const doneSources = getChatSources(parsedData);
+          const messageId = getAssistantMessageId(parsedData);
 
           if (retrieval) {
             setAssistantRetrieval(retrieval);
           }
 
+          setAssistantMessageId(messageId);
           setAssistantSources(doneSources);
 
           const doneAnswer = getAssistantContent(parsedData);

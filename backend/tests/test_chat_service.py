@@ -39,18 +39,25 @@ class ChatServiceSourcePersistenceTests(unittest.TestCase):
         ), patch(
             "app.services.chat_service.finish_assistant_message",
         ) as finish_message:
+            assistant_message_id = uuid4()
             events = list(stream_answer_and_save(
                 chain=object(),
                 user_input="什么是诉讼法",
                 history=[],
                 conversation_id=uuid4(),
-                assistant_message_id=uuid4(),
+                assistant_message_id=assistant_message_id,
                 user_id=1,
                 knowledge_base_id=uuid4(),
             ))
 
         self.assertTrue(any("event: sources" in event for event in events))
         self.assertTrue(any("event: done" in event for event in events))
+        self.assertTrue(
+            any(
+                f'"message_id": "{assistant_message_id}"' in event
+                for event in events
+            ),
+        )
         finish_message.assert_called_once()
         self.assertEqual(finish_message.call_args.kwargs["sources"], sources)
         self.assertEqual(

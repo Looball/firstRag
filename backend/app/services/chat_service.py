@@ -151,6 +151,7 @@ def stream_answer_and_save(
         "message": "回答完成",
         "answer": full_answer,
         "sources": sources,
+        "message_id": str(assistant_message_id),
     })
 
 
@@ -181,6 +182,7 @@ def stream_local_answer_and_save(
         "message": "回答完成",
         "answer": answer,
         "sources": [],
+        "message_id": str(assistant_message_id),
     })
 
 
