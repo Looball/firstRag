@@ -33,3 +33,12 @@ cd frontend
 npm install
 npm run dev
 ```
+
+## Documentation
+
+Project documentation lives in `docs/`. Start with:
+
+- `docs/ARCHITECTURE.md`
+- `docs/API.md`
+- `docs/RAG_WORKFLOW.md`
+- `docs/AGENT_GUIDE.md`

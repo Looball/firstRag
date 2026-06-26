@@ -1,0 +1,68 @@
+# 后端结构说明
+
+后端位于 `backend/`，使用 FastAPI 提供 HTTP API，使用 PostgreSQL 和 Chroma 完成 RAG 数据存储。
+
+## 目录结构
+
+```text
+backend/
+├── app/
+│   ├── api/             # FastAPI 路由
+│   ├── core/            # 配置、安全、密钥加密
+│   ├── db/              # 数据库连接、SQL 执行器、迁移 SQL
+│   ├── repositories/    # 数据访问层
+│   ├── schemas/         # Pydantic 请求模型
+│   ├── services/        # 业务逻辑
+│   └── workers/         # 后台 worker
+├── demo/                # 历史 demo / 兼容入口
+├── tests/               # 后端测试
+├── main.py              # ASGI app 兼容导出
+└── requirements.txt
+```
+
+## 启动
+
+```bash
+cd backend
+conda activate firstrag
+python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+```
+
+配置从 monorepo 根目录 `.env` 加载，不从 `backend/.env` 加载。
+
+## 路由模块
+
+| 文件 | 主要职责 |
+| --- | --- |
+| `auth.py` | 注册、登录、JWT 返回。 |
+| `chat.py` | SSE 聊天接口和 RAG 链调用。 |
+| `conversations.py` | 会话列表、创建、重命名、删除、消息和诊断读取。 |
+| `knowledge_bases.py` | 知识库列表、创建、文件关联管理。 |
+| `knowledge_files.py` | 文件上传、复用、知识文件列表。 |
+| `user_settings.py` | 用户模型厂商、凭据、测试连接和设置保存。 |
+| `vector_indexes.py` | 文件/知识库向量化任务、任务状态和向量删除。 |
+
+## 服务模块
+
+| 文件 | 主要职责 |
+| --- | --- |
+| `chat_service.py` | SSE 事件、消息持久化、回答落库。 |
+| `rag_service.py` | LCEL 链构建、检索决策和回答链编排。 |
+| `llm_service.py` | OpenAI 兼容模型厂商预设、用户/平台配置解析。 |
+| `file_service.py` | 上传文件大小限制、SHA-256、落盘路径。 |
+| `documents/document_service.py` | 文档加载、切分、向量库构建。 |
+| `retrieval/*` | 向量检索、全文检索、RRF 融合、CrossEncoder 精排。 |
+| `vectors/*` | embedding 模型、向量化队列、索引生命周期。 |
+
+## Worker
+
+向量化任务由独立 worker 处理：
+
+```bash
+cd backend
+conda activate firstrag
+python -m app.workers.vector_index_worker
+```
+
+worker 从 `vector_index_jobs` 领取任务，解析文件、切分文本、写 Chroma、写 PostgreSQL chunk，并更新任务状态。
+
