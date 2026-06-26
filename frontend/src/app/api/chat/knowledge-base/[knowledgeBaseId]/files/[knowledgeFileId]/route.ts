@@ -17,14 +17,16 @@ function getBackendRelationUrl(
   )}/files/${encodeURIComponent(knowledgeFileId)}`;
 }
 
+type KnowledgeBaseFileRelationParams = {
+  params: Promise<{ knowledgeBaseId: string; knowledgeFileId: string }>;
+};
+
 export async function POST(
   request: Request,
-  context: RouteContext<
-    "/api/chat/knowledge-base/[knowledgeBaseId]/files/[knowledgeFileId]"
-  >
+  { params }: KnowledgeBaseFileRelationParams
 ) {
   try {
-    const { knowledgeBaseId, knowledgeFileId } = await context.params;
+    const { knowledgeBaseId, knowledgeFileId } = await params;
     const upstreamHeaders = new Headers({
       Accept: "application/json",
     });
@@ -63,12 +65,10 @@ export async function POST(
 
 export async function DELETE(
   request: Request,
-  context: RouteContext<
-    "/api/chat/knowledge-base/[knowledgeBaseId]/files/[knowledgeFileId]"
-  >
+  { params }: KnowledgeBaseFileRelationParams
 ) {
   try {
-    const { knowledgeBaseId, knowledgeFileId } = await context.params;
+    const { knowledgeBaseId, knowledgeFileId } = await params;
     const upstreamHeaders = new Headers({
       Accept: "application/json",
     });

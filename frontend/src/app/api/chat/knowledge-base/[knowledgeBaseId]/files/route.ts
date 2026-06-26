@@ -14,14 +14,16 @@ function getBackendFilesUrl(knowledgeBaseId: string) {
   )}/files`;
 }
 
+type KnowledgeBaseFilesParams = {
+  params: Promise<{ knowledgeBaseId: string }>;
+};
+
 export async function GET(
   request: Request,
-  context: RouteContext<
-    "/api/chat/knowledge-base/[knowledgeBaseId]/files"
-  >
+  { params }: KnowledgeBaseFilesParams
 ) {
   try {
-    const { knowledgeBaseId } = await context.params;
+    const { knowledgeBaseId } = await params;
     const upstreamHeaders = new Headers({
       Accept: "application/json",
     });
@@ -60,12 +62,10 @@ export async function GET(
 
 export async function POST(
   request: Request,
-  context: RouteContext<
-    "/api/chat/knowledge-base/[knowledgeBaseId]/files"
-  >
+  { params }: KnowledgeBaseFilesParams
 ) {
   try {
-    const { knowledgeBaseId } = await context.params;
+    const { knowledgeBaseId } = await params;
     const formData = await request.formData();
     const upstreamHeaders = new Headers({
       Accept: "application/json",

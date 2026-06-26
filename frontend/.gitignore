@@ -55,5 +55,8 @@ skills-lock.json
 # .vscode
 .vscode/
 
+# JetBrains IDE metadata
+.idea/
+
 # PROJECT_NOTES
 PROJECT_NOTES.md
