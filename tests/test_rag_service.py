@@ -223,6 +223,58 @@ class RagReferenceFilteringTests(unittest.TestCase):
             ["Chroma 单文件向量检索失败：file-1"],
         )
 
+    def test_stream_rag_response_reads_diagnostics_from_documents(
+        self,
+    ) -> None:
+        """ContextVar 丢失时，应从文档 metadata 中读取检索诊断。"""
+        diagnostics = {
+            "vector_degraded": False,
+            "vector_errors": [],
+            "vector_count": 5,
+            "fulltext_count": 5,
+            "fused_count": 5,
+            "reranked_count": 5,
+            "retrieval_sources": ["fulltext", "vector"],
+        }
+        chain = FakeStreamingChain([
+            {
+                "retrieval_decision": {
+                    "need_retrieval": True,
+                    "rewritten_query": "诉讼法",
+                    "reason": "问题涉及知识库",
+                }
+            },
+            {
+                "context": [
+                    Document(
+                        page_content="相关内容",
+                        metadata={
+                            "file_name": "民事诉讼法.pdf",
+                            "rerank_score": 0.5,
+                            "retrieval_diagnostics": diagnostics,
+                        },
+                    )
+                ]
+            },
+            {"answer": "根据资料回答。"},
+        ])
+
+        with unittest.mock.patch(
+            "app.services.rag_service.get_retrieval_diagnostics",
+            return_value=None,
+        ):
+            events = list(stream_rag_response(
+                chain=chain,
+                user_input="民事诉讼法是什么",
+                chat_history=[],
+                user_id=1,
+                knowledge_base_id=uuid4(),
+            ))
+
+        self.assertEqual(events[0]["diagnostics"]["vector_count"], 5)
+        self.assertEqual(events[0]["retrieval_sources"], ["fulltext", "vector"])
+        self.assertFalse(events[0]["vector_degraded"])
+
 
 class RagQueryRouterTests(unittest.TestCase):
     """验证 Query Router 的解析、画像和检索开关行为。"""

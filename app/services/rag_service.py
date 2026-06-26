@@ -361,7 +361,7 @@ def retrieve_documents(inputs: ChainInput) -> RetrievedDocs:
     if not file_ids:
         return []
 
-    return get_hybrid_documents(
+    docs = get_hybrid_documents(
         query=query,
         user_id=user_id,
         file_ids=file_ids,
@@ -371,6 +371,24 @@ def retrieve_documents(inputs: ChainInput) -> RetrievedDocs:
         rrf_k=20,
         rerank=True,
     )
+    diagnostics = get_retrieval_diagnostics()
+    if diagnostics is not None:
+        # LCEL 流式执行过程中 ContextVar 可能跨 Runnable 丢失。
+        # 将诊断挂到文档 metadata，确保后续 SSE 和落库能稳定读取。
+        for doc in docs:
+            doc.metadata["retrieval_diagnostics"] = diagnostics
+    return docs
+
+
+def extract_retrieval_diagnostics_from_docs(
+    docs: list[Document],
+) -> dict[str, Any] | None:
+    """从检索文档 metadata 中提取混合检索诊断信息。"""
+    for doc in docs:
+        diagnostics = doc.metadata.get("retrieval_diagnostics")
+        if isinstance(diagnostics, dict):
+            return diagnostics
+    return None
 
 
 # 组建问答链
@@ -536,7 +554,10 @@ def stream_rag_response(
                 context,
                 user_id=user_id,
             )
-            diagnostics = get_retrieval_diagnostics()
+            diagnostics = (
+                extract_retrieval_diagnostics_from_docs(context)
+                or get_retrieval_diagnostics()
+            )
             if not retrieval_sent:
                 decision = normalize_retrieval_decision(retrieval_decision)
                 retrieval_event = {
