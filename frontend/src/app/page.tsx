@@ -71,6 +71,16 @@ type RetrievalDiagnostics = {
   fusedCount: number | null;
   rerankedCount: number | null;
   retrievalSources: string[];
+  timing: RetrievalTiming;
+};
+
+type RetrievalTiming = {
+  embeddingMs: number | null;
+  vectorMs: number | null;
+  fulltextMs: number | null;
+  rrfMs: number | null;
+  rerankMs: number | null;
+  retrievalTotalMs: number | null;
 };
 
 type SourcePreview = {
@@ -711,6 +721,7 @@ function getRetrievalDiagnostics(
 ): RetrievalDiagnostics {
   const diagnostics = getRecordField(value, "diagnostics") || {};
   const vectorDegraded = diagnostics.vector_degraded;
+  const timing = getRecordField(diagnostics, "timing") || {};
 
   return {
     ...(typeof vectorDegraded === "boolean"
@@ -722,6 +733,16 @@ function getRetrievalDiagnostics(
     fusedCount: getNullableNumberField(diagnostics, ["fused_count"]),
     rerankedCount: getNullableNumberField(diagnostics, ["reranked_count"]),
     retrievalSources: getStringArrayField(diagnostics, "retrieval_sources"),
+    timing: {
+      embeddingMs: getNullableNumberField(timing, ["embedding_ms"]),
+      vectorMs: getNullableNumberField(timing, ["vector_ms"]),
+      fulltextMs: getNullableNumberField(timing, ["fulltext_ms"]),
+      rrfMs: getNullableNumberField(timing, ["rrf_ms"]),
+      rerankMs: getNullableNumberField(timing, ["rerank_ms"]),
+      retrievalTotalMs: getNullableNumberField(timing, [
+        "retrieval_total_ms",
+      ]),
+    },
   };
 }
 
@@ -785,6 +806,18 @@ function formatDiagnosticScore(value: number | null) {
 
 function formatDiagnosticCount(value: number | null) {
   return value === null ? "—" : String(value);
+}
+
+function formatDiagnosticTiming(value: number | null) {
+  if (value === null) {
+    return "—";
+  }
+
+  if (value >= 1000) {
+    return `${(value / 1000).toFixed(2)}s`;
+  }
+
+  return `${value.toFixed(value >= 10 ? 0 : 2)}ms`;
 }
 
 function toChatSource(value: unknown, index: number): ChatSource | null {
@@ -3344,7 +3377,10 @@ export default function Home() {
     }
   }
 
-  async function loadConversationDiagnostics(conversationId: string) {
+  async function loadConversationDiagnostics(
+    conversationId: string,
+    options: { silent?: boolean } = {}
+  ) {
     const authState = parseAuthState(localStorage.getItem(AUTH_STORAGE_KEY));
 
     if (!authState) {
@@ -3353,14 +3389,16 @@ export default function Home() {
       return;
     }
 
-    setLoadingDiagnostics((prev) => ({
-      ...prev,
-      [conversationId]: true,
-    }));
-    setDiagnosticErrors((prev) => ({
-      ...prev,
-      [conversationId]: "",
-    }));
+    if (!options.silent) {
+      setLoadingDiagnostics((prev) => ({
+        ...prev,
+        [conversationId]: true,
+      }));
+      setDiagnosticErrors((prev) => ({
+        ...prev,
+        [conversationId]: "",
+      }));
+    }
 
     try {
       const response = await fetch(
@@ -3394,18 +3432,22 @@ export default function Home() {
         [conversationId]: diagnostics,
       }));
     } catch (error) {
-      setDiagnosticErrors((prev) => ({
-        ...prev,
-        [conversationId]:
-          error instanceof Error
-            ? error.message
-            : "加载诊断信息失败，请稍后再试。",
-      }));
+      if (!options.silent) {
+        setDiagnosticErrors((prev) => ({
+          ...prev,
+          [conversationId]:
+            error instanceof Error
+              ? error.message
+              : "加载诊断信息失败，请稍后再试。",
+        }));
+      }
     } finally {
-      setLoadingDiagnostics((prev) => ({
-        ...prev,
-        [conversationId]: false,
-      }));
+      if (!options.silent) {
+        setLoadingDiagnostics((prev) => ({
+          ...prev,
+          [conversationId]: false,
+        }));
+      }
     }
   }
 
@@ -3776,6 +3818,7 @@ export default function Home() {
 
           setAssistantMessageId(messageId);
           setAssistantSources(doneSources);
+          void loadConversationDiagnostics(activeSessionId, { silent: true });
 
           const doneAnswer = getAssistantContent(parsedData);
 
@@ -4460,6 +4503,65 @@ export default function Home() {
                                       diagnostic.diagnostics.rerankedCount
                                     )}
                                   </p>
+                                </div>
+
+                                <div className="border border-[#d5ded9] bg-[#fcfdfb] px-3 py-2 text-xs text-[#46514e]">
+                                  <div className="flex flex-wrap items-baseline justify-between gap-2">
+                                    <p className="font-utility text-[10px] font-semibold uppercase text-[#64716d]">
+                                      耗时分析
+                                    </p>
+                                    <p className="text-[11px] text-[#72807b]">
+                                      总检索{" "}
+                                      {formatDiagnosticTiming(
+                                        diagnostic.diagnostics.timing
+                                          .retrievalTotalMs
+                                      )}
+                                    </p>
+                                  </div>
+                                  <div className="mt-2 grid gap-2 md:grid-cols-5">
+                                    <p>
+                                      <span className="block text-[#72807b]">
+                                        Embedding
+                                      </span>
+                                      {formatDiagnosticTiming(
+                                        diagnostic.diagnostics.timing
+                                          .embeddingMs
+                                      )}
+                                    </p>
+                                    <p>
+                                      <span className="block text-[#72807b]">
+                                        Vector
+                                      </span>
+                                      {formatDiagnosticTiming(
+                                        diagnostic.diagnostics.timing.vectorMs
+                                      )}
+                                    </p>
+                                    <p>
+                                      <span className="block text-[#72807b]">
+                                        Fulltext
+                                      </span>
+                                      {formatDiagnosticTiming(
+                                        diagnostic.diagnostics.timing
+                                          .fulltextMs
+                                      )}
+                                    </p>
+                                    <p>
+                                      <span className="block text-[#72807b]">
+                                        RRF
+                                      </span>
+                                      {formatDiagnosticTiming(
+                                        diagnostic.diagnostics.timing.rrfMs
+                                      )}
+                                    </p>
+                                    <p>
+                                      <span className="block text-[#72807b]">
+                                        Rerank
+                                      </span>
+                                      {formatDiagnosticTiming(
+                                        diagnostic.diagnostics.timing.rerankMs
+                                      )}
+                                    </p>
+                                  </div>
                                 </div>
 
                                 {diagnostic.vectorDegraded && (
