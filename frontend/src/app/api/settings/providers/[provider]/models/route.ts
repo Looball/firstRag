@@ -7,10 +7,10 @@ const backendOrigin =
 
 export async function POST(
   request: Request,
-  context: RouteContext<"/api/settings/providers/[provider]/models">
+  { params }: { params: Promise<{ provider: string }> }
 ) {
   try {
-    const { provider } = await context.params;
+    const { provider } = await params;
     const headers = new Headers({ Accept: "application/json" });
     const authorization = request.headers.get("Authorization");
 
