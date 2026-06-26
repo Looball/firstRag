@@ -47,6 +47,42 @@ type RetrievalState = {
   source_count: number;
 };
 
+type MessageDiagnostic = {
+  messageId: string;
+  status: string;
+  errorMessage: string | null;
+  createdAt: string;
+  needRetrieval: boolean | null;
+  rewrittenQuery: string;
+  reason: string;
+  retrievedCount: number;
+  sourceCount: number;
+  retrievalSources: string[];
+  vectorDegraded: boolean;
+  diagnostics: RetrievalDiagnostics;
+  sourcesPreview: SourcePreview[];
+};
+
+type RetrievalDiagnostics = {
+  vectorDegraded?: boolean;
+  vectorErrors: string[];
+  vectorCount: number | null;
+  fulltextCount: number | null;
+  fusedCount: number | null;
+  rerankedCount: number | null;
+  retrievalSources: string[];
+};
+
+type SourcePreview = {
+  index: number | null;
+  fileId: string | null;
+  fileName: string | null;
+  chunkIndex: number | null;
+  retrievalSources: string[];
+  rrfScore: number | null;
+  rerankScore: number | null;
+};
+
 type ChatSession = {
   id: string;
   knowledgeBaseId: string;
@@ -531,6 +567,24 @@ function getOptionalNumberField(
   return undefined;
 }
 
+function getNullableNumberField(
+  value: Record<string, unknown>,
+  fieldNames: string[]
+) {
+  const numberValue = getOptionalNumberField(value, fieldNames);
+
+  return numberValue === undefined ? null : numberValue;
+}
+
+function getNullableStringField(
+  value: Record<string, unknown>,
+  fieldNames: string[]
+) {
+  const stringValue = getStringField(value, fieldNames);
+
+  return stringValue || null;
+}
+
 function getRetrievalState(value: unknown): RetrievalState | undefined {
   const parsedValue = typeof value === "string" ? parseJsonValue(value) : value;
 
@@ -605,6 +659,115 @@ function getStringArrayField(value: Record<string, unknown>, fieldName: string) 
         .map((item) => item.trim())
         .filter(Boolean)
     : [];
+}
+
+function toSourcePreview(value: unknown): SourcePreview | null {
+  if (typeof value !== "object" || value === null) {
+    return null;
+  }
+
+  const source = value as Record<string, unknown>;
+
+  return {
+    index: getNullableNumberField(source, ["index"]),
+    fileId: getNullableStringField(source, ["file_id"]),
+    fileName: getNullableStringField(source, ["file_name"]),
+    chunkIndex: getNullableNumberField(source, ["chunk_index"]),
+    retrievalSources: getStringArrayField(source, "retrieval_sources"),
+    rrfScore: getNullableNumberField(source, ["rrf_score"]),
+    rerankScore: getNullableNumberField(source, ["rerank_score"]),
+  };
+}
+
+function getSourcesPreview(value: Record<string, unknown>) {
+  const sourcesPreview = value.sources_preview;
+
+  return Array.isArray(sourcesPreview)
+    ? sourcesPreview
+        .map(toSourcePreview)
+        .filter((source): source is SourcePreview => source !== null)
+    : [];
+}
+
+function getRetrievalDiagnostics(
+  value: Record<string, unknown>
+): RetrievalDiagnostics {
+  const diagnostics = getRecordField(value, "diagnostics") || {};
+  const vectorDegraded = diagnostics.vector_degraded;
+
+  return {
+    ...(typeof vectorDegraded === "boolean"
+      ? { vectorDegraded }
+      : {}),
+    vectorErrors: getStringArrayField(diagnostics, "vector_errors"),
+    vectorCount: getNullableNumberField(diagnostics, ["vector_count"]),
+    fulltextCount: getNullableNumberField(diagnostics, ["fulltext_count"]),
+    fusedCount: getNullableNumberField(diagnostics, ["fused_count"]),
+    rerankedCount: getNullableNumberField(diagnostics, ["reranked_count"]),
+    retrievalSources: getStringArrayField(diagnostics, "retrieval_sources"),
+  };
+}
+
+function toMessageDiagnostic(value: unknown): MessageDiagnostic | null {
+  if (typeof value !== "object" || value === null) {
+    return null;
+  }
+
+  const diagnostic = value as Record<string, unknown>;
+  const messageId = getStringField(diagnostic, ["message_id"]);
+
+  if (!messageId) {
+    return null;
+  }
+
+  const needRetrievalValue = diagnostic.need_retrieval;
+
+  return {
+    messageId,
+    status: getStringField(diagnostic, ["status"]),
+    errorMessage:
+      typeof diagnostic.error_message === "string"
+        ? diagnostic.error_message
+        : diagnostic.error_message === null
+          ? null
+          : null,
+    createdAt: getStringField(diagnostic, ["created_at"]),
+    needRetrieval:
+      typeof needRetrievalValue === "boolean" ? needRetrievalValue : null,
+    rewrittenQuery: getStringField(diagnostic, ["rewritten_query"]),
+    reason: getStringField(diagnostic, ["reason"]),
+    retrievedCount: getNumberField(diagnostic, "retrieved_count"),
+    sourceCount: getNumberField(diagnostic, "source_count"),
+    retrievalSources: getStringArrayField(diagnostic, "retrieval_sources"),
+    vectorDegraded: diagnostic.vector_degraded === true,
+    diagnostics: getRetrievalDiagnostics(diagnostic),
+    sourcesPreview: getSourcesPreview(diagnostic),
+  };
+}
+
+function getConversationDiagnostics(value: unknown) {
+  if (typeof value !== "object" || value === null) {
+    return [];
+  }
+
+  const candidate = value as Record<string, unknown>;
+  const diagnostics = candidate.diagnostics;
+
+  return Array.isArray(diagnostics)
+    ? diagnostics
+        .map(toMessageDiagnostic)
+        .filter(
+          (diagnostic): diagnostic is MessageDiagnostic => diagnostic !== null
+        )
+    : [];
+}
+
+function formatDiagnosticScore(value: number | null) {
+  return value === null ? "—" : value.toFixed(4);
+}
+
+function formatDiagnosticCount(value: number | null) {
+  return value === null ? "—" : String(value);
 }
 
 function toChatSource(value: unknown, index: number): ChatSource | null {
@@ -1598,6 +1761,18 @@ export default function Home() {
     {}
   );
   const [sessionErrors, setSessionErrors] = useState<Record<string, string>>({});
+  const [conversationDiagnostics, setConversationDiagnostics] = useState<
+    Record<string, MessageDiagnostic[]>
+  >({});
+  const [expandedDiagnosticPanels, setExpandedDiagnosticPanels] = useState<
+    Record<string, boolean>
+  >({});
+  const [loadingDiagnostics, setLoadingDiagnostics] = useState<
+    Record<string, boolean>
+  >({});
+  const [diagnosticErrors, setDiagnosticErrors] = useState<
+    Record<string, string>
+  >({});
   const [hasCheckedAuth, setHasCheckedAuth] = useState(false);
   const [isCreatingSession, setIsCreatingSession] = useState(false);
   const [isCreatingKnowledgeBase, setIsCreatingKnowledgeBase] =
@@ -3152,6 +3327,89 @@ export default function Home() {
     }
   }
 
+  async function loadConversationDiagnostics(conversationId: string) {
+    const authState = parseAuthState(localStorage.getItem(AUTH_STORAGE_KEY));
+
+    if (!authState) {
+      localStorage.removeItem(AUTH_STORAGE_KEY);
+      window.location.href = "/login";
+      return;
+    }
+
+    setLoadingDiagnostics((prev) => ({
+      ...prev,
+      [conversationId]: true,
+    }));
+    setDiagnosticErrors((prev) => ({
+      ...prev,
+      [conversationId]: "",
+    }));
+
+    try {
+      const response = await fetch(
+        `/api/chat/conversations/${encodeURIComponent(
+          conversationId
+        )}/diagnostics`,
+        {
+          method: "GET",
+          headers: {
+            Authorization: buildAuthorizationHeader(authState),
+          },
+        }
+      );
+      const responseText = await response.text();
+
+      if (!response.ok) {
+        throw new Error(
+          getResponseErrorMessage(
+            responseText,
+            "加载诊断信息失败，请稍后再试。",
+            response.status
+          )
+        );
+      }
+
+      const data = parseJsonValue(responseText);
+      const diagnostics = getConversationDiagnostics(data);
+
+      setConversationDiagnostics((prev) => ({
+        ...prev,
+        [conversationId]: diagnostics,
+      }));
+    } catch (error) {
+      setDiagnosticErrors((prev) => ({
+        ...prev,
+        [conversationId]:
+          error instanceof Error
+            ? error.message
+            : "加载诊断信息失败，请稍后再试。",
+      }));
+    } finally {
+      setLoadingDiagnostics((prev) => ({
+        ...prev,
+        [conversationId]: false,
+      }));
+    }
+  }
+
+  function handleToggleDiagnostics(conversationId: string, messageKey: string) {
+    const panelKey = `${conversationId}:${messageKey}`;
+    const shouldOpen = !expandedDiagnosticPanels[panelKey];
+
+    setExpandedDiagnosticPanels((prev) => ({
+      ...prev,
+      [panelKey]: shouldOpen,
+    }));
+
+    if (
+      shouldOpen &&
+      conversationDiagnostics[conversationId] === undefined &&
+      !loadingDiagnostics[conversationId]
+    ) {
+      void loadConversationDiagnostics(conversationId);
+    }
+  }
+
   async function handleSubmit(overrideInput?: string) {
     if (isCurrentSessionLoading || isCreatingSession) {
       return;
@@ -3880,6 +4138,27 @@ export default function Home() {
 
               {currentSession?.messages.map((message, index) => {
                 const messageKey = `${currentSession.id}-${index}`;
+                const diagnosticPanelKey = `${currentSession.id}:${messageKey}`;
+                const isDiagnosticExpanded = Boolean(
+                  expandedDiagnosticPanels[diagnosticPanelKey]
+                );
+                const cachedDiagnostics =
+                  conversationDiagnostics[currentSession.id];
+                const diagnostic = message.id
+                  ? (cachedDiagnostics?.find(
+                      (item) => item.messageId === message.id
+                    ) ?? null)
+                  : null;
+                const isDiagnosticLoading = Boolean(
+                  loadingDiagnostics[currentSession.id]
+                );
+                const diagnosticError =
+                  diagnosticErrors[currentSession.id] || "";
+                const diagnosticChannels = diagnostic
+                  ? diagnostic.retrievalSources.length > 0
+                    ? diagnostic.retrievalSources
+                    : diagnostic.diagnostics.retrievalSources
+                  : [];
                 const isStreamingPlaceholder =
                   message.role === "assistant" &&
                   index === currentSession.messages.length - 1 &&
@@ -4006,8 +4285,219 @@ export default function Home() {
                         </div>
                       )}
 
+                      {message.role === "assistant" &&
+                        isDiagnosticExpanded && (
+                          <div className="mt-4 border-t border-[#d6dedb] pt-3">
+                            <div className="flex flex-wrap items-baseline justify-between gap-2">
+                              <p className="font-utility text-[10px] font-semibold uppercase text-[#64716d]">
+                                诊断
+                              </p>
+                              {diagnostic?.createdAt && (
+                                <p className="text-xs text-[#72807b]">
+                                  {diagnostic.createdAt}
+                                </p>
+                              )}
+                            </div>
+
+                            {isDiagnosticLoading && !cachedDiagnostics && (
+                              <p className="mt-2 text-xs text-[#64716d]">
+                                正在加载诊断信息...
+                              </p>
+                            )}
+
+                            {diagnosticError && (
+                              <p className="mt-2 border border-[#f0b8a8] bg-[#fff1ed] px-3 py-2 text-xs text-[#9b3c29]">
+                                {diagnosticError}
+                              </p>
+                            )}
+
+                            {!isDiagnosticLoading &&
+                              !diagnosticError &&
+                              !diagnostic && (
+                                <div className="mt-2 border border-[#d5ded9] bg-[#fcfdfb] px-3 py-2 text-xs text-[#64716d]">
+                                  <p className="font-semibold text-[#17201f]">
+                                    暂无诊断信息
+                                  </p>
+                                  <p className="mt-1">
+                                    常见原因：这是旧消息、本地问候短路回答、消息生成失败或被取消，或后端版本较旧。
+                                  </p>
+                                </div>
+                              )}
+
+                            {diagnostic && (
+                              <div className="mt-2 space-y-3">
+                                <div className="grid gap-2 border border-[#d5ded9] bg-[#fcfdfb] px-3 py-2 text-xs text-[#46514e] md:grid-cols-2">
+                                  <p>
+                                    <span className="text-[#72807b]">
+                                      是否检索：
+                                    </span>
+                                    {diagnostic.needRetrieval === null
+                                      ? "未知"
+                                      : diagnostic.needRetrieval
+                                        ? "是"
+                                        : "否"}
+                                  </p>
+                                  <p>
+                                    <span className="text-[#72807b]">
+                                      向量降级：
+                                    </span>
+                                    {diagnostic.vectorDegraded ? "是" : "否"}
+                                  </p>
+                                  <p>
+                                    <span className="text-[#72807b]">
+                                      召回片段：
+                                    </span>
+                                    {diagnostic.retrievedCount}
+                                  </p>
+                                  <p>
+                                    <span className="text-[#72807b]">
+                                      展示引用：
+                                    </span>
+                                    {diagnostic.sourceCount}
+                                  </p>
+                                  <p className="md:col-span-2">
+                                    <span className="text-[#72807b]">
+                                      检索通道：
+                                    </span>
+                                    {diagnosticChannels.length > 0
+                                      ? diagnosticChannels.join(" + ")
+                                      : "—"}
+                                  </p>
+                                  <p className="md:col-span-2">
+                                    <span className="text-[#72807b]">
+                                      改写问题：
+                                    </span>
+                                    {diagnostic.rewrittenQuery || "—"}
+                                  </p>
+                                  <p className="md:col-span-2">
+                                    <span className="text-[#72807b]">
+                                      判断原因：
+                                    </span>
+                                    {diagnostic.reason || "—"}
+                                  </p>
+                                </div>
+
+                                <div className="grid gap-2 border border-[#d5ded9] bg-[#fcfdfb] px-3 py-2 text-xs text-[#46514e] md:grid-cols-4">
+                                  <p>
+                                    <span className="block text-[#72807b]">
+                                      Vector 召回
+                                    </span>
+                                    {formatDiagnosticCount(
+                                      diagnostic.diagnostics.vectorCount
+                                    )}
+                                  </p>
+                                  <p>
+                                    <span className="block text-[#72807b]">
+                                      Fulltext 召回
+                                    </span>
+                                    {formatDiagnosticCount(
+                                      diagnostic.diagnostics.fulltextCount
+                                    )}
+                                  </p>
+                                  <p>
+                                    <span className="block text-[#72807b]">
+                                      融合后
+                                    </span>
+                                    {formatDiagnosticCount(
+                                      diagnostic.diagnostics.fusedCount
+                                    )}
+                                  </p>
+                                  <p>
+                                    <span className="block text-[#72807b]">
+                                      精排后
+                                    </span>
+                                    {formatDiagnosticCount(
+                                      diagnostic.diagnostics.rerankedCount
+                                    )}
+                                  </p>
+                                </div>
+
+                                {diagnostic.vectorDegraded && (
+                                  <div className="border border-[#f0b8a8] bg-[#fff1ed] px-3 py-2 text-xs text-[#9b3c29]">
+                                    <p>
+                                      向量检索发生降级，已尝试使用全文检索兜底。
+                                    </p>
+                                    {diagnostic.diagnostics.vectorErrors
+                                      .length > 0 && (
+                                      <ul className="mt-1 list-disc space-y-1 pl-4">
+                                        {diagnostic.diagnostics.vectorErrors.map(
+                                          (error) => (
+                                            <li key={error}>{error}</li>
+                                          )
+                                        )}
+                                      </ul>
+                                    )}
+                                  </div>
+                                )}
+
+                                {diagnostic.sourcesPreview.length > 0 && (
+                                  <div className="space-y-2">
+                                    <p className="font-utility text-[10px] font-semibold uppercase text-[#64716d]">
+                                      Sources 预览
+                                    </p>
+                                    {diagnostic.sourcesPreview.map(
+                                      (source, sourceIndex) => (
+                                        <div
+                                          key={`${messageKey}-diagnostic-source-${sourceIndex}`}
+                                          className="border border-[#d5ded9] bg-[#fcfdfb] px-3 py-2 text-xs text-[#46514e]"
+                                        >
+                                          <div className="flex flex-wrap items-start justify-between gap-2">
+                                            <p className="font-semibold text-[#17201f]">
+                                              {source.index !== null
+                                                ? `${source.index}. `
+                                                : ""}
+                                              {source.fileName ||
+                                                "未知来源"}
+                                            </p>
+                                            <p className="font-utility text-[10px] text-[#72807b]">
+                                              片段{" "}
+                                              {source.chunkIndex !== null
+                                                ? `#${source.chunkIndex}`
+                                                : "—"}
+                                            </p>
+                                          </div>
+                                          <p className="mt-1 text-[#64716d]">
+                                            通道：
+                                            {source.retrievalSources.length > 0
+                                              ? source.retrievalSources.join(
+                                                  " + "
+                                                )
+                                              : "—"}
+                                          </p>
+                                          <p className="mt-1 text-[#64716d]">
+                                            RRF：
+                                            {formatDiagnosticScore(
+                                              source.rrfScore
+                                            )}{" "}
+                                            · 相关性：
+                                            {formatDiagnosticScore(
+                                              source.rerankScore
+                                            )}
+                                          </p>
+                                        </div>
+                                      )
+                                    )}
+                                  </div>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        )}
+
                       {message.role === "assistant" && message.content && (
-                        <div className="mt-4 flex justify-end border-t border-[#d6dedb] pt-3">
+                        <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-[#d6dedb] pt-3">
+                          <button
+                            type="button"
+                            onClick={() =>
+                              handleToggleDiagnostics(
+                                currentSession.id,
+                                messageKey
+                              )
+                            }
+                            className="font-utility text-[10px] font-semibold uppercase text-[#64716d] transition hover:text-[#176b62]"
+                          >
+                            {isDiagnosticExpanded ? "收起诊断" : "诊断"}
+                          </button>
                           <button
                             type="button"
                             onClick={() =>
