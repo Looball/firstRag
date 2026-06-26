@@ -25,14 +25,14 @@ from langchain_core.documents import Document
 def get_document_key(document: Document) -> str:
     """获取可用于去重和融合排序的稳定文档键。"""
     metadata = document.metadata
-    if metadata.get("chunk_id"):
-        return str(metadata["chunk_id"])
-
     user_id = metadata.get("user_id", "")
     file_id = metadata.get("file_id", metadata.get("source", ""))
     chunk_index = metadata.get("chunk_index", "")
     if file_id != "" and chunk_index != "":
         return f"{user_id}:{file_id}:{chunk_index}"
+
+    if metadata.get("chunk_id"):
+        return str(metadata["chunk_id"])
 
     return document.page_content
 
@@ -45,7 +45,7 @@ def reciprocal_rank_fusion(
 ) -> list[Document]:
     """使用 RRF 融合多个有序检索结果列表。
 
-    本函数先根据 chunk_id 或 user_id:file_id:chunk_index 去重，
+    本函数先根据 user_id:file_id:chunk_index 或 chunk_id 去重，
     再累加不同召回器给同一文档带来的倒数排名分数，最后按融合分数
     返回 top-k。
     """

@@ -1,4 +1,5 @@
 from collections.abc import Sequence
+import re
 from typing import Any
 from uuid import UUID
 
@@ -7,6 +8,70 @@ from psycopg.types.json import Jsonb
 
 from app.db.connection import get_connection
 from app.db.executor import Row, fetch_all
+
+
+CHINESE_STOP_TERMS = {
+    "什么",
+    "什么是",
+    "是什么",
+    "怎么",
+    "如何",
+    "哪些",
+    "请问",
+    "一下",
+    "这个",
+    "那个",
+}
+
+
+def extract_chinese_search_terms(
+    text: str,
+    min_size: int = 2,
+    max_size: int = 6,
+    max_terms: int = 64,
+) -> list[str]:
+    """从中文查询中提取短语片段，用于 PostgreSQL ILIKE 兜底检索。
+
+    PostgreSQL `simple` 词典不能像中文分词器一样理解“诉讼法的任务是什么”。
+    因此在全文检索之外额外提取中文 ngram，让“诉讼法”“任务”这类
+    关键词能命中文档分块。
+    """
+    terms: list[str] = []
+    seen: set[str] = set()
+
+    for match in re.finditer(r"[\u4e00-\u9fff]+", text):
+        chars = match.group(0)
+        max_window = min(max_size, len(chars))
+        for size in range(max_window, min_size - 1, -1):
+            for start in range(0, len(chars) - size + 1):
+                term = chars[start:start + size]
+                if term in CHINESE_STOP_TERMS or term in seen:
+                    continue
+                seen.add(term)
+                terms.append(term)
+                if len(terms) >= max_terms:
+                    return terms
+
+    return terms
+
+
+def build_search_terms(query: str) -> list[str]:
+    """构造 SQL 检索关键词，兼容空格分词和中文连续文本。"""
+    normalized_query = query.strip()
+    terms = [
+        term
+        for term in normalized_query.split()
+        if term
+    ]
+
+    if normalized_query and normalized_query not in terms:
+        terms.append(normalized_query)
+
+    for term in extract_chinese_search_terms(normalized_query):
+        if term not in terms:
+            terms.append(term)
+
+    return terms
 
 
 def replace_file_chunks(
@@ -95,13 +160,9 @@ def search_chunks(
     if not normalized_query:
         return []
 
-    query_terms = [
-        term
-        for term in normalized_query.split()
-        if term
-    ]
+    query_terms = build_search_terms(normalized_query)
     if not query_terms:
-        query_terms = [normalized_query]
+        return []
 
     like_patterns = [f"%{term}%" for term in query_terms]
     phrase_pattern = f"%{normalized_query}%"
@@ -109,6 +170,7 @@ def search_chunks(
     file_filter = ""
     params: list[Any] = [
         normalized_query,
+        like_patterns,
         phrase_pattern,
         user_id,
         like_patterns,
@@ -134,6 +196,10 @@ def search_chunks(
                     to_tsvector('simple', content),
                     websearch_to_tsquery('simple', %s)
                 )
+                + CASE
+                    WHEN content ILIKE ANY(%s) THEN 0.2
+                    ELSE 0.0
+                  END
                 + CASE
                     WHEN content ILIKE %s THEN 1.0
                     ELSE 0.0

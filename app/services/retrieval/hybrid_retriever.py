@@ -84,33 +84,48 @@ def get_vector_documents(
     指定知识库文件范围时，逐个文件在 Chroma 侧进行等值过滤，再按向量
     距离合并排序。这样不会因其它知识库的高分文档占满固定候选池而漏召回。
     """
-    vectordb = get_vector_store()
     try:
         # 外部预计算 embedding，绕过 ChromaDB query_texts 路径
         embedding_model = ZhipuAIEmbeddings()
         query_embedding = embedding_model.embed_query(query)
+    except Exception:
+        logger.exception("查询向量生成失败，降级为空向量结果")
+        return []
 
-        if file_ids:
-            scored_candidates = []
-            for file_id in {str(file_id) for file_id in file_ids}:
-                scored_candidates.extend(
-                    vectordb.similarity_search_by_vector_with_relevance_scores(
-                        embedding=query_embedding,
-                        k=k,
-                        filter=build_file_chroma_filter(user_id, file_id),
-                    )
-                )
-            # Chroma 返回的是距离，数值越小语义越相近。
-            scored_candidates.sort(key=lambda item: item[1])
-            candidates = scored_candidates[:k]
-        else:
+    vectordb = get_vector_store()
+    try:
+        if not file_ids:
             candidates = vectordb.similarity_search_by_vector_with_relevance_scores(
                 embedding=query_embedding,
                 k=k,
                 filter={"user_id": str(user_id)},
             )
+        else:
+            scored_candidates = []
+            for file_id in sorted({str(file_id) for file_id in file_ids}):
+                try:
+                    scored_candidates.extend(
+                        vectordb.similarity_search_by_vector_with_relevance_scores(
+                            embedding=query_embedding,
+                            k=k,
+                            filter=build_file_chroma_filter(user_id, file_id),
+                        )
+                    )
+                except Exception:
+                    # Chroma 删除/重建向量后偶发 HNSW 残留错误。
+                    # 单文件失败不应拖垮整个知识库检索，后续仍可依赖其它文件
+                    # 和 PostgreSQL 全文检索兜底。
+                    logger.exception(
+                        "Chroma 单文件向量检索失败，跳过该文件 file_id=%s",
+                        file_id,
+                    )
+                    continue
+
+            # Chroma 返回的是距离，数值越小语义越相近。
+            scored_candidates.sort(key=lambda item: item[1])
+            candidates = scored_candidates[:k]
     except Exception:
-        logger.exception("Chroma 向量检索失败，降级为空结果")
+        logger.exception("Chroma 向量检索失败，降级为空向量结果")
         return []
 
     documents = []
