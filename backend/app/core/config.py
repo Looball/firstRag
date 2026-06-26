@@ -4,12 +4,12 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
 load_dotenv(PROJECT_ROOT / ".env")
 
 
 # 设置文件存储路径
-UPLOAD_ROOT = Path("./uploads")
+UPLOAD_ROOT = PROJECT_ROOT / "uploads"
 
 # 设置上传文件大小限制，默认 200MB，与前端限制保持一致
 MAX_UPLOAD_FILE_SIZE_BYTES = int(
@@ -18,7 +18,7 @@ MAX_UPLOAD_FILE_SIZE_BYTES = int(
 
 # 设置Chroma向量库存储路径和集合名称
 VECTOR_STORE_PATH = Path(
-    os.environ.get("VECTOR_STORE_PATH", "./vector_db/chroma")
+    os.environ.get("VECTOR_STORE_PATH", PROJECT_ROOT / "vector_db/chroma")
 )
 CHROMA_COLLECTION_NAME = os.environ.get(
     "CHROMA_COLLECTION_NAME",
@@ -29,7 +29,7 @@ CHROMA_COLLECTION_NAME = os.environ.get(
 RERANKER_MODEL_PATH = Path(
     os.environ.get(
         "RERANKER_MODEL_PATH",
-        "models/rerankers/bge-reranker-base",
+        PROJECT_ROOT / "models/rerankers/bge-reranker-base",
     )
 )
 
