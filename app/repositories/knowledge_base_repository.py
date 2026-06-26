@@ -80,6 +80,7 @@ def get_knowledge_base_files(
             kf.mime_type,
             kf.size_bytes,
             kf.status,
+            kf.index_version,
             kf.created_at,
             kf.updated_at
         FROM knowledge_base_files AS kbf

@@ -23,7 +23,7 @@ from app.services.file_service import (
 )
 from app.services.vectors.vector_index_queue_service import (
     enqueue_file_vector_index,
-    serialize_latest_vector_index_job,
+    serialize_current_vector_index_job,
 )
 
 
@@ -213,7 +213,8 @@ def get_all_knowledge_files(user_id: int = Depends(get_current_user_id)):
                 "status": row["status"],
                 "usage_count": row["usage_count"],
                 "created_at": row["created_at"],
-                "latest_index_job": serialize_latest_vector_index_job(
+                "latest_index_job": serialize_current_vector_index_job(
+                    row,
                     latest_jobs.get(str(row["id"])),
                 ),
             }

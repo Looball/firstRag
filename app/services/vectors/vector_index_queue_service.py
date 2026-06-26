@@ -52,6 +52,21 @@ def serialize_latest_vector_index_job(
     return serialized_job
 
 
+def serialize_current_vector_index_job(
+    file_record: Row | dict[str, Any],
+    job: Row | dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    """序列化文件当前索引版本对应的最近任务。"""
+    if job is None:
+        return None
+
+    # 删除向量会递增文件 index_version；旧版本成功任务不应继续驱动前端状态。
+    if job.get("index_version") != file_record.get("index_version"):
+        return None
+
+    return serialize_latest_vector_index_job(job)
+
+
 def serialize_vector_index_job_health(
     health: Row | dict[str, Any],
 ) -> dict[str, Any]:

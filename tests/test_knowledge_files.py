@@ -37,6 +37,7 @@ class KnowledgeFileListTests(unittest.TestCase):
                     "mime_type": "text/markdown",
                     "size_bytes": 123,
                     "status": "failed",
+                    "index_version": 0,
                     "created_at": "2026-06-25T00:00:00+08:00",
                     "updated_at": "2026-06-25T00:00:01+08:00",
                 }
@@ -86,6 +87,7 @@ class KnowledgeFileListTests(unittest.TestCase):
                     "mime_type": "text/markdown",
                     "size_bytes": 123,
                     "status": "queued",
+                    "index_version": 0,
                     "usage_count": 1,
                     "created_at": "2026-06-25T00:00:00+08:00",
                 }
@@ -130,6 +132,7 @@ class KnowledgeFileListTests(unittest.TestCase):
                     "mime_type": "text/markdown",
                     "size_bytes": 123,
                     "status": "indexed",
+                    "index_version": 1,
                     "usage_count": 1,
                     "created_at": "2026-06-25T00:00:00+08:00",
                 }
@@ -161,6 +164,50 @@ class KnowledgeFileListTests(unittest.TestCase):
         latest_job = response.json()["files"][0]["latest_index_job"]
         self.assertEqual(latest_job["id"], str(job_id))
         self.assertEqual(latest_job["status"], "completed")
+
+    def test_stale_index_job_is_hidden_after_vector_delete(self) -> None:
+        """删除向量后，旧版本成功任务不应继续让前端显示已向量化。"""
+        file_id = uuid4()
+        job_id = uuid4()
+        with patch(
+            "app.api.knowledge_files.get_user_knowledge_files",
+            return_value=[
+                {
+                    "id": file_id,
+                    "original_name": "demo.md",
+                    "mime_type": "text/markdown",
+                    "size_bytes": 123,
+                    "status": "pending",
+                    "index_version": 2,
+                    "usage_count": 1,
+                    "created_at": "2026-06-25T00:00:00+08:00",
+                }
+            ],
+        ), patch(
+            "app.api.knowledge_files.get_latest_vector_index_jobs_by_file_ids",
+            return_value={
+                str(file_id): {
+                    "id": job_id,
+                    "user_id": 1,
+                    "knowledge_file_id": file_id,
+                    "knowledge_base_id": None,
+                    "index_version": 1,
+                    "status": "succeeded",
+                    "attempts": 1,
+                    "max_attempts": 3,
+                    "error_message": None,
+                    "result": {"chunk_count": 3},
+                    "created_at": "2026-06-25T00:00:00+08:00",
+                    "updated_at": "2026-06-25T00:00:02+08:00",
+                }
+            },
+        ):
+            response = self.client.get("/chat/knowledge-files")
+
+        self.assertEqual(response.status_code, 200)
+        file_payload = response.json()["files"][0]
+        self.assertEqual(file_payload["status"], "pending")
+        self.assertIsNone(file_payload["latest_index_job"])
 
 
 if __name__ == "__main__":

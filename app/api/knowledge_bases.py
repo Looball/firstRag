@@ -16,7 +16,7 @@ from app.repositories.vector_index_job_repository import (
 )
 from app.schemas.knowledge import CreateKnowledgeBaseRequest
 from app.services.vectors.vector_index_queue_service import (
-    serialize_latest_vector_index_job,
+    serialize_current_vector_index_job,
 )
 
 
@@ -109,7 +109,8 @@ def get_knowledge_base_files(
                 "status": row["status"],
                 "created_at": row["created_at"],
                 "updated_at": row["updated_at"],
-                "latest_index_job": serialize_latest_vector_index_job(
+                "latest_index_job": serialize_current_vector_index_job(
+                    row,
                     latest_jobs.get(str(row["id"])),
                 ),
             }
