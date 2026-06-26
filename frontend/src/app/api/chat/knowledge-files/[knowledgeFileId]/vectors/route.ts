@@ -53,10 +53,10 @@ export async function POST(
 
 export async function DELETE(
   request: Request,
-  context: RouteContext<"/api/chat/knowledge-files/[knowledgeFileId]/vectors">
+  { params }: { params: Promise<{ knowledgeFileId: string }> }
 ) {
   try {
-    const { knowledgeFileId } = await context.params;
+    const { knowledgeFileId } = await params;
     const headers = new Headers({ Accept: "application/json" });
     const authorization = request.headers.get("Authorization");
 
