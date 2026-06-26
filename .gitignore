@@ -1,27 +1,34 @@
-# Local documents and generated vector store
-/demo/local_doc/
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Node / Next.js
+node_modules/
+.next/
+out/
+dist/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Local documents and generated stores
+/backend/demo/local_doc/
 /vector_db/
 /models/
+/uploads/
+/outputs/
 
-.vscode
-
-# 忽略环境变量
+# Local application settings
 .env
-
 /.streamlit/
 
-# 忽略idea文件
-__pycache__/
+# IDE and OS files
+.vscode/
 .idea/
 .DS_Store
-*.py[cod]
 
-# agent
+# Agent-local files
 .agents/
 AGENTS.md
 CLAUDE.md
-
-# 忽略上传文件夹
-uploads
-
-outputs
