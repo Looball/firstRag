@@ -52,6 +52,8 @@ class RagReferenceFilteringTests(unittest.TestCase):
                 metadata={
                     "file_id": str(uuid4()),
                     "file_name": "relevant.pdf",
+                    "vector_score": 0.12,
+                    "fulltext_score": 3.45,
                     "rerank_score": 1.25,
                 },
             ),
@@ -62,6 +64,8 @@ class RagReferenceFilteringTests(unittest.TestCase):
         self.assertEqual(len(references), 1)
         self.assertEqual(references[0]["content"], "强相关内容")
         self.assertEqual(references[0]["file_name"], "relevant.pdf")
+        self.assertEqual(references[0]["vector_score"], 0.12)
+        self.assertEqual(references[0]["fulltext_score"], 3.45)
 
     def test_get_res_doc_excludes_low_relevance_context(self) -> None:
         """低相关片段不应进入最终提示词上下文。"""

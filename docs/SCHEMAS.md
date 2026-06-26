@@ -52,6 +52,8 @@
 - `file_name`
 - `chunk_index`
 - `retrieval_sources`
+- `vector_score`
+- `fulltext_score`
 - `rrf_score`
 - `rerank_score`
 
@@ -87,4 +89,3 @@
 - `encryption_key_version`
 
 响应中只允许返回 `has_api_key` 和 `api_key_hint`，禁止返回完整 Key。
-

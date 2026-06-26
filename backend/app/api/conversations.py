@@ -59,6 +59,8 @@ def serialize_source_preview(source: dict) -> dict:
         "file_name": source.get("file_name"),
         "chunk_index": source.get("chunk_index"),
         "retrieval_sources": source.get("retrieval_sources") or [],
+        "vector_score": source.get("vector_score"),
+        "fulltext_score": source.get("fulltext_score"),
         "rrf_score": source.get("rrf_score"),
         "rerank_score": source.get("rerank_score"),
     }

@@ -34,6 +34,8 @@ type ChatSource = {
   fileName?: string;
   fileType?: string;
   chunkIndex?: number;
+  vectorScore?: number;
+  fulltextScore?: number;
   rerankScore?: number;
   rrfScore?: number;
   retrievalSources?: string[];
@@ -89,6 +91,8 @@ type SourcePreview = {
   fileName: string | null;
   chunkIndex: number | null;
   retrievalSources: string[];
+  vectorScore: number | null;
+  fulltextScore: number | null;
   rrfScore: number | null;
   rerankScore: number | null;
 };
@@ -701,6 +705,8 @@ function toSourcePreview(value: unknown): SourcePreview | null {
     fileName: getNullableStringField(source, ["file_name"]),
     chunkIndex: getNullableNumberField(source, ["chunk_index"]),
     retrievalSources: getStringArrayField(source, "retrieval_sources"),
+    vectorScore: getNullableNumberField(source, ["vector_score"]),
+    fulltextScore: getNullableNumberField(source, ["fulltext_score"]),
     rrfScore: getNullableNumberField(source, ["rrf_score"]),
     rerankScore: getNullableNumberField(source, ["rerank_score"]),
   };
@@ -849,6 +855,8 @@ function toChatSource(value: unknown, index: number): ChatSource | null {
     "score",
   ]);
   const rrfScore = getOptionalNumberField(source, ["rrf_score"]);
+  const vectorScore = getOptionalNumberField(source, ["vector_score"]);
+  const fulltextScore = getOptionalNumberField(source, ["fulltext_score"]);
   const fileId =
     getStringField(source, ["file_id", "knowledge_file_id", "document_id"]) ||
     (metadataRecord
@@ -976,6 +984,8 @@ function toChatSource(value: unknown, index: number): ChatSource | null {
     ...(fileName ? { fileName } : {}),
     ...(fileType ? { fileType } : {}),
     ...(chunkIndex !== undefined ? { chunkIndex } : {}),
+    ...(vectorScore !== undefined ? { vectorScore } : {}),
+    ...(fulltextScore !== undefined ? { fulltextScore } : {}),
     ...(rerankScore !== undefined ? { rerankScore } : {}),
     ...(rrfScore !== undefined ? { rrfScore } : {}),
     ...(retrievalSources.length > 0 ? { retrievalSources } : {}),
@@ -998,6 +1008,8 @@ function hasSourceShape(value: Record<string, unknown>) {
     "document",
     "index",
     "chunk_index",
+    "vector_score",
+    "fulltext_score",
     "rerank_score",
     "rrf_score",
     "retrieval_sources",
@@ -4342,6 +4354,18 @@ export default function Home() {
                                     {source.chunkIndex !== undefined && (
                                       <span>片段 #{source.chunkIndex}</span>
                                     )}
+                                    {source.vectorScore !== undefined && (
+                                      <span>
+                                        向量距离{" "}
+                                        {source.vectorScore.toFixed(4)}
+                                      </span>
+                                    )}
+                                    {source.fulltextScore !== undefined && (
+                                      <span>
+                                        文本分{" "}
+                                        {source.fulltextScore.toFixed(4)}
+                                      </span>
+                                    )}
                                     {source.rerankScore !== undefined && (
                                       <span>
                                         相关性{" "}
@@ -4620,6 +4644,14 @@ export default function Home() {
                                             RRF：
                                             {formatDiagnosticScore(
                                               source.rrfScore
+                                            )}{" "}
+                                            · 向量距离：
+                                            {formatDiagnosticScore(
+                                              source.vectorScore
+                                            )}{" "}
+                                            · 文本分：
+                                            {formatDiagnosticScore(
+                                              source.fulltextScore
                                             )}{" "}
                                             · 相关性：
                                             {formatDiagnosticScore(

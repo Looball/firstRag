@@ -130,6 +130,8 @@ class CreateConversationTests(unittest.TestCase):
                 "file_name": "民事诉讼法.pdf",
                 "chunk_index": 2,
                 "retrieval_sources": ["fulltext", "vector"],
+                "vector_score": 0.12,
+                "fulltext_score": 3.45,
                 "rrf_score": 0.03,
                 "rerank_score": 5.4,
                 "content": "较长正文不需要在诊断摘要中重复返回",
@@ -195,6 +197,11 @@ class CreateConversationTests(unittest.TestCase):
         self.assertEqual(diagnostic["diagnostics"]["vector_count"], 5)
         self.assertNotIn("content", diagnostic["sources_preview"][0])
         self.assertEqual(diagnostic["sources_preview"][0]["chunk_index"], 2)
+        self.assertEqual(diagnostic["sources_preview"][0]["vector_score"], 0.12)
+        self.assertEqual(
+            diagnostic["sources_preview"][0]["fulltext_score"],
+            3.45,
+        )
 
 
 if __name__ == "__main__":

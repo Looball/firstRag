@@ -315,6 +315,8 @@ def serialize_reference_documents(
             "file_type": metadata.get("file_type"),
             "chunk_index": metadata.get("chunk_index"),
             "retrieval_sources": metadata.get("retrieval_sources"),
+            "vector_score": metadata.get("vector_score"),
+            "fulltext_score": metadata.get("fulltext_score"),
             "rrf_score": metadata.get("rrf_score"),
             "rerank_score": metadata.get("rerank_score"),
         })
