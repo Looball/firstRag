@@ -68,6 +68,37 @@ conda run -n firstrag python scripts/eval_rag.py \
 | `--max-average-first-token-ms` | 最高平均首 token 等待时间。优先使用 `first_answer_token_ms`，缺失时使用 `pre_answer_total_ms` 近似。 |
 | `--max-average-elapsed-seconds` | 最高平均端到端 case 耗时。 |
 
+## 一键回归门禁
+
+项目提供了推荐门槛的一键脚本：
+
+```bash
+FIRSTRAG_EVAL_USERNAME=你的用户名 \
+FIRSTRAG_EVAL_PASSWORD=你的密码 \
+scripts/rag_eval_gate.sh
+```
+
+默认门槛：
+
+| 环境变量 | 默认值 | 说明 |
+| --- | ---: | --- |
+| `FIRSTRAG_EVAL_MIN_PASS_RATE` | `1.0` | 通过率必须达到 100%。 |
+| `FIRSTRAG_EVAL_MIN_AVERAGE_SOURCES` | `1` | 平均至少展示 1 条引用。 |
+| `FIRSTRAG_EVAL_MAX_AVERAGE_FIRST_TOKEN_MS` | `10000` | 平均首 token 等待不超过 10 秒。 |
+| `FIRSTRAG_EVAL_MAX_AVERAGE_ELAPSED_SECONDS` | `30` | 平均单 case 总耗时不超过 30 秒。 |
+
+常用覆盖项：
+
+```bash
+FIRSTRAG_EVAL_USERNAME=你的用户名 \
+FIRSTRAG_EVAL_PASSWORD=你的密码 \
+FIRSTRAG_EVAL_BASE_URL=http://127.0.0.1:8000 \
+FIRSTRAG_EVAL_MAX_AVERAGE_FIRST_TOKEN_MS=15000 \
+scripts/rag_eval_gate.sh
+```
+
+脚本不会读取 `.env`，也不要把账号密码写入脚本或提交到仓库。
+
 ## case 字段
 
 | 字段 | 说明 |
