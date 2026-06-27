@@ -83,7 +83,22 @@ type RetrievalDiagnostics = {
   fusedCount: number | null;
   rerankedCount: number | null;
   retrievalSources: string[];
+  llm: RetrievalLlmDiagnostics;
   timing: RetrievalTiming;
+};
+
+type RetrievalLlmDiagnostics = {
+  provider: string;
+  model: string;
+  credentialMode: string;
+  baseUrl: string;
+  temperature: number | null;
+  maxTokens: number | null;
+  timeoutSeconds: number | null;
+  maxRetries: number | null;
+  promptTokens: number | null;
+  completionTokens: number | null;
+  totalTokens: number | null;
 };
 
 type RetrievalTiming = {
@@ -820,6 +835,7 @@ function getRetrievalDiagnostics(
   const diagnostics = getRecordField(value, "diagnostics") || {};
   const vectorDegraded = diagnostics.vector_degraded;
   const timing = getRecordField(diagnostics, "timing") || {};
+  const llm = getRecordField(diagnostics, "llm") || {};
 
   return {
     ...(typeof vectorDegraded === "boolean"
@@ -831,6 +847,19 @@ function getRetrievalDiagnostics(
     fusedCount: getNullableNumberField(diagnostics, ["fused_count"]),
     rerankedCount: getNullableNumberField(diagnostics, ["reranked_count"]),
     retrievalSources: getStringArrayField(diagnostics, "retrieval_sources"),
+    llm: {
+      provider: getStringField(llm, ["provider"]),
+      model: getStringField(llm, ["model"]),
+      credentialMode: getStringField(llm, ["credential_mode"]),
+      baseUrl: getStringField(llm, ["base_url"]),
+      temperature: getNullableNumberField(llm, ["temperature"]),
+      maxTokens: getNullableNumberField(llm, ["max_tokens"]),
+      timeoutSeconds: getNullableNumberField(llm, ["timeout_seconds"]),
+      maxRetries: getNullableNumberField(llm, ["max_retries"]),
+      promptTokens: getNullableNumberField(llm, ["prompt_tokens"]),
+      completionTokens: getNullableNumberField(llm, ["completion_tokens"]),
+      totalTokens: getNullableNumberField(llm, ["total_tokens"]),
+    },
     timing: {
       standaloneQuestionMs: getNullableNumberField(timing, [
         "standalone_question_ms",
@@ -943,6 +972,14 @@ function formatDiagnosticScore(value?: number | null) {
 
 function formatDiagnosticCount(value: number | null) {
   return value === null ? "—" : String(value);
+}
+
+function formatDiagnosticValue(value?: string | number | null) {
+  if (typeof value === "number") {
+    return Number.isFinite(value) ? String(value) : "—";
+  }
+
+  return value ? value : "—";
 }
 
 function formatDiagnosticTiming(value?: number | null) {
@@ -4954,6 +4991,87 @@ export default function Home() {
                                       diagnostic.diagnostics.rerankedCount
                                     )}
                                   </p>
+                                </div>
+
+                                <div className="border border-[#d5ded9] bg-[#fcfdfb] px-3 py-2 text-xs text-[#46514e]">
+                                  <div className="flex flex-wrap items-baseline justify-between gap-2">
+                                    <p className="font-utility text-[10px] font-semibold uppercase text-[#64716d]">
+                                      LLM
+                                    </p>
+                                    <p className="max-w-full truncate text-[11px] text-[#72807b]">
+                                      {formatDiagnosticValue(
+                                        diagnostic.diagnostics.llm.baseUrl
+                                      )}
+                                    </p>
+                                  </div>
+                                  <div className="mt-2 grid gap-2 md:grid-cols-4">
+                                    <p>
+                                      <span className="block text-[#72807b]">
+                                        Provider
+                                      </span>
+                                      {formatDiagnosticValue(
+                                        diagnostic.diagnostics.llm.provider
+                                      )}
+                                    </p>
+                                    <p>
+                                      <span className="block text-[#72807b]">
+                                        Model
+                                      </span>
+                                      {formatDiagnosticValue(
+                                        diagnostic.diagnostics.llm.model
+                                      )}
+                                    </p>
+                                    <p>
+                                      <span className="block text-[#72807b]">
+                                        Key 来源
+                                      </span>
+                                      {formatDiagnosticValue(
+                                        diagnostic.diagnostics.llm
+                                          .credentialMode
+                                      )}
+                                    </p>
+                                    <p>
+                                      <span className="block text-[#72807b]">
+                                        Temperature
+                                      </span>
+                                      {formatDiagnosticValue(
+                                        diagnostic.diagnostics.llm.temperature
+                                      )}
+                                    </p>
+                                    <p>
+                                      <span className="block text-[#72807b]">
+                                        Max tokens
+                                      </span>
+                                      {formatDiagnosticValue(
+                                        diagnostic.diagnostics.llm.maxTokens
+                                      )}
+                                    </p>
+                                    <p>
+                                      <span className="block text-[#72807b]">
+                                        Prompt tokens
+                                      </span>
+                                      {formatDiagnosticValue(
+                                        diagnostic.diagnostics.llm.promptTokens
+                                      )}
+                                    </p>
+                                    <p>
+                                      <span className="block text-[#72807b]">
+                                        Completion tokens
+                                      </span>
+                                      {formatDiagnosticValue(
+                                        diagnostic.diagnostics.llm
+                                          .completionTokens
+                                      )}
+                                    </p>
+                                    <p>
+                                      <span className="block text-[#72807b]">
+                                        Total tokens
+                                      </span>
+                                      {formatDiagnosticValue(
+                                        diagnostic.diagnostics.llm.totalTokens
+                                      )}
+                                    </p>
+                                  </div>
                                 </div>
 
                                 <div className="border border-[#d5ded9] bg-[#fcfdfb] px-3 py-2 text-xs text-[#46514e]">
