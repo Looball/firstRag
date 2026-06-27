@@ -25,7 +25,7 @@ yarn-error.log*
 
 # IDE and OS files
 .vscode/
-.idea/
+.idea/*
 .DS_Store
 
 # Agent-local files
