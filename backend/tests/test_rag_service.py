@@ -182,6 +182,13 @@ class RagReferenceFilteringTests(unittest.TestCase):
         """检索事件应携带当前请求的混合检索诊断信息。"""
         chain = FakeStreamingChain([
             {
+                "raw_retrieval_decision": {
+                    "need_retrieval": True,
+                    "rewritten_query": "诉讼法",
+                    "reason": "问题涉及知识库",
+                }
+            },
+            {
                 "retrieval_decision": {
                     "need_retrieval": True,
                     "rewritten_query": "诉讼法",
@@ -230,6 +237,11 @@ class RagReferenceFilteringTests(unittest.TestCase):
             events[0]["diagnostics"]["vector_errors"],
             ["Chroma 单文件向量检索失败：file-1"],
         )
+        timing = events[0]["diagnostics"]["timing"]
+        self.assertIn("query_router_ms", timing)
+        self.assertIn("retrieve_documents_ms", timing)
+        self.assertIn("pre_answer_total_ms", timing)
+        self.assertGreaterEqual(timing["pre_answer_total_ms"], 0.0)
 
     def test_stream_rag_response_reads_diagnostics_from_documents(
         self,
@@ -282,6 +294,42 @@ class RagReferenceFilteringTests(unittest.TestCase):
         self.assertEqual(events[0]["diagnostics"]["vector_count"], 5)
         self.assertEqual(events[0]["retrieval_sources"], ["fulltext", "vector"])
         self.assertFalse(events[0]["vector_degraded"])
+        self.assertIn("timing", events[0]["diagnostics"])
+
+    def test_stream_rag_response_includes_timing_without_retrieval_diagnostics(
+        self,
+    ) -> None:
+        """未执行混合检索时，也应返回 RAG 外层耗时。"""
+        chain = FakeStreamingChain([
+            {
+                "retrieval_decision": {
+                    "need_retrieval": False,
+                    "rewritten_query": "你好",
+                    "reason": "普通问候",
+                }
+            },
+            {"context": []},
+            {"answer": "你好！"},
+        ])
+
+        with unittest.mock.patch(
+            "app.services.rag_service.get_retrieval_diagnostics",
+            return_value=None,
+        ):
+            events = list(stream_rag_response(
+                chain=chain,
+                user_input="你好",
+                chat_history=[],
+                user_id=1,
+                knowledge_base_id=uuid4(),
+            ))
+
+        self.assertEqual(events[0]["type"], "retrieval")
+        self.assertFalse(events[0]["need_retrieval"])
+        timing = events[0]["diagnostics"]["timing"]
+        self.assertIn("finalize_decision_ms", timing)
+        self.assertIn("retrieve_documents_ms", timing)
+        self.assertIn("pre_answer_total_ms", timing)
 
 
 class RagQueryRouterTests(unittest.TestCase):

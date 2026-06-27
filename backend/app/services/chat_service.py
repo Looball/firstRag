@@ -1,6 +1,7 @@
 import json
 import logging
 from collections.abc import Iterator
+from time import perf_counter
 from typing import Any
 from uuid import UUID
 
@@ -55,6 +56,25 @@ def format_sse_event(event: str, data: dict[str, Any]) -> str:
     return f"event: {event}\ndata: {payload}\n\n"
 
 
+def record_stream_timing(
+    retrieval: dict[str, Any],
+    name: str,
+    started_at: float,
+) -> None:
+    """将聊天流式阶段耗时写入 retrieval diagnostics。"""
+    diagnostics = retrieval.setdefault("diagnostics", {})
+    if not isinstance(diagnostics, dict):
+        diagnostics = {}
+        retrieval["diagnostics"] = diagnostics
+
+    timing = diagnostics.setdefault("timing", {})
+    if not isinstance(timing, dict):
+        timing = {}
+        diagnostics["timing"] = timing
+
+    timing[f"{name}_ms"] = round((perf_counter() - started_at) * 1000, 2)
+
+
 def stream_answer_and_save(
     chain,
     user_input: str,
@@ -72,6 +92,8 @@ def stream_answer_and_save(
     full_answer = ""
     sources: list[dict] = []
     retrieval: dict[str, Any] = {}
+    stream_started_at = perf_counter()
+    answer_started_at: float | None = None
 
     try:
         for event in stream_rag_response(
@@ -114,12 +136,22 @@ def stream_answer_and_save(
                 continue
 
             if event["type"] == "answer":
+                if answer_started_at is None:
+                    record_stream_timing(
+                        retrieval,
+                        "first_answer_token",
+                        stream_started_at,
+                    )
+                    answer_started_at = perf_counter()
                 content = event["content"]
                 full_answer += content
                 yield format_sse_event("answer", {
                     "content": content,
                 })
     except GeneratorExit:
+        record_stream_timing(retrieval, "chat_stream_total", stream_started_at)
+        if answer_started_at is not None:
+            record_stream_timing(retrieval, "answer_stream", answer_started_at)
         finish_assistant_message(
             assistant_message_id,
             full_answer,
@@ -131,6 +163,9 @@ def stream_answer_and_save(
         raise
     except Exception:
         logger.exception("流式回答生成失败")
+        record_stream_timing(retrieval, "chat_stream_total", stream_started_at)
+        if answer_started_at is not None:
+            record_stream_timing(retrieval, "answer_stream", answer_started_at)
         finish_assistant_message(
             assistant_message_id,
             full_answer,
@@ -145,6 +180,9 @@ def stream_answer_and_save(
         })
         return
 
+    record_stream_timing(retrieval, "chat_stream_total", stream_started_at)
+    if answer_started_at is not None:
+        record_stream_timing(retrieval, "answer_stream", answer_started_at)
     finish_assistant_message(
         assistant_message_id,
         full_answer,

@@ -63,7 +63,22 @@
 | Router 判断 | `llm_need_retrieval`、`llm_reason` | LLM Router 对本轮问题是否需要检索的原始判断与原因。 |
 | 规则覆盖 | `override_applied`、`override_reason` | 后端确定性规则是否覆盖 Router 判断，例如命中知识库文件画像。 |
 | 召回排序 | `diagnostics.vector_count`、`fulltext_count`、`fused_count`、`reranked_count` | vector/fulltext 召回数量、RRF 融合后数量和 rerank 精排后数量。 |
+| 阶段耗时 | `diagnostics.timing.*_ms` | 问题改写、Router、检索、RRF、rerank、首 token 和整体流式回答耗时，单位毫秒。 |
 | 最终引用 | `retrieval_sources`、`sources` | 最终展示给用户的引用片段及这些片段命中的召回通道。 |
+
+常见耗时字段：
+
+- `standalone_question_ms`：生成独立问题阶段耗时。
+- `retrieval_settings_ms`：读取知识库检索配置耗时。
+- `knowledge_profile_ms`：构建知识库文件画像耗时。
+- `query_router_ms`：Query Router 判断耗时。
+- `finalize_decision_ms`：规则覆盖和最终检索决策耗时。
+- `retrieve_documents_ms`：执行检索阶段耗时。
+- `embedding_ms`、`vector_ms`、`fulltext_ms`、`rrf_ms`、`rerank_ms`：混合检索内部阶段耗时。
+- `pre_answer_total_ms`：开始生成回答前的总耗时。
+- `first_answer_token_ms`：从后端开始处理到首个回答 token 的耗时。
+- `answer_stream_ms`：首个回答 token 后到回答完成的流式耗时。
+- `chat_stream_total_ms`：本轮后端流式回答总耗时。
 
 前端可通过：
 

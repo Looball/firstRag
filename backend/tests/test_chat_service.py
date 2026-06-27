@@ -60,10 +60,14 @@ class ChatServiceSourcePersistenceTests(unittest.TestCase):
         )
         finish_message.assert_called_once()
         self.assertEqual(finish_message.call_args.kwargs["sources"], sources)
-        self.assertEqual(
-            finish_message.call_args.kwargs["retrieval"],
-            retrieval,
-        )
+        saved_retrieval = finish_message.call_args.kwargs["retrieval"]
+        self.assertTrue(saved_retrieval["need_retrieval"])
+        self.assertEqual(saved_retrieval["rewritten_query"], "诉讼法")
+        timing = saved_retrieval["diagnostics"]["timing"]
+        self.assertIn("first_answer_token_ms", timing)
+        self.assertIn("answer_stream_ms", timing)
+        self.assertIn("chat_stream_total_ms", timing)
+        self.assertGreaterEqual(timing["chat_stream_total_ms"], 0.0)
 
 
 if __name__ == "__main__":

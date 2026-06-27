@@ -1,5 +1,6 @@
 import json
 from collections.abc import Iterator
+from time import perf_counter
 from typing import Any, cast
 from uuid import UUID
 
@@ -38,6 +39,35 @@ type RetrievalDecision = dict[str, Any]
 
 REFERENCE_RERANK_SCORE_THRESHOLD = 0.0
 MAX_KNOWLEDGE_PROFILE_FILES = 30
+RAG_STAGE_TIMING_FIELDS = {
+    "standalone_question": "standalone_question",
+    "retrieval_settings": "retrieval_settings",
+    "knowledge_profile": "knowledge_profile",
+    "raw_retrieval_decision": "query_router",
+    "retrieval_decision": "finalize_decision",
+    "context": "retrieve_documents",
+}
+
+
+def elapsed_ms(started_at: float) -> float:
+    """计算从指定时间点到当前的毫秒耗时。"""
+    return round((perf_counter() - started_at) * 1000, 2)
+
+
+def merge_diagnostics_timing(
+    diagnostics: dict[str, Any] | None,
+    timing: dict[str, float],
+) -> dict[str, Any]:
+    """将 RAG 外层耗时合并进 retrieval diagnostics。"""
+    merged = dict(diagnostics or {})
+    existing_timing = merged.get("timing")
+    if not isinstance(existing_timing, dict):
+        existing_timing = {}
+    merged["timing"] = {
+        **existing_timing,
+        **timing,
+    }
+    return merged
 
 
 def create_chat_model(user_id: int) -> ChatOpenAI:
@@ -704,6 +734,27 @@ def stream_rag_response(
     knowledge_base_id: UUID,
 ) -> Iterator[RagStreamEvent]:
     """流式返回 RAG 事件，包括引用文档和答案片段。"""
+    stream_started_at = perf_counter()
+    current_stage_started_at = stream_started_at
+    rag_timing: dict[str, float] = {}
+
+    def record_rag_stage(stage: str) -> None:
+        """记录 LCEL 流式阶段耗时和相对起点耗时。"""
+        nonlocal current_stage_started_at
+        if f"{stage}_ms" in rag_timing:
+            return
+
+        now = perf_counter()
+        rag_timing[f"{stage}_ms"] = round(
+            (now - current_stage_started_at) * 1000,
+            2,
+        )
+        rag_timing[f"{stage}_elapsed_ms"] = round(
+            (now - stream_started_at) * 1000,
+            2,
+        )
+        current_stage_started_at = now
+
     response = chain.stream({
         "input": user_input,
         "chat_history": chat_history,
@@ -714,7 +765,12 @@ def stream_rag_response(
     sources_sent = False
     retrieval_sent = False
     retrieval_decision: RetrievalDecision | None = None
+    first_answer_token_recorded = False
     for chunk in response:
+        for chunk_key, stage in RAG_STAGE_TIMING_FIELDS.items():
+            if chunk_key in chunk:
+                record_rag_stage(stage)
+
         if "retrieval_decision" in chunk:
             retrieval_decision = normalize_retrieval_decision(
                 chunk["retrieval_decision"],
@@ -729,6 +785,11 @@ def stream_rag_response(
             diagnostics = (
                 extract_retrieval_diagnostics_from_docs(context)
                 or get_retrieval_diagnostics()
+            )
+            rag_timing["pre_answer_total_ms"] = elapsed_ms(stream_started_at)
+            diagnostics_with_timing = merge_diagnostics_timing(
+                diagnostics,
+                rag_timing,
             )
             if not retrieval_sent:
                 decision = normalize_retrieval_decision(retrieval_decision)
@@ -745,14 +806,13 @@ def stream_rag_response(
                     "retrieved_count": len(context),
                     "source_count": len(sources),
                 }
-                if diagnostics is not None:
-                    retrieval_event["diagnostics"] = diagnostics
-                    retrieval_event["retrieval_sources"] = (
-                        diagnostics.get("retrieval_sources") or []
-                    )
-                    retrieval_event["vector_degraded"] = bool(
-                        diagnostics.get("vector_degraded"),
-                    )
+                retrieval_event["diagnostics"] = diagnostics_with_timing
+                retrieval_event["retrieval_sources"] = (
+                    diagnostics_with_timing.get("retrieval_sources") or []
+                )
+                retrieval_event["vector_degraded"] = bool(
+                    diagnostics_with_timing.get("vector_degraded"),
+                )
                 yield retrieval_event
                 retrieval_sent = True
 
@@ -765,6 +825,11 @@ def stream_rag_response(
             sources_sent = True
 
         if "answer" in chunk:
+            if not first_answer_token_recorded:
+                rag_timing["first_answer_token_ms"] = elapsed_ms(
+                    stream_started_at,
+                )
+                first_answer_token_recorded = True
             yield {
                 "type": "answer",
                 "content": chunk["answer"],
