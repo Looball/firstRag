@@ -43,8 +43,13 @@ type ChatSource = {
 
 type RetrievalState = {
   need_retrieval: boolean;
+  final_need_retrieval?: boolean | null;
+  llm_need_retrieval?: boolean | null;
   rewritten_query: string;
   reason: string;
+  llm_reason?: string;
+  override_applied?: boolean;
+  override_reason?: string;
   retrieved_count: number;
   source_count: number;
 };
@@ -55,8 +60,13 @@ type MessageDiagnostic = {
   errorMessage: string | null;
   createdAt: string;
   needRetrieval: boolean | null;
+  finalNeedRetrieval: boolean | null;
+  llmNeedRetrieval: boolean | null;
   rewrittenQuery: string;
   reason: string;
+  llmReason: string;
+  overrideApplied: boolean;
+  overrideReason: string;
   retrievedCount: number;
   sourceCount: number;
   retrievalSources: string[];
@@ -616,6 +626,33 @@ function getNullableStringField(
   return stringValue || null;
 }
 
+function getNullableBooleanField(
+  value: Record<string, unknown>,
+  fieldNames: string[]
+) {
+  for (const fieldName of fieldNames) {
+    const fieldValue = value[fieldName];
+
+    if (typeof fieldValue === "boolean") {
+      return fieldValue;
+    }
+
+    if (typeof fieldValue === "string" && fieldValue.trim()) {
+      const normalizedValue = fieldValue.trim().toLowerCase();
+
+      if (["true", "1", "yes", "是"].includes(normalizedValue)) {
+        return true;
+      }
+
+      if (["false", "0", "no", "否"].includes(normalizedValue)) {
+        return false;
+      }
+    }
+  }
+
+  return null;
+}
+
 function getRetrievalState(value: unknown): RetrievalState | undefined {
   const parsedValue = typeof value === "string" ? parseJsonValue(value) : value;
 
@@ -641,11 +678,26 @@ function getRetrievalState(value: unknown): RetrievalState | undefined {
 
   return {
     need_retrieval: retrieval.need_retrieval,
+    final_need_retrieval: getNullableBooleanField(retrieval, [
+      "final_need_retrieval",
+    ]),
+    llm_need_retrieval: getNullableBooleanField(retrieval, [
+      "llm_need_retrieval",
+    ]),
     rewritten_query:
       typeof retrieval.rewritten_query === "string"
         ? retrieval.rewritten_query
         : "",
     reason: typeof retrieval.reason === "string" ? retrieval.reason : "",
+    llm_reason:
+      typeof retrieval.llm_reason === "string" ? retrieval.llm_reason : "",
+    override_applied: getNullableBooleanField(retrieval, [
+      "override_applied",
+    ]) === true,
+    override_reason:
+      typeof retrieval.override_reason === "string"
+        ? retrieval.override_reason
+        : "",
     retrieved_count: getNumberField(retrieval, "retrieved_count"),
     source_count: getNumberField(retrieval, "source_count"),
   };
@@ -778,8 +830,19 @@ function toMessageDiagnostic(value: unknown): MessageDiagnostic | null {
     createdAt: getStringField(diagnostic, ["created_at"]),
     needRetrieval:
       typeof needRetrievalValue === "boolean" ? needRetrievalValue : null,
+    finalNeedRetrieval: getNullableBooleanField(diagnostic, [
+      "final_need_retrieval",
+      "need_retrieval",
+    ]),
+    llmNeedRetrieval: getNullableBooleanField(diagnostic, [
+      "llm_need_retrieval",
+    ]),
     rewrittenQuery: getStringField(diagnostic, ["rewritten_query"]),
     reason: getStringField(diagnostic, ["reason"]),
+    llmReason: getStringField(diagnostic, ["llm_reason"]),
+    overrideApplied:
+      getNullableBooleanField(diagnostic, ["override_applied"]) === true,
+    overrideReason: getStringField(diagnostic, ["override_reason"]),
     retrievedCount: getNumberField(diagnostic, "retrieved_count"),
     sourceCount: getNumberField(diagnostic, "source_count"),
     retrievalSources: getStringArrayField(diagnostic, "retrieval_sources"),
@@ -826,6 +889,14 @@ function formatDiagnosticTiming(value?: number | null) {
   }
 
   return `${value.toFixed(value >= 10 ? 0 : 2)}ms`;
+}
+
+function formatRetrievalDecision(value?: boolean | null) {
+  if (value === null || value === undefined) {
+    return "未知";
+  }
+
+  return value ? "检索" : "不检索";
 }
 
 function toChatSource(value: unknown, index: number): ChatSource | null {
@@ -4267,6 +4338,9 @@ export default function Home() {
                     : diagnostic.diagnostics.retrievalSources
                   : [];
                 const diagnosticTiming = diagnostic?.diagnostics.timing;
+                const finalDiagnosticNeedRetrieval = diagnostic
+                  ? (diagnostic.finalNeedRetrieval ?? diagnostic.needRetrieval)
+                  : null;
                 const isStreamingPlaceholder =
                   message.role === "assistant" &&
                   index === currentSession.messages.length - 1 &&
@@ -4451,13 +4525,25 @@ export default function Home() {
                                 <div className="grid gap-2 border border-[#d5ded9] bg-[#fcfdfb] px-3 py-2 text-xs text-[#46514e] md:grid-cols-2">
                                   <p>
                                     <span className="text-[#72807b]">
-                                      是否检索：
+                                      最终决策：
                                     </span>
-                                    {diagnostic.needRetrieval === null
-                                      ? "未知"
-                                      : diagnostic.needRetrieval
-                                        ? "是"
-                                        : "否"}
+                                    {formatRetrievalDecision(
+                                      finalDiagnosticNeedRetrieval
+                                    )}
+                                  </p>
+                                  <p>
+                                    <span className="text-[#72807b]">
+                                      LLM 判断：
+                                    </span>
+                                    {formatRetrievalDecision(
+                                      diagnostic.llmNeedRetrieval
+                                    )}
+                                  </p>
+                                  <p>
+                                    <span className="text-[#72807b]">
+                                      规则覆盖：
+                                    </span>
+                                    {diagnostic.overrideApplied ? "是" : "否"}
                                   </p>
                                   <p>
                                     <span className="text-[#72807b]">
@@ -4467,19 +4553,13 @@ export default function Home() {
                                   </p>
                                   <p>
                                     <span className="text-[#72807b]">
-                                      召回片段：
-                                    </span>
-                                    {diagnostic.retrievedCount}
-                                  </p>
-                                  <p>
-                                    <span className="text-[#72807b]">
                                       展示引用：
                                     </span>
                                     {diagnostic.sourceCount}
                                   </p>
-                                  <p className="md:col-span-2">
+                                  <p>
                                     <span className="text-[#72807b]">
-                                      检索通道：
+                                      最终引用通道：
                                     </span>
                                     {diagnosticChannels.length > 0
                                       ? diagnosticChannels.join(" + ")
@@ -4493,9 +4573,17 @@ export default function Home() {
                                   </p>
                                   <p className="md:col-span-2">
                                     <span className="text-[#72807b]">
-                                      判断原因：
+                                      LLM 原因：
                                     </span>
-                                    {diagnostic.reason || "—"}
+                                    {diagnostic.llmReason ||
+                                      diagnostic.reason ||
+                                      "—"}
+                                  </p>
+                                  <p className="md:col-span-2">
+                                    <span className="text-[#72807b]">
+                                      覆盖原因：
+                                    </span>
+                                    {diagnostic.overrideReason || "—"}
                                   </p>
                                 </div>
 

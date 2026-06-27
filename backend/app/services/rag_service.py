@@ -83,8 +83,13 @@ def normalize_retrieval_decision(
     if not isinstance(decision, dict):
         return {
             "need_retrieval": True,
+            "final_need_retrieval": True,
+            "llm_need_retrieval": None,
             "rewritten_query": "",
             "reason": "路由结果无效，保守执行知识库检索",
+            "llm_reason": "路由结果无效",
+            "override_applied": True,
+            "override_reason": "路由结果无效，保守执行知识库检索",
         }
 
     need_retrieval = decision.get("need_retrieval", True)
@@ -94,11 +99,32 @@ def normalize_retrieval_decision(
     rewritten_query = str(decision.get("rewritten_query") or "").strip()
     reason = str(decision.get("reason") or "").strip()
 
-    return {
+    normalized: RetrievalDecision = {
         "need_retrieval": bool(need_retrieval),
+        "final_need_retrieval": bool(need_retrieval),
         "rewritten_query": rewritten_query,
         "reason": reason or "未提供原因",
+        "llm_reason": str(
+            decision.get("llm_reason") or reason or "未提供原因",
+        ).strip(),
+        "override_applied": bool(decision.get("override_applied", False)),
+        "override_reason": str(decision.get("override_reason") or "").strip(),
     }
+
+    llm_need_retrieval = decision.get("llm_need_retrieval")
+    if isinstance(llm_need_retrieval, bool):
+        normalized["llm_need_retrieval"] = llm_need_retrieval
+    elif "llm_need_retrieval" not in decision:
+        normalized["llm_need_retrieval"] = bool(need_retrieval)
+    else:
+        normalized["llm_need_retrieval"] = None
+
+    final_need_retrieval = decision.get("final_need_retrieval")
+    if isinstance(final_need_retrieval, bool):
+        normalized["final_need_retrieval"] = final_need_retrieval
+        normalized["need_retrieval"] = final_need_retrieval
+
+    return normalized
 
 
 def parse_retrieval_decision(raw_output: str) -> RetrievalDecision:
@@ -185,20 +211,33 @@ def finalize_retrieval_decision(inputs: ChainInput) -> RetrievalDecision:
     )
     profile = str(inputs.get("knowledge_profile") or "")
 
+    final_decision: RetrievalDecision = {
+        **decision,
+        "llm_need_retrieval": decision["need_retrieval"],
+        "llm_reason": decision["reason"],
+        "override_applied": False,
+        "override_reason": "",
+        "final_need_retrieval": decision["need_retrieval"],
+    }
+
     if (
         not decision["need_retrieval"]
         and should_force_retrieval_by_profile(query, profile)
     ):
+        override_reason = "问题关键词命中当前知识库文件画像，已强制检索"
         return {
+            **final_decision,
             "need_retrieval": True,
+            "final_need_retrieval": True,
             "rewritten_query": query,
+            "override_applied": True,
+            "override_reason": override_reason,
             "reason": (
-                f"{decision['reason']}；问题关键词命中当前知识库文件画像，"
-                "已强制检索"
+                f"{decision['reason']}；{override_reason}"
             ),
         }
 
-    return decision
+    return final_decision
 
 
 def build_knowledge_base_profile(inputs: ChainInput) -> str:
@@ -565,8 +604,13 @@ def stream_rag_response(
                 retrieval_event = {
                     "type": "retrieval",
                     "need_retrieval": decision["need_retrieval"],
+                    "final_need_retrieval": decision["final_need_retrieval"],
+                    "llm_need_retrieval": decision["llm_need_retrieval"],
                     "rewritten_query": decision["rewritten_query"],
                     "reason": decision["reason"],
+                    "llm_reason": decision["llm_reason"],
+                    "override_applied": decision["override_applied"],
+                    "override_reason": decision["override_reason"],
                     "retrieved_count": len(context),
                     "source_count": len(sources),
                 }

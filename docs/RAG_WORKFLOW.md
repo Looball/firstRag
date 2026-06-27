@@ -43,7 +43,17 @@
 助手消息会保存：
 
 - `sources`：回答引用的文件、chunk、分数和检索来源。
-- `retrieval`：是否检索、改写问题、召回数量、降级状态和诊断信息。
+- `retrieval`：最终是否检索、Router LLM 原始判断、规则覆盖原因、改写问题、召回数量、降级状态和诊断信息。
+
+诊断展示应区分三类信息：
+
+| 类型 | 字段 | 说明 |
+| --- | --- | --- |
+| 决策 | `final_need_retrieval` / `need_retrieval` | 后端最终是否执行知识库检索。 |
+| Router 判断 | `llm_need_retrieval`、`llm_reason` | LLM Router 对本轮问题是否需要检索的原始判断与原因。 |
+| 规则覆盖 | `override_applied`、`override_reason` | 后端确定性规则是否覆盖 Router 判断，例如命中知识库文件画像。 |
+| 召回排序 | `diagnostics.vector_count`、`fulltext_count`、`fused_count`、`reranked_count` | vector/fulltext 召回数量、RRF 融合后数量和 rerank 精排后数量。 |
+| 最终引用 | `retrieval_sources`、`sources` | 最终展示给用户的引用片段及这些片段命中的召回通道。 |
 
 前端可通过：
 
@@ -52,4 +62,3 @@ GET /chat/conversations/{conversation_id}/diagnostics
 ```
 
 恢复历史会话的检索状态。
-

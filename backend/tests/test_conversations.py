@@ -139,8 +139,13 @@ class CreateConversationTests(unittest.TestCase):
         ]
         retrieval = {
             "need_retrieval": True,
+            "final_need_retrieval": True,
+            "llm_need_retrieval": False,
             "rewritten_query": "诉讼法的任务是什么",
             "reason": "问题涉及知识库",
+            "llm_reason": "模型认为可直接回答",
+            "override_applied": True,
+            "override_reason": "问题关键词命中当前知识库文件画像，已强制检索",
             "retrieved_count": 5,
             "source_count": 1,
             "retrieval_sources": ["fulltext", "vector"],
@@ -192,6 +197,10 @@ class CreateConversationTests(unittest.TestCase):
         self.assertEqual(diagnostic["message_id"], str(message_id))
         self.assertEqual(diagnostic["retrieved_count"], 5)
         self.assertEqual(diagnostic["source_count"], 1)
+        self.assertTrue(diagnostic["final_need_retrieval"])
+        self.assertFalse(diagnostic["llm_need_retrieval"])
+        self.assertTrue(diagnostic["override_applied"])
+        self.assertIn("知识库文件画像", diagnostic["override_reason"])
         self.assertEqual(diagnostic["retrieval_sources"], ["fulltext", "vector"])
         self.assertFalse(diagnostic["vector_degraded"])
         self.assertEqual(diagnostic["diagnostics"]["vector_count"], 5)

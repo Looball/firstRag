@@ -60,13 +60,23 @@
 `messages.retrieval` 保存本轮检索诊断，常见字段包括：
 
 - `need_retrieval`
+- `final_need_retrieval`
+- `llm_need_retrieval`
 - `rewritten_query`
 - `reason`
+- `llm_reason`
+- `override_applied`
+- `override_reason`
 - `retrieved_count`
 - `source_count`
 - `retrieval_sources`
 - `vector_degraded`
 - `diagnostics`
+
+其中 `need_retrieval` 继续表示最终是否检索，保留给旧前端兼容；
+`llm_need_retrieval` 表示 Router LLM 的原始判断；
+`override_applied` 与 `override_reason` 表示后端规则是否覆盖了 LLM 判断，
+例如问题关键词命中当前知识库文件画像时强制检索。
 
 ## 向量化任务状态
 

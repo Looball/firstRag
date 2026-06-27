@@ -90,6 +90,11 @@ def stream_answer_and_save(
                     "source_count": event["source_count"],
                 }
                 for optional_key in (
+                    "final_need_retrieval",
+                    "llm_need_retrieval",
+                    "llm_reason",
+                    "override_applied",
+                    "override_reason",
                     "retrieval_sources",
                     "vector_degraded",
                     "diagnostics",
@@ -162,8 +167,13 @@ def stream_local_answer_and_save(
     """流式返回本地短路答案，并完成助手消息保存。"""
     retrieval = {
         "need_retrieval": False,
+        "final_need_retrieval": False,
+        "llm_need_retrieval": False,
         "rewritten_query": "",
         "reason": "本地识别为普通问候，跳过模型调用和知识库检索",
+        "llm_reason": "本地识别为普通问候",
+        "override_applied": False,
+        "override_reason": "",
         "retrieved_count": 0,
         "source_count": 0,
     }

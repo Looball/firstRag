@@ -171,6 +171,9 @@ class RagReferenceFilteringTests(unittest.TestCase):
             [event["type"] for event in events],
             ["retrieval", "sources", "answer"],
         )
+        self.assertTrue(events[0]["final_need_retrieval"])
+        self.assertTrue(events[0]["llm_need_retrieval"])
+        self.assertFalse(events[0]["override_applied"])
         self.assertEqual(events[0]["source_count"], 1)
         self.assertEqual(events[1]["sources"][0]["content"], "相关内容")
 
@@ -331,6 +334,14 @@ class RagQueryRouterTests(unittest.TestCase):
 
         self.assertTrue(decision["need_retrieval"])
         self.assertEqual(decision["rewritten_query"], "什么是诉讼法")
+        self.assertFalse(decision["llm_need_retrieval"])
+        self.assertTrue(decision["final_need_retrieval"])
+        self.assertEqual(
+            decision["llm_reason"],
+            "通用法律概念解释，无需检索当前知识库",
+        )
+        self.assertTrue(decision["override_applied"])
+        self.assertIn("知识库文件画像", decision["override_reason"])
         self.assertIn("强制检索", decision["reason"])
 
     def test_retrieve_documents_skips_when_router_says_no(self) -> None:
