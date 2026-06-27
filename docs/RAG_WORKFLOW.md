@@ -28,7 +28,7 @@
 2. 后端校验会话属于当前用户和知识库。
 3. 问候类本地可回答内容直接走本地响应，避免额外模型调用。
 4. 普通问题加载历史消息，构建 RAG 链。
-5. `rag_service` 判断是否需要检索，并可改写多轮问题。
+5. `rag_service` 读取当前知识库的 retrieval settings，判断是否需要检索，并可改写多轮问题。
 6. 召回候选片段：
    - Chroma 向量检索。
    - PostgreSQL 全文检索。
@@ -37,6 +37,16 @@
 7. DeepSeek 或用户配置的 OpenAI 兼容模型流式生成回答。
 8. SSE 返回 token、sources、retrieval 诊断。
 9. 回答完成后持久化到 `messages`。
+
+知识库级 retrieval settings 可通过
+`GET/PATCH /chat/knowledge-base/{knowledge_base_id}/retrieval-settings`
+读写，当前支持：
+
+- `retrieval_mode`：`auto`、`always`、`never`。
+- `enable_query_router`：是否调用 Router LLM 判断本轮是否检索。
+- `enable_rerank`：是否启用 CrossEncoder rerank。
+- `top_k`、`vector_top_k`、`fulltext_top_k`、`rrf_k`：控制最终引用数、两路召回数和 RRF 候选池。
+- `rerank_score_threshold`：控制低相关片段是否进入上下文和 Sources。
 
 ## 检索诊断
 

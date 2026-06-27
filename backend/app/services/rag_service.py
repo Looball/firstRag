@@ -18,6 +18,10 @@ from langchain_openai import ChatOpenAI
 from app.repositories.knowledge_base_repository import (
     get_knowledge_base_files,
 )
+from app.repositories.retrieval_settings_repository import (
+    DEFAULT_RETRIEVAL_SETTINGS,
+    get_knowledge_base_retrieval_settings,
+)
 from app.services.user_settings_service import get_effective_chat_model_settings
 from app.services.llm_service import create_openai_compatible_chat_model
 from app.services.retrieval.hybrid_retriever import (
@@ -74,6 +78,77 @@ def filter_relevant_reference_documents(
         if isinstance(doc, Document)
         and is_reference_document_relevant(doc, rerank_score_threshold)
     ]
+
+
+def get_reference_threshold_from_docs(docs: list[Document]) -> float:
+    """从文档 metadata 读取本轮引用展示阈值，缺失时使用默认值。"""
+    for doc in docs:
+        if not isinstance(doc, Document):
+            continue
+        threshold = doc.metadata.get("rerank_score_threshold")
+        try:
+            return float(threshold)
+        except (TypeError, ValueError):
+            continue
+
+    return REFERENCE_RERANK_SCORE_THRESHOLD
+
+
+def normalize_retrieval_settings(settings: dict[str, Any] | None) -> dict:
+    """规范化知识库检索设置，保证链路内部总能拿到完整字段。"""
+    normalized = dict(DEFAULT_RETRIEVAL_SETTINGS)
+    if isinstance(settings, dict):
+        normalized.update({
+            key: value
+            for key, value in settings.items()
+            if value is not None and key in DEFAULT_RETRIEVAL_SETTINGS
+        })
+    return normalized
+
+
+def load_retrieval_settings(inputs: ChainInput) -> dict:
+    """读取当前知识库的检索设置，未配置时使用默认值。"""
+    settings = get_knowledge_base_retrieval_settings(
+        knowledge_base_id=inputs["knowledge_base_id"],
+        user_id=inputs["user_id"],
+    )
+    return normalize_retrieval_settings(settings)
+
+
+def should_run_query_router(inputs: ChainInput) -> bool:
+    """判断本轮是否需要调用 Router LLM。"""
+    settings = normalize_retrieval_settings(inputs.get("retrieval_settings"))
+    return (
+        settings["retrieval_mode"] == "auto"
+        and bool(settings["enable_query_router"])
+    )
+
+
+def build_configured_retrieval_decision(inputs: ChainInput) -> RetrievalDecision:
+    """当配置跳过 Router LLM 时，生成确定性的路由结果。"""
+    settings = normalize_retrieval_settings(inputs.get("retrieval_settings"))
+    query = str(inputs.get("standalone_question") or inputs.get("input") or "")
+    mode = settings["retrieval_mode"]
+
+    if mode == "never":
+        return {
+            "need_retrieval": False,
+            "rewritten_query": query,
+            "reason": "当前知识库设置为永不检索",
+        }
+
+    if mode == "always":
+        return {
+            "need_retrieval": True,
+            "rewritten_query": query,
+            "reason": "当前知识库设置为强制检索",
+        }
+
+    return {
+        "need_retrieval": True,
+        "rewritten_query": query,
+        "reason": "Query Router 已关闭，默认执行知识库检索",
+    }
 
 
 def normalize_retrieval_decision(
@@ -210,6 +285,32 @@ def finalize_retrieval_decision(inputs: ChainInput) -> RetrievalDecision:
         "",
     )
     profile = str(inputs.get("knowledge_profile") or "")
+    settings = normalize_retrieval_settings(inputs.get("retrieval_settings"))
+    retrieval_mode = settings["retrieval_mode"]
+
+    if retrieval_mode == "never":
+        return {
+            "need_retrieval": False,
+            "rewritten_query": query,
+            "reason": f"{decision['reason']}；当前知识库设置为永不检索",
+        }
+
+    if retrieval_mode == "always":
+        return {
+            "need_retrieval": True,
+            "rewritten_query": query,
+            "reason": f"{decision['reason']}；当前知识库设置为强制检索",
+        }
+
+    if not settings["enable_query_router"]:
+        return {
+            "need_retrieval": True,
+            "rewritten_query": query,
+            "reason": (
+                f"{decision['reason']}；Query Router 已关闭，"
+                "默认执行知识库检索"
+            ),
+        }
 
     final_decision: RetrievalDecision = {
         **decision,
@@ -295,7 +396,11 @@ def format_route_info(inputs: ChainInput) -> str:
 
 def get_res_doc(inputs: dict[str, Any]) -> str:
     """将检索到的文档列表格式化为提示词上下文。"""
-    docs = filter_relevant_reference_documents(inputs.get("context", []))
+    settings = normalize_retrieval_settings(inputs.get("retrieval_settings"))
+    docs = filter_relevant_reference_documents(
+        inputs.get("context", []),
+        rerank_score_threshold=float(settings["rerank_score_threshold"]),
+    )
     context_parts = []
 
     for index, doc in enumerate(docs, start=1):
@@ -339,7 +444,10 @@ def serialize_reference_documents(
     )
 
     references = []
-    relevant_docs = filter_relevant_reference_documents(docs)
+    relevant_docs = filter_relevant_reference_documents(
+        docs,
+        rerank_score_threshold=get_reference_threshold_from_docs(docs),
+    )
     for index, doc in enumerate(relevant_docs, start=1):
         metadata = doc.metadata
         doc_file_id = metadata.get("file_id", "")
@@ -387,6 +495,7 @@ def retrieve_documents(inputs: ChainInput) -> RetrievedDocs:
     """根据当前知识库范围执行混合检索。"""
     user_id = inputs["user_id"]
     knowledge_base_id = inputs["knowledge_base_id"]
+    settings = normalize_retrieval_settings(inputs.get("retrieval_settings"))
     decision = normalize_retrieval_decision(
         inputs.get("retrieval_decision"),
     )
@@ -406,18 +515,22 @@ def retrieve_documents(inputs: ChainInput) -> RetrievedDocs:
         query=query,
         user_id=user_id,
         file_ids=file_ids,
-        k=5,
-        vector_k=20,
-        fulltext_k=20,
-        rrf_k=20,
-        rerank=True,
+        k=int(settings["top_k"]),
+        vector_k=int(settings["vector_top_k"]),
+        fulltext_k=int(settings["fulltext_top_k"]),
+        rrf_k=int(settings["rrf_k"]),
+        rerank=bool(settings["enable_rerank"]),
     )
     diagnostics = get_retrieval_diagnostics()
     if diagnostics is not None:
+        diagnostics["settings"] = settings
         # LCEL 流式执行过程中 ContextVar 可能跨 Runnable 丢失。
         # 将诊断挂到文档 metadata，确保后续 SSE 和落库能稳定读取。
         for doc in docs:
             doc.metadata["retrieval_diagnostics"] = diagnostics
+            doc.metadata["rerank_score_threshold"] = settings[
+                "rerank_score_threshold"
+            ]
     return docs
 
 
@@ -503,6 +616,16 @@ def get_chain(user_id: int) -> RunnableSerializable:
         | StrOutputParser()
         | RunnableLambda(parse_retrieval_decision)
     )
+    configured_router_decision: RunnableSerializable[
+        ChainInput,
+        RetrievalDecision,
+    ] = RunnableLambda(build_configured_retrieval_decision)
+    retrieval_router: RunnableSerializable[ChainInput, RetrievalDecision] = (
+        RunnableBranch(
+            (RunnableLambda(should_run_query_router), router_chain),
+            configured_router_decision,
+        )
+    )
 
     # 第二次调用：由检索上下文和用户问题生成答案
     system_prompt = (
@@ -537,8 +660,9 @@ def get_chain(user_id: int) -> RunnableSerializable:
         RunnablePassthrough.assign(
             standalone_question=standalone_question
         )
+        .assign(retrieval_settings=RunnableLambda(load_retrieval_settings))
         .assign(knowledge_profile=RunnableLambda(build_knowledge_base_profile))
-        .assign(raw_retrieval_decision=router_chain)
+        .assign(raw_retrieval_decision=retrieval_router)
         .assign(retrieval_decision=RunnableLambda(finalize_retrieval_decision))
         .assign(context=retrieve_docs)
         .assign(answer=qa_chain)

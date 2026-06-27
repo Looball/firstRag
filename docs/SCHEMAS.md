@@ -8,6 +8,7 @@
 | --- | --- |
 | `users` | 用户账号，保存 argon2 密码哈希。 |
 | `knowledge_bases` | 用户知识库，每个用户有默认知识库。 |
+| `knowledge_base_retrieval_settings` | 知识库级 RAG 检索策略设置。 |
 | `knowledge_files` | 知识文件元数据，包含软删除、SHA-256 去重和索引状态。 |
 | `knowledge_base_files` | 知识库与文件多对多关联。 |
 | `knowledge_file_chunks` | 文本分块正文、metadata、全文检索索引和索引版本。 |
@@ -29,6 +30,7 @@
 | `CreateConversationRequest` | `title` | 新建会话。 |
 | `RenameConversationRequest` | `title` | 重命名会话。 |
 | `CreateKnowledgeBaseRequest` | `name` | 新建知识库，1 到 50 字符。 |
+| `UpdateRetrievalSettingsRequest` | `retrieval_mode`, `enable_query_router`, `enable_rerank`, `top_k`, `vector_top_k`, `fulltext_top_k`, `rrf_k`, `rerank_score_threshold` | 更新知识库检索策略。 |
 | `UpdateUserLLMSettingsRequest` | `credential_mode`, `provider`, `model`, `base_url`, `api_key`, `temperature`, `max_tokens`, `timeout_seconds`, `max_retries` | 更新或测试用户模型设置。 |
 
 ## 消息结构

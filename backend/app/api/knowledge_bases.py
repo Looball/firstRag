@@ -11,10 +11,18 @@ from app.repositories.knowledge_base_repository import (
     get_user_knowledge_bases,
     remove_file_relation,
 )
+from app.repositories.retrieval_settings_repository import (
+    DEFAULT_RETRIEVAL_SETTINGS,
+    get_knowledge_base_retrieval_settings,
+    upsert_knowledge_base_retrieval_settings,
+)
 from app.repositories.vector_index_job_repository import (
     get_latest_vector_index_jobs_by_file_ids,
 )
-from app.schemas.knowledge import CreateKnowledgeBaseRequest
+from app.schemas.knowledge import (
+    CreateKnowledgeBaseRequest,
+    UpdateRetrievalSettingsRequest,
+)
 from app.services.vectors.vector_index_queue_service import (
     serialize_current_vector_index_job,
 )
@@ -81,6 +89,61 @@ def create_knowledge_base(
             "created_at": knowledge_base["created_at"],
             "updated_at": knowledge_base["updated_at"],
         },
+    }
+
+
+@router.get("/knowledge-base/{knowledge_base_id}/retrieval-settings")
+def get_retrieval_settings(
+    knowledge_base_id: UUID,
+    user_id: int = Depends(get_current_user_id),
+):
+    """读取当前知识库的 RAG 检索策略设置。"""
+    settings = get_knowledge_base_retrieval_settings(
+        knowledge_base_id=knowledge_base_id,
+        user_id=user_id,
+    )
+    if settings is None:
+        raise HTTPException(status_code=404, detail="知识库不存在")
+
+    return {
+        "success": True,
+        "knowledge_base_id": str(knowledge_base_id),
+        "settings": settings,
+    }
+
+
+@router.patch("/knowledge-base/{knowledge_base_id}/retrieval-settings")
+def update_retrieval_settings(
+    knowledge_base_id: UUID,
+    req: UpdateRetrievalSettingsRequest,
+    user_id: int = Depends(get_current_user_id),
+):
+    """保存当前知识库的 RAG 检索策略设置。"""
+    current_settings = get_knowledge_base_retrieval_settings(
+        knowledge_base_id=knowledge_base_id,
+        user_id=user_id,
+    )
+    if current_settings is None:
+        raise HTTPException(status_code=404, detail="知识库不存在")
+
+    update_values = req.model_dump(exclude_unset=True)
+    settings = {
+        **DEFAULT_RETRIEVAL_SETTINGS,
+        **current_settings,
+        **update_values,
+    }
+    saved_settings = upsert_knowledge_base_retrieval_settings(
+        knowledge_base_id=knowledge_base_id,
+        user_id=user_id,
+        settings=settings,
+    )
+    if saved_settings is None:
+        raise HTTPException(status_code=404, detail="知识库不存在")
+
+    return {
+        "success": True,
+        "knowledge_base_id": str(knowledge_base_id),
+        "settings": saved_settings,
     }
 
 

@@ -8,6 +8,7 @@ from langchain_core.language_models.fake_chat_models import FakeListChatModel
 
 from app.services.rag_service import (
     build_knowledge_base_profile,
+    build_configured_retrieval_decision,
     finalize_retrieval_decision,
     get_res_doc,
     get_chain,
@@ -359,6 +360,69 @@ class RagQueryRouterTests(unittest.TestCase):
 
         self.assertEqual(docs, [])
 
+    def test_configured_retrieval_decision_forces_retrieval(self) -> None:
+        """强制检索模式不需要调用 Router LLM，也应生成检索决策。"""
+        decision = build_configured_retrieval_decision({
+            "input": "什么是诉讼法",
+            "standalone_question": "什么是诉讼法",
+            "retrieval_settings": {
+                "retrieval_mode": "always",
+                "enable_query_router": False,
+            },
+        })
+
+        self.assertTrue(decision["need_retrieval"])
+        self.assertEqual(decision["rewritten_query"], "什么是诉讼法")
+        self.assertIn("强制检索", decision["reason"])
+
+    def test_retrieve_documents_uses_knowledge_base_retrieval_settings(
+        self,
+    ) -> None:
+        """知识库级设置应传递到 hybrid retriever。"""
+        doc = Document(page_content="相关内容", metadata={"file_id": "file-1"})
+        settings = {
+            "retrieval_mode": "auto",
+            "enable_query_router": True,
+            "enable_rerank": False,
+            "top_k": 3,
+            "vector_top_k": 8,
+            "fulltext_top_k": 9,
+            "rrf_k": 10,
+            "rerank_score_threshold": 0.5,
+        }
+
+        with unittest.mock.patch(
+            "app.services.rag_service.get_knowledge_base_file_ids",
+            return_value=["file-1"],
+        ), unittest.mock.patch(
+            "app.services.rag_service.get_hybrid_documents",
+            return_value=[doc],
+        ) as hybrid_mock, unittest.mock.patch(
+            "app.services.rag_service.get_retrieval_diagnostics",
+            return_value={"vector_count": 1},
+        ):
+            docs = retrieve_documents({
+                "user_id": 1,
+                "knowledge_base_id": uuid4(),
+                "standalone_question": "什么是诉讼法",
+                "retrieval_settings": settings,
+                "retrieval_decision": {
+                    "need_retrieval": True,
+                    "rewritten_query": "诉讼法",
+                    "reason": "测试",
+                },
+            })
+
+        self.assertEqual(docs, [doc])
+        hybrid_mock.assert_called_once()
+        _, kwargs = hybrid_mock.call_args
+        self.assertEqual(kwargs["k"], 3)
+        self.assertEqual(kwargs["vector_k"], 8)
+        self.assertEqual(kwargs["fulltext_k"], 9)
+        self.assertEqual(kwargs["rrf_k"], 10)
+        self.assertFalse(kwargs["rerank"])
+        self.assertEqual(doc.metadata["rerank_score_threshold"], 0.5)
+
     def test_build_knowledge_base_profile_uses_indexed_files(self) -> None:
         """知识库画像应只使用已索引文件，供 Router 识别知识库范围。"""
         with unittest.mock.patch(
@@ -401,6 +465,9 @@ class RagQueryRouterTests(unittest.TestCase):
         ), unittest.mock.patch(
             "app.services.rag_service.get_knowledge_base_files",
             return_value=[],
+        ), unittest.mock.patch(
+            "app.services.rag_service.get_knowledge_base_retrieval_settings",
+            return_value=None,
         ):
             chain = get_chain(user_id=1)
             chunks = list(chain.stream({

@@ -46,6 +46,8 @@ Authorization: Bearer <access_token>
 | --- | --- | --- |
 | `GET` | `/chat/knowledge-bases` | 当前用户知识库列表。 |
 | `POST` | `/chat/knowledge-base` | 新建知识库。 |
+| `GET` | `/chat/knowledge-base/{knowledge_base_id}/retrieval-settings` | 获取知识库检索策略设置。 |
+| `PATCH` | `/chat/knowledge-base/{knowledge_base_id}/retrieval-settings` | 保存知识库检索策略设置。 |
 | `GET` | `/chat/knowledge-base/{knowledge_base_id}/files` | 知识库文件列表。 |
 | `POST` | `/chat/knowledge-base/{knowledge_base_id}/files/{knowledge_file_id}` | 关联已有文件。 |
 | `DELETE` | `/chat/knowledge-base/{knowledge_base_id}/files/{knowledge_file_id}` | 解除文件关联。 |
@@ -105,4 +107,3 @@ Authorization: Bearer <access_token>
 | `POST` | `/user/settings/test` | 测试当前或草稿设置。 |
 
 更细的设置页协议见 `backend/frontend_llm_settings_protocol.md` 和 `backend/user_settings_api.md`。
-

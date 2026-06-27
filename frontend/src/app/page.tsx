@@ -122,6 +122,19 @@ type KnowledgeBase = {
   fileCount: number;
 };
 
+type RetrievalMode = "auto" | "always" | "never";
+
+type KnowledgeBaseRetrievalSettings = {
+  retrievalMode: RetrievalMode;
+  enableQueryRouter: boolean;
+  enableRerank: boolean;
+  topK: number;
+  vectorTopK: number;
+  fulltextTopK: number;
+  rrfK: number;
+  rerankScoreThreshold: number;
+};
+
 type BackendKnowledgeBase = {
   id?: unknown;
   name?: unknown;
@@ -278,6 +291,13 @@ type CreateKnowledgeBaseResponse = {
   message?: string;
 };
 
+type RetrievalSettingsResponse = {
+  settings?: unknown;
+  detail?: string;
+  error?: string;
+  message?: string;
+};
+
 type UploadKnowledgeFilesResponse = {
   files?: unknown;
   detail?: string;
@@ -304,6 +324,16 @@ type VectorIndexResponse = {
 const STORAGE_KEY = "ai-learning-assistant-sessions";
 const CURRENT_SESSION_KEY = "ai-learning-assistant-current-session";
 const DEFAULT_KNOWLEDGE_BASE_ID = "default";
+const DEFAULT_RETRIEVAL_SETTINGS: KnowledgeBaseRetrievalSettings = {
+  retrievalMode: "auto",
+  enableQueryRouter: true,
+  enableRerank: true,
+  topK: 5,
+  vectorTopK: 20,
+  fulltextTopK: 20,
+  rrfK: 20,
+  rerankScoreThreshold: 0,
+};
 const LEGACY_INITIAL_MESSAGE =
   "你好，我是你的 AI 学习助手。你可以问我任何关于 AI 的问题。";
 
@@ -1223,6 +1253,98 @@ function toKnowledgeBase(value: unknown): KnowledgeBase | null {
   };
 }
 
+function getRetrievalMode(value: unknown): RetrievalMode {
+  return value === "always" || value === "never" || value === "auto"
+    ? value
+    : DEFAULT_RETRIEVAL_SETTINGS.retrievalMode;
+}
+
+function getBoundedNumber(
+  value: Record<string, unknown>,
+  fieldNames: string[],
+  fallback: number,
+  minValue: number,
+  maxValue: number
+) {
+  const parsedValue = getNullableNumberField(value, fieldNames);
+
+  if (parsedValue === null) {
+    return fallback;
+  }
+
+  return Math.min(maxValue, Math.max(minValue, parsedValue));
+}
+
+function toRetrievalSettings(
+  value: unknown
+): KnowledgeBaseRetrievalSettings {
+  if (typeof value !== "object" || value === null) {
+    return DEFAULT_RETRIEVAL_SETTINGS;
+  }
+
+  const settings = value as Record<string, unknown>;
+
+  return {
+    retrievalMode: getRetrievalMode(settings.retrieval_mode),
+    enableQueryRouter:
+      getNullableBooleanField(settings, ["enable_query_router"]) ??
+      DEFAULT_RETRIEVAL_SETTINGS.enableQueryRouter,
+    enableRerank:
+      getNullableBooleanField(settings, ["enable_rerank"]) ??
+      DEFAULT_RETRIEVAL_SETTINGS.enableRerank,
+    topK: getBoundedNumber(
+      settings,
+      ["top_k"],
+      DEFAULT_RETRIEVAL_SETTINGS.topK,
+      1,
+      20
+    ),
+    vectorTopK: getBoundedNumber(
+      settings,
+      ["vector_top_k"],
+      DEFAULT_RETRIEVAL_SETTINGS.vectorTopK,
+      1,
+      100
+    ),
+    fulltextTopK: getBoundedNumber(
+      settings,
+      ["fulltext_top_k"],
+      DEFAULT_RETRIEVAL_SETTINGS.fulltextTopK,
+      1,
+      100
+    ),
+    rrfK: getBoundedNumber(
+      settings,
+      ["rrf_k"],
+      DEFAULT_RETRIEVAL_SETTINGS.rrfK,
+      1,
+      100
+    ),
+    rerankScoreThreshold: getBoundedNumber(
+      settings,
+      ["rerank_score_threshold"],
+      DEFAULT_RETRIEVAL_SETTINGS.rerankScoreThreshold,
+      -20,
+      20
+    ),
+  };
+}
+
+function serializeRetrievalSettings(
+  settings: KnowledgeBaseRetrievalSettings
+) {
+  return {
+    retrieval_mode: settings.retrievalMode,
+    enable_query_router: settings.enableQueryRouter,
+    enable_rerank: settings.enableRerank,
+    top_k: settings.topK,
+    vector_top_k: settings.vectorTopK,
+    fulltext_top_k: settings.fulltextTopK,
+    rrf_k: settings.rrfK,
+    rerank_score_threshold: settings.rerankScoreThreshold,
+  };
+}
+
 function toKnowledgeFile(
   value: unknown,
   sourceFile?: File
@@ -1963,6 +2085,17 @@ export default function Home() {
   const [knowledgeBaseFiles, setKnowledgeBaseFiles] = useState<
     KnowledgeBaseFile[]
   >([]);
+  const [
+    retrievalSettingsByKnowledgeBaseId,
+    setRetrievalSettingsByKnowledgeBaseId,
+  ] = useState<Record<string, KnowledgeBaseRetrievalSettings>>({});
+  const [isLoadingRetrievalSettings, setIsLoadingRetrievalSettings] =
+    useState(false);
+  const [isSavingRetrievalSettings, setIsSavingRetrievalSettings] =
+    useState(false);
+  const [retrievalSettingsMessage, setRetrievalSettingsMessage] =
+    useState("");
+  const [retrievalSettingsError, setRetrievalSettingsError] = useState("");
   const [isKnowledgeBaseManagerOpen, setIsKnowledgeBaseManagerOpen] =
     useState(false);
   const [isFileManagerOpen, setIsFileManagerOpen] = useState(false);
@@ -2000,6 +2133,9 @@ export default function Home() {
     knowledgeBases.find(
       (knowledgeBase) => knowledgeBase.id === selectedKnowledgeBaseId
     ) || knowledgeBases[0];
+  const selectedRetrievalSettings =
+    retrievalSettingsByKnowledgeBaseId[selectedKnowledgeBaseId] ||
+    DEFAULT_RETRIEVAL_SETTINGS;
   const selectedKnowledgeFileIds = new Set(
     knowledgeBaseFiles
       .filter(
@@ -2321,6 +2457,151 @@ export default function Home() {
       );
     } finally {
       setIsCreatingKnowledgeBase(false);
+    }
+  }
+
+  function updateSelectedRetrievalSettings(
+    patch: Partial<KnowledgeBaseRetrievalSettings>
+  ) {
+    if (!selectedKnowledgeBaseId) {
+      return;
+    }
+
+    setRetrievalSettingsByKnowledgeBaseId((prev) => ({
+      ...prev,
+      [selectedKnowledgeBaseId]: {
+        ...(prev[selectedKnowledgeBaseId] || DEFAULT_RETRIEVAL_SETTINGS),
+        ...patch,
+      },
+    }));
+    setRetrievalSettingsMessage("");
+    setRetrievalSettingsError("");
+  }
+
+  async function loadRetrievalSettings(knowledgeBaseId: string) {
+    if (!knowledgeBaseId || knowledgeBaseId === DEFAULT_KNOWLEDGE_BASE_ID) {
+      return;
+    }
+
+    const authState = parseAuthState(localStorage.getItem(AUTH_STORAGE_KEY));
+
+    if (!authState) {
+      localStorage.removeItem(AUTH_STORAGE_KEY);
+      window.location.href = "/login";
+      return;
+    }
+
+    setIsLoadingRetrievalSettings(true);
+    setRetrievalSettingsError("");
+
+    try {
+      const response = await fetch(
+        `/api/chat/knowledge-base/${encodeURIComponent(
+          knowledgeBaseId
+        )}/retrieval-settings`,
+        {
+          method: "GET",
+          headers: {
+            Authorization: buildAuthorizationHeader(authState),
+          },
+          cache: "no-store",
+        }
+      );
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(
+          getResponseErrorMessage(
+            errorText,
+            "读取检索设置失败，请稍后再试。",
+            response.status
+          )
+        );
+      }
+
+      const data = (await response.json()) as RetrievalSettingsResponse;
+      const settings = toRetrievalSettings(data.settings);
+
+      setRetrievalSettingsByKnowledgeBaseId((prev) => ({
+        ...prev,
+        [knowledgeBaseId]: settings,
+      }));
+    } catch (error) {
+      setRetrievalSettingsError(
+        error instanceof Error
+          ? error.message
+          : "读取检索设置失败，请稍后再试。"
+      );
+    } finally {
+      setIsLoadingRetrievalSettings(false);
+    }
+  }
+
+  async function handleSaveRetrievalSettings() {
+    if (
+      !selectedKnowledgeBaseId ||
+      selectedKnowledgeBaseId === DEFAULT_KNOWLEDGE_BASE_ID ||
+      isSavingRetrievalSettings
+    ) {
+      return;
+    }
+
+    const authState = parseAuthState(localStorage.getItem(AUTH_STORAGE_KEY));
+
+    if (!authState) {
+      localStorage.removeItem(AUTH_STORAGE_KEY);
+      window.location.href = "/login";
+      return;
+    }
+
+    setIsSavingRetrievalSettings(true);
+    setRetrievalSettingsMessage("");
+    setRetrievalSettingsError("");
+
+    try {
+      const response = await fetch(
+        `/api/chat/knowledge-base/${encodeURIComponent(
+          selectedKnowledgeBaseId
+        )}/retrieval-settings`,
+        {
+          method: "PATCH",
+          headers: {
+            Authorization: buildAuthorizationHeader(authState),
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(
+            serializeRetrievalSettings(selectedRetrievalSettings)
+          ),
+        }
+      );
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(
+          getResponseErrorMessage(
+            errorText,
+            "保存检索设置失败，请稍后再试。",
+            response.status
+          )
+        );
+      }
+
+      const data = (await response.json()) as RetrievalSettingsResponse;
+      const settings = toRetrievalSettings(data.settings);
+
+      setRetrievalSettingsByKnowledgeBaseId((prev) => ({
+        ...prev,
+        [selectedKnowledgeBaseId]: settings,
+      }));
+      setRetrievalSettingsMessage("检索设置已保存，下一次提问生效。");
+    } catch (error) {
+      setRetrievalSettingsError(
+        error instanceof Error
+          ? error.message
+          : "保存检索设置失败，请稍后再试。"
+      );
+    } finally {
+      setIsSavingRetrievalSettings(false);
     }
   }
 
@@ -3056,6 +3337,23 @@ export default function Home() {
   }, [
     hasCheckedAuth,
     loadKnowledgeBaseFiles,
+    selectedKnowledgeBaseId,
+  ]);
+
+  useEffect(() => {
+    if (
+      !hasCheckedAuth ||
+      !isKnowledgeBaseManagerOpen ||
+      !selectedKnowledgeBaseId ||
+      selectedKnowledgeBaseId === DEFAULT_KNOWLEDGE_BASE_ID
+    ) {
+      return;
+    }
+
+    void loadRetrievalSettings(selectedKnowledgeBaseId);
+  }, [
+    hasCheckedAuth,
+    isKnowledgeBaseManagerOpen,
     selectedKnowledgeBaseId,
   ]);
 
@@ -4958,6 +5256,152 @@ export default function Home() {
                     </button>
                   );
                 })}
+              </div>
+
+              <div className="mt-6 border border-[#cbd5d1] bg-[#f7faf8] px-4 py-4">
+                <div className="flex items-start justify-between gap-4">
+                  <div>
+                    <p className="font-utility text-[10px] font-semibold uppercase text-[#176b62]">
+                      Retrieval Policy
+                    </p>
+                    <h3 className="mt-1 text-sm font-semibold text-[#17201f]">
+                      当前知识库检索策略
+                    </h3>
+                    <p className="mt-1 text-xs leading-5 text-[#72807b]">
+                      调整后会影响下一次聊天，不会重建已有向量。
+                    </p>
+                  </div>
+                  {isLoadingRetrievalSettings && (
+                    <span className="text-xs text-[#72807b]">读取中...</span>
+                  )}
+                </div>
+
+                <div className="mt-4 grid gap-3 md:grid-cols-2">
+                  <label className="block text-xs font-semibold text-[#46514e]">
+                    检索模式
+                    <select
+                      value={selectedRetrievalSettings.retrievalMode}
+                      onChange={(event) =>
+                        updateSelectedRetrievalSettings({
+                          retrievalMode: event.target.value as RetrievalMode,
+                        })
+                      }
+                      disabled={
+                        !selectedKnowledgeBaseId ||
+                        selectedKnowledgeBaseId === DEFAULT_KNOWLEDGE_BASE_ID
+                      }
+                      className="research-focus mt-1 w-full border border-[#b7c4bf] bg-white px-3 py-2 text-sm text-[#17201f]"
+                    >
+                      <option value="auto">自动判断</option>
+                      <option value="always">强制检索</option>
+                      <option value="never">永不检索</option>
+                    </select>
+                  </label>
+
+                  <label className="block text-xs font-semibold text-[#46514e]">
+                    引用阈值
+                    <input
+                      type="number"
+                      step="0.1"
+                      min="-20"
+                      max="20"
+                      value={selectedRetrievalSettings.rerankScoreThreshold}
+                      onChange={(event) =>
+                        updateSelectedRetrievalSettings({
+                          rerankScoreThreshold: Number(event.target.value),
+                        })
+                      }
+                      className="research-focus mt-1 w-full border border-[#b7c4bf] bg-white px-3 py-2 text-sm text-[#17201f]"
+                    />
+                  </label>
+
+                  <label className="flex items-center gap-2 text-xs font-semibold text-[#46514e]">
+                    <input
+                      type="checkbox"
+                      checked={selectedRetrievalSettings.enableQueryRouter}
+                      onChange={(event) =>
+                        updateSelectedRetrievalSettings({
+                          enableQueryRouter: event.target.checked,
+                        })
+                      }
+                      className="h-4 w-4 accent-[#176b62]"
+                    />
+                    启用 Query Router
+                  </label>
+
+                  <label className="flex items-center gap-2 text-xs font-semibold text-[#46514e]">
+                    <input
+                      type="checkbox"
+                      checked={selectedRetrievalSettings.enableRerank}
+                      onChange={(event) =>
+                        updateSelectedRetrievalSettings({
+                          enableRerank: event.target.checked,
+                        })
+                      }
+                      className="h-4 w-4 accent-[#176b62]"
+                    />
+                    启用 Rerank 精排
+                  </label>
+                </div>
+
+                <div className="mt-3 grid gap-3 md:grid-cols-4">
+                  {[
+                    ["topK", "最终引用", 1, 20],
+                    ["vectorTopK", "Vector 召回", 1, 100],
+                    ["fulltextTopK", "Fulltext 召回", 1, 100],
+                    ["rrfK", "RRF 候选", 1, 100],
+                  ].map(([field, label, min, max]) => (
+                    <label
+                      key={field}
+                      className="block text-xs font-semibold text-[#46514e]"
+                    >
+                      {label}
+                      <input
+                        type="number"
+                        min={min}
+                        max={max}
+                        value={
+                          selectedRetrievalSettings[
+                            field as keyof KnowledgeBaseRetrievalSettings
+                          ] as number
+                        }
+                        onChange={(event) =>
+                          updateSelectedRetrievalSettings({
+                            [field]: Number(event.target.value),
+                          } as Partial<KnowledgeBaseRetrievalSettings>)
+                        }
+                        className="research-focus mt-1 w-full border border-[#b7c4bf] bg-white px-2 py-2 text-sm text-[#17201f]"
+                      />
+                    </label>
+                  ))}
+                </div>
+
+                {retrievalSettingsMessage && (
+                  <p className="mt-3 border-l-4 border-[#176b62] bg-[#edf7f3] px-3 py-2 text-xs text-[#176b62]">
+                    {retrievalSettingsMessage}
+                  </p>
+                )}
+
+                {retrievalSettingsError && (
+                  <p className="mt-3 border-l-4 border-[#e36b4f] bg-[#fff1ed] px-3 py-2 text-xs text-[#9b3c29]">
+                    {retrievalSettingsError}
+                  </p>
+                )}
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    void handleSaveRetrievalSettings();
+                  }}
+                  disabled={
+                    !selectedKnowledgeBaseId ||
+                    selectedKnowledgeBaseId === DEFAULT_KNOWLEDGE_BASE_ID ||
+                    isSavingRetrievalSettings
+                  }
+                  className="mt-4 w-full bg-[#176b62] px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-[#105149] disabled:bg-[#a7b8b2]"
+                >
+                  {isSavingRetrievalSettings ? "保存中..." : "保存检索设置"}
+                </button>
               </div>
 
               <div className="mt-6">
