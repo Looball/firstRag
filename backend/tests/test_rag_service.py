@@ -375,6 +375,30 @@ class RagQueryRouterTests(unittest.TestCase):
         self.assertEqual(decision["rewritten_query"], "什么是诉讼法")
         self.assertIn("强制检索", decision["reason"])
 
+    def test_finalize_configured_decision_does_not_duplicate_reason(
+        self,
+    ) -> None:
+        """配置生成的路由原因进入最终决策后不应重复拼接。"""
+        decision = finalize_retrieval_decision({
+            "standalone_question": "你好",
+            "knowledge_profile": "当前知识库已索引文件：\n1. demo.md（text/markdown）",
+            "retrieval_settings": {
+                "retrieval_mode": "always",
+                "enable_query_router": True,
+            },
+            "raw_retrieval_decision": {
+                "need_retrieval": True,
+                "rewritten_query": "你好",
+                "reason": "当前知识库设置为强制检索",
+            },
+        })
+
+        self.assertTrue(decision["need_retrieval"])
+        self.assertEqual(
+            decision["reason"].count("当前知识库设置为强制检索"),
+            1,
+        )
+
     def test_retrieve_documents_uses_knowledge_base_retrieval_settings(
         self,
     ) -> None:

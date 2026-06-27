@@ -151,6 +151,13 @@ def build_configured_retrieval_decision(inputs: ChainInput) -> RetrievalDecision
     }
 
 
+def append_reason_once(reason: str, suffix: str) -> str:
+    """向路由原因追加说明，避免相同配置原因重复出现。"""
+    if suffix in reason:
+        return reason
+    return f"{reason}；{suffix}" if reason else suffix
+
+
 def normalize_retrieval_decision(
     decision: dict[str, Any] | None,
 ) -> RetrievalDecision:
@@ -289,27 +296,27 @@ def finalize_retrieval_decision(inputs: ChainInput) -> RetrievalDecision:
     retrieval_mode = settings["retrieval_mode"]
 
     if retrieval_mode == "never":
+        reason = "当前知识库设置为永不检索"
         return {
             "need_retrieval": False,
             "rewritten_query": query,
-            "reason": f"{decision['reason']}；当前知识库设置为永不检索",
+            "reason": append_reason_once(decision["reason"], reason),
         }
 
     if retrieval_mode == "always":
+        reason = "当前知识库设置为强制检索"
         return {
             "need_retrieval": True,
             "rewritten_query": query,
-            "reason": f"{decision['reason']}；当前知识库设置为强制检索",
+            "reason": append_reason_once(decision["reason"], reason),
         }
 
     if not settings["enable_query_router"]:
+        reason = "Query Router 已关闭，默认执行知识库检索"
         return {
             "need_retrieval": True,
             "rewritten_query": query,
-            "reason": (
-                f"{decision['reason']}；Query Router 已关闭，"
-                "默认执行知识库检索"
-            ),
+            "reason": append_reason_once(decision["reason"], reason),
         }
 
     final_decision: RetrievalDecision = {
