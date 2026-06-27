@@ -87,12 +87,22 @@ type RetrievalDiagnostics = {
 };
 
 type RetrievalTiming = {
+  standaloneQuestionMs: number | null;
+  retrievalSettingsMs: number | null;
+  knowledgeProfileMs: number | null;
+  queryRouterMs: number | null;
+  finalizeDecisionMs: number | null;
+  retrieveDocumentsMs: number | null;
   embeddingMs: number | null;
   vectorMs: number | null;
   fulltextMs: number | null;
   rrfMs: number | null;
   rerankMs: number | null;
   retrievalTotalMs: number | null;
+  preAnswerTotalMs: number | null;
+  firstAnswerTokenMs: number | null;
+  answerStreamMs: number | null;
+  chatStreamTotalMs: number | null;
 };
 
 type SourcePreview = {
@@ -822,6 +832,22 @@ function getRetrievalDiagnostics(
     rerankedCount: getNullableNumberField(diagnostics, ["reranked_count"]),
     retrievalSources: getStringArrayField(diagnostics, "retrieval_sources"),
     timing: {
+      standaloneQuestionMs: getNullableNumberField(timing, [
+        "standalone_question_ms",
+      ]),
+      retrievalSettingsMs: getNullableNumberField(timing, [
+        "retrieval_settings_ms",
+      ]),
+      knowledgeProfileMs: getNullableNumberField(timing, [
+        "knowledge_profile_ms",
+      ]),
+      queryRouterMs: getNullableNumberField(timing, ["query_router_ms"]),
+      finalizeDecisionMs: getNullableNumberField(timing, [
+        "finalize_decision_ms",
+      ]),
+      retrieveDocumentsMs: getNullableNumberField(timing, [
+        "retrieve_documents_ms",
+      ]),
       embeddingMs: getNullableNumberField(timing, ["embedding_ms"]),
       vectorMs: getNullableNumberField(timing, ["vector_ms"]),
       fulltextMs: getNullableNumberField(timing, ["fulltext_ms"]),
@@ -829,6 +855,16 @@ function getRetrievalDiagnostics(
       rerankMs: getNullableNumberField(timing, ["rerank_ms"]),
       retrievalTotalMs: getNullableNumberField(timing, [
         "retrieval_total_ms",
+      ]),
+      preAnswerTotalMs: getNullableNumberField(timing, [
+        "pre_answer_total_ms",
+      ]),
+      firstAnswerTokenMs: getNullableNumberField(timing, [
+        "first_answer_token_ms",
+      ]),
+      answerStreamMs: getNullableNumberField(timing, ["answer_stream_ms"]),
+      chatStreamTotalMs: getNullableNumberField(timing, [
+        "chat_stream_total_ms",
       ]),
     },
   };
@@ -4926,53 +4962,164 @@ export default function Home() {
                                       耗时分析
                                     </p>
                                     <p className="text-[11px] text-[#72807b]">
-                                      总检索{" "}
+                                      总耗时{" "}
                                       {formatDiagnosticTiming(
-                                        diagnosticTiming?.retrievalTotalMs
+                                        diagnosticTiming?.chatStreamTotalMs
                                       )}
                                     </p>
                                   </div>
-                                  <div className="mt-2 grid gap-2 md:grid-cols-5">
-                                    <p>
-                                      <span className="block text-[#72807b]">
-                                        Embedding
-                                      </span>
-                                      {formatDiagnosticTiming(
-                                        diagnosticTiming?.embeddingMs
-                                      )}
-                                    </p>
-                                    <p>
-                                      <span className="block text-[#72807b]">
-                                        Vector
-                                      </span>
-                                      {formatDiagnosticTiming(
-                                        diagnosticTiming?.vectorMs
-                                      )}
-                                    </p>
-                                    <p>
-                                      <span className="block text-[#72807b]">
-                                        Fulltext
-                                      </span>
-                                      {formatDiagnosticTiming(
-                                        diagnosticTiming?.fulltextMs
-                                      )}
-                                    </p>
-                                    <p>
-                                      <span className="block text-[#72807b]">
-                                        RRF
-                                      </span>
-                                      {formatDiagnosticTiming(
-                                        diagnosticTiming?.rrfMs
-                                      )}
-                                    </p>
-                                    <p>
-                                      <span className="block text-[#72807b]">
-                                        Rerank
-                                      </span>
-                                      {formatDiagnosticTiming(
-                                        diagnosticTiming?.rerankMs
-                                      )}
-                                    </p>
+                                  <div className="mt-3 space-y-3">
+                                    <div>
+                                      <p className="font-utility text-[10px] font-semibold uppercase text-[#72807b]">
+                                        Decision
+                                      </p>
+                                      <div className="mt-1 grid gap-2 md:grid-cols-5">
+                                        <p>
+                                          <span className="block text-[#72807b]">
+                                            问题改写
+                                          </span>
+                                          {formatDiagnosticTiming(
+                                            diagnosticTiming?.standaloneQuestionMs
+                                          )}
+                                        </p>
+                                        <p>
+                                          <span className="block text-[#72807b]">
+                                            读取配置
+                                          </span>
+                                          {formatDiagnosticTiming(
+                                            diagnosticTiming?.retrievalSettingsMs
+                                          )}
+                                        </p>
+                                        <p>
+                                          <span className="block text-[#72807b]">
+                                            知识画像
+                                          </span>
+                                          {formatDiagnosticTiming(
+                                            diagnosticTiming?.knowledgeProfileMs
+                                          )}
+                                        </p>
+                                        <p>
+                                          <span className="block text-[#72807b]">
+                                            Router
+                                          </span>
+                                          {formatDiagnosticTiming(
+                                            diagnosticTiming?.queryRouterMs
+                                          )}
+                                        </p>
+                                        <p>
+                                          <span className="block text-[#72807b]">
+                                            最终决策
+                                          </span>
+                                          {formatDiagnosticTiming(
+                                            diagnosticTiming?.finalizeDecisionMs
+                                          )}
+                                        </p>
+                                      </div>
+                                    </div>
+
+                                    <div>
+                                      <p className="font-utility text-[10px] font-semibold uppercase text-[#72807b]">
+                                        Retrieval
+                                      </p>
+                                      <div className="mt-1 grid gap-2 md:grid-cols-4 lg:grid-cols-7">
+                                        <p>
+                                          <span className="block text-[#72807b]">
+                                            检索调用
+                                          </span>
+                                          {formatDiagnosticTiming(
+                                            diagnosticTiming?.retrieveDocumentsMs
+                                          )}
+                                        </p>
+                                        <p>
+                                          <span className="block text-[#72807b]">
+                                            Embedding
+                                          </span>
+                                          {formatDiagnosticTiming(
+                                            diagnosticTiming?.embeddingMs
+                                          )}
+                                        </p>
+                                        <p>
+                                          <span className="block text-[#72807b]">
+                                            Vector
+                                          </span>
+                                          {formatDiagnosticTiming(
+                                            diagnosticTiming?.vectorMs
+                                          )}
+                                        </p>
+                                        <p>
+                                          <span className="block text-[#72807b]">
+                                            Fulltext
+                                          </span>
+                                          {formatDiagnosticTiming(
+                                            diagnosticTiming?.fulltextMs
+                                          )}
+                                        </p>
+                                        <p>
+                                          <span className="block text-[#72807b]">
+                                            RRF
+                                          </span>
+                                          {formatDiagnosticTiming(
+                                            diagnosticTiming?.rrfMs
+                                          )}
+                                        </p>
+                                        <p>
+                                          <span className="block text-[#72807b]">
+                                            Rerank
+                                          </span>
+                                          {formatDiagnosticTiming(
+                                            diagnosticTiming?.rerankMs
+                                          )}
+                                        </p>
+                                        <p>
+                                          <span className="block text-[#72807b]">
+                                            检索总计
+                                          </span>
+                                          {formatDiagnosticTiming(
+                                            diagnosticTiming?.retrievalTotalMs
+                                          )}
+                                        </p>
+                                      </div>
+                                    </div>
+
+                                    <div>
+                                      <p className="font-utility text-[10px] font-semibold uppercase text-[#72807b]">
+                                        Answer
+                                      </p>
+                                      <div className="mt-1 grid gap-2 md:grid-cols-4">
+                                        <p>
+                                          <span className="block text-[#72807b]">
+                                            回答前
+                                          </span>
+                                          {formatDiagnosticTiming(
+                                            diagnosticTiming?.preAnswerTotalMs
+                                          )}
+                                        </p>
+                                        <p>
+                                          <span className="block text-[#72807b]">
+                                            首 token
+                                          </span>
+                                          {formatDiagnosticTiming(
+                                            diagnosticTiming?.firstAnswerTokenMs
+                                          )}
+                                        </p>
+                                        <p>
+                                          <span className="block text-[#72807b]">
+                                            输出耗时
+                                          </span>
+                                          {formatDiagnosticTiming(
+                                            diagnosticTiming?.answerStreamMs
+                                          )}
+                                        </p>
+                                        <p>
+                                          <span className="block text-[#72807b]">
+                                            总耗时
+                                          </span>
+                                          {formatDiagnosticTiming(
+                                            diagnosticTiming?.chatStreamTotalMs
+                                          )}
+                                        </p>
+                                      </div>
+                                    </div>
                                   </div>
                                 </div>
 
