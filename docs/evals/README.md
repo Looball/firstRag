@@ -117,3 +117,51 @@ scripts/rag_eval_gate.sh
 - 脚本会创建临时会话，用于保存真实聊天结果。
 - 脚本会临时 PATCH 知识库检索设置，并在每条 case 完成后恢复原设置。
 - 脚本不会读取 `.env`，账号密码请通过环境变量或命令行参数传入。
+
+## 上传与向量化链路验收
+
+`scripts/eval_indexing.py` 用于检查新文件进入知识库后的完整链路：
+
+```text
+登录
+  -> 选择默认知识库
+  -> 上传临时 Markdown 文件
+  -> auto_index 提交 vector index job
+  -> 等待 worker 完成
+  -> 确认文件状态为 indexed
+  -> 发起聊天
+  -> 确认 Sources 命中刚上传的临时文件
+  -> 默认解除临时文件与知识库关联
+```
+
+运行命令：
+
+```bash
+FIRSTRAG_EVAL_USERNAME=你的用户名 \
+FIRSTRAG_EVAL_PASSWORD=你的密码 \
+conda run -n firstrag python scripts/eval_indexing.py \
+  --base-url http://127.0.0.1:8000
+```
+
+运行前需要同时启动后端和 vector index worker：
+
+```bash
+cd backend
+conda activate firstrag
+python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+
+cd backend
+conda activate firstrag
+python -m app.workers.vector_index_worker
+```
+
+默认输出：
+
+- `docs/evals/latest_indexing_eval_report.md`：最新 Markdown 报告。
+- `docs/evals/indexing_runs/YYYYMMDD_HHMMSS.json`：带时间戳的历史 JSON 记录。
+
+默认情况下，脚本只会解除临时文件和知识库的关联，不会删除全局文件记录、上传目录、chunks 或 Chroma 数据，避免误删用户数据。如果需要保留临时文件关联，可加：
+
+```bash
+--keep-file
+```
