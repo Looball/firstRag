@@ -15,9 +15,12 @@ yarn-error.log*
 # Local documents and generated stores
 /backend/demo/local_doc/
 /vector_db/
+/backend/vector_db/
 /models/
 /uploads/
+/backend/uploads/
 /buffer/
+/backend/buffer/
 
 # Local application settings
 .env
