@@ -64,6 +64,7 @@
 | 规则覆盖 | `override_applied`、`override_reason` | 后端确定性规则是否覆盖 Router 判断，例如命中知识库文件画像。 |
 | 召回排序 | `diagnostics.vector_count`、`fulltext_count`、`fused_count`、`reranked_count` | vector/fulltext 召回数量、RRF 融合后数量和 rerank 精排后数量。 |
 | 阶段耗时 | `diagnostics.timing.*_ms` | 问题改写、Router、检索、RRF、rerank、首 token 和整体流式回答耗时，单位毫秒。 |
+| LLM 配置 | `diagnostics.llm.provider`、`model`、`credential_mode`、`temperature`、`max_tokens` | 本轮实际使用的模型厂商、模型名、凭据来源和生成参数，不包含 API Key。 |
 | 最终引用 | `retrieval_sources`、`sources` | 最终展示给用户的引用片段及这些片段命中的召回通道。 |
 
 常见耗时字段：
@@ -79,6 +80,15 @@
 - `first_answer_token_ms`：从后端开始处理到首个回答 token 的耗时。
 - `answer_stream_ms`：首个回答 token 后到回答完成的流式耗时。
 - `chat_stream_total_ms`：本轮后端流式回答总耗时。
+
+`diagnostics.llm` 当前会记录：
+
+- `provider`：实际使用的模型厂商。
+- `model`：实际使用的模型名。
+- `credential_mode`：`platform` 或 `user`。
+- `base_url`：实际请求的 OpenAI-compatible 地址。
+- `temperature`、`max_tokens`、`timeout_seconds`、`max_retries`：本轮生成参数。
+- `prompt_tokens`、`completion_tokens`、`total_tokens`：Token 用量。当前兼容流式链路拿不到 usage 时为 `null`。
 
 前端可通过：
 

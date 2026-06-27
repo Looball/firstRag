@@ -7,6 +7,7 @@ from unittest.mock import MagicMock, patch
 from app.services.user_settings_service import (
     _merge_settings_record,
     _validate_user_base_url,
+    get_effective_chat_model_config,
     get_serialized_user_llm_settings,
     get_saved_provider_models,
     test_user_llm_settings,
@@ -65,6 +66,26 @@ class UserLLMSettingsServiceTests(unittest.TestCase):
         self.assertEqual(settings["api_key_hint"], "••••-key")
         self.assertNotIn("api_key", settings)
         decrypt_secret.assert_not_called()
+
+    def test_effective_config_reports_user_credential_mode(self) -> None:
+        """生效模型配置应携带实际凭据来源，供 RAG 诊断使用。"""
+        record = build_user_record()
+        with patch(
+            "app.services.user_settings_service.get_user_llm_settings",
+            return_value=record,
+        ), patch(
+            "app.services.user_settings_service.get_user_llm_provider_credential",
+            return_value=None,
+        ), patch(
+            "app.services.user_settings_service.decrypt_secret",
+            return_value="plain-key",
+        ):
+            config = get_effective_chat_model_config(1)
+
+        self.assertEqual(config.credential_mode, "user")
+        self.assertEqual(config.settings.provider, "deepseek")
+        self.assertEqual(config.settings.model, "deepseek-v4-flash")
+        self.assertEqual(config.settings.api_key, "plain-key")
 
     def test_update_user_settings_encrypts_new_api_key(self) -> None:
         """新提交的 API Key 应加密后才传给仓库层。"""

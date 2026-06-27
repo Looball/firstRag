@@ -6,6 +6,7 @@ from uuid import uuid4
 from langchain_core.documents import Document
 from langchain_core.language_models.fake_chat_models import FakeListChatModel
 
+from app.services.llm_service import ChatModelSettings
 from app.services.rag_service import (
     build_knowledge_base_profile,
     build_configured_retrieval_decision,
@@ -18,6 +19,7 @@ from app.services.rag_service import (
     serialize_reference_documents,
     stream_rag_response,
 )
+from app.services.user_settings_service import EffectiveChatModelConfig
 
 
 class FakeStreamingChain:
@@ -331,6 +333,48 @@ class RagReferenceFilteringTests(unittest.TestCase):
         self.assertIn("retrieve_documents_ms", timing)
         self.assertIn("pre_answer_total_ms", timing)
 
+    def test_stream_rag_response_includes_llm_diagnostics(self) -> None:
+        """检索事件应携带本轮实际 LLM 配置且不包含 API Key。"""
+        llm_diagnostics = {
+            "provider": "deepseek",
+            "model": "deepseek-chat",
+            "credential_mode": "user",
+            "base_url": "https://api.deepseek.com/v1",
+            "temperature": 0.2,
+            "max_tokens": 8000,
+            "timeout_seconds": 60,
+            "max_retries": 2,
+            "prompt_tokens": None,
+            "completion_tokens": None,
+            "total_tokens": None,
+        }
+        chain = FakeStreamingChain([
+            {"llm_diagnostics": llm_diagnostics},
+            {
+                "retrieval_decision": {
+                    "need_retrieval": False,
+                    "rewritten_query": "你好",
+                    "reason": "普通问候",
+                }
+            },
+            {"context": []},
+            {"answer": "你好！"},
+        ])
+
+        events = list(stream_rag_response(
+            chain=chain,
+            user_input="你好",
+            chat_history=[],
+            user_id=1,
+            knowledge_base_id=uuid4(),
+        ))
+
+        saved_llm = events[0]["diagnostics"]["llm"]
+        self.assertEqual(saved_llm["provider"], "deepseek")
+        self.assertEqual(saved_llm["model"], "deepseek-chat")
+        self.assertEqual(saved_llm["credential_mode"], "user")
+        self.assertNotIn("api_key", saved_llm)
+
 
 class RagQueryRouterTests(unittest.TestCase):
     """验证 Query Router 的解析、画像和检索开关行为。"""
@@ -532,7 +576,22 @@ class RagQueryRouterTests(unittest.TestCase):
         ])
 
         with unittest.mock.patch(
-            "app.services.rag_service.create_chat_model",
+            "app.services.rag_service.get_effective_chat_model_config",
+            return_value=EffectiveChatModelConfig(
+                settings=ChatModelSettings(
+                    provider="deepseek",
+                    model="deepseek-chat",
+                    api_key="test-key",
+                    base_url=None,
+                    temperature=0.2,
+                    max_tokens=8000,
+                    timeout_seconds=60,
+                    max_retries=2,
+                ),
+                credential_mode="platform",
+            ),
+        ), unittest.mock.patch(
+            "app.services.rag_service.create_openai_compatible_chat_model",
             return_value=model,
         ), unittest.mock.patch(
             "app.services.rag_service.get_knowledge_base_files",

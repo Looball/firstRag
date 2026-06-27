@@ -23,8 +23,15 @@ from app.repositories.retrieval_settings_repository import (
     DEFAULT_RETRIEVAL_SETTINGS,
     get_knowledge_base_retrieval_settings,
 )
-from app.services.user_settings_service import get_effective_chat_model_settings
-from app.services.llm_service import create_openai_compatible_chat_model
+from app.services.user_settings_service import (
+    get_effective_chat_model_config,
+    get_effective_chat_model_settings,
+)
+from app.services.llm_service import (
+    ChatModelSettings,
+    create_openai_compatible_chat_model,
+    resolve_base_url,
+)
 from app.services.retrieval.hybrid_retriever import (
     get_hybrid_documents,
     get_retrieval_diagnostics,
@@ -57,6 +64,7 @@ def elapsed_ms(started_at: float) -> float:
 def merge_diagnostics_timing(
     diagnostics: dict[str, Any] | None,
     timing: dict[str, float],
+    llm_diagnostics: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """将 RAG 外层耗时合并进 retrieval diagnostics。"""
     merged = dict(diagnostics or {})
@@ -67,6 +75,8 @@ def merge_diagnostics_timing(
         **existing_timing,
         **timing,
     }
+    if llm_diagnostics is not None:
+        merged["llm"] = llm_diagnostics
     return merged
 
 
@@ -74,6 +84,26 @@ def create_chat_model(user_id: int) -> ChatOpenAI:
     """创建当前用户生效的 OpenAI 兼容聊天模型。"""
     settings = get_effective_chat_model_settings(user_id)
     return create_openai_compatible_chat_model(settings)
+
+
+def serialize_llm_diagnostics(
+    settings: ChatModelSettings,
+    credential_mode: str,
+) -> dict[str, Any]:
+    """生成不含 API Key 的 LLM 调用诊断信息。"""
+    return {
+        "provider": settings.provider,
+        "model": settings.model,
+        "credential_mode": credential_mode,
+        "base_url": resolve_base_url(settings.provider, settings.base_url),
+        "temperature": settings.temperature,
+        "max_tokens": settings.max_tokens,
+        "timeout_seconds": settings.timeout_seconds,
+        "max_retries": settings.max_retries,
+        "prompt_tokens": None,
+        "completion_tokens": None,
+        "total_tokens": None,
+    }
 
 
 def is_reference_document_relevant(
@@ -590,7 +620,12 @@ def get_chain(user_id: int) -> RunnableSerializable:
     第一次调用由 LLM 补充用户问题，再在当前知识库范围内混合检索。
     第二次调用将检索上下文和用户问题交给 LLM 生成答案。
     """
-    model = create_chat_model(user_id)
+    model_config = get_effective_chat_model_config(user_id)
+    model = create_openai_compatible_chat_model(model_config.settings)
+    llm_diagnostics = serialize_llm_diagnostics(
+        model_config.settings,
+        model_config.credential_mode,
+    )
 
     # 第一次调用：由LLM补充用户提问，再进行混合检索
     condense_question_system_template = (
@@ -697,6 +732,7 @@ def get_chain(user_id: int) -> RunnableSerializable:
         RunnablePassthrough.assign(
             standalone_question=standalone_question
         )
+        .assign(llm_diagnostics=RunnableLambda(lambda _: llm_diagnostics))
         .assign(retrieval_settings=RunnableLambda(load_retrieval_settings))
         .assign(knowledge_profile=RunnableLambda(build_knowledge_base_profile))
         .assign(raw_retrieval_decision=retrieval_router)
@@ -765,11 +801,15 @@ def stream_rag_response(
     sources_sent = False
     retrieval_sent = False
     retrieval_decision: RetrievalDecision | None = None
+    llm_diagnostics: dict[str, Any] | None = None
     first_answer_token_recorded = False
     for chunk in response:
         for chunk_key, stage in RAG_STAGE_TIMING_FIELDS.items():
             if chunk_key in chunk:
                 record_rag_stage(stage)
+
+        if isinstance(chunk.get("llm_diagnostics"), dict):
+            llm_diagnostics = chunk["llm_diagnostics"]
 
         if "retrieval_decision" in chunk:
             retrieval_decision = normalize_retrieval_decision(
@@ -790,6 +830,7 @@ def stream_rag_response(
             diagnostics_with_timing = merge_diagnostics_timing(
                 diagnostics,
                 rag_timing,
+                llm_diagnostics,
             )
             if not retrieval_sent:
                 decision = normalize_retrieval_decision(retrieval_decision)

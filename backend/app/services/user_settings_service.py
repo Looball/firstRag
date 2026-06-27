@@ -1,6 +1,6 @@
 """用户聊天模型设置的业务编排。"""
 
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from decimal import Decimal
 from ipaddress import ip_address
 from typing import Any
@@ -36,6 +36,14 @@ from app.services.llm_service import (
 
 USER_CREDENTIAL_MODE = "user"
 PLATFORM_CREDENTIAL_MODE = "platform"
+
+
+@dataclass(frozen=True)
+class EffectiveChatModelConfig:
+    """当前请求实际生效的聊天模型配置和凭据来源。"""
+
+    settings: ChatModelSettings
+    credential_mode: str
 
 
 def _as_float(value: float | Decimal) -> float:
@@ -200,12 +208,25 @@ def _get_provider_credential_for_updates(
 
 def get_effective_chat_model_settings(user_id: int) -> ChatModelSettings:
     """获取当前用户实际生效的聊天模型设置。"""
+    return get_effective_chat_model_config(user_id).settings
+
+
+def get_effective_chat_model_config(user_id: int) -> EffectiveChatModelConfig:
+    """获取当前用户实际生效的聊天模型配置及凭据来源。"""
     record = get_user_llm_settings(user_id)
     if record is None or record["credential_mode"] == PLATFORM_CREDENTIAL_MODE:
-        return _build_platform_settings(record)
+        return EffectiveChatModelConfig(
+            settings=_build_platform_settings(record),
+            credential_mode=PLATFORM_CREDENTIAL_MODE,
+        )
 
     credential = get_user_llm_provider_credential(user_id, record["provider"])
-    return _build_user_settings(_apply_provider_credential(record, credential))
+    return EffectiveChatModelConfig(
+        settings=_build_user_settings(
+            _apply_provider_credential(record, credential),
+        ),
+        credential_mode=USER_CREDENTIAL_MODE,
+    )
 
 
 def get_serialized_user_llm_settings(user_id: int) -> dict[str, Any]:

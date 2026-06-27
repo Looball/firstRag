@@ -426,6 +426,7 @@ def compact_diagnostics(retrieval: dict[str, Any]) -> dict[str, Any]:
         "fused_count": diagnostics.get("fused_count"),
         "reranked_count": diagnostics.get("reranked_count"),
         "timing": diagnostics.get("timing") or {},
+        "llm": diagnostics.get("llm") or {},
         "reason": retrieval.get("reason"),
     }
 
@@ -670,6 +671,11 @@ def write_report(
                 pre_answer=diagnostics["timing"].get("pre_answer_total_ms", "—"),
                 retrieval=diagnostics["timing"].get("retrieval_total_ms", "—"),
                 rerank=diagnostics["timing"].get("rerank_ms", "—"),
+            ),
+            "- LLM：provider={provider}，model={model}，tokens={tokens}".format(
+                provider=diagnostics["llm"].get("provider", "—"),
+                model=diagnostics["llm"].get("model", "—"),
+                tokens=diagnostics["llm"].get("total_tokens") or "—",
             ),
             f"- 判断原因：{diagnostics['reason'] or '—'}",
             "",
