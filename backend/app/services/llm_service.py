@@ -134,6 +134,7 @@ def create_openai_compatible_chat_model(
         timeout=settings.timeout_seconds,
         max_retries=settings.max_retries,
         streaming=True,
+        stream_usage=True,
     )
 
 

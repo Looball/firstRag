@@ -234,6 +234,15 @@ def dispatch_sse_event(
 
     if event_name == "retrieval":
         result["retrieval"] = payload
+    elif event_name == "llm_usage":
+        llm = payload.get("llm")
+        if isinstance(llm, dict):
+            retrieval = result.setdefault("retrieval", {})
+            diagnostics = retrieval.setdefault("diagnostics", {})
+            existing_llm = diagnostics.get("llm")
+            if not isinstance(existing_llm, dict):
+                existing_llm = {}
+            diagnostics["llm"] = {**existing_llm, **llm}
     elif event_name == "sources":
         result["sources"] = payload.get("sources") or []
     elif event_name == "answer":

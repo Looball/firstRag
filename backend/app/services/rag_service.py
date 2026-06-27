@@ -106,6 +106,88 @@ def serialize_llm_diagnostics(
     }
 
 
+def normalize_token_usage_value(value: Any) -> int | None:
+    """将模型返回的 token usage 值规范化为整数或 None。"""
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        return int(value)
+    return None
+
+
+def extract_token_usage_from_chunk(chunk: Any) -> dict[str, int | None]:
+    """从 LangChain/OpenAI 流式消息块中提取 token usage。"""
+    usage = getattr(chunk, "usage_metadata", None)
+    if not isinstance(usage, dict):
+        response_metadata = getattr(chunk, "response_metadata", None)
+        if isinstance(response_metadata, dict):
+            usage = (
+                response_metadata.get("token_usage")
+                or response_metadata.get("usage")
+            )
+    if not isinstance(usage, dict):
+        additional_kwargs = getattr(chunk, "additional_kwargs", None)
+        if isinstance(additional_kwargs, dict):
+            usage = (
+                additional_kwargs.get("token_usage")
+                or additional_kwargs.get("usage")
+            )
+
+    if not isinstance(usage, dict):
+        return {}
+
+    prompt_tokens = (
+        usage.get("prompt_tokens")
+        if "prompt_tokens" in usage
+        else usage.get("input_tokens")
+    )
+    completion_tokens = (
+        usage.get("completion_tokens")
+        if "completion_tokens" in usage
+        else usage.get("output_tokens")
+    )
+    total_tokens = usage.get("total_tokens")
+
+    return {
+        "prompt_tokens": normalize_token_usage_value(prompt_tokens),
+        "completion_tokens": normalize_token_usage_value(completion_tokens),
+        "total_tokens": normalize_token_usage_value(total_tokens),
+    }
+
+
+def merge_llm_token_usage(
+    llm_diagnostics: dict[str, Any] | None,
+    token_usage: dict[str, int | None],
+) -> dict[str, Any] | None:
+    """把 token usage 合并到 LLM 诊断信息中。"""
+    if llm_diagnostics is None or not token_usage:
+        return llm_diagnostics
+
+    merged = dict(llm_diagnostics)
+    for key, value in token_usage.items():
+        if value is not None:
+            merged[key] = value
+    return merged
+
+
+def extract_answer_text(chunk: Any) -> str:
+    """从模型流式 chunk 中提取可返回给前端的文本内容。"""
+    content = getattr(chunk, "content", chunk)
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts = []
+        for item in content:
+            if isinstance(item, str):
+                parts.append(item)
+            elif isinstance(item, dict) and isinstance(item.get("text"), str):
+                parts.append(item["text"])
+        return "".join(parts)
+    return str(content) if content is not None else ""
+
+
 def is_reference_document_relevant(
     doc: Document,
     rerank_score_threshold: float = REFERENCE_RERANK_SCORE_THRESHOLD,
@@ -725,7 +807,6 @@ def get_chain(user_id: int) -> RunnableSerializable:
         )
         | qa_prompt
         | model
-        | StrOutputParser()
     )
 
     return (
@@ -866,6 +947,22 @@ def stream_rag_response(
             sources_sent = True
 
         if "answer" in chunk:
+            answer_chunk = chunk["answer"]
+            token_usage = extract_token_usage_from_chunk(answer_chunk)
+            if token_usage:
+                llm_diagnostics = merge_llm_token_usage(
+                    llm_diagnostics,
+                    token_usage,
+                )
+                yield {
+                    "type": "llm_usage",
+                    "llm": llm_diagnostics,
+                }
+
+            content = extract_answer_text(answer_chunk)
+            if not content:
+                continue
+
             if not first_answer_token_recorded:
                 rag_timing["first_answer_token_ms"] = elapsed_ms(
                     stream_started_at,
@@ -873,5 +970,5 @@ def stream_rag_response(
                 first_answer_token_recorded = True
             yield {
                 "type": "answer",
-                "content": chunk["answer"],
+                "content": content,
             }

@@ -75,6 +75,28 @@ def record_stream_timing(
     timing[f"{name}_ms"] = round((perf_counter() - started_at) * 1000, 2)
 
 
+def merge_llm_diagnostics(
+    retrieval: dict[str, Any],
+    llm_diagnostics: dict[str, Any] | None,
+) -> None:
+    """将流式过程中后到达的 LLM usage 合并进 retrieval diagnostics。"""
+    if not isinstance(llm_diagnostics, dict):
+        return
+
+    diagnostics = retrieval.setdefault("diagnostics", {})
+    if not isinstance(diagnostics, dict):
+        diagnostics = {}
+        retrieval["diagnostics"] = diagnostics
+
+    current_llm = diagnostics.get("llm")
+    if not isinstance(current_llm, dict):
+        current_llm = {}
+    diagnostics["llm"] = {
+        **current_llm,
+        **llm_diagnostics,
+    }
+
+
 def stream_answer_and_save(
     chain,
     user_input: str,
@@ -132,6 +154,13 @@ def stream_answer_and_save(
                 sources = event["sources"]
                 yield format_sse_event("sources", {
                     "sources": sources,
+                })
+                continue
+
+            if event["type"] == "llm_usage":
+                merge_llm_diagnostics(retrieval, event.get("llm"))
+                yield format_sse_event("llm_usage", {
+                    "llm": event.get("llm") or {},
                 })
                 continue
 

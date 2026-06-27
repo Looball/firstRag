@@ -5,6 +5,7 @@ from uuid import uuid4
 
 from langchain_core.documents import Document
 from langchain_core.language_models.fake_chat_models import FakeListChatModel
+from langchain_core.messages import AIMessageChunk
 
 from app.services.llm_service import ChatModelSettings
 from app.services.rag_service import (
@@ -374,6 +375,115 @@ class RagReferenceFilteringTests(unittest.TestCase):
         self.assertEqual(saved_llm["model"], "deepseek-chat")
         self.assertEqual(saved_llm["credential_mode"], "user")
         self.assertNotIn("api_key", saved_llm)
+
+    def test_stream_rag_response_emits_llm_usage_from_message_chunks(
+        self,
+    ) -> None:
+        """模型流式 chunk 携带 usage 时，应输出 LLM usage 事件。"""
+        llm_diagnostics = {
+            "provider": "deepseek",
+            "model": "deepseek-chat",
+            "credential_mode": "user",
+            "prompt_tokens": None,
+            "completion_tokens": None,
+            "total_tokens": None,
+        }
+        chain = FakeStreamingChain([
+            {"llm_diagnostics": llm_diagnostics},
+            {
+                "retrieval_decision": {
+                    "need_retrieval": False,
+                    "rewritten_query": "你好",
+                    "reason": "普通问候",
+                }
+            },
+            {"context": []},
+            {"answer": AIMessageChunk(content="你好")},
+            {
+                "answer": AIMessageChunk(
+                    content="",
+                    usage_metadata={
+                        "input_tokens": 12,
+                        "output_tokens": 3,
+                        "total_tokens": 15,
+                    },
+                )
+            },
+        ])
+
+        events = list(stream_rag_response(
+            chain=chain,
+            user_input="你好",
+            chat_history=[],
+            user_id=1,
+            knowledge_base_id=uuid4(),
+        ))
+
+        usage_events = [
+            event
+            for event in events
+            if event["type"] == "llm_usage"
+        ]
+        answer_events = [
+            event
+            for event in events
+            if event["type"] == "answer"
+        ]
+        self.assertEqual(answer_events[0]["content"], "你好")
+        self.assertEqual(usage_events[0]["llm"]["prompt_tokens"], 12)
+        self.assertEqual(usage_events[0]["llm"]["completion_tokens"], 3)
+        self.assertEqual(usage_events[0]["llm"]["total_tokens"], 15)
+
+    def test_stream_rag_response_reads_usage_from_additional_kwargs(
+        self,
+    ) -> None:
+        """部分 OpenAI 兼容厂商可能把 usage 放在 additional_kwargs。"""
+        chain = FakeStreamingChain([
+            {
+                "llm_diagnostics": {
+                    "provider": "compatible",
+                    "model": "chat-model",
+                    "credential_mode": "user",
+                }
+            },
+            {
+                "retrieval_decision": {
+                    "need_retrieval": False,
+                    "rewritten_query": "你好",
+                    "reason": "普通问候",
+                }
+            },
+            {"context": []},
+            {
+                "answer": AIMessageChunk(
+                    content="",
+                    additional_kwargs={
+                        "usage": {
+                            "prompt_tokens": 20,
+                            "completion_tokens": 4,
+                            "total_tokens": 24,
+                        }
+                    },
+                )
+            },
+        ])
+
+        events = list(stream_rag_response(
+            chain=chain,
+            user_input="你好",
+            chat_history=[],
+            user_id=1,
+            knowledge_base_id=uuid4(),
+        ))
+
+        usage_event = next(
+            event
+            for event in events
+            if event["type"] == "llm_usage"
+        )
+        self.assertEqual(usage_event["llm"]["prompt_tokens"], 20)
+        self.assertEqual(usage_event["llm"]["completion_tokens"], 4)
+        self.assertEqual(usage_event["llm"]["total_tokens"], 24)
 
 
 class RagQueryRouterTests(unittest.TestCase):
