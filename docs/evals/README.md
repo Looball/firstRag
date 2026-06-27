@@ -44,6 +44,30 @@ conda run -n firstrag python scripts/eval_rag.py \
   --no-history
 ```
 
+## 质量门禁
+
+评测脚本支持在真实链路跑完后检查质量门槛。任一门槛不满足时，脚本会返回非 0 退出码，并在 Markdown 报告和历史 JSON 中记录失败项：
+
+```bash
+conda run -n firstrag python scripts/eval_rag.py \
+  --base-url http://127.0.0.1:8000 \
+  --username 你的用户名 \
+  --password 你的密码 \
+  --min-pass-rate 1.0 \
+  --min-average-sources 1 \
+  --max-average-first-token-ms 8000 \
+  --max-average-elapsed-seconds 20
+```
+
+可用门槛：
+
+| 参数 | 说明 |
+| --- | --- |
+| `--min-pass-rate` | 最低通过率，取值范围 `0` 到 `1`。不传时沿用默认严格模式：所有 case 必须通过。 |
+| `--min-average-sources` | 最低平均引用数。 |
+| `--max-average-first-token-ms` | 最高平均首 token 等待时间。优先使用 `first_answer_token_ms`，缺失时使用 `pre_answer_total_ms` 近似。 |
+| `--max-average-elapsed-seconds` | 最高平均端到端 case 耗时。 |
+
 ## case 字段
 
 | 字段 | 说明 |

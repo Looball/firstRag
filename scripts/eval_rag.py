@@ -90,7 +90,53 @@ def parse_args() -> argparse.Namespace:
         default=180,
         help="HTTP timeout seconds for each request, default: 180.",
     )
+    parser.add_argument(
+        "--min-pass-rate",
+        type=parse_pass_rate,
+        default=None,
+        help="Minimum acceptable pass rate in [0, 1]. If omitted, every case must pass.",
+    )
+    parser.add_argument(
+        "--min-average-sources",
+        type=parse_non_negative_float,
+        default=None,
+        help="Minimum acceptable average source count.",
+    )
+    parser.add_argument(
+        "--max-average-first-token-ms",
+        type=parse_non_negative_float,
+        default=None,
+        help=(
+            "Maximum acceptable average first-token wait in milliseconds. "
+            "Falls back to pre_answer_total_ms when first_answer_token_ms is unavailable."
+        ),
+    )
+    parser.add_argument(
+        "--max-average-elapsed-seconds",
+        type=parse_non_negative_float,
+        default=None,
+        help="Maximum acceptable average end-to-end case latency in seconds.",
+    )
     return parser.parse_args()
+
+
+def parse_non_negative_float(value: str) -> float:
+    """解析非负浮点数命令行参数。"""
+    try:
+        parsed = float(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("must be a number") from exc
+    if parsed < 0:
+        raise argparse.ArgumentTypeError("must be greater than or equal to 0")
+    return parsed
+
+
+def parse_pass_rate(value: str) -> float:
+    """解析 0 到 1 之间的通过率门槛。"""
+    parsed = parse_non_negative_float(value)
+    if parsed > 1:
+        raise argparse.ArgumentTypeError("must be between 0 and 1")
+    return parsed
 
 
 def normalize_base_url(base_url: str) -> str:
@@ -416,6 +462,22 @@ def format_bool(value: Any) -> str:
     return "—"
 
 
+def numeric_value(value: Any) -> float | None:
+    """把指标值规范化为可参与平均值计算的数字。"""
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    return None
+
+
+def average_or_none(values: list[float]) -> float | None:
+    """计算平均值；没有样本时返回 None。"""
+    if not values:
+        return None
+    return sum(values) / len(values)
+
+
 def compact_diagnostics(retrieval: dict[str, Any]) -> dict[str, Any]:
     """提取报告中最常用的检索诊断字段。"""
     diagnostics = retrieval.get("diagnostics") or {}
@@ -459,6 +521,29 @@ def build_summary(results: list[dict[str, Any]]) -> dict[str, Any]:
             result["chat_result"].retrieval,
         )["need_retrieval"] is True
     )
+    first_token_values: list[float] = []
+    pre_answer_values: list[float] = []
+    total_token_values: list[float] = []
+    for result in results:
+        diagnostics = compact_diagnostics(result["chat_result"].retrieval)
+        timing = diagnostics["timing"]
+        first_token_ms = numeric_value(timing.get("first_answer_token_ms"))
+        pre_answer_ms = numeric_value(timing.get("pre_answer_total_ms"))
+        if pre_answer_ms is not None:
+            pre_answer_values.append(pre_answer_ms)
+        # eval 的流式 retrieval 事件有时早于 first_answer_token_ms，
+        # 这种情况下用 pre_answer_total_ms 近似首 token 等待。
+        effective_first_token_ms = (
+            first_token_ms
+            if first_token_ms is not None
+            else pre_answer_ms
+        )
+        if effective_first_token_ms is not None:
+            first_token_values.append(effective_first_token_ms)
+
+        total_tokens = numeric_value(diagnostics["llm"].get("total_tokens"))
+        if total_tokens is not None:
+            total_token_values.append(total_tokens)
 
     return {
         "total": total,
@@ -469,7 +554,70 @@ def build_summary(results: list[dict[str, Any]]) -> dict[str, Any]:
         "average_elapsed_seconds": total_elapsed / total if total else 0,
         "average_sources": total_sources / total if total else 0,
         "retrieval_cases": retrieval_count,
+        "average_first_token_ms": average_or_none(first_token_values),
+        "average_pre_answer_ms": average_or_none(pre_answer_values),
+        "average_total_tokens": average_or_none(total_token_values),
     }
+
+
+def build_quality_gate_checks(
+    summary: dict[str, Any],
+    args: argparse.Namespace,
+) -> list[dict[str, Any]]:
+    """根据命令行门槛生成质量门禁检查结果。"""
+    checks: list[dict[str, Any]] = []
+
+    if args.min_pass_rate is not None:
+        current = numeric_value(summary.get("pass_rate"))
+        checks.append({
+            "name": "min_pass_rate",
+            "label": "最低通过率",
+            "operator": ">=",
+            "threshold": args.min_pass_rate,
+            "actual": current,
+            "passed": current is not None and current >= args.min_pass_rate,
+        })
+
+    if args.min_average_sources is not None:
+        current = numeric_value(summary.get("average_sources"))
+        checks.append({
+            "name": "min_average_sources",
+            "label": "最低平均引用数",
+            "operator": ">=",
+            "threshold": args.min_average_sources,
+            "actual": current,
+            "passed": current is not None and current >= args.min_average_sources,
+        })
+
+    if args.max_average_first_token_ms is not None:
+        current = numeric_value(summary.get("average_first_token_ms"))
+        checks.append({
+            "name": "max_average_first_token_ms",
+            "label": "最高平均首 token 等待",
+            "operator": "<=",
+            "threshold": args.max_average_first_token_ms,
+            "actual": current,
+            "passed": (
+                current is not None
+                and current <= args.max_average_first_token_ms
+            ),
+        })
+
+    if args.max_average_elapsed_seconds is not None:
+        current = numeric_value(summary.get("average_elapsed_seconds"))
+        checks.append({
+            "name": "max_average_elapsed_seconds",
+            "label": "最高平均总耗时",
+            "operator": "<=",
+            "threshold": args.max_average_elapsed_seconds,
+            "actual": current,
+            "passed": (
+                current is not None
+                and current <= args.max_average_elapsed_seconds
+            ),
+        })
+
+    return checks
 
 
 def serialize_source_summary(source: dict[str, Any]) -> dict[str, Any]:
@@ -511,14 +659,20 @@ def build_run_record(
     generated_at: datetime,
     base_url: str,
     cases_path: Path,
+    quality_gate_checks: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """构建可落盘的评测历史记录。"""
+    quality_gate_checks = quality_gate_checks or []
     return {
         "schema_version": 1,
         "generated_at": generated_at.isoformat(timespec="seconds"),
         "base_url": base_url,
         "cases_path": str(cases_path),
         "summary": build_summary(results),
+        "quality_gate": {
+            "passed": all(check["passed"] for check in quality_gate_checks),
+            "checks": quality_gate_checks,
+        },
         "cases": [
             serialize_result(result)
             for result in results
@@ -597,6 +751,8 @@ def append_history_comparison(
         "pass_rate": "通过率",
         "average_elapsed_seconds": "平均耗时秒",
         "average_sources": "平均引用数",
+        "average_first_token_ms": "平均首 token 毫秒",
+        "average_total_tokens": "平均 token",
         "retrieval_cases": "触发检索数",
     }
     for key, label in metric_names.items():
@@ -622,10 +778,13 @@ def write_report(
     generated_at: datetime,
     previous_run: dict[str, Any] | None = None,
     history_path: Path | None = None,
+    quality_gate_checks: list[dict[str, Any]] | None = None,
 ) -> None:
     """写入 Markdown 评测报告。"""
     report_path.parent.mkdir(parents=True, exist_ok=True)
     summary = build_summary(results)
+    quality_gate_checks = quality_gate_checks or []
+    quality_gate_passed = all(check["passed"] for check in quality_gate_checks)
     lines = [
         "# RAG 评测报告",
         "",
@@ -633,10 +792,32 @@ def write_report(
         f"- 通过：{summary['passed']}/{summary['total']}",
         f"- 平均耗时：{summary['average_elapsed_seconds']:.2f}s",
         f"- 平均引用数：{summary['average_sources']:.2f}",
+        f"- 平均首 token 等待：{format_number(summary['average_first_token_ms'])}ms",
+        f"- 平均 token：{format_number(summary['average_total_tokens'])}",
+        f"- 质量门禁：{'通过' if quality_gate_passed else '未通过'}",
         f"- 历史 JSON：{history_path or '未生成'}",
         "",
     ]
     append_history_comparison(lines, summary, previous_run)
+    if quality_gate_checks:
+        lines.extend([
+            "## 质量门禁",
+            "",
+            "| 门槛 | 结果 | 当前 | 要求 |",
+            "| --- | --- | ---: | ---: |",
+        ])
+        for check in quality_gate_checks:
+            lines.append(
+                "| {label} | {status} | {actual} | {operator} {threshold} |".format(
+                    label=check["label"],
+                    status="✅" if check["passed"] else "❌",
+                    actual=format_number(check["actual"]),
+                    operator=check["operator"],
+                    threshold=format_number(check["threshold"]),
+                ),
+            )
+        lines.append("")
+
     lines.extend([
         "| Case | 结果 | 耗时 | 是否检索 | 引用数 | 命中文件 |",
         "| --- | --- | ---: | --- | ---: | --- |",
@@ -814,11 +995,20 @@ def main() -> int:
                     timeout=args.timeout,
                 )
 
+    summary = build_summary(results)
+    quality_gate_checks = build_quality_gate_checks(summary, args)
+    quality_gate_failed = [
+        check
+        for check in quality_gate_checks
+        if not check["passed"]
+    ]
+
     run_record = build_run_record(
         results=results,
         generated_at=generated_at,
         base_url=base_url,
         cases_path=args.cases,
+        quality_gate_checks=quality_gate_checks,
     )
     history_path = None
     if not args.no_history:
@@ -830,13 +1020,30 @@ def main() -> int:
         generated_at=generated_at,
         previous_run=previous_run,
         history_path=history_path,
+        quality_gate_checks=quality_gate_checks,
     )
     passed_count = sum(1 for result in results if result["passed"])
     print(f"RAG eval passed {passed_count}/{len(results)}")
+    if quality_gate_checks:
+        print("Quality gate:")
+        for check in quality_gate_checks:
+            status = "PASS" if check["passed"] else "FAIL"
+            actual = format_number(check["actual"])
+            threshold = format_number(check["threshold"])
+            print(
+                f"- [{status}] {check['name']}: "
+                f"{actual} {check['operator']} {threshold}",
+            )
     print(f"Report: {args.report}")
     if history_path is not None:
         print(f"History: {history_path}")
-    return 0 if passed_count == len(results) else 1
+
+    case_gate_passed = (
+        True
+        if args.min_pass_rate is not None
+        else passed_count == len(results)
+    )
+    return 0 if case_gate_passed and not quality_gate_failed else 1
 
 
 if __name__ == "__main__":
