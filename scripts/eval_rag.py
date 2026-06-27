@@ -425,6 +425,7 @@ def compact_diagnostics(retrieval: dict[str, Any]) -> dict[str, Any]:
         "fulltext_count": diagnostics.get("fulltext_count"),
         "fused_count": diagnostics.get("fused_count"),
         "reranked_count": diagnostics.get("reranked_count"),
+        "timing": diagnostics.get("timing") or {},
         "reason": retrieval.get("reason"),
     }
 
@@ -665,6 +666,11 @@ def write_report(
             f"- 检索通道：{diagnostics['retrieval_sources'] or '—'}",
             f"- 向量降级：{format_bool(diagnostics['vector_degraded'])}",
             f"- 诊断计数：vector={diagnostics['vector_count']}，fulltext={diagnostics['fulltext_count']}，fused={diagnostics['fused_count']}，reranked={diagnostics['reranked_count']}",
+            "- 关键耗时：pre_answer={pre_answer}ms，retrieval={retrieval}ms，rerank={rerank}ms".format(
+                pre_answer=diagnostics["timing"].get("pre_answer_total_ms", "—"),
+                retrieval=diagnostics["timing"].get("retrieval_total_ms", "—"),
+                rerank=diagnostics["timing"].get("rerank_ms", "—"),
+            ),
             f"- 判断原因：{diagnostics['reason'] or '—'}",
             "",
             "### 检查项",
