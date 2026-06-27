@@ -1,4 +1,5 @@
 import argparse
+import logging
 import socket
 import time
 from uuid import UUID
@@ -14,11 +15,18 @@ from app.repositories.vector_index_job_repository import (
 from app.services.vectors.vector_index_service import index_knowledge_file_record
 
 
+logger = logging.getLogger(__name__)
+
+
 def process_next_vector_index_job(worker_id: str) -> bool:
     """领取并处理一个向量化任务；没有任务时返回 False。"""
     reclaimed_count = reclaim_expired_vector_index_jobs()
     if reclaimed_count:
-        print(f"[{worker_id}] reclaimed expired jobs={reclaimed_count}")
+        logger.info(
+            "回收过期向量化任务 worker_id=%s count=%s",
+            worker_id,
+            reclaimed_count,
+        )
 
     job = claim_next_vector_index_job(worker_id)
     if job is None:
@@ -39,7 +47,12 @@ def process_next_vector_index_job(worker_id: str) -> bool:
                 UUID(str(job_id)),
                 "文件索引版本已更新，旧任务已取消",
             )
-            print(f"[{worker_id}] cancelled stale file={file_id} job={job_id}")
+            logger.info(
+                "取消过期向量化任务 worker_id=%s file_id=%s job_id=%s",
+                worker_id,
+                file_id,
+                job_id,
+            )
             return True
 
         if file_record["status"] == "indexed":
@@ -50,7 +63,12 @@ def process_next_vector_index_job(worker_id: str) -> bool:
                 "message": "文件已完成向量化，跳过重复任务",
             }
             mark_vector_index_job_succeeded(UUID(str(job_id)), result)
-            print(f"[{worker_id}] skipped indexed file={file_id} job={job_id}")
+            logger.info(
+                "跳过已完成向量化的文件 worker_id=%s file_id=%s job_id=%s",
+                worker_id,
+                file_id,
+                job_id,
+            )
             return True
 
         result = index_knowledge_file_record(
@@ -59,10 +77,20 @@ def process_next_vector_index_job(worker_id: str) -> bool:
             index_version,
         )
         mark_vector_index_job_succeeded(UUID(str(job_id)), result)
-        print(f"[{worker_id}] indexed file={file_id} job={job_id}")
+        logger.info(
+            "完成文件向量化 worker_id=%s file_id=%s job_id=%s",
+            worker_id,
+            file_id,
+            job_id,
+        )
     except Exception as exc:
         mark_vector_index_job_failed(UUID(str(job_id)), str(exc))
-        print(f"[{worker_id}] failed file={file_id} job={job_id}: {exc}")
+        logger.exception(
+            "向量化任务失败 worker_id=%s file_id=%s job_id=%s",
+            worker_id,
+            file_id,
+            job_id,
+        )
 
     return True
 
