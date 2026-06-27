@@ -88,6 +88,9 @@ class ChatSettingsTests(unittest.TestCase):
         ), patch(
             "app.api.chat.get_chain",
         ) as get_chain, patch(
+            "app.api.chat.get_knowledge_base_retrieval_settings",
+            return_value=None,
+        ), patch(
             "app.api.chat.save_message",
             side_effect=[
                 {"id": uuid4()},
@@ -111,6 +114,61 @@ class ChatSettingsTests(unittest.TestCase):
         self.assertIn('"need_retrieval": false', body)
         self.assertIn("event: answer", body)
         get_chain.assert_not_called()
+
+    def test_forced_retrieval_bypasses_greeting_local_response(self) -> None:
+        """强制检索模式下，问候也应进入 RAG 链而不是本地短路。"""
+        assistant_message_id = uuid4()
+        knowledge_base_id = uuid4()
+        with patch(
+            "app.api.chat.conversation_exists",
+            return_value=True,
+        ), patch(
+            "app.api.chat.conversation_belongs_base",
+            return_value=True,
+        ), patch(
+            "app.api.chat.get_knowledge_base_retrieval_settings",
+            return_value={
+                "retrieval_mode": "always",
+                "enable_query_router": True,
+                "enable_rerank": True,
+                "top_k": 5,
+                "vector_top_k": 20,
+                "fulltext_top_k": 20,
+                "rrf_k": 20,
+                "rerank_score_threshold": 0.0,
+            },
+        ), patch(
+            "app.api.chat.load_chat_history",
+            return_value=[],
+        ), patch(
+            "app.api.chat.get_chain",
+            return_value=object(),
+        ) as get_chain, patch(
+            "app.api.chat.save_message",
+            side_effect=[
+                {"id": uuid4()},
+                {"id": assistant_message_id},
+            ],
+        ), patch(
+            "app.api.chat.stream_answer_and_save",
+            return_value=iter([
+                'event: retrieval\ndata: {"need_retrieval": true}\n\n',
+                'event: done\ndata: {"message": "回答完成"}\n\n',
+            ]),
+        ) as stream_answer:
+            response = self.client.post(
+                "/chat",
+                json={
+                    "conversation_id": str(uuid4()),
+                    "knowledge_base_id": str(knowledge_base_id),
+                    "message": "你好",
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn('"need_retrieval": true', response.text)
+        get_chain.assert_called_once_with(1)
+        stream_answer.assert_called_once()
 
 
 if __name__ == "__main__":

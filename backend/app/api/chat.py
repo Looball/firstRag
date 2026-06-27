@@ -1,3 +1,5 @@
+from uuid import UUID
+
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 
@@ -5,6 +7,10 @@ from app.core.security import get_current_user_id
 from app.repositories.conversation_repository import (
     conversation_belongs_base,
     conversation_exists,
+)
+from app.repositories.retrieval_settings_repository import (
+    DEFAULT_RETRIEVAL_SETTINGS,
+    get_knowledge_base_retrieval_settings,
 )
 from app.schemas.chat import ChatRequest
 from app.services.chat_service import (
@@ -18,6 +24,29 @@ from app.services.rag_service import get_chain
 
 
 router = APIRouter(tags=["chat"])
+
+
+def should_use_local_chat_response(
+    user_id: int,
+    knowledge_base_id: UUID,
+) -> bool:
+    """判断当前知识库设置是否允许本地问候短路。"""
+    settings = get_knowledge_base_retrieval_settings(
+        knowledge_base_id=knowledge_base_id,
+        user_id=user_id,
+    ) or DEFAULT_RETRIEVAL_SETTINGS
+    retrieval_mode = settings.get("retrieval_mode", "auto")
+
+    if retrieval_mode == "always":
+        return False
+
+    if (
+        retrieval_mode == "auto"
+        and settings.get("enable_query_router") is False
+    ):
+        return False
+
+    return True
 
 
 # 请求聊天接口
@@ -39,6 +68,11 @@ def chat(
         raise HTTPException(status_code=404, detail="禁止跨知识库提问")
 
     local_answer = get_local_chat_response(req.message)
+    if local_answer is not None and not should_use_local_chat_response(
+        user_id,
+        req.knowledge_base_id,
+    ):
+        local_answer = None
     if local_answer is not None:
         # 本地可确定的问候类消息不需要构建 RAG 链，避免额外模型调用。
         save_message(req.conversation_id, "user", req.message)
