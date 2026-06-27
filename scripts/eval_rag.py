@@ -18,6 +18,7 @@ from urllib.request import Request, urlopen
 
 DEFAULT_CASES_PATH = Path("docs/evals/rag_eval_cases.jsonl")
 DEFAULT_REPORT_PATH = Path("docs/evals/latest_rag_eval_report.md")
+DEFAULT_RUNS_DIR = Path("docs/evals/runs")
 
 
 class EvalError(RuntimeError):
@@ -66,6 +67,17 @@ def parse_args() -> argparse.Namespace:
         type=Path,
         default=DEFAULT_REPORT_PATH,
         help=f"Markdown report path, default: {DEFAULT_REPORT_PATH}",
+    )
+    parser.add_argument(
+        "--runs-dir",
+        type=Path,
+        default=DEFAULT_RUNS_DIR,
+        help=f"Timestamped JSON run history dir, default: {DEFAULT_RUNS_DIR}",
+    )
+    parser.add_argument(
+        "--no-history",
+        action="store_true",
+        help="Only write latest markdown report, skip timestamped JSON history.",
     )
     parser.add_argument(
         "--knowledge-base-name",
@@ -417,19 +429,207 @@ def compact_diagnostics(retrieval: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def write_report(results: list[dict[str, Any]], report_path: Path) -> None:
+def build_summary(results: list[dict[str, Any]]) -> dict[str, Any]:
+    """汇总本轮评测的核心指标。"""
+    total = len(results)
+    passed_count = sum(1 for result in results if result["passed"])
+    total_elapsed = sum(
+        result["chat_result"].elapsed_seconds
+        for result in results
+    )
+    total_sources = sum(
+        len(result["chat_result"].sources)
+        for result in results
+    )
+    retrieval_count = sum(
+        1
+        for result in results
+        if compact_diagnostics(
+            result["chat_result"].retrieval,
+        )["need_retrieval"] is True
+    )
+
+    return {
+        "total": total,
+        "passed": passed_count,
+        "failed": total - passed_count,
+        "pass_rate": passed_count / total if total else 0,
+        "total_elapsed_seconds": total_elapsed,
+        "average_elapsed_seconds": total_elapsed / total if total else 0,
+        "average_sources": total_sources / total if total else 0,
+        "retrieval_cases": retrieval_count,
+    }
+
+
+def serialize_source_summary(source: dict[str, Any]) -> dict[str, Any]:
+    """序列化历史 JSON 中的引用摘要，避免写入过多正文。"""
+    return {
+        "file_id": source.get("file_id"),
+        "file_name": source.get("file_name"),
+        "chunk_index": source.get("chunk_index"),
+        "retrieval_sources": source.get("retrieval_sources") or [],
+        "vector_score": source.get("vector_score"),
+        "fulltext_score": source.get("fulltext_score"),
+        "rrf_score": source.get("rrf_score"),
+        "rerank_score": source.get("rerank_score"),
+    }
+
+
+def serialize_result(result: dict[str, Any]) -> dict[str, Any]:
+    """序列化单条评测结果用于历史 JSON。"""
+    case = result["case"]
+    chat_result = result["chat_result"]
+    return {
+        "id": case["id"],
+        "question": case["question"],
+        "passed": result["passed"],
+        "elapsed_seconds": chat_result.elapsed_seconds,
+        "message_id": chat_result.message_id,
+        "answer_preview": chat_result.answer.replace("\n", " ")[:500],
+        "checks": result["checks"],
+        "diagnostics": compact_diagnostics(chat_result.retrieval),
+        "sources": [
+            serialize_source_summary(source)
+            for source in chat_result.sources
+        ],
+    }
+
+
+def build_run_record(
+    results: list[dict[str, Any]],
+    generated_at: datetime,
+    base_url: str,
+    cases_path: Path,
+) -> dict[str, Any]:
+    """构建可落盘的评测历史记录。"""
+    return {
+        "schema_version": 1,
+        "generated_at": generated_at.isoformat(timespec="seconds"),
+        "base_url": base_url,
+        "cases_path": str(cases_path),
+        "summary": build_summary(results),
+        "cases": [
+            serialize_result(result)
+            for result in results
+        ],
+    }
+
+
+def load_previous_run_record(runs_dir: Path) -> dict[str, Any] | None:
+    """读取最近一次历史评测记录，用于本轮报告对比。"""
+    if not runs_dir.exists():
+        return None
+
+    for run_path in sorted(runs_dir.glob("*.json"), reverse=True):
+        try:
+            return json.loads(run_path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            continue
+    return None
+
+
+def write_run_record(run_record: dict[str, Any], runs_dir: Path) -> Path:
+    """写入带时间戳的 JSON 评测历史。"""
+    runs_dir.mkdir(parents=True, exist_ok=True)
+    generated_at = datetime.fromisoformat(run_record["generated_at"])
+    run_path = runs_dir / f"{generated_at.strftime('%Y%m%d_%H%M%S')}.json"
+    run_path.write_text(
+        json.dumps(run_record, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    return run_path
+
+
+def format_number(value: Any, precision: int = 2) -> str:
+    """格式化报告中的数字。"""
+    if isinstance(value, int):
+        return str(value)
+    if isinstance(value, float):
+        return f"{value:.{precision}f}"
+    return "—"
+
+
+def format_delta(current: Any, previous: Any, precision: int = 2) -> str:
+    """格式化本轮和上一轮指标差异。"""
+    if not isinstance(current, (int, float)) or not isinstance(previous, (int, float)):
+        return "—"
+    delta = current - previous
+    sign = "+" if delta > 0 else ""
+    return f"{sign}{delta:.{precision}f}"
+
+
+def append_history_comparison(
+    lines: list[str],
+    current_summary: dict[str, Any],
+    previous_run: dict[str, Any] | None,
+) -> None:
+    """向 Markdown 报告追加历史对比区块。"""
+    if previous_run is None:
+        lines.extend([
+            "- 历史对比：暂无上一轮记录",
+            "",
+        ])
+        return
+
+    previous_summary = previous_run.get("summary") or {}
+    lines.extend([
+        f"- 上一轮评测：{previous_run.get('generated_at', '未知时间')}",
+        "",
+        "## 与上次评测对比",
+        "",
+        "| 指标 | 本次 | 上次 | 变化 |",
+        "| --- | ---: | ---: | ---: |",
+    ])
+    metric_names = {
+        "passed": "通过数",
+        "failed": "失败数",
+        "pass_rate": "通过率",
+        "average_elapsed_seconds": "平均耗时秒",
+        "average_sources": "平均引用数",
+        "retrieval_cases": "触发检索数",
+    }
+    for key, label in metric_names.items():
+        precision = 2
+        lines.append(
+            "| {label} | {current} | {previous} | {delta} |".format(
+                label=label,
+                current=format_number(current_summary.get(key), precision),
+                previous=format_number(previous_summary.get(key), precision),
+                delta=format_delta(
+                    current_summary.get(key),
+                    previous_summary.get(key),
+                    precision,
+                ),
+            ),
+        )
+    lines.append("")
+
+
+def write_report(
+    results: list[dict[str, Any]],
+    report_path: Path,
+    generated_at: datetime,
+    previous_run: dict[str, Any] | None = None,
+    history_path: Path | None = None,
+) -> None:
     """写入 Markdown 评测报告。"""
     report_path.parent.mkdir(parents=True, exist_ok=True)
-    passed_count = sum(1 for result in results if result["passed"])
+    summary = build_summary(results)
     lines = [
         "# RAG 评测报告",
         "",
-        f"- 生成时间：{datetime.now().isoformat(timespec='seconds')}",
-        f"- 通过：{passed_count}/{len(results)}",
+        f"- 生成时间：{generated_at.isoformat(timespec='seconds')}",
+        f"- 通过：{summary['passed']}/{summary['total']}",
+        f"- 平均耗时：{summary['average_elapsed_seconds']:.2f}s",
+        f"- 平均引用数：{summary['average_sources']:.2f}",
+        f"- 历史 JSON：{history_path or '未生成'}",
         "",
+    ]
+    append_history_comparison(lines, summary, previous_run)
+    lines.extend([
         "| Case | 结果 | 耗时 | 是否检索 | 引用数 | 命中文件 |",
         "| --- | --- | ---: | --- | ---: | --- |",
-    ]
+    ])
 
     for result in results:
         case = result["case"]
@@ -515,6 +715,7 @@ def write_report(results: list[dict[str, Any]], report_path: Path) -> None:
 def main() -> int:
     """命令行入口。"""
     args = parse_args()
+    generated_at = datetime.now()
     if not args.username or not args.password:
         raise EvalError(
             "请通过 --username/--password 或 FIRSTRAG_EVAL_USERNAME/FIRSTRAG_EVAL_PASSWORD 提供登录信息",
@@ -532,6 +733,7 @@ def main() -> int:
     )
     knowledge_bases = knowledge_base_data.get("knowledge_bases") or []
 
+    previous_run = None if args.no_history else load_previous_run_record(args.runs_dir)
     settings_cache: dict[str, dict[str, Any]] = {}
     results: list[dict[str, Any]] = []
 
@@ -591,10 +793,28 @@ def main() -> int:
                     timeout=args.timeout,
                 )
 
-    write_report(results, args.report)
+    run_record = build_run_record(
+        results=results,
+        generated_at=generated_at,
+        base_url=base_url,
+        cases_path=args.cases,
+    )
+    history_path = None
+    if not args.no_history:
+        history_path = write_run_record(run_record, args.runs_dir)
+
+    write_report(
+        results=results,
+        report_path=args.report,
+        generated_at=generated_at,
+        previous_run=previous_run,
+        history_path=history_path,
+    )
     passed_count = sum(1 for result in results if result["passed"])
     print(f"RAG eval passed {passed_count}/{len(results)}")
     print(f"Report: {args.report}")
+    if history_path is not None:
+        print(f"History: {history_path}")
     return 0 if passed_count == len(results) else 1
 
 

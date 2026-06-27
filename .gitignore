@@ -15,6 +15,7 @@ yarn-error.log*
 # Local documents and generated stores
 /backend/demo/local_doc/
 /docs/evals/latest_rag_eval_report.md
+/docs/evals/runs/
 /vector_db/
 /backend/vector_db/
 /models/

@@ -27,7 +27,22 @@ conda run -n firstrag python scripts/eval_rag.py \
   --password 你的密码
 ```
 
-默认读取 `docs/evals/rag_eval_cases.jsonl`，并生成 `docs/evals/latest_rag_eval_report.md`。
+默认读取 `docs/evals/rag_eval_cases.jsonl`，并生成：
+
+- `docs/evals/latest_rag_eval_report.md`：最新 Markdown 报告。
+- `docs/evals/runs/YYYYMMDD_HHMMSS.json`：带时间戳的历史 JSON 记录。
+
+历史文件默认被 `.gitignore` 忽略，只保留在本地。再次运行评测时，最新报告会自动对比上一轮历史记录。
+
+如果只想生成最新 Markdown 报告，不写历史记录：
+
+```bash
+conda run -n firstrag python scripts/eval_rag.py \
+  --base-url http://127.0.0.1:8000 \
+  --username 你的用户名 \
+  --password 你的密码 \
+  --no-history
+```
 
 ## case 字段
 
