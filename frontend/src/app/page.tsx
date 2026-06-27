@@ -806,16 +806,18 @@ function getConversationDiagnostics(value: unknown) {
     : [];
 }
 
-function formatDiagnosticScore(value: number | null) {
-  return value === null ? "—" : value.toFixed(4);
+function formatDiagnosticScore(value?: number | null) {
+  return typeof value === "number" && Number.isFinite(value)
+    ? value.toFixed(4)
+    : "—";
 }
 
 function formatDiagnosticCount(value: number | null) {
   return value === null ? "—" : String(value);
 }
 
-function formatDiagnosticTiming(value: number | null) {
-  if (value === null) {
+function formatDiagnosticTiming(value?: number | null) {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
     return "—";
   }
 
@@ -4264,6 +4266,7 @@ export default function Home() {
                     ? diagnostic.retrievalSources
                     : diagnostic.diagnostics.retrievalSources
                   : [];
+                const diagnosticTiming = diagnostic?.diagnostics.timing;
                 const isStreamingPlaceholder =
                   message.role === "assistant" &&
                   index === currentSession.messages.length - 1 &&
@@ -4352,7 +4355,9 @@ export default function Home() {
                                   </p>
                                   <div className="font-utility flex shrink-0 flex-wrap justify-end gap-2 text-[10px] text-[#72807b]">
                                     {source.chunkIndex !== undefined && (
-                                      <span>片段 #{source.chunkIndex}</span>
+                                      <span>
+                                        文件片段 #{source.chunkIndex}
+                                      </span>
                                     )}
                                     {source.vectorScore !== undefined && (
                                       <span>
@@ -4537,8 +4542,7 @@ export default function Home() {
                                     <p className="text-[11px] text-[#72807b]">
                                       总检索{" "}
                                       {formatDiagnosticTiming(
-                                        diagnostic.diagnostics.timing
-                                          .retrievalTotalMs
+                                        diagnosticTiming?.retrievalTotalMs
                                       )}
                                     </p>
                                   </div>
@@ -4548,8 +4552,7 @@ export default function Home() {
                                         Embedding
                                       </span>
                                       {formatDiagnosticTiming(
-                                        diagnostic.diagnostics.timing
-                                          .embeddingMs
+                                        diagnosticTiming?.embeddingMs
                                       )}
                                     </p>
                                     <p>
@@ -4557,7 +4560,7 @@ export default function Home() {
                                         Vector
                                       </span>
                                       {formatDiagnosticTiming(
-                                        diagnostic.diagnostics.timing.vectorMs
+                                        diagnosticTiming?.vectorMs
                                       )}
                                     </p>
                                     <p>
@@ -4565,8 +4568,7 @@ export default function Home() {
                                         Fulltext
                                       </span>
                                       {formatDiagnosticTiming(
-                                        diagnostic.diagnostics.timing
-                                          .fulltextMs
+                                        diagnosticTiming?.fulltextMs
                                       )}
                                     </p>
                                     <p>
@@ -4574,7 +4576,7 @@ export default function Home() {
                                         RRF
                                       </span>
                                       {formatDiagnosticTiming(
-                                        diagnostic.diagnostics.timing.rrfMs
+                                        diagnosticTiming?.rrfMs
                                       )}
                                     </p>
                                     <p>
@@ -4582,7 +4584,7 @@ export default function Home() {
                                         Rerank
                                       </span>
                                       {formatDiagnosticTiming(
-                                        diagnostic.diagnostics.timing.rerankMs
+                                        diagnosticTiming?.rerankMs
                                       )}
                                     </p>
                                   </div>
@@ -4626,7 +4628,7 @@ export default function Home() {
                                                 "未知来源"}
                                             </p>
                                             <p className="font-utility text-[10px] text-[#72807b]">
-                                              片段{" "}
+                                              文件片段{" "}
                                               {source.chunkIndex !== null
                                                 ? `#${source.chunkIndex}`
                                                 : "—"}
