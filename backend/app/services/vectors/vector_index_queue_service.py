@@ -6,6 +6,19 @@ from app.repositories.knowledge_file_repository import update_knowledge_file_sta
 from app.repositories.vector_index_job_repository import enqueue_vector_index_job
 
 
+def build_job_worker_hint(job: Row | dict[str, Any]) -> str | None:
+    """根据单个任务状态生成给前端展示的 worker 提示。"""
+    if not job.get("is_stale"):
+        return None
+
+    status = job.get("status")
+    if status == "queued":
+        return "该文件向量化任务长时间排队，可能 worker 未启动。"
+    if status == "processing":
+        return "该文件向量化任务长时间处理中且没有心跳，可能 worker 已停止或任务卡住。"
+    return None
+
+
 def serialize_vector_index_job(job: Row | dict[str, Any]) -> dict[str, Any]:
     """将向量化任务记录转换为接口响应结构。"""
     if not job:
@@ -34,6 +47,9 @@ def serialize_vector_index_job(job: Row | dict[str, Any]) -> dict[str, Any]:
         "updated_at": job.get("updated_at"),
         "started_at": job.get("started_at"),
         "finished_at": job.get("finished_at"),
+        "active_seconds": job.get("active_seconds"),
+        "is_stale": bool(job.get("is_stale", False)),
+        "worker_hint": build_job_worker_hint(job),
     }
 
 
@@ -83,27 +99,55 @@ def serialize_vector_index_job_health(
     # 没有独立 worker 心跳表时，用任务是否长期停留在活跃态来判断是否需要关注。
     if stale_queued > 0 or stale_processing > 0:
         worker_status = "attention_needed"
+        queue_status = "stuck"
     elif processing > 0:
         worker_status = "active"
+        queue_status = "processing"
     elif queued > 0:
         worker_status = "waiting"
+        queue_status = "waiting"
     else:
         worker_status = "idle"
+        queue_status = "idle"
+
+    worker_hint = None
+    if stale_processing > 0 and stale_queued > 0:
+        worker_hint = "向量化任务长时间未推进，可能 worker 未启动或已卡住。"
+    elif stale_processing > 0:
+        worker_hint = "存在处理中的向量化任务长时间没有心跳，可能 worker 已停止或任务卡住。"
+    elif stale_queued > 0:
+        worker_hint = "存在排队任务长时间未被领取，可能 worker 未启动。"
+    elif processing > 0:
+        worker_hint = "worker 正在处理向量化任务。"
+    elif queued > 0:
+        worker_hint = "任务正在排队，等待 worker 领取。"
 
     return {
         "worker": {
             "status": worker_status,
             "is_healthy": worker_status != "attention_needed",
             "has_recent_activity": processing > 0 and stale_processing == 0,
+            "hint": worker_hint,
             "last_job_updated_at": health.get("last_job_updated_at"),
             "last_processing_heartbeat_at": health.get(
                 "last_processing_heartbeat_at",
+            ),
+            "oldest_active_created_at": health.get("oldest_active_created_at"),
+            "oldest_queued_created_at": health.get("oldest_queued_created_at"),
+            "oldest_processing_heartbeat_at": health.get(
+                "oldest_processing_heartbeat_at",
+            ),
+            "oldest_active_seconds": health.get("oldest_active_seconds"),
+            "oldest_queued_seconds": health.get("oldest_queued_seconds"),
+            "oldest_processing_seconds": health.get(
+                "oldest_processing_seconds",
             ),
             "stale_queued": stale_queued,
             "stale_processing": stale_processing,
             "checked_at": health.get("checked_at"),
         },
         "queue": {
+            "status": queue_status,
             "total": int(health.get("total") or 0),
             "active": active,
             "queued": queued,

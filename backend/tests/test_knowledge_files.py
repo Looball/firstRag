@@ -119,6 +119,56 @@ class KnowledgeFileListTests(unittest.TestCase):
         self.assertEqual(latest_job["status"], "queued")
         self.assertEqual(latest_job["max_attempts"], 3)
 
+    def test_latest_index_job_includes_stale_worker_hint(self) -> None:
+        """文件列表应返回单文件向量化卡住提示。"""
+        file_id = uuid4()
+        job_id = uuid4()
+        with patch(
+            "app.api.knowledge_files.get_user_knowledge_files",
+            return_value=[
+                {
+                    "id": file_id,
+                    "original_name": "demo.md",
+                    "mime_type": "text/markdown",
+                    "size_bytes": 123,
+                    "status": "queued",
+                    "index_version": 0,
+                    "usage_count": 1,
+                    "created_at": "2026-06-25T00:00:00+08:00",
+                }
+            ],
+        ), patch(
+            "app.api.knowledge_files.get_latest_vector_index_jobs_by_file_ids",
+            return_value={
+                str(file_id): {
+                    "id": job_id,
+                    "user_id": 1,
+                    "knowledge_file_id": file_id,
+                    "knowledge_base_id": None,
+                    "index_version": 0,
+                    "status": "queued",
+                    "attempts": 0,
+                    "max_attempts": 3,
+                    "error_message": None,
+                    "result": None,
+                    "created_at": "2026-06-25T00:00:00+08:00",
+                    "updated_at": "2026-06-25T00:00:00+08:00",
+                    "active_seconds": 1800,
+                    "is_stale": True,
+                }
+            },
+        ):
+            response = self.client.get("/chat/knowledge-files")
+
+        self.assertEqual(response.status_code, 200)
+        latest_job = response.json()["files"][0]["latest_index_job"]
+        self.assertTrue(latest_job["is_stale"])
+        self.assertEqual(latest_job["active_seconds"], 1800)
+        self.assertEqual(
+            latest_job["worker_hint"],
+            "该文件向量化任务长时间排队，可能 worker 未启动。",
+        )
+
     def test_latest_index_job_normalizes_succeeded_status(self) -> None:
         """文件列表应把内部 succeeded 状态归一化为前端协议的 completed。"""
         file_id = uuid4()

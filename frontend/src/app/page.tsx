@@ -212,6 +212,9 @@ type LatestIndexJob = {
   updatedAt: string;
   startedAt: string | null;
   finishedAt: string | null;
+  activeSeconds: number | null;
+  isStale: boolean;
+  workerHint: string | null;
 };
 
 type VectorStatus = {
@@ -227,6 +230,7 @@ type VectorStatus = {
   canDeleteVector: boolean;
   canPoll: boolean;
   errorMessage?: string;
+  workerHint?: string;
 };
 
 type VectorIndexHealthResponse = {
@@ -234,13 +238,18 @@ type VectorIndexHealthResponse = {
     status: "idle" | "waiting" | "active" | "attention_needed" | "unknown";
     isHealthy: boolean;
     hasRecentActivity: boolean;
+    hint: string | null;
     lastJobUpdatedAt: string | null;
     lastProcessingHeartbeatAt: string | null;
+    oldestActiveSeconds: number | null;
+    oldestQueuedSeconds: number | null;
+    oldestProcessingSeconds: number | null;
     staleQueued: number;
     staleProcessing: number;
     checkedAt: string;
   };
   queue: {
+    status: "idle" | "waiting" | "processing" | "stuck" | "unknown";
     total: number;
     active: number;
     queued: number;
@@ -398,6 +407,24 @@ function formatFileSize(size: number) {
   }
 
   return `${(size / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function formatDurationSeconds(seconds: number | null) {
+  if (seconds === null || !Number.isFinite(seconds) || seconds < 0) {
+    return "";
+  }
+
+  if (seconds < 60) {
+    return `${Math.round(seconds)} 秒`;
+  }
+
+  const minutes = seconds / 60;
+  if (minutes < 60) {
+    return `${minutes.toFixed(minutes >= 10 ? 0 : 1)} 分钟`;
+  }
+
+  const hours = minutes / 60;
+  return `${hours.toFixed(hours >= 10 ? 0 : 1)} 小时`;
 }
 
 function getFileFingerprint(file: File) {
@@ -1467,6 +1494,7 @@ function toLatestIndexJob(value: unknown): LatestIndexJob | null {
   const indexVersion = Number(job.index_version);
   const attempts = Number(job.attempts);
   const maxAttempts = Number(job.max_attempts);
+  const activeSeconds = getNullableNumberField(job, ["active_seconds"]);
 
   return {
     id,
@@ -1487,6 +1515,9 @@ function toLatestIndexJob(value: unknown): LatestIndexJob | null {
     updatedAt: typeof job.updated_at === "string" ? job.updated_at : "",
     startedAt: typeof job.started_at === "string" ? job.started_at : null,
     finishedAt: typeof job.finished_at === "string" ? job.finished_at : null,
+    activeSeconds,
+    isStale: job.is_stale === true,
+    workerHint: getNullableStringField(job, ["worker_hint"]),
   };
 }
 
@@ -1543,6 +1574,7 @@ function getVectorStatus(file: KnowledgeFile): VectorStatus {
       canVectorize: false,
       canDeleteVector: false,
       canPoll: true,
+      ...(job.workerHint ? { workerHint: job.workerHint } : {}),
     };
   }
 
@@ -1553,6 +1585,7 @@ function getVectorStatus(file: KnowledgeFile): VectorStatus {
       canVectorize: false,
       canDeleteVector: false,
       canPoll: true,
+      ...(job.workerHint ? { workerHint: job.workerHint } : {}),
     };
   }
 
@@ -1599,6 +1632,41 @@ function getWorkerStatus(value: unknown): VectorIndexHealthResponse["worker"]["s
   return "unknown";
 }
 
+function getQueueStatus(value: unknown): VectorIndexHealthResponse["queue"]["status"] {
+  if (
+    value === "idle" ||
+    value === "waiting" ||
+    value === "processing" ||
+    value === "stuck"
+  ) {
+    return value;
+  }
+
+  return "unknown";
+}
+
+function getQueueStatusLabel(
+  status: VectorIndexHealthResponse["queue"]["status"]
+) {
+  if (status === "idle") {
+    return "空闲";
+  }
+
+  if (status === "waiting") {
+    return "等待中";
+  }
+
+  if (status === "processing") {
+    return "处理中";
+  }
+
+  if (status === "stuck") {
+    return "可能卡住";
+  }
+
+  return "未知";
+}
+
 function parseVectorIndexHealth(value: unknown): VectorIndexHealthResponse | null {
   if (typeof value !== "object" || value === null) {
     return null;
@@ -1622,6 +1690,7 @@ function parseVectorIndexHealth(value: unknown): VectorIndexHealthResponse | nul
       status: getWorkerStatus(worker.status),
       isHealthy: worker.is_healthy === true,
       hasRecentActivity: worker.has_recent_activity === true,
+      hint: getNullableStringField(worker, ["hint"]),
       lastJobUpdatedAt:
         typeof worker.last_job_updated_at === "string"
           ? worker.last_job_updated_at
@@ -1630,11 +1699,21 @@ function parseVectorIndexHealth(value: unknown): VectorIndexHealthResponse | nul
         typeof worker.last_processing_heartbeat_at === "string"
           ? worker.last_processing_heartbeat_at
           : null,
+      oldestActiveSeconds: getNullableNumberField(worker, [
+        "oldest_active_seconds",
+      ]),
+      oldestQueuedSeconds: getNullableNumberField(worker, [
+        "oldest_queued_seconds",
+      ]),
+      oldestProcessingSeconds: getNullableNumberField(worker, [
+        "oldest_processing_seconds",
+      ]),
       staleQueued: getNumberField(worker, "stale_queued"),
       staleProcessing: getNumberField(worker, "stale_processing"),
       checkedAt: typeof worker.checked_at === "string" ? worker.checked_at : "",
     },
     queue: {
+      status: getQueueStatus(queue.status),
       total: getNumberField(queue, "total"),
       active: getNumberField(queue, "active"),
       queued: getNumberField(queue, "queued"),
@@ -5890,15 +5969,25 @@ export default function Home() {
                     <p className="font-semibold">{workerHealthLabel.label}</p>
                     {vectorIndexHealth && (
                       <p className="mt-1 text-[11px]">
-                        排队 {vectorIndexHealth.queue.queued} · 处理中{" "}
+                        {getQueueStatusLabel(vectorIndexHealth.queue.status)} · 排队{" "}
+                        {vectorIndexHealth.queue.queued} · 处理中{" "}
                         {vectorIndexHealth.queue.processing} · 失败{" "}
                         {vectorIndexHealth.queue.failed} · 已完成{" "}
                         {vectorIndexHealth.queue.succeeded}
                       </p>
                     )}
-                    {vectorIndexHealth?.worker.status === "attention_needed" && (
+                    {vectorIndexHealth?.worker.hint && (
                       <p className="mt-2 font-semibold">
-                        向量化任务可能卡住，请确认 worker 是否已启动
+                        {vectorIndexHealth.worker.hint}
+                      </p>
+                    )}
+                    {vectorIndexHealth &&
+                      vectorIndexHealth.worker.oldestActiveSeconds !== null && (
+                      <p className="mt-1 text-[11px]">
+                        最老活跃任务已等待{" "}
+                        {formatDurationSeconds(
+                          vectorIndexHealth.worker.oldestActiveSeconds
+                        )}
                       </p>
                     )}
                   </div>
@@ -5989,6 +6078,11 @@ export default function Home() {
                             {vectorStatus.errorMessage && (
                               <p className="mt-1 text-xs text-[#9b3c29]">
                                 {vectorStatus.errorMessage}
+                              </p>
+                            )}
+                            {vectorStatus.workerHint && (
+                              <p className="mt-1 text-xs font-semibold text-[#9b3c29]">
+                                {vectorStatus.workerHint}
                               </p>
                             )}
                           </div>
@@ -6094,6 +6188,11 @@ export default function Home() {
                             {vectorStatus.errorMessage && (
                               <p className="mt-1 text-xs text-[#9b3c29]">
                                 {vectorStatus.errorMessage}
+                              </p>
+                            )}
+                            {vectorStatus.workerHint && (
+                              <p className="mt-1 text-xs font-semibold text-[#9b3c29]">
+                                {vectorStatus.workerHint}
                               </p>
                             )}
                           </div>

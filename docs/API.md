@@ -85,6 +85,46 @@ Authorization: Bearer <access_token>
 | `GET` | `/chat/vector-index-jobs/{job_id}` | 查询任务状态。 |
 | `DELETE` | `/chat/knowledge-files/{knowledge_file_id}/vectors` | 删除单文件向量化存储。 |
 
+`GET /chat/vector-index-jobs/health` 会返回队列总览和 worker 提示，供前端判断任务是否可能卡住：
+
+```json
+{
+  "success": true,
+  "worker": {
+    "status": "attention_needed",
+    "is_healthy": false,
+    "has_recent_activity": false,
+    "hint": "存在排队任务长时间未被领取，可能 worker 未启动。",
+    "stale_queued": 1,
+    "stale_processing": 0,
+    "oldest_active_seconds": 1200,
+    "oldest_queued_seconds": 1200,
+    "oldest_processing_seconds": null
+  },
+  "queue": {
+    "status": "stuck",
+    "total": 3,
+    "active": 1,
+    "queued": 1,
+    "processing": 0,
+    "succeeded": 2,
+    "failed": 0,
+    "cancelled": 0
+  }
+}
+```
+
+文件列表中的 `latest_index_job` 也会携带单文件提示：
+
+```json
+{
+  "status": "queued",
+  "active_seconds": 1200,
+  "is_stale": true,
+  "worker_hint": "该文件向量化任务长时间排队，可能 worker 未启动。"
+}
+```
+
 ## 会话
 
 | 方法 | 路径 | 说明 |

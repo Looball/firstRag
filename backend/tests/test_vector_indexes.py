@@ -39,6 +39,11 @@ class VectorIndexJobHealthTests(unittest.TestCase):
                 "last_job_updated_at": "2026-06-25T11:59:59+08:00",
                 "last_processing_heartbeat_at": "2026-06-25T11:59:58+08:00",
                 "oldest_active_created_at": "2026-06-25T11:58:00+08:00",
+                "oldest_queued_created_at": "2026-06-25T11:58:00+08:00",
+                "oldest_processing_heartbeat_at": "2026-06-25T11:59:58+08:00",
+                "oldest_active_seconds": 120,
+                "oldest_queued_seconds": 120,
+                "oldest_processing_seconds": 2,
             },
         ):
             response = self.client.get("/chat/vector-index-jobs/health")
@@ -49,6 +54,10 @@ class VectorIndexJobHealthTests(unittest.TestCase):
         self.assertEqual(payload["worker"]["status"], "active")
         self.assertTrue(payload["worker"]["is_healthy"])
         self.assertTrue(payload["worker"]["has_recent_activity"])
+        self.assertEqual(payload["worker"]["hint"], "worker 正在处理向量化任务。")
+        self.assertEqual(payload["worker"]["oldest_active_seconds"], 120)
+        self.assertEqual(payload["worker"]["oldest_processing_seconds"], 2)
+        self.assertEqual(payload["queue"]["status"], "processing")
         self.assertEqual(payload["queue"]["active"], 2)
         self.assertEqual(payload["queue"]["succeeded"], 3)
         self.assertEqual(payload["queue"]["failed"], 1)
@@ -70,6 +79,11 @@ class VectorIndexJobHealthTests(unittest.TestCase):
                 "last_job_updated_at": "2026-06-25T11:30:00+08:00",
                 "last_processing_heartbeat_at": "2026-06-25T11:30:00+08:00",
                 "oldest_active_created_at": "2026-06-25T11:20:00+08:00",
+                "oldest_queued_created_at": "2026-06-25T11:20:00+08:00",
+                "oldest_processing_heartbeat_at": "2026-06-25T11:30:00+08:00",
+                "oldest_active_seconds": 2400,
+                "oldest_queued_seconds": 2400,
+                "oldest_processing_seconds": 1800,
             },
         ):
             response = self.client.get("/chat/vector-index-jobs/health")
@@ -78,6 +92,9 @@ class VectorIndexJobHealthTests(unittest.TestCase):
         payload = response.json()
         self.assertEqual(payload["worker"]["status"], "attention_needed")
         self.assertFalse(payload["worker"]["is_healthy"])
+        self.assertEqual(payload["worker"]["hint"], "向量化任务长时间未推进，可能 worker 未启动或已卡住。")
+        self.assertEqual(payload["queue"]["status"], "stuck")
+        self.assertEqual(payload["worker"]["oldest_active_seconds"], 2400)
         self.assertEqual(payload["worker"]["stale_queued"], 1)
         self.assertEqual(payload["worker"]["stale_processing"], 1)
 

@@ -128,6 +128,7 @@ def get_user_vector_index_job(
 def get_latest_vector_index_jobs_by_file_ids(
     user_id: int,
     file_ids: list[str],
+    stale_after_seconds: int = DEFAULT_JOB_LEASE_SECONDS,
 ) -> dict[str, Row]:
     """批量查询每个文件最近一次向量化任务。"""
     if not file_ids:
@@ -149,13 +150,29 @@ def get_latest_vector_index_jobs_by_file_ids(
             created_at,
             updated_at,
             started_at,
-            finished_at
+            finished_at,
+            CASE
+                WHEN status IN ('queued', 'processing')
+                THEN EXTRACT(EPOCH FROM (now() - created_at))::integer
+                ELSE NULL
+            END AS active_seconds,
+            CASE
+                WHEN status = 'queued'
+                  AND available_at <= now()
+                  AND created_at < now() - make_interval(secs => %s)
+                THEN TRUE
+                WHEN status = 'processing'
+                  AND COALESCE(heartbeat_at, locked_at, started_at, updated_at)
+                      < now() - make_interval(secs => %s)
+                THEN TRUE
+                ELSE FALSE
+            END AS is_stale
         FROM vector_index_jobs
         WHERE user_id = %s
           AND knowledge_file_id = ANY(%s::uuid[])
         ORDER BY knowledge_file_id, created_at DESC, id DESC;
         """,
-        (user_id, file_ids),
+        (stale_after_seconds, stale_after_seconds, user_id, file_ids),
     )
     return {
         str(row["knowledge_file_id"]): row
@@ -194,7 +211,32 @@ def get_user_vector_index_job_health(
             ) AS last_processing_heartbeat_at,
             MIN(created_at) FILTER (
                 WHERE status IN ('queued', 'processing')
-            ) AS oldest_active_created_at
+            ) AS oldest_active_created_at,
+            MIN(created_at) FILTER (
+                WHERE status = 'queued'
+            ) AS oldest_queued_created_at,
+            MIN(
+                COALESCE(heartbeat_at, locked_at, started_at, updated_at)
+            ) FILTER (
+                WHERE status = 'processing'
+            ) AS oldest_processing_heartbeat_at,
+            EXTRACT(EPOCH FROM (
+                now() - MIN(created_at) FILTER (
+                    WHERE status IN ('queued', 'processing')
+                )
+            ))::integer AS oldest_active_seconds,
+            EXTRACT(EPOCH FROM (
+                now() - MIN(created_at) FILTER (
+                    WHERE status = 'queued'
+                )
+            ))::integer AS oldest_queued_seconds,
+            EXTRACT(EPOCH FROM (
+                now() - MIN(
+                    COALESCE(heartbeat_at, locked_at, started_at, updated_at)
+                ) FILTER (
+                    WHERE status = 'processing'
+                )
+            ))::integer AS oldest_processing_seconds
         FROM vector_index_jobs
         WHERE user_id = %s;
         """,
