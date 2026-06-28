@@ -16,6 +16,7 @@ yarn-error.log*
 /backend/demo/local_doc/
 /docs/evals/latest_rag_eval_report.md
 /docs/evals/latest_indexing_eval_report.md
+/docs/evals/latest_summary.md
 /docs/evals/runs/
 /docs/evals/indexing_runs/
 /vector_db/

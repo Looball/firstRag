@@ -18,6 +18,7 @@
 
 - `docs/evals/latest_rag_eval_report.md`
 - `docs/evals/latest_indexing_eval_report.md`
+- `docs/evals/latest_summary.md`
 
 该记录用于进入文档整理、提交、推送或 PR 前的 release readiness 检查。再次修改 RAG 检索、token usage、eval gate、indexing、worker health、vector failure recovery 或前端文件管理链路后，应重新运行上述验收。
 
@@ -46,6 +47,31 @@ scripts/acceptance_check.sh --skip-real-eval
 ```
 
 如果本地沙箱限制 Turbopack 创建辅助进程或绑定本地端口，`npm run build` 可能需要在非沙箱环境或提权环境中重跑确认。
+
+## 历史趋势摘要
+
+`scripts/eval_summary.py` 会读取本地历史 JSON，生成 RAG 与 indexing eval 的趋势摘要，不访问后端服务，也不需要账号密码：
+
+```bash
+conda run -n firstrag python scripts/eval_summary.py
+```
+
+默认读取：
+
+- `docs/evals/runs/*.json`
+- `docs/evals/indexing_runs/*.json`
+
+默认输出：
+
+- `docs/evals/latest_summary.md`
+
+可通过 `--limit` 控制每类最近展示的运行次数：
+
+```bash
+conda run -n firstrag python scripts/eval_summary.py --limit 5
+```
+
+趋势摘要报告默认被 `.gitignore` 忽略，避免每次本地验收产生无关提交。报告不输出账号密码、API Key、JWT 或数据库连接串。
 
 ## 运行前提
 
