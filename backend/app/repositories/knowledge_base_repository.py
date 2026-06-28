@@ -99,6 +99,30 @@ def get_knowledge_base_files(
     )
 
 
+def get_knowledge_base_ids_for_file(
+    user_id: int,
+    knowledge_file_id: UUID | str,
+) -> list[UUID]:
+    """查询当前用户下包含某个文件的知识库 ID。"""
+    rows = fetch_all(
+        """
+        SELECT kbf.knowledge_base_id
+        FROM knowledge_base_files AS kbf
+        JOIN knowledge_bases AS kb
+          ON kb.id = kbf.knowledge_base_id
+        JOIN knowledge_files AS kf
+          ON kf.id = kbf.knowledge_file_id
+        WHERE kbf.knowledge_file_id = %s
+          AND kb.user_id = %s
+          AND kf.user_id = %s
+          AND kb.deleted_at IS NULL
+          AND kf.deleted_at IS NULL;
+        """,
+        (str(knowledge_file_id), user_id, user_id),
+    )
+    return [row["knowledge_base_id"] for row in rows]
+
+
 def remove_file_relation(
     knowledge_base_id: UUID,
     knowledge_file_id: UUID,

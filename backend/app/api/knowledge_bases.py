@@ -26,6 +26,9 @@ from app.schemas.knowledge import (
 from app.services.vectors.vector_index_queue_service import (
     serialize_current_vector_index_job,
 )
+from app.services.knowledge_profile_cache import (
+    invalidate_knowledge_base_context,
+)
 
 
 router = APIRouter(prefix="/chat", tags=["knowledge-bases"])
@@ -198,6 +201,8 @@ def remove_file_from_knowledge_base(
     if relation is None:
         raise HTTPException(status_code=404, detail="文件关联不存在")
 
+    invalidate_knowledge_base_context(user_id, knowledge_base_id)
+
     return {
         "success": True,
         "knowledge_base_id": str(knowledge_base_id),
@@ -229,6 +234,8 @@ def add_file_to_knowledge_base(
                 "knowledge_file_id": str(knowledge_file_id),
             }
         raise HTTPException(status_code=404, detail="知识库或文件不存在")
+
+    invalidate_knowledge_base_context(user_id, knowledge_base_id)
 
     return {
         "success": True,

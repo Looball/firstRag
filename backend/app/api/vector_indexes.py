@@ -23,6 +23,9 @@ from app.services.vectors.vector_index_queue_service import (
     serialize_vector_index_job,
 )
 from app.services.vectors.vector_index_service import delete_file_vector_entries
+from app.services.knowledge_profile_cache import (
+    invalidate_file_knowledge_base_contexts,
+)
 
 
 router = APIRouter(prefix="/chat", tags=["vector-indexes"])
@@ -145,6 +148,7 @@ def delete_knowledge_file_vectors(
             delete_file_vector_entries(user_id, knowledge_file_id)
             chunks_deleted = delete_file_chunks(user_id, knowledge_file_id)
             reset_file_index_state(user_id, knowledge_file_id)
+            invalidate_file_knowledge_base_contexts(user_id, knowledge_file_id)
         except Exception as exc:
             # Chroma 已删除但 PG 清理失败时，标记 failed，避免读取半完成索引。
             update_knowledge_file_status(
@@ -153,6 +157,7 @@ def delete_knowledge_file_vectors(
                 "failed",
                 expected_index_version=file_record["index_version"],
             )
+            invalidate_file_knowledge_base_contexts(user_id, knowledge_file_id)
             raise HTTPException(
                 status_code=500,
                 detail=f"删除向量化存储失败: {exc}",

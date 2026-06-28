@@ -25,6 +25,9 @@ from app.services.vectors.vector_index_queue_service import (
     enqueue_file_vector_index,
     serialize_current_vector_index_job,
 )
+from app.services.knowledge_profile_cache import (
+    invalidate_knowledge_base_context,
+)
 
 
 router = APIRouter(prefix="/chat", tags=["knowledge-files"])
@@ -109,6 +112,8 @@ async def upload_knowledge_files(
                 knowledge_base_id,
                 existing_file["id"],
             )
+            if relation_created:
+                invalidate_knowledge_base_context(user_id, knowledge_base_id)
             index_job = None
             if auto_index:
                 index_job = enqueue_uploaded_file_index(
@@ -165,6 +170,8 @@ async def upload_knowledge_files(
             )
             if file_record is None:
                 raise RuntimeError("文件记录创建失败")
+
+            invalidate_knowledge_base_context(user_id, knowledge_base_id)
 
             index_job = None
             if auto_index:

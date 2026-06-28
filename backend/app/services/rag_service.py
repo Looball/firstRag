@@ -36,6 +36,11 @@ from app.services.retrieval.hybrid_retriever import (
     get_hybrid_documents,
     get_retrieval_diagnostics,
 )
+from app.services.knowledge_profile_cache import (
+    get_cached_knowledge_base_context,
+    get_knowledge_profile_cache_diagnostics,
+    reset_knowledge_profile_cache_diagnostics,
+)
 
 
 type RetrievedDocs = list[Document]
@@ -496,34 +501,16 @@ def build_knowledge_base_profile(inputs: ChainInput) -> str:
     先不引入新的摘要表，使用文件名、类型和索引状态帮助 Router 判断
     用户问题是否可能需要知识库。后续可以将这里替换为文件摘要/标签表。
     """
-    rows = get_knowledge_base_files(
-        knowledge_base_id=inputs["knowledge_base_id"],
+    context = get_cached_knowledge_base_context(
         user_id=inputs["user_id"],
+        knowledge_base_id=inputs["knowledge_base_id"],
+        load_rows=lambda: get_knowledge_base_files(
+            knowledge_base_id=inputs["knowledge_base_id"],
+            user_id=inputs["user_id"],
+        ),
+        max_profile_files=MAX_KNOWLEDGE_PROFILE_FILES,
     )
-    indexed_rows = [
-        row
-        for row in rows
-        if row.get("status") == "indexed"
-    ]
-    if not indexed_rows:
-        return "当前知识库没有已完成索引的文件。"
-
-    profile_lines = [
-        "当前知识库已索引文件：",
-    ]
-    for index, row in enumerate(
-        indexed_rows[:MAX_KNOWLEDGE_PROFILE_FILES],
-        start=1,
-    ):
-        file_name = row.get("original_name") or "未命名文件"
-        mime_type = row.get("mime_type") or "未知类型"
-        profile_lines.append(f"{index}. {file_name}（{mime_type}）")
-
-    remaining_count = len(indexed_rows) - MAX_KNOWLEDGE_PROFILE_FILES
-    if remaining_count > 0:
-        profile_lines.append(f"...另有 {remaining_count} 个已索引文件。")
-
-    return "\n".join(profile_lines)
+    return context.profile
 
 
 def format_route_info(inputs: ChainInput) -> str:
@@ -629,15 +616,16 @@ def get_knowledge_base_file_ids(
     只返回 status='indexed' 的文件，避免 ChromaDB 查找未向量化
     文件 ID 时触发 HNSW 内部错误。
     """
-    rows = get_knowledge_base_files(
-        knowledge_base_id=knowledge_base_id,
+    context = get_cached_knowledge_base_context(
         user_id=user_id,
+        knowledge_base_id=knowledge_base_id,
+        load_rows=lambda: get_knowledge_base_files(
+            knowledge_base_id=knowledge_base_id,
+            user_id=user_id,
+        ),
+        max_profile_files=MAX_KNOWLEDGE_PROFILE_FILES,
     )
-    return [
-        str(row["id"])
-        for row in rows
-        if row.get("status") == "indexed"
-    ]
+    return context.file_ids
 
 
 def retrieve_documents(inputs: ChainInput) -> RetrievedDocs:
@@ -851,6 +839,7 @@ def stream_rag_response(
     knowledge_base_id: UUID,
 ) -> Iterator[RagStreamEvent]:
     """流式返回 RAG 事件，包括引用文档和答案片段。"""
+    reset_knowledge_profile_cache_diagnostics()
     stream_started_at = perf_counter()
     current_stage_started_at = stream_started_at
     rag_timing: dict[str, float] = {}
@@ -913,6 +902,9 @@ def stream_rag_response(
                 rag_timing,
                 llm_diagnostics,
             )
+            cache_diagnostics = get_knowledge_profile_cache_diagnostics()
+            if cache_diagnostics is not None:
+                diagnostics_with_timing.update(cache_diagnostics)
             if not retrieval_sent:
                 decision = normalize_retrieval_decision(retrieval_decision)
                 retrieval_event = {

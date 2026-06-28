@@ -12,6 +12,7 @@ from app.services.rag_service import (
     build_knowledge_base_profile,
     build_configured_retrieval_decision,
     finalize_retrieval_decision,
+    get_knowledge_base_file_ids,
     get_res_doc,
     get_chain,
     normalize_retrieval_decision,
@@ -19,6 +20,10 @@ from app.services.rag_service import (
     retrieve_documents,
     serialize_reference_documents,
     stream_rag_response,
+)
+from app.services.knowledge_profile_cache import (
+    get_knowledge_profile_cache_diagnostics,
+    invalidate_knowledge_base_context,
 )
 from app.services.user_settings_service import EffectiveChatModelConfig
 
@@ -224,6 +229,9 @@ class RagReferenceFilteringTests(unittest.TestCase):
         with unittest.mock.patch(
             "app.services.rag_service.get_retrieval_diagnostics",
             return_value=diagnostics,
+        ), unittest.mock.patch(
+            "app.services.rag_service.get_knowledge_profile_cache_diagnostics",
+            return_value={"knowledge_profile_cache_hit": True},
         ):
             events = list(stream_rag_response(
                 chain=chain,
@@ -240,6 +248,7 @@ class RagReferenceFilteringTests(unittest.TestCase):
             events[0]["diagnostics"]["vector_errors"],
             ["Chroma 单文件向量检索失败：file-1"],
         )
+        self.assertTrue(events[0]["diagnostics"]["knowledge_profile_cache_hit"])
         timing = events[0]["diagnostics"]["timing"]
         self.assertIn("query_router_ms", timing)
         self.assertIn("retrieve_documents_ms", timing)
@@ -651,28 +660,78 @@ class RagQueryRouterTests(unittest.TestCase):
 
     def test_build_knowledge_base_profile_uses_indexed_files(self) -> None:
         """知识库画像应只使用已索引文件，供 Router 识别知识库范围。"""
+        knowledge_base_id = uuid4()
+        indexed_file_id = uuid4()
+        pending_file_id = uuid4()
+        invalidate_knowledge_base_context(1, knowledge_base_id)
         with unittest.mock.patch(
             "app.services.rag_service.get_knowledge_base_files",
             return_value=[
                 {
+                    "id": indexed_file_id,
                     "original_name": "民事诉讼法.pdf",
                     "mime_type": "application/pdf",
                     "status": "indexed",
                 },
                 {
+                    "id": pending_file_id,
                     "original_name": "未处理.txt",
                     "mime_type": "text/plain",
                     "status": "pending",
                 },
             ],
-        ):
+        ) as files_mock:
             profile = build_knowledge_base_profile({
                 "user_id": 1,
-                "knowledge_base_id": uuid4(),
+                "knowledge_base_id": knowledge_base_id,
             })
+            file_ids = get_knowledge_base_file_ids(
+                user_id=1,
+                knowledge_base_id=knowledge_base_id,
+            )
 
         self.assertIn("民事诉讼法.pdf", profile)
         self.assertNotIn("未处理.txt", profile)
+        self.assertEqual(file_ids, [str(indexed_file_id)])
+        files_mock.assert_called_once()
+
+    def test_knowledge_base_profile_cache_reuses_context(self) -> None:
+        """同一知识库的 profile 与 file_ids 应复用进程内缓存。"""
+        knowledge_base_id = uuid4()
+        indexed_file_id = uuid4()
+        invalidate_knowledge_base_context(1, knowledge_base_id)
+
+        with unittest.mock.patch(
+            "app.services.rag_service.get_knowledge_base_files",
+            return_value=[
+                {
+                    "id": indexed_file_id,
+                    "original_name": "RAG系统核心技术与实现.md",
+                    "mime_type": "text/markdown",
+                    "status": "indexed",
+                },
+            ],
+        ) as files_mock:
+            first_profile = build_knowledge_base_profile({
+                "user_id": 1,
+                "knowledge_base_id": knowledge_base_id,
+            })
+            second_profile = build_knowledge_base_profile({
+                "user_id": 1,
+                "knowledge_base_id": knowledge_base_id,
+            })
+            file_ids = get_knowledge_base_file_ids(
+                user_id=1,
+                knowledge_base_id=knowledge_base_id,
+            )
+
+        self.assertEqual(first_profile, second_profile)
+        self.assertEqual(file_ids, [str(indexed_file_id)])
+        files_mock.assert_called_once()
+        diagnostics = get_knowledge_profile_cache_diagnostics()
+        self.assertIsNotNone(diagnostics)
+        assert diagnostics is not None
+        self.assertFalse(diagnostics["knowledge_profile_cache_hit"])
 
     def test_get_chain_stream_renders_router_prompt_json_example(self) -> None:
         """真实链路应能渲染 Router Prompt 中的 JSON 示例。"""

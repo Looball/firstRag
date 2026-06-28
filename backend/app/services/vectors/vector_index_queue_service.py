@@ -4,6 +4,9 @@ from uuid import UUID
 from app.db.executor import Row
 from app.repositories.knowledge_file_repository import update_knowledge_file_status
 from app.repositories.vector_index_job_repository import enqueue_vector_index_job
+from app.services.knowledge_profile_cache import (
+    invalidate_file_knowledge_base_contexts,
+)
 
 
 def build_job_worker_hint(job: Row | dict[str, Any]) -> str | None:
@@ -322,5 +325,6 @@ def enqueue_file_vector_index(
             "queued",
             expected_index_version=file_record.get("index_version", 0),
         )
+        invalidate_file_knowledge_base_contexts(user_id, file_record["id"])
 
     return serialize_vector_index_job(job)

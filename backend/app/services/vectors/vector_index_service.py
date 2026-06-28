@@ -18,6 +18,9 @@ from app.services.documents.document_service import (
     load_document,
     split_documents,
 )
+from app.services.knowledge_profile_cache import (
+    invalidate_file_knowledge_base_contexts,
+)
 from app.services.vectors.embedding_model import ZhipuAIEmbeddings
 
 
@@ -171,6 +174,7 @@ def index_knowledge_file_record(
             expected_index_version=index_version,
         ):
             raise RuntimeError("索引任务版本已过期")
+        invalidate_file_knowledge_base_contexts(user_id, file_id)
 
         try:
             index_result = index_file_vectors(
@@ -186,6 +190,7 @@ def index_knowledge_file_record(
                 "failed",
                 expected_index_version=index_version,
             )
+            invalidate_file_knowledge_base_contexts(user_id, file_id)
             raise
 
         if not update_knowledge_file_status(
@@ -195,6 +200,7 @@ def index_knowledge_file_record(
             expected_index_version=index_version,
         ):
             raise RuntimeError("索引任务版本已过期")
+        invalidate_file_knowledge_base_contexts(user_id, file_id)
     return {
         "id": str(file_id),
         "original_name": file_record["original_name"],
