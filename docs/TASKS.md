@@ -56,7 +56,7 @@
 | ID | 来源计划 | 优先级 | 状态 | 标题 | 完成日期 | 相关 commit |
 | --- | --- | --- | --- | --- | --- | --- |
 | `T-001` | `PLAN-20260628-01` | `P1` | `Done` | 拆分前端聊天工作台基础类型和工具 | 2026-06-28 | `f70e0a6` |
-| `T-002` | `PLAN-20260628-01` | `P1` | `Todo` | 建立前端解析/状态工具测试底座 | - | - |
+| `T-002` | `PLAN-20260628-01` | `P1` | `Done` | 建立前端解析/状态工具测试底座 | 2026-06-28 | `48a3d53` |
 | `T-003` | `PLAN-20260628-01` | `P1` | `Todo` | 增加 eval 历史趋势摘要 | - | - |
 | `T-004` | `PLAN-20260628-01` | `P1` | `Todo` | 产品化 vector worker health 展示 | - | - |
 | `T-005` | `PLAN-20260628-01` | `P2` | `Todo` | 完善 indexing failure recovery 分类与操作闭环 | - | - |
@@ -122,13 +122,19 @@ npm run build
 
 - 来源计划：`PLAN-20260628-01`
 - 优先级：`P1`
-- 状态：`Todo`
+- 状态：`Done`
 - 目标：为前端 retrieval、sources、vector health 等解析逻辑建立单元测试，降低后续拆分和协议演进风险。
 - 范围：默认使用 Vitest；优先覆盖 retrieval/source/vector health 解析函数和状态归一化逻辑。
 - 验收标准：
   - `frontend/package.json` 增加 `npm run test`。
   - 核心解析函数有单元测试覆盖。
   - `scripts/acceptance_check.sh` 增加可选前端测试阶段，默认纳入静态验收。
+- 完成记录：
+  - 完成日期：2026-06-28
+  - 相关 commit：`48a3d53`
+  - 新增 Vitest 测试脚本和 `frontend/src/lib/chat-workspace/utils.test.ts`。
+  - 覆盖 retrieval、sources、worker health、vector status、retrieval settings 和 diagnostics timing。
+  - `scripts/acceptance_check.sh --skip-real-eval` 已包含前端单测阶段并通过。
 - 建议验证命令：
 
 ```bash
