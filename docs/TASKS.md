@@ -52,6 +52,7 @@
 | `PLAN-20260628-01` | 2026-06-28 | `Done` | 基于代码和功能审查，建立可维护性、可观测性和验收自动化方向的第一批 backlog。 | `T-001` - `T-009` |
 | `PLAN-20260628-02` | 2026-06-28 | `Done` | 优化知识库检索速度，优先降低 rerank 对首 token 前等待时间的影响。 | `T-010` |
 | `PLAN-20260628-03` | 2026-06-28 | `Done` | 优化 RAG 检索前置阶段，减少 knowledge profile 与文件范围查询开销。 | `T-011` |
+| `PLAN-20260628-04` | 2026-06-28 | `Doing` | 补强 RAG eval 性能观测，让后续检索优化有稳定报告依据。 | `T-012` |
 
 ## 任务总览
 
@@ -68,6 +69,7 @@
 | `T-009` | `PLAN-20260628-01` | `P1` | `Done` | 继续拆分前端聊天工作台 UI 面板 | 2026-06-28 | `bdd53c8` |
 | `T-010` | `PLAN-20260628-02` | `P1` | `Done` | 优化知识库检索速度，降低 rerank 开销 | 2026-06-28 | `8c9ac21` |
 | `T-011` | `PLAN-20260628-03` | `P1` | `Done` | 增加知识库画像进程内轻量缓存 | 2026-06-28 | `9f178fc` |
+| `T-012` | `PLAN-20260628-04` | `P1` | `Doing` | RAG eval 报告补齐缓存与阶段耗时摘要 | - | - |
 
 ## 新计划接入流程
 
@@ -382,6 +384,28 @@ scripts/rag_eval_gate.sh
   - retrieval diagnostics 会合并 `knowledge_profile_cache_hit`、已索引文件数和总文件数。
   - `scripts/acceptance_check.sh --skip-real-eval` 已通过：后端 80 个 unittest、前端 lint/test/build 通过。
   - `scripts/rag_eval_gate.sh` 已通过：10/10 PASS。
+- 建议验证命令：
+
+```bash
+scripts/acceptance_check.sh --skip-real-eval
+FIRSTRAG_EVAL_USERNAME=你的用户名 \
+FIRSTRAG_EVAL_PASSWORD=你的密码 \
+scripts/rag_eval_gate.sh
+```
+
+## T-012 RAG eval 报告补齐缓存与阶段耗时摘要
+
+- 来源计划：`PLAN-20260628-04`
+- 优先级：`P1`
+- 状态：`Doing`
+- 目标：让 RAG eval 报告稳定展示检索前置阶段、混合检索和 rerank 耗时，为后续 Query Router、settings、profile 优化提供量化依据。
+- 范围：扩展 `scripts/eval_rag.py` 的 summary、Markdown 报告和历史 JSON，展示 `knowledge_profile_cache_hit`、`retrieval_settings_ms`、`knowledge_profile_ms`、`query_router_ms`、`retrieve_documents_ms`、`retrieval_total_ms` 和 `rerank_ms`。
+- 验收标准：
+  - 报告顶部展示平均阶段耗时和 knowledge profile 缓存命中情况。
+  - 报告包含按 case 展示的阶段耗时摘要表。
+  - 每个 case 详情展示缓存命中和关键阶段耗时。
+  - 单元测试覆盖 summary 字段和 Markdown 输出。
+  - 静态验收和真实 RAG eval 通过。
 - 建议验证命令：
 
 ```bash

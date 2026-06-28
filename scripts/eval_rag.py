@@ -526,6 +526,15 @@ def compact_diagnostics(retrieval: dict[str, Any]) -> dict[str, Any]:
         "fulltext_count": diagnostics.get("fulltext_count"),
         "fused_count": diagnostics.get("fused_count"),
         "reranked_count": diagnostics.get("reranked_count"),
+        "knowledge_profile_cache_hit": diagnostics.get(
+            "knowledge_profile_cache_hit",
+        ),
+        "knowledge_profile_indexed_file_count": diagnostics.get(
+            "knowledge_profile_indexed_file_count",
+        ),
+        "knowledge_profile_total_file_count": diagnostics.get(
+            "knowledge_profile_total_file_count",
+        ),
         "timing": diagnostics.get("timing") or {},
         "llm": diagnostics.get("llm") or {},
         "settings": diagnostics.get("settings") or {},
@@ -565,6 +574,16 @@ def build_summary(results: list[dict[str, Any]]) -> dict[str, Any]:
     first_token_values: list[float] = []
     pre_answer_values: list[float] = []
     total_token_values: list[float] = []
+    stage_values: dict[str, list[float]] = {
+        "retrieval_settings_ms": [],
+        "knowledge_profile_ms": [],
+        "query_router_ms": [],
+        "retrieve_documents_ms": [],
+        "retrieval_total_ms": [],
+        "rerank_ms": [],
+    }
+    cache_hit_count = 0
+    cache_observed_count = 0
     for result in results:
         diagnostics = compact_diagnostics(result["chat_result"].retrieval)
         timing = diagnostics["timing"]
@@ -586,6 +605,17 @@ def build_summary(results: list[dict[str, Any]]) -> dict[str, Any]:
         if total_tokens is not None:
             total_token_values.append(total_tokens)
 
+        for key, values in stage_values.items():
+            stage_ms = numeric_value(timing.get(key))
+            if stage_ms is not None:
+                values.append(stage_ms)
+
+        cache_hit = diagnostics.get("knowledge_profile_cache_hit")
+        if isinstance(cache_hit, bool):
+            cache_observed_count += 1
+            if cache_hit:
+                cache_hit_count += 1
+
     return {
         "total": total,
         "passed": passed_count,
@@ -597,6 +627,29 @@ def build_summary(results: list[dict[str, Any]]) -> dict[str, Any]:
         "retrieval_cases": retrieval_count,
         "average_first_token_ms": average_or_none(first_token_values),
         "average_pre_answer_ms": average_or_none(pre_answer_values),
+        "average_retrieval_settings_ms": average_or_none(
+            stage_values["retrieval_settings_ms"],
+        ),
+        "average_knowledge_profile_ms": average_or_none(
+            stage_values["knowledge_profile_ms"],
+        ),
+        "average_query_router_ms": average_or_none(
+            stage_values["query_router_ms"],
+        ),
+        "average_retrieve_documents_ms": average_or_none(
+            stage_values["retrieve_documents_ms"],
+        ),
+        "average_retrieval_total_ms": average_or_none(
+            stage_values["retrieval_total_ms"],
+        ),
+        "average_rerank_ms": average_or_none(stage_values["rerank_ms"]),
+        "knowledge_profile_cache_hit_count": cache_hit_count,
+        "knowledge_profile_cache_observed_count": cache_observed_count,
+        "knowledge_profile_cache_hit_rate": (
+            cache_hit_count / cache_observed_count
+            if cache_observed_count
+            else None
+        ),
         "average_total_tokens": average_or_none(total_token_values),
     }
 
@@ -793,6 +846,14 @@ def append_history_comparison(
         "average_elapsed_seconds": "平均耗时秒",
         "average_sources": "平均引用数",
         "average_first_token_ms": "平均首 token 毫秒",
+        "average_pre_answer_ms": "平均回答前等待毫秒",
+        "average_retrieval_settings_ms": "平均 settings 毫秒",
+        "average_knowledge_profile_ms": "平均 profile 毫秒",
+        "average_query_router_ms": "平均 router 毫秒",
+        "average_retrieve_documents_ms": "平均检索 Runnable 毫秒",
+        "average_retrieval_total_ms": "平均混合检索毫秒",
+        "average_rerank_ms": "平均 rerank 毫秒",
+        "knowledge_profile_cache_hit_rate": "profile 缓存命中率",
         "average_total_tokens": "平均 token",
         "retrieval_cases": "触发检索数",
     }
@@ -834,6 +895,19 @@ def write_report(
         f"- 平均耗时：{summary['average_elapsed_seconds']:.2f}s",
         f"- 平均引用数：{summary['average_sources']:.2f}",
         f"- 平均首 token 等待：{format_number(summary['average_first_token_ms'])}ms",
+        f"- 平均回答前等待：{format_number(summary['average_pre_answer_ms'])}ms",
+        "- 平均阶段耗时：settings={settings}ms，profile={profile}ms，router={router}ms，检索={retrieve}ms，rerank={rerank}ms".format(
+            settings=format_number(summary["average_retrieval_settings_ms"]),
+            profile=format_number(summary["average_knowledge_profile_ms"]),
+            router=format_number(summary["average_query_router_ms"]),
+            retrieve=format_number(summary["average_retrieve_documents_ms"]),
+            rerank=format_number(summary["average_rerank_ms"]),
+        ),
+        "- knowledge profile 缓存命中：{hits}/{observed}（{rate}）".format(
+            hits=summary["knowledge_profile_cache_hit_count"],
+            observed=summary["knowledge_profile_cache_observed_count"],
+            rate=format_number(summary["knowledge_profile_cache_hit_rate"]),
+        ),
         f"- 平均 token：{format_number(summary['average_total_tokens'])}",
         f"- 质量门禁：{'通过' if quality_gate_passed else '未通过'}",
         f"- 历史 JSON：{history_path or '未生成'}",
@@ -881,6 +955,31 @@ def write_report(
             ),
         )
 
+    lines.extend([
+        "",
+        "## 阶段耗时摘要",
+        "",
+        "| Case | pre-answer | settings | profile | cache | router | retrieve | hybrid | rerank |",
+        "| --- | ---: | ---: | ---: | --- | ---: | ---: | ---: | ---: |",
+    ])
+    for result in results:
+        case = result["case"]
+        diagnostics = compact_diagnostics(result["chat_result"].retrieval)
+        timing = diagnostics["timing"]
+        lines.append(
+            "| {case_id} | {pre_answer} | {settings} | {profile} | {cache} | {router} | {retrieve} | {hybrid} | {rerank} |".format(
+                case_id=case["id"],
+                pre_answer=format_number(timing.get("pre_answer_total_ms")),
+                settings=format_number(timing.get("retrieval_settings_ms")),
+                profile=format_number(timing.get("knowledge_profile_ms")),
+                cache=format_bool(diagnostics["knowledge_profile_cache_hit"]),
+                router=format_number(timing.get("query_router_ms")),
+                retrieve=format_number(timing.get("retrieve_documents_ms")),
+                hybrid=format_number(timing.get("retrieval_total_ms")),
+                rerank=format_number(timing.get("rerank_ms")),
+            ),
+        )
+
     for result in results:
         case = result["case"]
         chat_result = result["chat_result"]
@@ -898,8 +997,17 @@ def write_report(
             f"- 检索通道：{diagnostics['retrieval_sources'] or '—'}",
             f"- 向量降级：{format_bool(diagnostics['vector_degraded'])}",
             f"- 诊断计数：vector={diagnostics['vector_count']}，fulltext={diagnostics['fulltext_count']}，fused={diagnostics['fused_count']}，reranked={diagnostics['reranked_count']}",
-            "- 关键耗时：pre_answer={pre_answer}ms，retrieval={retrieval}ms，rerank={rerank}ms".format(
+            "- 知识库画像缓存：hit={hit}，indexed_files={indexed}，total_files={total}".format(
+                hit=format_bool(diagnostics["knowledge_profile_cache_hit"]),
+                indexed=diagnostics["knowledge_profile_indexed_file_count"] or "—",
+                total=diagnostics["knowledge_profile_total_file_count"] or "—",
+            ),
+            "- 关键耗时：pre_answer={pre_answer}ms，settings={settings}ms，profile={profile}ms，router={router}ms，retrieve={retrieve}ms，hybrid={retrieval}ms，rerank={rerank}ms".format(
                 pre_answer=diagnostics["timing"].get("pre_answer_total_ms", "—"),
+                settings=diagnostics["timing"].get("retrieval_settings_ms", "—"),
+                profile=diagnostics["timing"].get("knowledge_profile_ms", "—"),
+                router=diagnostics["timing"].get("query_router_ms", "—"),
+                retrieve=diagnostics["timing"].get("retrieve_documents_ms", "—"),
                 retrieval=diagnostics["timing"].get("retrieval_total_ms", "—"),
                 rerank=diagnostics["timing"].get("rerank_ms", "—"),
             ),

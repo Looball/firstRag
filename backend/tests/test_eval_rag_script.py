@@ -1,5 +1,7 @@
 import sys
+import tempfile
 import unittest
+from datetime import datetime
 from pathlib import Path
 
 
@@ -20,6 +22,7 @@ class EvalRagQualityGateTests(unittest.TestCase):
         source_count: int = 1,
         timing: dict | None = None,
         total_tokens: int | None = None,
+        diagnostics: dict | None = None,
     ) -> dict:
         """构建最小可用的 eval result。"""
         retrieval = {
@@ -28,10 +31,16 @@ class EvalRagQualityGateTests(unittest.TestCase):
                 "llm": {},
             },
         }
+        if diagnostics:
+            retrieval["diagnostics"].update(diagnostics)
         if total_tokens is not None:
             retrieval["diagnostics"]["llm"]["total_tokens"] = total_tokens
 
         return {
+            "case": {
+                "id": "case-id",
+                "question": "测试问题",
+            },
             "passed": passed,
             "chat_result": eval_rag.ChatResult(
                 answer="answer",
@@ -40,6 +49,7 @@ class EvalRagQualityGateTests(unittest.TestCase):
                 message_id="message-id",
                 elapsed_seconds=1.5,
             ),
+            "checks": [],
         }
 
     def test_build_summary_uses_pre_answer_as_first_token_fallback(self):
@@ -48,13 +58,21 @@ class EvalRagQualityGateTests(unittest.TestCase):
             self.build_result(
                 timing={"pre_answer_total_ms": 1000},
                 total_tokens=300,
+                diagnostics={"knowledge_profile_cache_hit": False},
             ),
             self.build_result(
                 timing={
                     "first_answer_token_ms": 500,
                     "pre_answer_total_ms": 700,
+                    "retrieval_settings_ms": 10,
+                    "knowledge_profile_ms": 20,
+                    "query_router_ms": 30,
+                    "retrieve_documents_ms": 40,
+                    "retrieval_total_ms": 50,
+                    "rerank_ms": 60,
                 },
                 total_tokens=100,
+                diagnostics={"knowledge_profile_cache_hit": True},
             ),
         ]
 
@@ -62,6 +80,15 @@ class EvalRagQualityGateTests(unittest.TestCase):
 
         self.assertEqual(summary["average_first_token_ms"], 750)
         self.assertEqual(summary["average_pre_answer_ms"], 850)
+        self.assertEqual(summary["average_retrieval_settings_ms"], 10)
+        self.assertEqual(summary["average_knowledge_profile_ms"], 20)
+        self.assertEqual(summary["average_query_router_ms"], 30)
+        self.assertEqual(summary["average_retrieve_documents_ms"], 40)
+        self.assertEqual(summary["average_retrieval_total_ms"], 50)
+        self.assertEqual(summary["average_rerank_ms"], 60)
+        self.assertEqual(summary["knowledge_profile_cache_hit_count"], 1)
+        self.assertEqual(summary["knowledge_profile_cache_observed_count"], 2)
+        self.assertEqual(summary["knowledge_profile_cache_hit_rate"], 0.5)
         self.assertEqual(summary["average_total_tokens"], 200)
 
     def test_quality_gate_checks_thresholds(self):
@@ -126,6 +153,43 @@ class EvalRagQualityGateTests(unittest.TestCase):
         )
 
         self.assertTrue(result["passed"])
+
+    def test_write_report_includes_stage_timing_table(self):
+        """Markdown 报告应展示阶段耗时和 knowledge profile 缓存命中。"""
+        result = self.build_result(
+            timing={
+                "pre_answer_total_ms": 100,
+                "retrieval_settings_ms": 2,
+                "knowledge_profile_ms": 3,
+                "query_router_ms": 4,
+                "retrieve_documents_ms": 5,
+                "retrieval_total_ms": 6,
+                "rerank_ms": 7,
+            },
+            diagnostics={
+                "knowledge_profile_cache_hit": True,
+                "knowledge_profile_indexed_file_count": 2,
+                "knowledge_profile_total_file_count": 3,
+                "vector_count": 10,
+                "fulltext_count": 8,
+                "fused_count": 5,
+                "reranked_count": 5,
+            },
+        )
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            report_path = Path(temp_dir) / "report.md"
+            eval_rag.write_report(
+                [result],
+                report_path=report_path,
+                generated_at=datetime(2026, 6, 28, 12, 0, 0),
+            )
+            report = report_path.read_text(encoding="utf-8")
+
+        self.assertIn("## 阶段耗时摘要", report)
+        self.assertIn("| case-id | 100 | 2 | 3 | 是 | 4 | 5 | 6 | 7 |", report)
+        self.assertIn("knowledge profile 缓存命中：1/1", report)
+        self.assertIn("知识库画像缓存：hit=是，indexed_files=2，total_files=3", report)
 
 
 if __name__ == "__main__":
