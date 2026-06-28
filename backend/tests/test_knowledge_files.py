@@ -72,6 +72,12 @@ class KnowledgeFileListTests(unittest.TestCase):
         self.assertEqual(latest_job["id"], str(job_id))
         self.assertEqual(latest_job["status"], "failed")
         self.assertEqual(latest_job["error_message"], "解析失败")
+        self.assertEqual(latest_job["failure_type"], "parse_error")
+        self.assertEqual(
+            latest_job["failure_hint"],
+            "文件解析失败。请确认文件内容可读取，必要时转为 PDF、Markdown 或 TXT 后重新上传。",
+        )
+        self.assertTrue(latest_job["can_retry"])
         self.assertEqual(latest_job["attempts"], 3)
 
     def test_get_all_knowledge_files_returns_latest_index_job(self) -> None:

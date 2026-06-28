@@ -121,7 +121,22 @@ Authorization: Bearer <access_token>
   "status": "queued",
   "active_seconds": 1200,
   "is_stale": true,
-  "worker_hint": "该文件向量化任务长时间排队，可能 worker 未启动。"
+  "worker_hint": "该文件向量化任务长时间排队，可能 worker 未启动。",
+  "failure_type": null,
+  "failure_hint": null,
+  "can_retry": false
+}
+```
+
+向量化失败时，`latest_index_job` 会额外返回可恢复建议：
+
+```json
+{
+  "status": "failed",
+  "error_message": "解析失败",
+  "failure_type": "parse_error",
+  "failure_hint": "文件解析失败。请确认文件内容可读取，必要时转为 PDF、Markdown 或 TXT 后重新上传。",
+  "can_retry": true
 }
 ```
 

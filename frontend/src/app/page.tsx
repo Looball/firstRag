@@ -215,6 +215,9 @@ type LatestIndexJob = {
   activeSeconds: number | null;
   isStale: boolean;
   workerHint: string | null;
+  failureType: string | null;
+  failureHint: string | null;
+  canRetry: boolean;
 };
 
 type VectorStatus = {
@@ -231,6 +234,8 @@ type VectorStatus = {
   canPoll: boolean;
   errorMessage?: string;
   workerHint?: string;
+  failureHint?: string;
+  canRetry?: boolean;
 };
 
 type VectorIndexHealthResponse = {
@@ -266,6 +271,7 @@ type VectorIndexJob = {
   id: string;
   status: VectorIndexJobStatus;
   errorMessage: string;
+  failureHint: string;
 };
 
 type VectorIndexQueueItem = VectorIndexJob & {
@@ -1518,6 +1524,9 @@ function toLatestIndexJob(value: unknown): LatestIndexJob | null {
     activeSeconds,
     isStale: job.is_stale === true,
     workerHint: getNullableStringField(job, ["worker_hint"]),
+    failureType: getNullableStringField(job, ["failure_type"]),
+    failureHint: getNullableStringField(job, ["failure_hint"]),
+    canRetry: job.can_retry !== false,
   };
 }
 
@@ -1603,10 +1612,12 @@ function getVectorStatus(file: KnowledgeFile): VectorStatus {
     return {
       label: "向量化失败",
       type: "failed",
-      canVectorize: true,
+      canVectorize: job.canRetry,
       canDeleteVector: false,
       canPoll: false,
       ...(job.errorMessage ? { errorMessage: job.errorMessage } : {}),
+      ...(job.failureHint ? { failureHint: job.failureHint } : {}),
+      canRetry: job.canRetry,
     };
   }
 
@@ -1803,6 +1814,7 @@ function toVectorIndexJob(value: unknown): VectorIndexJob | null {
     job_id?: unknown;
     status?: unknown;
     error_message?: unknown;
+    failure_hint?: unknown;
   };
   const id =
     typeof job.id === "string" && job.id.trim()
@@ -1829,6 +1841,8 @@ function toVectorIndexJob(value: unknown): VectorIndexJob | null {
     status,
     errorMessage:
       typeof job.error_message === "string" ? job.error_message : "",
+    failureHint:
+      typeof job.failure_hint === "string" ? job.failure_hint.trim() : "",
   };
 }
 
@@ -6017,6 +6031,11 @@ export default function Home() {
                                 {job.errorMessage}
                               </p>
                             )}
+                            {job.failureHint && (
+                              <p className="mt-1 text-xs font-semibold text-[#9b3c29]">
+                                {job.failureHint}
+                              </p>
+                            )}
                           </div>
                           <span
                             className={`shrink-0 border px-2 py-1 text-xs font-semibold ${
@@ -6080,6 +6099,11 @@ export default function Home() {
                                 {vectorStatus.errorMessage}
                               </p>
                             )}
+                            {vectorStatus.failureHint && (
+                              <p className="mt-1 text-xs font-semibold text-[#9b3c29]">
+                                {vectorStatus.failureHint}
+                              </p>
+                            )}
                             {vectorStatus.workerHint && (
                               <p className="mt-1 text-xs font-semibold text-[#9b3c29]">
                                 {vectorStatus.workerHint}
@@ -6119,7 +6143,9 @@ export default function Home() {
                             >
                               {isFileIndexing || vectorStatus.canPoll
                                 ? "向量化中..."
-                                : "向量化"}
+                                : vectorStatus.type === "failed"
+                                  ? "重新向量化"
+                                  : "向量化"}
                             </button>
                             <button
                               type="button"
@@ -6190,6 +6216,11 @@ export default function Home() {
                                 {vectorStatus.errorMessage}
                               </p>
                             )}
+                            {vectorStatus.failureHint && (
+                              <p className="mt-1 text-xs font-semibold text-[#9b3c29]">
+                                {vectorStatus.failureHint}
+                              </p>
+                            )}
                             {vectorStatus.workerHint && (
                               <p className="mt-1 text-xs font-semibold text-[#9b3c29]">
                                 {vectorStatus.workerHint}
@@ -6229,7 +6260,9 @@ export default function Home() {
                             >
                               {isFileIndexing || vectorStatus.canPoll
                                 ? "向量化中..."
-                                : "向量化"}
+                                : vectorStatus.type === "failed"
+                                  ? "重新向量化"
+                                  : "向量化"}
                             </button>
                             <button
                               type="button"

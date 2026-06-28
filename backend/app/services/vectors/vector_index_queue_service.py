@@ -19,11 +19,100 @@ def build_job_worker_hint(job: Row | dict[str, Any]) -> str | None:
     return None
 
 
+def classify_vector_index_failure(error_message: str | None) -> str | None:
+    """根据错误信息粗略归类向量化失败原因。"""
+    if not error_message:
+        return None
+
+    normalized = error_message.lower()
+    if any(
+        keyword in normalized
+        for keyword in [
+            "parse",
+            "loader",
+            "pdf",
+            "docx",
+            "decode",
+            "encoding",
+            "未解析",
+            "解析",
+            "文本分块",
+            "分块",
+        ]
+    ):
+        return "parse_error"
+    if any(
+        keyword in normalized
+        for keyword in [
+            "embedding",
+            "embed",
+            "zhipu",
+            "api key",
+            "apikey",
+            "401",
+            "403",
+            "429",
+            "timeout",
+            "timed out",
+            "connection",
+            "network",
+            "向量模型",
+            "嵌入",
+        ]
+    ):
+        return "embedding_error"
+    if any(
+        keyword in normalized
+        for keyword in [
+            "chroma",
+            "chromadb",
+            "vector store",
+            "vector database",
+            "collection",
+            "向量库",
+        ]
+    ):
+        return "vector_store_error"
+    if any(
+        keyword in normalized
+        for keyword in [
+            "database",
+            "postgres",
+            "psycopg",
+            "sql",
+            "deadlock",
+            "数据库",
+        ]
+    ):
+        return "database_error"
+    if "版本已过期" in error_message:
+        return "stale_job"
+    return "unknown_error"
+
+
+def build_vector_index_failure_hint(failure_type: str | None) -> str | None:
+    """根据失败类型生成可恢复建议。"""
+    if failure_type == "parse_error":
+        return "文件解析失败。请确认文件内容可读取，必要时转为 PDF、Markdown 或 TXT 后重新上传。"
+    if failure_type == "embedding_error":
+        return "Embedding 调用失败。请检查向量模型 API Key、网络连通性或稍后重新向量化。"
+    if failure_type == "vector_store_error":
+        return "向量库写入失败。请确认 Chroma/vector_db 可用，可删除向量后重新向量化。"
+    if failure_type == "database_error":
+        return "数据库写入失败。请检查数据库连接和迁移状态，然后重新向量化。"
+    if failure_type == "stale_job":
+        return "该任务版本已过期，通常是文件向量被重置或重新提交导致，可直接重新向量化。"
+    if failure_type == "unknown_error":
+        return "向量化失败。请查看错误信息，确认 worker、模型配置和文件内容后重新向量化。"
+    return None
+
+
 def serialize_vector_index_job(job: Row | dict[str, Any]) -> dict[str, Any]:
     """将向量化任务记录转换为接口响应结构。"""
     if not job:
         return {}
 
+    failure_type = classify_vector_index_failure(job.get("error_message"))
     return {
         "id": str(job["id"]) if job.get("id") is not None else None,
         "user_id": job["user_id"],
@@ -42,6 +131,9 @@ def serialize_vector_index_job(job: Row | dict[str, Any]) -> dict[str, Any]:
         "skipped": job.get("skipped", False),
         "message": job.get("message"),
         "error_message": job.get("error_message"),
+        "failure_type": failure_type,
+        "failure_hint": build_vector_index_failure_hint(failure_type),
+        "can_retry": job.get("status") == "failed",
         "result": job.get("result"),
         "created_at": job.get("created_at"),
         "updated_at": job.get("updated_at"),
