@@ -59,8 +59,8 @@
 | `T-002` | `PLAN-20260628-01` | `P1` | `Done` | 建立前端解析/状态工具测试底座 | 2026-06-28 | `48a3d53` |
 | `T-003` | `PLAN-20260628-01` | `P1` | `Done` | 增加 eval 历史趋势摘要 | 2026-06-28 | `419b10d` |
 | `T-004` | `PLAN-20260628-01` | `P1` | `Done` | 产品化 vector worker health 展示 | 2026-06-28 | `c61dcfa` |
-| `T-005` | `PLAN-20260628-01` | `P2` | `Todo` | 完善 indexing failure recovery 分类与操作闭环 | - | - |
-| `T-006` | `PLAN-20260628-01` | `P2` | `Todo` | 扩充 RAG eval case 覆盖面 | - | - |
+| `T-005` | `PLAN-20260628-01` | `P2` | `Done` | 完善 indexing failure recovery 分类与操作闭环 | 2026-06-28 | `5bd9bfe` |
+| `T-006` | `PLAN-20260628-01` | `P2` | `Done` | 扩充 RAG eval case 覆盖面 | 2026-06-28 | `9620eee` |
 | `T-007` | `PLAN-20260628-01` | `P2` | `Todo` | 梳理本地启动与验收工作流文档 | - | - |
 | `T-008` | `PLAN-20260628-01` | `P2` | `Todo` | 为部署目录补齐可运行 Docker Compose 方案 | - | - |
 | `T-009` | `PLAN-20260628-01` | `P1` | `Done` | 继续拆分前端聊天工作台 UI 面板 | 2026-06-28 | `bdd53c8` |
@@ -200,13 +200,20 @@ npm run build
 
 - 来源计划：`PLAN-20260628-01`
 - 优先级：`P2`
-- 状态：`Todo`
+- 状态：`Done`
 - 目标：提高向量化失败后的可恢复性，让用户知道失败原因和下一步操作。
 - 范围：扩展失败类型识别和提示，例如解析失败、embedding 失败、Chroma 写入失败、数据库 chunk 写入失败和任务超时。
 - 验收标准：
   - 后端返回稳定的 `failure_type`、`failure_hint` 和 `can_retry`。
   - 前端按失败类型展示重试、删除向量或重新上传建议。
   - 后端测试覆盖主要失败分类。
+- 完成记录：
+  - 完成日期：2026-06-28
+  - 相关 commit：`5bd9bfe`
+  - 后端新增 `chunk_write_error`、`task_timeout` 等稳定分类，并调整数据库连接错误优先级。
+  - 前端按 `failure_type` 展示恢复动作列表。
+  - 新增 `backend/tests/test_vector_index_failure_recovery.py`，前端 Vitest 覆盖恢复动作映射。
+  - `scripts/acceptance_check.sh --skip-real-eval` 已通过。
 - 建议验证命令：
 
 ```bash
@@ -221,13 +228,19 @@ npm run build
 
 - 来源计划：`PLAN-20260628-01`
 - 优先级：`P2`
-- 状态：`Todo`
+- 状态：`Done`
 - 目标：让真实 RAG 回归覆盖更多高风险路径，减少路由、rerank 和无答案场景的回归盲区。
 - 范围：新增多轮追问、无答案或低相关、禁用 rerank、禁用 query router、`retrieval_mode=never` 等 case。
 - 验收标准：
   - `docs/evals/rag_eval_cases.jsonl` 新增 case 后仍可稳定运行。
   - `scripts/rag_eval_gate.sh` 继续全 PASS。
   - 新 case 的期望文件、关键词和检索行为定义清晰。
+- 完成记录：
+  - 完成日期：2026-06-28
+  - 相关 commit：`9620eee`
+  - `docs/evals/rag_eval_cases.jsonl` 从 6 条扩展到 10 条，新增多轮追问、禁用 rerank、禁用 query router 和 `retrieval_mode=never` 低相关场景。
+  - `scripts/eval_rag.py` 新增 `pre_questions`、`expected_reason_keywords` 和 `expected_diagnostics` 检查能力。
+  - `scripts/rag_eval_gate.sh` 已通过：10/10 case PASS，质量门禁全部 PASS。
 - 建议验证命令：
 
 ```bash
