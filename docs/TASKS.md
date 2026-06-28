@@ -50,7 +50,7 @@
 | 计划 ID | 日期 | 状态 | 目标 | 关联任务 |
 | --- | --- | --- | --- | --- |
 | `PLAN-20260628-01` | 2026-06-28 | `Done` | 基于代码和功能审查，建立可维护性、可观测性和验收自动化方向的第一批 backlog。 | `T-001` - `T-009` |
-| `PLAN-20260628-02` | 2026-06-28 | `Doing` | 优化知识库检索速度，优先降低 rerank 对首 token 前等待时间的影响。 | `T-010` |
+| `PLAN-20260628-02` | 2026-06-28 | `Done` | 优化知识库检索速度，优先降低 rerank 对首 token 前等待时间的影响。 | `T-010` |
 
 ## 任务总览
 
@@ -65,7 +65,7 @@
 | `T-007` | `PLAN-20260628-01` | `P2` | `Done` | 梳理本地启动与验收工作流文档 | 2026-06-28 | `7c52ae8` |
 | `T-008` | `PLAN-20260628-01` | `P2` | `Done` | 为部署目录补齐可运行 Docker Compose 方案 | 2026-06-28 | `7c52ae8` |
 | `T-009` | `PLAN-20260628-01` | `P1` | `Done` | 继续拆分前端聊天工作台 UI 面板 | 2026-06-28 | `bdd53c8` |
-| `T-010` | `PLAN-20260628-02` | `P1` | `Doing` | 优化知识库检索速度，降低 rerank 开销 | - | - |
+| `T-010` | `PLAN-20260628-02` | `P1` | `Done` | 优化知识库检索速度，降低 rerank 开销 | 2026-06-28 | `8c9ac21` |
 
 ## 新计划接入流程
 
@@ -330,7 +330,7 @@ npm run build
 
 - 来源计划：`PLAN-20260628-02`
 - 优先级：`P1`
-- 状态：`Doing`
+- 状态：`Done`
 - 目标：降低知识库检索阶段耗时，优先压缩 CrossEncoder rerank 对 `pre_answer_total_ms` 和首 token 前等待时间的影响。
 - 范围：将默认 `rrf_k` 从 20 调低到 10；候选数不超过最终 `top_k` 时跳过 CrossEncoder；降低 reranker 默认 `max_length`；保留知识库设置覆盖能力。
 - 基线观察：
@@ -341,6 +341,15 @@ npm run build
   - 小候选集场景跳过 rerank，并在 diagnostics 中记录跳过原因。
   - 候选数超过 `top_k` 时仍执行 rerank，保证高召回场景排序质量。
   - 后端测试、前端测试、lint 和 build 通过。
+- 完成记录：
+  - 完成日期：2026-06-28
+  - 相关 commit：`8c9ac21`
+  - 默认 `rrf_k` 已从 20 调整为 10，并新增 `012_default_retrieval_rrf_k_10.sql` 更新数据库默认值和旧默认记录。
+  - `hybrid_retriever` 在候选数不超过 `top_k` 时跳过 CrossEncoder，并写入 `rerank_skipped` 与 `rerank_skip_reason` diagnostics。
+  - reranker 默认 `max_length` 从 512 降到 384，减少 CPU 推理输入长度。
+  - RAG eval case 已显式覆盖 `rrf_k=10`，报告中真实链路 `fused=10`。
+  - 真实 RAG eval 10/10 PASS，平均首 token 等待从 5049.24ms 降至 3494.03ms，平均总耗时从 7.66s 降至 6.50s。
+  - `scripts/acceptance_check.sh --skip-real-eval` 已通过。
 - 建议验证命令：
 
 ```bash
