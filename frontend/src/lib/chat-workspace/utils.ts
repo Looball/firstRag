@@ -1,0 +1,1510 @@
+import {
+  DEFAULT_RETRIEVAL_SETTINGS,
+  LEGACY_INITIAL_MESSAGE,
+} from "./constants";
+import type {
+  BackendConversation,
+  BackendKnowledgeBase,
+  BackendKnowledgeFile,
+  ChatSession,
+  ChatSource,
+  KnowledgeBase,
+  KnowledgeBaseRetrievalSettings,
+  KnowledgeFile,
+  KnowledgeFileStatus,
+  LatestIndexJob,
+  LatestIndexJobStatus,
+  Message,
+  MessageDiagnostic,
+  RetrievalDiagnostics,
+  RetrievalMode,
+  RetrievalState,
+  SourcePreview,
+  VectorIndexHealthResponse,
+  VectorIndexJob,
+  VectorIndexJobStatus,
+  VectorIndexResponse,
+  VectorStatus,
+  WorkerHealthTone,
+} from "./types";
+
+export function isAuthExpiredMessage(message: string) {
+  const normalizedMessage = message.toLowerCase();
+
+  return (
+    message.includes("登录已过期") ||
+    message.includes("登录过期") ||
+    message.includes("登录已失效") ||
+    message.includes("请重新登录") ||
+    normalizedMessage.includes("unauthorized") ||
+    normalizedMessage.includes("not authenticated") ||
+    normalizedMessage.includes("could not validate credentials") ||
+    normalizedMessage.includes("invalid token") ||
+    normalizedMessage.includes("token expired")
+  );
+}
+
+
+export function formatFileSize(size: number) {
+  if (size < 1024) {
+    return `${size} B`;
+  }
+
+  if (size < 1024 * 1024) {
+    return `${Math.round(size / 1024)} KB`;
+  }
+
+  return `${(size / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+
+export function formatDurationSeconds(seconds: number | null) {
+  if (seconds === null || !Number.isFinite(seconds) || seconds < 0) {
+    return "";
+  }
+
+  if (seconds < 60) {
+    return `${Math.round(seconds)} 秒`;
+  }
+
+  const minutes = seconds / 60;
+  if (minutes < 60) {
+    return `${minutes.toFixed(minutes >= 10 ? 0 : 1)} 分钟`;
+  }
+
+  const hours = minutes / 60;
+  return `${hours.toFixed(hours >= 10 ? 0 : 1)} 小时`;
+}
+
+
+export function getFileFingerprint(file: File) {
+  return `${file.name}:${file.size}:${file.lastModified}`;
+}
+
+
+export function buildSessionTitle(input: string) {
+  const normalized = input.replace(/\s+/g, " ").trim();
+
+  if (!normalized) {
+    return "新对话";
+  }
+
+  return normalized.length > 24 ? `${normalized.slice(0, 24)}...` : normalized;
+}
+
+
+export function toMessage(value: unknown): Message | null {
+  if (typeof value !== "object" || value === null) {
+    return null;
+  }
+
+  const candidate = value as Record<string, unknown>;
+  const role = candidate.role;
+
+  if (
+    (role !== "user" && role !== "assistant") ||
+    typeof candidate.content !== "string"
+  ) {
+    return null;
+  }
+
+  const sourceContainer = Array.isArray(candidate.sources)
+    ? { sources: candidate.sources }
+    : Array.isArray(candidate.documents)
+      ? { documents: candidate.documents }
+      : Array.isArray(candidate.refs)
+        ? { refs: candidate.refs }
+        : null;
+  const sources = sourceContainer ? getChatSources(sourceContainer) : [];
+  const retrieval = getRetrievalState(candidate);
+  const id = typeof candidate.id === "string" ? candidate.id : undefined;
+  const status =
+    typeof candidate.status === "string" ? candidate.status : undefined;
+  const errorMessage =
+    typeof candidate.error_message === "string"
+      ? candidate.error_message
+      : candidate.error_message === null
+        ? null
+        : undefined;
+
+  return {
+    ...(id ? { id } : {}),
+    role,
+    content: candidate.content,
+    ...(status ? { status } : {}),
+    ...(errorMessage !== undefined ? { errorMessage } : {}),
+    ...(sources.length > 0 ? { sources } : {}),
+    ...(retrieval ? { retrieval } : {}),
+  };
+}
+
+
+export function toMessages(values: unknown[]) {
+  return values
+    .map(toMessage)
+    .filter((message): message is Message => message !== null);
+}
+
+
+export function getAssistantContent(value: unknown) {
+  if (typeof value === "string") {
+    return value;
+  }
+
+  if (typeof value !== "object" || value === null) {
+    return "";
+  }
+
+  const candidate = value as {
+    answer?: unknown;
+    content?: unknown;
+    assistant_message?: { content?: unknown };
+    message?: { content?: unknown } | unknown;
+    messages?: Array<{ role?: unknown; content?: unknown }>;
+  };
+
+  if (typeof candidate.assistant_message?.content === "string") {
+    return candidate.assistant_message.content;
+  }
+
+  if (typeof candidate.answer === "string") {
+    return candidate.answer;
+  }
+
+  if (typeof candidate.content === "string") {
+    return candidate.content;
+  }
+
+  if (
+    typeof candidate.message === "object" &&
+    candidate.message !== null &&
+    "content" in candidate.message &&
+    typeof candidate.message.content === "string"
+  ) {
+    return candidate.message.content;
+  }
+
+  const assistantMessage = candidate.messages?.find(
+    (message) =>
+      message.role === "assistant" && typeof message.content === "string"
+  );
+
+  return typeof assistantMessage?.content === "string"
+    ? assistantMessage.content
+    : "";
+}
+
+
+export function getAssistantMessageId(value: unknown) {
+  if (typeof value !== "object" || value === null) {
+    return "";
+  }
+
+  const candidate = value as Record<string, unknown>;
+  const nestedMessage =
+    typeof candidate.message === "object" && candidate.message !== null
+      ? (candidate.message as Record<string, unknown>)
+      : null;
+
+  return (
+    getStringField(candidate, ["message_id", "assistant_message_id", "id"]) ||
+    (nestedMessage ? getStringField(nestedMessage, ["id"]) : "")
+  );
+}
+
+
+export function parseJsonValue(value: string) {
+  try {
+    return JSON.parse(value) as unknown;
+  } catch {
+    return value;
+  }
+}
+
+
+export function getNumberField(value: Record<string, unknown>, fieldName: string) {
+  const fieldValue = value[fieldName];
+
+  if (typeof fieldValue === "number" && Number.isFinite(fieldValue)) {
+    return fieldValue;
+  }
+
+  if (typeof fieldValue === "string" && fieldValue.trim()) {
+    const parsedValue = Number(fieldValue);
+
+    return Number.isFinite(parsedValue) ? parsedValue : 0;
+  }
+
+  return 0;
+}
+
+
+export function getOptionalNumberField(
+  value: Record<string, unknown>,
+  fieldNames: string[]
+) {
+  for (const fieldName of fieldNames) {
+    const fieldValue = value[fieldName];
+
+    if (typeof fieldValue === "number" && Number.isFinite(fieldValue)) {
+      return fieldValue;
+    }
+
+    if (typeof fieldValue === "string" && fieldValue.trim()) {
+      const parsedValue = Number(fieldValue);
+
+      if (Number.isFinite(parsedValue)) {
+        return parsedValue;
+      }
+    }
+  }
+
+  return undefined;
+}
+
+
+export function getNullableNumberField(
+  value: Record<string, unknown>,
+  fieldNames: string[]
+) {
+  const numberValue = getOptionalNumberField(value, fieldNames);
+
+  return numberValue === undefined ? null : numberValue;
+}
+
+
+export function getNullableStringField(
+  value: Record<string, unknown>,
+  fieldNames: string[]
+) {
+  const stringValue = getStringField(value, fieldNames);
+
+  return stringValue || null;
+}
+
+
+export function getNullableBooleanField(
+  value: Record<string, unknown>,
+  fieldNames: string[]
+) {
+  for (const fieldName of fieldNames) {
+    const fieldValue = value[fieldName];
+
+    if (typeof fieldValue === "boolean") {
+      return fieldValue;
+    }
+
+    if (typeof fieldValue === "string" && fieldValue.trim()) {
+      const normalizedValue = fieldValue.trim().toLowerCase();
+
+      if (["true", "1", "yes", "是"].includes(normalizedValue)) {
+        return true;
+      }
+
+      if (["false", "0", "no", "否"].includes(normalizedValue)) {
+        return false;
+      }
+    }
+  }
+
+  return null;
+}
+
+
+export function getRetrievalState(value: unknown): RetrievalState | undefined {
+  const parsedValue = typeof value === "string" ? parseJsonValue(value) : value;
+
+  if (typeof parsedValue !== "object" || parsedValue === null) {
+    return undefined;
+  }
+
+  const candidate = parsedValue as Record<string, unknown>;
+  const retrievalValue =
+    typeof candidate.retrieval === "object" && candidate.retrieval !== null
+      ? candidate.retrieval
+      : candidate;
+
+  if (typeof retrievalValue !== "object" || retrievalValue === null) {
+    return undefined;
+  }
+
+  const retrieval = retrievalValue as Record<string, unknown>;
+
+  if (typeof retrieval.need_retrieval !== "boolean") {
+    return undefined;
+  }
+
+  return {
+    need_retrieval: retrieval.need_retrieval,
+    final_need_retrieval: getNullableBooleanField(retrieval, [
+      "final_need_retrieval",
+    ]),
+    llm_need_retrieval: getNullableBooleanField(retrieval, [
+      "llm_need_retrieval",
+    ]),
+    rewritten_query:
+      typeof retrieval.rewritten_query === "string"
+        ? retrieval.rewritten_query
+        : "",
+    reason: typeof retrieval.reason === "string" ? retrieval.reason : "",
+    llm_reason:
+      typeof retrieval.llm_reason === "string" ? retrieval.llm_reason : "",
+    override_applied: getNullableBooleanField(retrieval, [
+      "override_applied",
+    ]) === true,
+    override_reason:
+      typeof retrieval.override_reason === "string"
+        ? retrieval.override_reason
+        : "",
+    retrieved_count: getNumberField(retrieval, "retrieved_count"),
+    source_count: getNumberField(retrieval, "source_count"),
+  };
+}
+
+
+export function getStringField(
+  value: Record<string, unknown>,
+  fieldNames: string[]
+) {
+  for (const fieldName of fieldNames) {
+    const fieldValue = value[fieldName];
+
+    if (typeof fieldValue === "string" && fieldValue.trim()) {
+      return fieldValue.trim();
+    }
+
+    if (typeof fieldValue === "number" && Number.isFinite(fieldValue)) {
+      return String(fieldValue);
+    }
+  }
+
+  return "";
+}
+
+
+export function getRecordField(
+  value: Record<string, unknown>,
+  fieldName: string
+): Record<string, unknown> | null {
+  const fieldValue = value[fieldName];
+
+  return typeof fieldValue === "object" && fieldValue !== null
+    ? (fieldValue as Record<string, unknown>)
+    : null;
+}
+
+
+export function getStringArrayField(value: Record<string, unknown>, fieldName: string) {
+  const fieldValue = value[fieldName];
+
+  return Array.isArray(fieldValue)
+    ? fieldValue
+        .filter((item): item is string => typeof item === "string")
+        .map((item) => item.trim())
+        .filter(Boolean)
+    : [];
+}
+
+
+export function toSourcePreview(value: unknown): SourcePreview | null {
+  if (typeof value !== "object" || value === null) {
+    return null;
+  }
+
+  const source = value as Record<string, unknown>;
+
+  return {
+    index: getNullableNumberField(source, ["index"]),
+    fileId: getNullableStringField(source, ["file_id"]),
+    fileName: getNullableStringField(source, ["file_name"]),
+    chunkIndex: getNullableNumberField(source, ["chunk_index"]),
+    retrievalSources: getStringArrayField(source, "retrieval_sources"),
+    vectorScore: getNullableNumberField(source, ["vector_score"]),
+    fulltextScore: getNullableNumberField(source, ["fulltext_score"]),
+    rrfScore: getNullableNumberField(source, ["rrf_score"]),
+    rerankScore: getNullableNumberField(source, ["rerank_score"]),
+  };
+}
+
+
+export function getSourcesPreview(value: Record<string, unknown>) {
+  const sourcesPreview = value.sources_preview;
+
+  return Array.isArray(sourcesPreview)
+    ? sourcesPreview
+        .map(toSourcePreview)
+        .filter((source): source is SourcePreview => source !== null)
+    : [];
+}
+
+
+export function getRetrievalDiagnostics(
+  value: Record<string, unknown>
+): RetrievalDiagnostics {
+  const diagnostics = getRecordField(value, "diagnostics") || {};
+  const vectorDegraded = diagnostics.vector_degraded;
+  const timing = getRecordField(diagnostics, "timing") || {};
+  const llm = getRecordField(diagnostics, "llm") || {};
+
+  return {
+    ...(typeof vectorDegraded === "boolean"
+      ? { vectorDegraded }
+      : {}),
+    vectorErrors: getStringArrayField(diagnostics, "vector_errors"),
+    vectorCount: getNullableNumberField(diagnostics, ["vector_count"]),
+    fulltextCount: getNullableNumberField(diagnostics, ["fulltext_count"]),
+    fusedCount: getNullableNumberField(diagnostics, ["fused_count"]),
+    rerankedCount: getNullableNumberField(diagnostics, ["reranked_count"]),
+    retrievalSources: getStringArrayField(diagnostics, "retrieval_sources"),
+    llm: {
+      provider: getStringField(llm, ["provider"]),
+      model: getStringField(llm, ["model"]),
+      credentialMode: getStringField(llm, ["credential_mode"]),
+      baseUrl: getStringField(llm, ["base_url"]),
+      temperature: getNullableNumberField(llm, ["temperature"]),
+      maxTokens: getNullableNumberField(llm, ["max_tokens"]),
+      timeoutSeconds: getNullableNumberField(llm, ["timeout_seconds"]),
+      maxRetries: getNullableNumberField(llm, ["max_retries"]),
+      promptTokens: getNullableNumberField(llm, ["prompt_tokens"]),
+      completionTokens: getNullableNumberField(llm, ["completion_tokens"]),
+      totalTokens: getNullableNumberField(llm, ["total_tokens"]),
+    },
+    timing: {
+      standaloneQuestionMs: getNullableNumberField(timing, [
+        "standalone_question_ms",
+      ]),
+      retrievalSettingsMs: getNullableNumberField(timing, [
+        "retrieval_settings_ms",
+      ]),
+      knowledgeProfileMs: getNullableNumberField(timing, [
+        "knowledge_profile_ms",
+      ]),
+      queryRouterMs: getNullableNumberField(timing, ["query_router_ms"]),
+      finalizeDecisionMs: getNullableNumberField(timing, [
+        "finalize_decision_ms",
+      ]),
+      retrieveDocumentsMs: getNullableNumberField(timing, [
+        "retrieve_documents_ms",
+      ]),
+      embeddingMs: getNullableNumberField(timing, ["embedding_ms"]),
+      vectorMs: getNullableNumberField(timing, ["vector_ms"]),
+      fulltextMs: getNullableNumberField(timing, ["fulltext_ms"]),
+      rrfMs: getNullableNumberField(timing, ["rrf_ms"]),
+      rerankMs: getNullableNumberField(timing, ["rerank_ms"]),
+      retrievalTotalMs: getNullableNumberField(timing, [
+        "retrieval_total_ms",
+      ]),
+      preAnswerTotalMs: getNullableNumberField(timing, [
+        "pre_answer_total_ms",
+      ]),
+      firstAnswerTokenMs: getNullableNumberField(timing, [
+        "first_answer_token_ms",
+      ]),
+      answerStreamMs: getNullableNumberField(timing, ["answer_stream_ms"]),
+      chatStreamTotalMs: getNullableNumberField(timing, [
+        "chat_stream_total_ms",
+      ]),
+    },
+  };
+}
+
+
+export function toMessageDiagnostic(value: unknown): MessageDiagnostic | null {
+  if (typeof value !== "object" || value === null) {
+    return null;
+  }
+
+  const diagnostic = value as Record<string, unknown>;
+  const messageId = getStringField(diagnostic, ["message_id"]);
+
+  if (!messageId) {
+    return null;
+  }
+
+  const needRetrievalValue = diagnostic.need_retrieval;
+
+  return {
+    messageId,
+    status: getStringField(diagnostic, ["status"]),
+    errorMessage:
+      typeof diagnostic.error_message === "string"
+        ? diagnostic.error_message
+        : diagnostic.error_message === null
+          ? null
+          : null,
+    createdAt: getStringField(diagnostic, ["created_at"]),
+    needRetrieval:
+      typeof needRetrievalValue === "boolean" ? needRetrievalValue : null,
+    finalNeedRetrieval: getNullableBooleanField(diagnostic, [
+      "final_need_retrieval",
+      "need_retrieval",
+    ]),
+    llmNeedRetrieval: getNullableBooleanField(diagnostic, [
+      "llm_need_retrieval",
+    ]),
+    rewrittenQuery: getStringField(diagnostic, ["rewritten_query"]),
+    reason: getStringField(diagnostic, ["reason"]),
+    llmReason: getStringField(diagnostic, ["llm_reason"]),
+    overrideApplied:
+      getNullableBooleanField(diagnostic, ["override_applied"]) === true,
+    overrideReason: getStringField(diagnostic, ["override_reason"]),
+    retrievedCount: getNumberField(diagnostic, "retrieved_count"),
+    sourceCount: getNumberField(diagnostic, "source_count"),
+    retrievalSources: getStringArrayField(diagnostic, "retrieval_sources"),
+    vectorDegraded: diagnostic.vector_degraded === true,
+    diagnostics: getRetrievalDiagnostics(diagnostic),
+    sourcesPreview: getSourcesPreview(diagnostic),
+  };
+}
+
+
+export function getConversationDiagnostics(value: unknown) {
+  if (typeof value !== "object" || value === null) {
+    return [];
+  }
+
+  const candidate = value as Record<string, unknown>;
+  const diagnostics = candidate.diagnostics;
+
+  return Array.isArray(diagnostics)
+    ? diagnostics
+        .map(toMessageDiagnostic)
+        .filter(
+          (diagnostic): diagnostic is MessageDiagnostic => diagnostic !== null
+        )
+    : [];
+}
+
+
+export function formatDiagnosticScore(value?: number | null) {
+  return typeof value === "number" && Number.isFinite(value)
+    ? value.toFixed(4)
+    : "—";
+}
+
+
+export function formatDiagnosticCount(value: number | null) {
+  return value === null ? "—" : String(value);
+}
+
+
+export function formatDiagnosticValue(value?: string | number | null) {
+  if (typeof value === "number") {
+    return Number.isFinite(value) ? String(value) : "—";
+  }
+
+  return value ? value : "—";
+}
+
+
+export function formatDiagnosticTiming(value?: number | null) {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return "—";
+  }
+
+  if (value >= 1000) {
+    return `${(value / 1000).toFixed(2)}s`;
+  }
+
+  return `${value.toFixed(value >= 10 ? 0 : 2)}ms`;
+}
+
+
+export function formatRetrievalDecision(value?: boolean | null) {
+  if (value === null || value === undefined) {
+    return "未知";
+  }
+
+  return value ? "检索" : "不检索";
+}
+
+
+export function toChatSource(value: unknown, index: number): ChatSource | null {
+  if (typeof value === "string") {
+    const normalized = value.trim();
+
+    return normalized
+      ? {
+          title: `参考文档 ${index + 1}`,
+          content: normalized,
+          metadata: "",
+        }
+      : null;
+  }
+
+  if (typeof value !== "object" || value === null) {
+    return null;
+  }
+
+  const source = value as Record<string, unknown>;
+  const metadataRecord = getRecordField(source, "metadata");
+  const sourceIndex = getOptionalNumberField(source, ["index"]);
+  const chunkIndex = getOptionalNumberField(source, [
+    "chunk_index",
+    "chunk_id",
+  ]);
+  const rerankScore = getOptionalNumberField(source, [
+    "rerank_score",
+    "score",
+  ]);
+  const rrfScore = getOptionalNumberField(source, ["rrf_score"]);
+  const vectorScore = getOptionalNumberField(source, ["vector_score"]);
+  const fulltextScore = getOptionalNumberField(source, ["fulltext_score"]);
+  const fileId =
+    getStringField(source, ["file_id", "knowledge_file_id", "document_id"]) ||
+    (metadataRecord
+      ? getStringField(metadataRecord, [
+          "file_id",
+          "knowledge_file_id",
+          "document_id",
+        ])
+      : "");
+  const fileName =
+    getStringField(source, [
+      "file_name",
+      "filename",
+      "original_name",
+      "document_name",
+      "knowledge_file_name",
+    ]) ||
+    (metadataRecord
+      ? getStringField(metadataRecord, [
+          "file_name",
+          "filename",
+          "original_name",
+          "document_name",
+          "knowledge_file_name",
+        ])
+      : "");
+  const fileType =
+    getStringField(source, ["file_type", "type"]) ||
+    (metadataRecord
+      ? getStringField(metadataRecord, ["file_type", "type"])
+      : "");
+  const retrievalSources = getStringArrayField(source, "retrieval_sources");
+  const title =
+    getStringField(source, [
+      "title",
+      "name",
+      "file_name",
+      "filename",
+      "original_name",
+      "document_name",
+      "knowledge_file_name",
+      "source",
+      "document",
+    ]) ||
+    fileName ||
+    (metadataRecord
+      ? getStringField(metadataRecord, [
+          "title",
+          "name",
+          "file_name",
+          "filename",
+          "original_name",
+          "document_name",
+          "knowledge_file_name",
+          "source",
+          "document",
+        ])
+      : "") ||
+    `参考文档 ${index + 1}`;
+  const content =
+    getStringField(source, [
+      "content",
+      "text",
+      "chunk",
+      "chunk_text",
+      "snippet",
+      "excerpt",
+      "quote",
+      "page_content",
+    ]) ||
+    (metadataRecord
+      ? getStringField(metadataRecord, [
+          "content",
+          "text",
+          "chunk",
+          "chunk_text",
+          "snippet",
+          "excerpt",
+          "quote",
+          "page_content",
+        ])
+      : "");
+
+  const metadataParts: string[] = [];
+  const createdAt = source["created_at"];
+  const pageNumber =
+    source["page"] ??
+    source["page_number"] ??
+    source["page_index"] ??
+    metadataRecord?.page ??
+    metadataRecord?.page_number ??
+    metadataRecord?.page_index;
+
+  if (
+    (typeof pageNumber === "number" && Number.isFinite(pageNumber)) ||
+    (typeof pageNumber === "string" && pageNumber.trim())
+  ) {
+    metadataParts.push(`页码 ${pageNumber}`);
+  }
+
+  if (typeof createdAt === "string" && createdAt.trim()) {
+    metadataParts.push(createdAt.trim());
+  }
+
+  if (
+    retrievalSources.length > 0 &&
+    !metadataParts.length
+  ) {
+    metadataParts.push(retrievalSources.join(" / "));
+  }
+
+  const legacyMetadata = fileId;
+
+  const metadata =
+    metadataParts.length > 0
+      ? metadataParts.join(" · ")
+      : legacyMetadata;
+
+  return {
+    title,
+    content,
+    metadata,
+    ...(sourceIndex !== undefined ? { index: sourceIndex } : {}),
+    ...(fileId ? { fileId } : {}),
+    ...(fileName ? { fileName } : {}),
+    ...(fileType ? { fileType } : {}),
+    ...(chunkIndex !== undefined ? { chunkIndex } : {}),
+    ...(vectorScore !== undefined ? { vectorScore } : {}),
+    ...(fulltextScore !== undefined ? { fulltextScore } : {}),
+    ...(rerankScore !== undefined ? { rerankScore } : {}),
+    ...(rrfScore !== undefined ? { rrfScore } : {}),
+    ...(retrievalSources.length > 0 ? { retrievalSources } : {}),
+  };
+}
+
+
+export function hasSourceShape(value: Record<string, unknown>) {
+  return [
+    "title",
+    "file_name",
+    "filename",
+    "original_name",
+    "file_id",
+    "file_type",
+    "knowledge_file_id",
+    "document_id",
+    "document_name",
+    "knowledge_file_name",
+    "source",
+    "document",
+    "index",
+    "chunk_index",
+    "vector_score",
+    "fulltext_score",
+    "rerank_score",
+    "rrf_score",
+    "retrieval_sources",
+    "metadata",
+    "content",
+    "text",
+    "chunk",
+    "chunk_text",
+    "snippet",
+    "excerpt",
+    "quote",
+    "page_content",
+  ].some((fieldName) => fieldName in value);
+}
+
+
+export function getChatSources(value: unknown) {
+  const parsedValue = typeof value === "string" ? parseJsonValue(value) : value;
+  const sourceValues = Array.isArray(parsedValue)
+    ? parsedValue
+    : typeof parsedValue === "object" && parsedValue !== null
+      ? Array.isArray((parsedValue as { sources?: unknown }).sources)
+        ? (parsedValue as { sources: unknown[] }).sources
+        : Array.isArray((parsedValue as { documents?: unknown }).documents)
+          ? (parsedValue as { documents: unknown[] }).documents
+          : Array.isArray((parsedValue as { refs?: unknown }).refs)
+            ? (parsedValue as { refs: unknown[] }).refs
+            : hasSourceShape(parsedValue as Record<string, unknown>)
+              ? [parsedValue]
+              : []
+      : [];
+
+  return sourceValues
+    .map(toChatSource)
+    .filter((source): source is ChatSource => source !== null);
+}
+
+
+export function parseSseBlock(block: string) {
+  let event = "message";
+  const dataLines: string[] = [];
+
+  block.split(/\r?\n/).forEach((line) => {
+    if (!line || line.startsWith(":")) {
+      return;
+    }
+
+    if (line.startsWith("event:")) {
+      event = line.slice("event:".length).trim() || event;
+      return;
+    }
+
+    if (line.startsWith("data:")) {
+      dataLines.push(line.slice("data:".length).replace(/^ /, ""));
+    }
+  });
+
+  return {
+    event,
+    data: dataLines.join("\n"),
+  };
+}
+
+
+export function getSseAnswerContent(data: string) {
+  const parsedData = parseJsonValue(data);
+  const answer = getAssistantContent(parsedData);
+
+  return answer || (typeof parsedData === "string" ? parsedData : "");
+}
+
+
+export function removeLegacyInitialMessage(messages: Message[]) {
+  if (
+    messages[0]?.role === "assistant" &&
+    messages[0].content === LEGACY_INITIAL_MESSAGE
+  ) {
+    return messages.slice(1);
+  }
+
+  return messages;
+}
+
+
+export function toChatSession(
+  value: unknown,
+  fallbackKnowledgeBaseId = ""
+): ChatSession | null {
+  if (typeof value !== "object" || value === null) {
+    return null;
+  }
+
+  const conversation = value as BackendConversation;
+
+  if (typeof conversation.id !== "string" || !conversation.id.trim()) {
+    return null;
+  }
+
+  const messages = Array.isArray(conversation.messages)
+    ? removeLegacyInitialMessage(toMessages(conversation.messages))
+    : [];
+  const knowledgeBaseId =
+    typeof conversation.knowledge_base_id === "string" &&
+    conversation.knowledge_base_id.trim()
+      ? conversation.knowledge_base_id.trim()
+      : fallbackKnowledgeBaseId;
+
+  return {
+    id: conversation.id,
+    knowledgeBaseId,
+    title:
+      typeof conversation.title === "string" && conversation.title.trim()
+        ? conversation.title.trim()
+        : "新对话",
+    messages,
+    messagesLoaded: Array.isArray(conversation.messages),
+  };
+}
+
+
+export function toKnowledgeBase(value: unknown): KnowledgeBase | null {
+  if (typeof value !== "object" || value === null) {
+    return null;
+  }
+
+  const knowledgeBase = value as BackendKnowledgeBase;
+
+  if (
+    typeof knowledgeBase.id !== "string" ||
+    !knowledgeBase.id.trim() ||
+    typeof knowledgeBase.name !== "string" ||
+    !knowledgeBase.name.trim()
+  ) {
+    return null;
+  }
+
+  const fileCount = Number(knowledgeBase.file_count);
+
+  return {
+    id: knowledgeBase.id,
+    name: knowledgeBase.name.trim(),
+    isDefault: knowledgeBase.is_default === true,
+    fileCount: Number.isFinite(fileCount) ? fileCount : 0,
+  };
+}
+
+
+export function getRetrievalMode(value: unknown): RetrievalMode {
+  return value === "always" || value === "never" || value === "auto"
+    ? value
+    : DEFAULT_RETRIEVAL_SETTINGS.retrievalMode;
+}
+
+
+export function getBoundedNumber(
+  value: Record<string, unknown>,
+  fieldNames: string[],
+  fallback: number,
+  minValue: number,
+  maxValue: number
+) {
+  const parsedValue = getNullableNumberField(value, fieldNames);
+
+  if (parsedValue === null) {
+    return fallback;
+  }
+
+  return Math.min(maxValue, Math.max(minValue, parsedValue));
+}
+
+
+export function toRetrievalSettings(
+  value: unknown
+): KnowledgeBaseRetrievalSettings {
+  if (typeof value !== "object" || value === null) {
+    return DEFAULT_RETRIEVAL_SETTINGS;
+  }
+
+  const settings = value as Record<string, unknown>;
+
+  return {
+    retrievalMode: getRetrievalMode(settings.retrieval_mode),
+    enableQueryRouter:
+      getNullableBooleanField(settings, ["enable_query_router"]) ??
+      DEFAULT_RETRIEVAL_SETTINGS.enableQueryRouter,
+    enableRerank:
+      getNullableBooleanField(settings, ["enable_rerank"]) ??
+      DEFAULT_RETRIEVAL_SETTINGS.enableRerank,
+    topK: getBoundedNumber(
+      settings,
+      ["top_k"],
+      DEFAULT_RETRIEVAL_SETTINGS.topK,
+      1,
+      20
+    ),
+    vectorTopK: getBoundedNumber(
+      settings,
+      ["vector_top_k"],
+      DEFAULT_RETRIEVAL_SETTINGS.vectorTopK,
+      1,
+      100
+    ),
+    fulltextTopK: getBoundedNumber(
+      settings,
+      ["fulltext_top_k"],
+      DEFAULT_RETRIEVAL_SETTINGS.fulltextTopK,
+      1,
+      100
+    ),
+    rrfK: getBoundedNumber(
+      settings,
+      ["rrf_k"],
+      DEFAULT_RETRIEVAL_SETTINGS.rrfK,
+      1,
+      100
+    ),
+    rerankScoreThreshold: getBoundedNumber(
+      settings,
+      ["rerank_score_threshold"],
+      DEFAULT_RETRIEVAL_SETTINGS.rerankScoreThreshold,
+      -20,
+      20
+    ),
+  };
+}
+
+
+export function serializeRetrievalSettings(
+  settings: KnowledgeBaseRetrievalSettings
+) {
+  return {
+    retrieval_mode: settings.retrievalMode,
+    enable_query_router: settings.enableQueryRouter,
+    enable_rerank: settings.enableRerank,
+    top_k: settings.topK,
+    vector_top_k: settings.vectorTopK,
+    fulltext_top_k: settings.fulltextTopK,
+    rrf_k: settings.rrfK,
+    rerank_score_threshold: settings.rerankScoreThreshold,
+  };
+}
+
+
+export function toKnowledgeFile(
+  value: unknown,
+  sourceFile?: File
+): KnowledgeFile | null {
+  if (typeof value !== "object" || value === null) {
+    return null;
+  }
+
+  const knowledgeFile = value as BackendKnowledgeFile;
+
+  if (
+    typeof knowledgeFile.id !== "string" ||
+    !knowledgeFile.id.trim() ||
+    typeof knowledgeFile.original_name !== "string" ||
+    !knowledgeFile.original_name.trim()
+  ) {
+    return null;
+  }
+
+  const size = Number(knowledgeFile.size_bytes);
+  const usageCount = Number(knowledgeFile.usage_count);
+  const status = getKnowledgeFileStatus(knowledgeFile.status);
+  const latestIndexJob = toLatestIndexJob(knowledgeFile.latest_index_job);
+
+  return {
+    id: knowledgeFile.id,
+    name: knowledgeFile.original_name.trim(),
+    size: Number.isFinite(size) ? size : sourceFile?.size || 0,
+    fingerprint: sourceFile
+      ? getFileFingerprint(sourceFile)
+      : knowledgeFile.id,
+    status,
+    latestIndexJob,
+    usageCount: Number.isFinite(usageCount) ? usageCount : null,
+  };
+}
+
+
+export function toLatestIndexJob(value: unknown): LatestIndexJob | null {
+  if (typeof value !== "object" || value === null) {
+    return null;
+  }
+
+  const job = value as Record<string, unknown>;
+  const id = typeof job.id === "string" ? job.id : "";
+  const status = getLatestIndexJobStatus(job.status);
+  const userId = Number(job.user_id);
+  const indexVersion = Number(job.index_version);
+  const attempts = Number(job.attempts);
+  const maxAttempts = Number(job.max_attempts);
+  const activeSeconds = getNullableNumberField(job, ["active_seconds"]);
+
+  return {
+    id,
+    userId: Number.isFinite(userId) ? userId : null,
+    knowledgeFileId:
+      typeof job.knowledge_file_id === "string" ? job.knowledge_file_id : "",
+    knowledgeBaseId:
+      typeof job.knowledge_base_id === "string" ? job.knowledge_base_id : null,
+    indexVersion: Number.isFinite(indexVersion) ? indexVersion : null,
+    status,
+    attempts: Number.isFinite(attempts) ? attempts : null,
+    maxAttempts: Number.isFinite(maxAttempts) ? maxAttempts : null,
+    errorMessage:
+      typeof job.error_message === "string" && job.error_message.trim()
+        ? job.error_message.trim()
+        : null,
+    createdAt: typeof job.created_at === "string" ? job.created_at : "",
+    updatedAt: typeof job.updated_at === "string" ? job.updated_at : "",
+    startedAt: typeof job.started_at === "string" ? job.started_at : null,
+    finishedAt: typeof job.finished_at === "string" ? job.finished_at : null,
+    activeSeconds,
+    isStale: job.is_stale === true,
+    workerHint: getNullableStringField(job, ["worker_hint"]),
+    failureType: getNullableStringField(job, ["failure_type"]),
+    failureHint: getNullableStringField(job, ["failure_hint"]),
+    canRetry: job.can_retry !== false,
+  };
+}
+
+
+export function getLatestIndexJobStatus(value: unknown): LatestIndexJobStatus {
+  if (
+    value === "queued" ||
+    value === "processing" ||
+    value === "completed" ||
+    value === "failed"
+  ) {
+    return value;
+  }
+
+  return "unknown";
+}
+
+
+export function getKnowledgeFileStatus(value: unknown): KnowledgeFileStatus {
+  if (value === "queued") {
+    return "queued";
+  }
+
+  if (value === "processing") {
+    return "processing";
+  }
+
+  if (value === "indexed" || value === "ready") {
+    return "indexed";
+  }
+
+  if (value === "failed") {
+    return "failed";
+  }
+
+  return "pending";
+}
+
+
+export function getVectorStatus(file: KnowledgeFile): VectorStatus {
+  const job = file.latestIndexJob;
+
+  if (!job) {
+    return {
+      label: "未向量化",
+      type: "idle",
+      canVectorize: true,
+      canDeleteVector: false,
+      canPoll: false,
+    };
+  }
+
+  if (job.status === "queued") {
+    return {
+      label: "排队中",
+      type: "pending",
+      canVectorize: false,
+      canDeleteVector: false,
+      canPoll: true,
+      ...(job.workerHint ? { workerHint: job.workerHint } : {}),
+    };
+  }
+
+  if (job.status === "processing") {
+    return {
+      label: "处理中",
+      type: "processing",
+      canVectorize: false,
+      canDeleteVector: false,
+      canPoll: true,
+      ...(job.workerHint ? { workerHint: job.workerHint } : {}),
+    };
+  }
+
+  if (job.status === "completed") {
+    return {
+      label: "已向量化",
+      type: "completed",
+      canVectorize: true,
+      canDeleteVector: true,
+      canPoll: false,
+    };
+  }
+
+  if (job.status === "failed") {
+    return {
+      label: "向量化失败",
+      type: "failed",
+      canVectorize: job.canRetry,
+      canDeleteVector: false,
+      canPoll: false,
+      ...(job.errorMessage ? { errorMessage: job.errorMessage } : {}),
+      ...(job.failureHint ? { failureHint: job.failureHint } : {}),
+      canRetry: job.canRetry,
+    };
+  }
+
+  return {
+    label: "未知状态",
+    type: "unknown",
+    canVectorize: true,
+    canDeleteVector: false,
+    canPoll: false,
+  };
+}
+
+
+export function getWorkerStatus(value: unknown): VectorIndexHealthResponse["worker"]["status"] {
+  if (
+    value === "idle" ||
+    value === "waiting" ||
+    value === "active" ||
+    value === "attention_needed"
+  ) {
+    return value;
+  }
+
+  return "unknown";
+}
+
+
+export function getQueueStatus(value: unknown): VectorIndexHealthResponse["queue"]["status"] {
+  if (
+    value === "idle" ||
+    value === "waiting" ||
+    value === "processing" ||
+    value === "stuck"
+  ) {
+    return value;
+  }
+
+  return "unknown";
+}
+
+
+export function getQueueStatusLabel(
+  status: VectorIndexHealthResponse["queue"]["status"]
+) {
+  if (status === "idle") {
+    return "空闲";
+  }
+
+  if (status === "waiting") {
+    return "等待中";
+  }
+
+  if (status === "processing") {
+    return "处理中";
+  }
+
+  if (status === "stuck") {
+    return "可能卡住";
+  }
+
+  return "未知";
+}
+
+
+export function parseVectorIndexHealth(value: unknown): VectorIndexHealthResponse | null {
+  if (typeof value !== "object" || value === null) {
+    return null;
+  }
+
+  const candidate = value as Record<string, unknown>;
+
+  if (candidate.success !== true) {
+    return null;
+  }
+
+  const worker = getRecordField(candidate, "worker");
+  const queue = getRecordField(candidate, "queue");
+
+  if (!worker || !queue) {
+    return null;
+  }
+
+  return {
+    worker: {
+      status: getWorkerStatus(worker.status),
+      isHealthy: worker.is_healthy === true,
+      hasRecentActivity: worker.has_recent_activity === true,
+      hint: getNullableStringField(worker, ["hint"]),
+      lastJobUpdatedAt:
+        typeof worker.last_job_updated_at === "string"
+          ? worker.last_job_updated_at
+          : null,
+      lastProcessingHeartbeatAt:
+        typeof worker.last_processing_heartbeat_at === "string"
+          ? worker.last_processing_heartbeat_at
+          : null,
+      oldestActiveSeconds: getNullableNumberField(worker, [
+        "oldest_active_seconds",
+      ]),
+      oldestQueuedSeconds: getNullableNumberField(worker, [
+        "oldest_queued_seconds",
+      ]),
+      oldestProcessingSeconds: getNullableNumberField(worker, [
+        "oldest_processing_seconds",
+      ]),
+      staleQueued: getNumberField(worker, "stale_queued"),
+      staleProcessing: getNumberField(worker, "stale_processing"),
+      checkedAt: typeof worker.checked_at === "string" ? worker.checked_at : "",
+    },
+    queue: {
+      status: getQueueStatus(queue.status),
+      total: getNumberField(queue, "total"),
+      active: getNumberField(queue, "active"),
+      queued: getNumberField(queue, "queued"),
+      processing: getNumberField(queue, "processing"),
+      succeeded: getNumberField(queue, "succeeded"),
+      failed: getNumberField(queue, "failed"),
+      cancelled: getNumberField(queue, "cancelled"),
+    },
+  };
+}
+
+
+export function getWorkerHealthLabel(
+  health: VectorIndexHealthResponse | null,
+  errorMessage: string
+): { label: string; tone: WorkerHealthTone } {
+  if (errorMessage) {
+    return {
+      label: "任务状态暂不可用",
+      tone: "muted",
+    };
+  }
+
+  if (!health) {
+    return {
+      label: "任务状态加载中",
+      tone: "muted",
+    };
+  }
+
+  if (health.worker.status === "idle") {
+    return {
+      label: "暂无向量化任务",
+      tone: "muted",
+    };
+  }
+
+  if (health.worker.status === "waiting") {
+    return {
+      label: `任务排队中：${health.queue.queued} 个`,
+      tone: "warning",
+    };
+  }
+
+  if (health.worker.status === "active") {
+    return {
+      label: `Worker 正在处理：${health.queue.processing} 个`,
+      tone: "success",
+    };
+  }
+
+  if (health.worker.status === "attention_needed") {
+    return {
+      label: `任务可能卡住：排队 ${health.worker.staleQueued} 个，处理中 ${health.worker.staleProcessing} 个`,
+      tone: "danger",
+    };
+  }
+
+  return {
+    label: "任务状态未知",
+    tone: "muted",
+  };
+}
+
+export function getWorkerHealthToneClass(tone: WorkerHealthTone) {
+  if (tone === "danger") {
+    return "border-[#e36b4f] bg-[#fff1ed] text-[#9b3c29]";
+  }
+
+  if (tone === "warning") {
+    return "border-[#d9aa2f] bg-[#fff7df] text-[#7a5a12]";
+  }
+
+  if (tone === "success") {
+    return "border-[#176b62] bg-[#edf7f3] text-[#176b62]";
+  }
+
+  return "border-[#d5ded9] bg-[#f7faf8] text-[#64716d]";
+}
+
+
+export function toVectorIndexJob(value: unknown): VectorIndexJob | null {
+  if (typeof value !== "object" || value === null) {
+    return null;
+  }
+
+  const job = value as {
+    id?: unknown;
+    job_id?: unknown;
+    status?: unknown;
+    error_message?: unknown;
+    failure_hint?: unknown;
+  };
+  const id =
+    typeof job.id === "string" && job.id.trim()
+      ? job.id.trim()
+      : typeof job.job_id === "string" && job.job_id.trim()
+        ? job.job_id.trim()
+        : "";
+
+  if (!id) {
+    return null;
+  }
+
+  const status =
+    job.status === "completed"
+      ? "succeeded"
+      : job.status === "processing" ||
+          job.status === "succeeded" ||
+          job.status === "failed"
+        ? job.status
+        : "queued";
+
+  return {
+    id,
+    status,
+    errorMessage:
+      typeof job.error_message === "string" ? job.error_message : "",
+    failureHint:
+      typeof job.failure_hint === "string" ? job.failure_hint.trim() : "",
+  };
+}
+
+
+export function getVectorIndexJobs(value: unknown) {
+  if (typeof value !== "object" || value === null) {
+    return [];
+  }
+
+  const data = value as VectorIndexResponse;
+  const candidates = [
+    data.job,
+    data.vector_index_job,
+    data,
+    ...(Array.isArray(data.jobs) ? data.jobs : []),
+    ...(Array.isArray(data.vector_index_jobs) ? data.vector_index_jobs : []),
+  ];
+
+  const jobsById = new Map<string, VectorIndexJob>();
+
+  candidates.forEach((candidate) => {
+    const job = toVectorIndexJob(candidate);
+
+    if (job) {
+      jobsById.set(job.id, job);
+    }
+  });
+
+  return Array.from(jobsById.values());
+}
+
+
+export function isVectorIndexJobDone(job: VectorIndexJob) {
+  return job.status === "succeeded" || job.status === "failed";
+}
+
+
+export function getVectorIndexStatusText(status: VectorIndexJobStatus) {
+  if (status === "queued") {
+    return "排队中";
+  }
+
+  if (status === "processing") {
+    return "处理中";
+  }
+
+  if (status === "succeeded") {
+    return "已完成";
+  }
+
+  return "失败";
+}
+
+
+export function wait(ms: number) {
+  return new Promise<void>((resolve) => {
+    window.setTimeout(resolve, ms);
+  });
+}
