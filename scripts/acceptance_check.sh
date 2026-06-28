@@ -6,7 +6,7 @@ set -euo pipefail
 show_help() {
   cat <<'EOF'
 Usage:
-  scripts/acceptance_check.sh [--skip-real-eval] [--skip-frontend-build]
+  scripts/acceptance_check.sh [--skip-real-eval] [--skip-frontend-tests] [--skip-frontend-build]
 
 Environment variables:
   FIRSTRAG_CONDA_ENV              Conda env name. Default: firstrag
@@ -15,6 +15,7 @@ Environment variables:
   FIRSTRAG_EVAL_BASE_URL          Backend origin. Default: http://127.0.0.1:8000
   FIRSTRAG_SKIP_BACKEND_TESTS     Set to 1 to skip backend unittest.
   FIRSTRAG_SKIP_FRONTEND_LINT     Set to 1 to skip frontend lint.
+  FIRSTRAG_SKIP_FRONTEND_TESTS    Set to 1 to skip frontend unit tests.
   FIRSTRAG_SKIP_FRONTEND_BUILD    Set to 1 to skip frontend build.
   FIRSTRAG_SKIP_REAL_EVAL         Set to 1 to skip RAG and indexing real evals.
   FIRSTRAG_SKIP_RAG_EVAL          Set to 1 to skip only RAG eval gate.
@@ -57,6 +58,10 @@ while [[ $# -gt 0 ]]; do
       FIRSTRAG_SKIP_FRONTEND_BUILD=1
       shift
       ;;
+    --skip-frontend-tests)
+      FIRSTRAG_SKIP_FRONTEND_TESTS=1
+      shift
+      ;;
     *)
       echo "Unknown argument: $1" >&2
       echo "Run scripts/acceptance_check.sh --help for usage." >&2
@@ -85,6 +90,14 @@ if [[ "${FIRSTRAG_SKIP_FRONTEND_LINT:-0}" != "1" ]]; then
   (
     cd frontend
     npm run lint
+  )
+fi
+
+if [[ "${FIRSTRAG_SKIP_FRONTEND_TESTS:-0}" != "1" ]]; then
+  log_step "Frontend unit tests"
+  (
+    cd frontend
+    npm run test
   )
 fi
 
