@@ -35,7 +35,7 @@ class KnowledgeBaseRetrievalSettingsTests(unittest.TestCase):
                 "top_k": 5,
                 "vector_top_k": 20,
                 "fulltext_top_k": 20,
-                "rrf_k": 20,
+                "rrf_k": 10,
                 "rerank_score_threshold": 0.0,
             },
         ):
@@ -59,7 +59,7 @@ class KnowledgeBaseRetrievalSettingsTests(unittest.TestCase):
                 "top_k": 5,
                 "vector_top_k": 20,
                 "fulltext_top_k": 20,
-                "rrf_k": 20,
+                "rrf_k": 10,
                 "rerank_score_threshold": 0.0,
             },
         ), patch(
@@ -71,7 +71,7 @@ class KnowledgeBaseRetrievalSettingsTests(unittest.TestCase):
                 "top_k": 3,
                 "vector_top_k": 20,
                 "fulltext_top_k": 20,
-                "rrf_k": 20,
+                "rrf_k": 10,
                 "rerank_score_threshold": 0.0,
             },
         ) as upsert_mock:

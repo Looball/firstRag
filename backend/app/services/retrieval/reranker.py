@@ -26,6 +26,7 @@ from app.core.config import RERANKER_MODEL_PATH
 
 
 DEFAULT_RERANKER_MODEL = str(RERANKER_MODEL_PATH)
+DEFAULT_RERANKER_MAX_LENGTH = 384
 
 
 class LocalCrossEncoderReranker:
@@ -54,7 +55,7 @@ class LocalCrossEncoderReranker:
         query: str,
         documents: list[Document],
         batch_size: int = 8,
-        max_length: int = 512,
+        max_length: int = DEFAULT_RERANKER_MAX_LENGTH,
     ) -> list[float]:
         """计算 query 与多个文档的相关性分数。
 
@@ -93,7 +94,7 @@ class LocalCrossEncoderReranker:
         documents: list[Document],
         top_k: int = 5,
         batch_size: int = 8,
-        max_length: int = 512,
+        max_length: int = DEFAULT_RERANKER_MAX_LENGTH,
     ) -> list[Document]:
         """返回按 Cross-Encoder 分数重排后的 top_k 文档。"""
         if not documents:

@@ -45,7 +45,7 @@
 - `retrieval_mode`：`auto`、`always`、`never`。
 - `enable_query_router`：是否调用 Router LLM 判断本轮是否检索。
 - `enable_rerank`：是否启用 CrossEncoder rerank。
-- `top_k`、`vector_top_k`、`fulltext_top_k`、`rrf_k`：控制最终引用数、两路召回数和 RRF 候选池。
+- `top_k`、`vector_top_k`、`fulltext_top_k`、`rrf_k`：控制最终引用数、两路召回数和 RRF 候选池；默认 `rrf_k=10`，用于减少 CrossEncoder 候选数和首 token 前等待时间。
 - `rerank_score_threshold`：控制低相关片段是否进入上下文和 Sources。
 
 ## 检索诊断
@@ -78,6 +78,10 @@
 - `embedding_ms`、`vector_ms`、`fulltext_ms`、`rrf_ms`、`rerank_ms`：混合检索内部阶段耗时。
 - `pre_answer_total_ms`：开始生成回答前的总耗时。
 - `first_answer_token_ms`：从后端开始处理到首个回答 token 的耗时。
+
+当 RRF 融合后的候选数量不超过最终 `top_k` 时，后端会跳过 CrossEncoder rerank，
+并在 diagnostics 中写入 `rerank_skipped=true` 与 `rerank_skip_reason`。该策略用于避免
+小候选集场景下的无收益精排开销；候选数超过 `top_k` 时仍会执行 rerank。
 - `answer_stream_ms`：首个回答 token 后到回答完成的流式耗时。
 - `chat_stream_total_ms`：本轮后端流式回答总耗时。
 

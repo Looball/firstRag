@@ -25,7 +25,11 @@ from uuid import UUID
 from langchain_core.documents import Document
 
 from app.services.retrieval.fulltext_retriever import get_fulltext_documents
-from app.services.retrieval.reranker import DEFAULT_RERANKER_MODEL, get_reranker
+from app.services.retrieval.reranker import (
+    DEFAULT_RERANKER_MAX_LENGTH,
+    DEFAULT_RERANKER_MODEL,
+    get_reranker,
+)
 from app.services.retrieval.rrf import reciprocal_rank_fusion
 from app.services.vectors.embedding_model import ZhipuAIEmbeddings
 from app.services.vectors.vector_index_service import get_vector_store
@@ -215,7 +219,7 @@ def get_hybrid_documents(
     k: int = 5,
     vector_k: int = 20,
     fulltext_k: int = 20,
-    rrf_k: int = 20,
+    rrf_k: int = 10,
     vector_weight: float = 1.0,
     fulltext_weight: float = 1.0,
     rerank: bool = True,
@@ -279,11 +283,21 @@ def get_hybrid_documents(
         record_retrieval_timing("retrieval_total", total_started_at)
         return fused_documents
 
+    if len(fused_documents) <= k:
+        update_retrieval_diagnostics(
+            reranked_count=0,
+            rerank_skipped=True,
+            rerank_skip_reason="candidate_count_not_above_top_k",
+        )
+        record_retrieval_timing("retrieval_total", total_started_at)
+        return fused_documents
+
     rerank_started_at = perf_counter()
     reranked_documents = get_reranker(reranker_model).rerank(
         query=query,
         documents=fused_documents,
         top_k=k,
+        max_length=DEFAULT_RERANKER_MAX_LENGTH,
     )
     record_retrieval_timing("rerank", rerank_started_at)
     record_retrieval_timing("retrieval_total", total_started_at)

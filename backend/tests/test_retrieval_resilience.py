@@ -45,13 +45,20 @@ class FakeVectorStore:
 class FakeReranker:
     """模拟 CrossEncoder reranker，避免单元测试加载真实模型。"""
 
+    def __init__(self) -> None:
+        """记录最近一次调用参数，便于测试性能配置。"""
+        self.last_max_length: int | None = None
+
     def rerank(
         self,
         query: str,
         documents: list[Document],
         top_k: int,
+        batch_size: int = 8,
+        max_length: int = 384,
     ) -> list[Document]:
         """返回前 top_k 个文档，并写入测试用 rerank 分数。"""
+        self.last_max_length = max_length
         for index, document in enumerate(documents, start=1):
             document.metadata["rerank_score"] = float(index)
         return documents[:top_k]
@@ -89,8 +96,10 @@ class RetrievalResilienceTests(unittest.TestCase):
         self.assertEqual(docs[0].metadata["file_id"], "good-file")
         self.assertEqual(docs[0].metadata["retrieval_source"], "vector")
 
-    def test_hybrid_retrieval_records_timing_diagnostics(self) -> None:
-        """混合检索应记录各阶段耗时，便于定位慢请求。"""
+    def test_hybrid_retrieval_skips_rerank_when_candidates_fit_top_k(
+        self,
+    ) -> None:
+        """候选数不超过最终 top_k 时应跳过昂贵的 CrossEncoder。"""
         fulltext_doc = Document(
             page_content="第二条 民事诉讼法的任务...",
             metadata={
@@ -133,12 +142,75 @@ class RetrievalResilienceTests(unittest.TestCase):
             "vector_ms",
             "fulltext_ms",
             "rrf_ms",
-            "rerank_ms",
             "retrieval_total_ms",
         ):
             self.assertIn(key, timing)
             self.assertIsInstance(timing[key], float)
             self.assertGreaterEqual(timing[key], 0.0)
+        self.assertNotIn("rerank_ms", timing)
+        self.assertEqual(diagnostics["reranked_count"], 0)
+        self.assertTrue(diagnostics["rerank_skipped"])
+        self.assertEqual(
+            diagnostics["rerank_skip_reason"],
+            "candidate_count_not_above_top_k",
+        )
+
+    def test_hybrid_retrieval_records_rerank_timing_when_needed(self) -> None:
+        """候选数超过最终 top_k 时仍应执行并记录 rerank 耗时。"""
+        vector_docs = [
+            Document(
+                page_content=f"向量候选 {index}",
+                metadata={
+                    "user_id": "6",
+                    "file_id": f"vector-file-{index}",
+                    "chunk_index": index,
+                    "retrieval_source": "vector",
+                },
+            )
+            for index in range(3)
+        ]
+        fulltext_docs = [
+            Document(
+                page_content=f"全文候选 {index}",
+                metadata={
+                    "user_id": "6",
+                    "file_id": f"fulltext-file-{index}",
+                    "chunk_index": index,
+                    "retrieval_source": "fulltext",
+                },
+            )
+            for index in range(3)
+        ]
+
+        fake_reranker = FakeReranker()
+        with unittest.mock.patch(
+            "app.services.retrieval.hybrid_retriever.get_vector_documents",
+            return_value=vector_docs,
+        ), unittest.mock.patch(
+            "app.services.retrieval.hybrid_retriever.get_fulltext_documents",
+            return_value=fulltext_docs,
+        ), unittest.mock.patch(
+            "app.services.retrieval.hybrid_retriever.get_reranker",
+            return_value=fake_reranker,
+        ):
+            docs = get_hybrid_documents(
+                query="诉讼法的任务是什么",
+                user_id=6,
+                file_ids=["good-file"],
+                k=2,
+                rrf_k=6,
+                rerank=True,
+            )
+
+        diagnostics = get_retrieval_diagnostics()
+
+        self.assertEqual(len(docs), 2)
+        self.assertIsNotNone(diagnostics)
+        assert diagnostics is not None
+        self.assertEqual(diagnostics["reranked_count"], 2)
+        self.assertEqual(fake_reranker.last_max_length, 384)
+        self.assertIn("rerank_ms", diagnostics["timing"])
+        self.assertFalse(diagnostics.get("rerank_skipped", False))
 
     def test_rrf_deduplicates_vector_and_fulltext_same_chunk(self) -> None:
         """同一文件同一 chunk 被两路召回时，Sources 里只应展示一次。"""

@@ -7,7 +7,7 @@ CREATE TABLE IF NOT EXISTS knowledge_base_retrieval_settings (
     top_k INTEGER NOT NULL DEFAULT 5,
     vector_top_k INTEGER NOT NULL DEFAULT 20,
     fulltext_top_k INTEGER NOT NULL DEFAULT 20,
-    rrf_k INTEGER NOT NULL DEFAULT 20,
+    rrf_k INTEGER NOT NULL DEFAULT 10,
     rerank_score_threshold NUMERIC(6,3) NOT NULL DEFAULT 0.000,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),

@@ -10,7 +10,7 @@ export const DEFAULT_RETRIEVAL_SETTINGS: KnowledgeBaseRetrievalSettings = {
   topK: 5,
   vectorTopK: 20,
   fulltextTopK: 20,
-  rrfK: 20,
+  rrfK: 10,
   rerankScoreThreshold: 0,
 };
 export const LEGACY_INITIAL_MESSAGE =

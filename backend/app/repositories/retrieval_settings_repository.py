@@ -11,7 +11,7 @@ DEFAULT_RETRIEVAL_SETTINGS = {
     "top_k": 5,
     "vector_top_k": 20,
     "fulltext_top_k": 20,
-    "rrf_k": 20,
+    "rrf_k": 10,
     "rerank_score_threshold": 0.0,
 }
 
@@ -48,7 +48,7 @@ def get_knowledge_base_retrieval_settings(
             COALESCE(s.top_k, 5) AS top_k,
             COALESCE(s.vector_top_k, 20) AS vector_top_k,
             COALESCE(s.fulltext_top_k, 20) AS fulltext_top_k,
-            COALESCE(s.rrf_k, 20) AS rrf_k,
+            COALESCE(s.rrf_k, 10) AS rrf_k,
             COALESCE(s.rerank_score_threshold, 0.000)
                 AS rerank_score_threshold
         FROM knowledge_bases AS kb
