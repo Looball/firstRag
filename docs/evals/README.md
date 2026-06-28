@@ -21,6 +21,32 @@
 
 该记录用于进入文档整理、提交、推送或 PR 前的 release readiness 检查。再次修改 RAG 检索、token usage、eval gate、indexing、worker health、vector failure recovery 或前端文件管理链路后，应重新运行上述验收。
 
+## 一键本地验收
+
+单人开发时，推荐在 push 前使用一键脚本串行运行主要检查：
+
+```bash
+FIRSTRAG_EVAL_USERNAME=你的用户名 \
+FIRSTRAG_EVAL_PASSWORD=你的密码 \
+scripts/acceptance_check.sh
+```
+
+该脚本会依次执行：
+
+1. 后端 `unittest discover`。
+2. 前端 `npm run lint`。
+3. 前端 `npm run build`。
+4. RAG eval gate。
+5. Indexing eval。
+
+只做静态检查、不访问真实后端时可跳过真实 eval：
+
+```bash
+scripts/acceptance_check.sh --skip-real-eval
+```
+
+如果本地沙箱限制 Turbopack 创建辅助进程或绑定本地端口，`npm run build` 可能需要在非沙箱环境或提权环境中重跑确认。
+
 ## 运行前提
 
 - 后端服务已经启动。
