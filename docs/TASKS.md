@@ -40,7 +40,7 @@
 
 ## 当前基线
 
-- 2026-06-28 已完成整体回归验收：后端 71 个测试通过、前端 lint/build 通过、RAG eval gate 6/6 通过、indexing eval 通过。
+- 2026-06-28 已完成整体回归验收：后端测试通过、前端 lint/build 通过、RAG eval gate 10/10 通过、indexing eval 通过；当前静态验收为后端 78 个 unittest、前端 lint、Vitest 10 个用例和 Next build 通过。
 - 本地 push 前推荐运行 `scripts/acceptance_check.sh`；只做静态检查时可运行 `scripts/acceptance_check.sh --skip-real-eval`。
 - 当前阶段优先做“可维护性 + 可观测性 + 验收自动化”，避免在关键链路刚稳定后继续堆叠大功能。
 - 修改项目文件后，继续遵守只暂存当前任务相关文件、不混入 unrelated refactor 的规则。
@@ -49,7 +49,7 @@
 
 | 计划 ID | 日期 | 状态 | 目标 | 关联任务 |
 | --- | --- | --- | --- | --- |
-| `PLAN-20260628-01` | 2026-06-28 | `Doing` | 基于代码和功能审查，建立可维护性、可观测性和验收自动化方向的第一批 backlog。 | `T-001` - `T-009` |
+| `PLAN-20260628-01` | 2026-06-28 | `Done` | 基于代码和功能审查，建立可维护性、可观测性和验收自动化方向的第一批 backlog。 | `T-001` - `T-009` |
 
 ## 任务总览
 
@@ -61,8 +61,8 @@
 | `T-004` | `PLAN-20260628-01` | `P1` | `Done` | 产品化 vector worker health 展示 | 2026-06-28 | `c61dcfa` |
 | `T-005` | `PLAN-20260628-01` | `P2` | `Done` | 完善 indexing failure recovery 分类与操作闭环 | 2026-06-28 | `5bd9bfe` |
 | `T-006` | `PLAN-20260628-01` | `P2` | `Done` | 扩充 RAG eval case 覆盖面 | 2026-06-28 | `9620eee` |
-| `T-007` | `PLAN-20260628-01` | `P2` | `Todo` | 梳理本地启动与验收工作流文档 | - | - |
-| `T-008` | `PLAN-20260628-01` | `P2` | `Todo` | 为部署目录补齐可运行 Docker Compose 方案 | - | - |
+| `T-007` | `PLAN-20260628-01` | `P2` | `Done` | 梳理本地启动与验收工作流文档 | 2026-06-28 | `7c52ae8` |
+| `T-008` | `PLAN-20260628-01` | `P2` | `Done` | 为部署目录补齐可运行 Docker Compose 方案 | 2026-06-28 | `7c52ae8` |
 | `T-009` | `PLAN-20260628-01` | `P1` | `Done` | 继续拆分前端聊天工作台 UI 面板 | 2026-06-28 | `bdd53c8` |
 
 ## 新计划接入流程
@@ -253,13 +253,19 @@ scripts/rag_eval_gate.sh
 
 - 来源计划：`PLAN-20260628-01`
 - 优先级：`P2`
-- 状态：`Todo`
+- 状态：`Done`
 - 目标：把单人开发的启动、开发、验收和 push 流程整理成可重复执行的日常工作流。
 - 范围：更新 `docs/DEPLOYMENT.md` 或 `docs/evals/README.md`，串联后端、前端、worker、真实 eval 和一键验收脚本。
 - 验收标准：
   - 文档可按顺序完成启动、开发、验收、push。
   - 明确说明何时需要启动 worker，何时可使用 `--skip-real-eval`。
   - 不写入真实账号密码或敏感配置。
+- 完成记录：
+  - 完成日期：2026-06-28
+  - 相关 commit：`7c52ae8`
+  - `docs/DEPLOYMENT.md` 已补充本地 conda 启动、worker 使用时机、静态验收、完整真实验收和 push 前检查流程。
+  - 文档明确 `--skip-real-eval` 的适用场景，以及 RAG、indexing、用户模型配置等必须跑真实验收的场景。
+  - `scripts/acceptance_check.sh --skip-real-eval` 已通过。
 - 建议验证命令：
 
 ```bash
@@ -270,17 +276,26 @@ scripts/acceptance_check.sh --skip-real-eval
 
 - 来源计划：`PLAN-20260628-01`
 - 优先级：`P2`
-- 状态：`Todo`
+- 状态：`Done`
 - 目标：把当前占位部署配置推进到可本地运行的 Docker Compose 方案。
 - 范围：补齐 PostgreSQL、后端、前端、worker 服务，并明确 Chroma/vector_db 持久化目录。
 - 验收标准：
   - 新环境可按文档启动基础服务。
   - 敏感配置仍通过 `.env` 注入，不提交真实密钥。
   - worker 和后端共享必要的上传目录、vector_db 和数据库配置。
+- 完成记录：
+  - 完成日期：2026-06-28
+  - 相关 commit：`7c52ae8`
+  - `docker-compose.yml` 已补齐 `postgres`、`backend`、`frontend` 和 `worker` 服务。
+  - 新增 `deploy/docker/backend.Dockerfile`、`deploy/docker/frontend.Dockerfile` 和 `.dockerignore`。
+  - `.env.example` 增加 compose PostgreSQL 变量和可选 `COMPOSE_DATABASE_URL`，避免容器内误用指向宿主机的 `DATABASE_URL`。
+  - 文档已说明 `uploads`、`vector_db`、`models` 和 `postgres_data` 的持久化方式。
+  - 当前 compose 不自动创建业务基础表，该限制已在 `docs/DEPLOYMENT.md` 中说明，后续可单独新增迁移执行任务。
+  - `docker compose config --quiet` 已通过。
 - 建议验证命令：
 
 ```bash
-docker compose config
+docker compose config --quiet
 ```
 
 ## T-009 继续拆分前端聊天工作台 UI 面板
