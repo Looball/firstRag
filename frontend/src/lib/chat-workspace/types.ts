@@ -250,6 +250,20 @@ export type VectorIndexHealthResponse = {
 
 export type WorkerHealthTone = "muted" | "warning" | "success" | "danger";
 
+export type WorkerHealthDetail = {
+  label: string;
+  value: string;
+  tone?: WorkerHealthTone;
+};
+
+export type WorkerHealthDetails = {
+  summary: string;
+  tone: WorkerHealthTone;
+  checkedAtLabel: string;
+  details: WorkerHealthDetail[];
+  suggestedActions: string[];
+};
+
 export type VectorIndexJob = {
   id: string;
   status: VectorIndexJobStatus;

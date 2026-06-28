@@ -5,6 +5,7 @@ import {
   getChatSources,
   getRetrievalState,
   getVectorStatus,
+  getWorkerHealthDetails,
   getWorkerHealthLabel,
   parseVectorIndexHealth,
   serializeRetrievalSettings,
@@ -115,6 +116,118 @@ describe("chat workspace vector status parsing", () => {
       label: "任务可能卡住：排队 1 个，处理中 2 个",
       tone: "danger",
     });
+    expect(getWorkerHealthDetails(health, "")).toMatchObject({
+      summary: "任务可能卡住：排队 1 个，处理中 2 个",
+      tone: "danger",
+      checkedAtLabel: "2026-06-28 08:00:00",
+    });
+    expect(getWorkerHealthDetails(health, "").suggestedActions).toContain(
+      "存在长时间未领取任务，优先启动或重启 vector index worker。"
+    );
+  });
+
+  it("builds actionable worker health details for active and failed queues", () => {
+    const health = parseVectorIndexHealth({
+      success: true,
+      worker: {
+        status: "active",
+        is_healthy: true,
+        has_recent_activity: true,
+        hint: null,
+        last_job_updated_at: "2026-06-28T08:01:02",
+        last_processing_heartbeat_at: "2026-06-28T08:02:03",
+        stale_queued: 0,
+        stale_processing: 0,
+        oldest_active_seconds: 45,
+        checked_at: "2026-06-28T08:03:04",
+      },
+      queue: {
+        status: "processing",
+        total: 4,
+        active: 1,
+        queued: 0,
+        processing: 1,
+        succeeded: 2,
+        failed: 1,
+        cancelled: 0,
+      },
+    });
+
+    const details = getWorkerHealthDetails(health, "");
+
+    expect(details).toMatchObject({
+      summary: "Worker 正在处理：1 个",
+      tone: "success",
+      checkedAtLabel: "2026-06-28 08:03:04",
+    });
+    expect(details.details).toContainEqual({
+      label: "失败",
+      value: "1 个",
+      tone: "danger",
+    });
+    expect(details.details).toContainEqual({
+      label: "最近处理心跳",
+      value: "2026-06-28 08:02:03",
+    });
+    expect(details.suggestedActions).toContain(
+      "失败任务可在下方任务列表或文件卡片中按红色状态快速定位。"
+    );
+  });
+
+  it("builds clear guidance for idle and waiting worker states", () => {
+    const idleHealth = parseVectorIndexHealth({
+      success: true,
+      worker: {
+        status: "idle",
+        is_healthy: true,
+        has_recent_activity: false,
+        hint: null,
+        stale_queued: 0,
+        stale_processing: 0,
+        checked_at: "2026-06-28T08:04:05",
+      },
+      queue: {
+        status: "idle",
+        total: 0,
+        active: 0,
+        queued: 0,
+        processing: 0,
+        succeeded: 0,
+        failed: 0,
+        cancelled: 0,
+      },
+    });
+    const waitingHealth = parseVectorIndexHealth({
+      success: true,
+      worker: {
+        status: "waiting",
+        is_healthy: false,
+        has_recent_activity: false,
+        hint: "存在排队任务长时间未被领取，可能 worker 未启动。",
+        stale_queued: 0,
+        stale_processing: 0,
+        checked_at: "2026-06-28T08:05:06",
+      },
+      queue: {
+        status: "waiting",
+        total: 2,
+        active: 2,
+        queued: 2,
+        processing: 0,
+        succeeded: 0,
+        failed: 0,
+        cancelled: 0,
+      },
+    });
+
+    expect(getWorkerHealthDetails(idleHealth, "")).toMatchObject({
+      summary: "暂无向量化任务",
+      checkedAtLabel: "2026-06-28 08:04:05",
+      suggestedActions: ["无需操作；上传文件或手动向量化后会进入队列。"],
+    });
+    expect(getWorkerHealthDetails(waitingHealth, "").suggestedActions).toContain(
+      "确认 vector index worker 已启动，排队任务会自动被领取。"
+    );
   });
 
   it("maps failed file index job to retryable vector status", () => {

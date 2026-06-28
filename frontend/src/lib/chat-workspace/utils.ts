@@ -25,6 +25,7 @@ import type {
   VectorIndexJobStatus,
   VectorIndexResponse,
   VectorStatus,
+  WorkerHealthDetails,
   WorkerHealthTone,
 } from "./types";
 
@@ -74,6 +75,24 @@ export function formatDurationSeconds(seconds: number | null) {
 
   const hours = minutes / 60;
   return `${hours.toFixed(hours >= 10 ? 0 : 1)} 小时`;
+}
+
+
+export function formatDateTimeText(value: string | null) {
+  if (!value) {
+    return "未知";
+  }
+
+  const match = value.match(
+    /^(\d{4})-(\d{2})-(\d{2})[T\s](\d{2}):(\d{2})(?::(\d{2}))?/
+  );
+
+  if (!match) {
+    return value;
+  }
+
+  const [, year, month, day, hour, minute, second = "00"] = match;
+  return `${year}-${month}-${day} ${hour}:${minute}:${second}`;
 }
 
 
@@ -1393,6 +1412,129 @@ export function getWorkerHealthLabel(
   };
 }
 
+
+function buildWorkerHealthDetails(
+  health: VectorIndexHealthResponse
+): WorkerHealthDetails["details"] {
+  const details: WorkerHealthDetails["details"] = [
+    {
+      label: "队列状态",
+      value: getQueueStatusLabel(health.queue.status),
+    },
+    {
+      label: "排队",
+      value: `${health.queue.queued} 个`,
+      tone: health.queue.queued > 0 ? "warning" : "muted",
+    },
+    {
+      label: "处理中",
+      value: `${health.queue.processing} 个`,
+      tone: health.queue.processing > 0 ? "success" : "muted",
+    },
+    {
+      label: "失败",
+      value: `${health.queue.failed} 个`,
+      tone: health.queue.failed > 0 ? "danger" : "muted",
+    },
+  ];
+
+  if (health.worker.staleQueued > 0 || health.worker.staleProcessing > 0) {
+    details.push({
+      label: "疑似卡住",
+      value: `${health.worker.staleQueued + health.worker.staleProcessing} 个`,
+      tone: "danger",
+    });
+  }
+
+  if (health.worker.oldestActiveSeconds !== null) {
+    details.push({
+      label: "最老活跃任务",
+      value: formatDurationSeconds(health.worker.oldestActiveSeconds),
+      tone: health.worker.oldestActiveSeconds > 0 ? "warning" : "muted",
+    });
+  }
+
+  if (health.worker.lastJobUpdatedAt) {
+    details.push({
+      label: "最近任务更新",
+      value: formatDateTimeText(health.worker.lastJobUpdatedAt),
+    });
+  }
+
+  if (health.worker.lastProcessingHeartbeatAt) {
+    details.push({
+      label: "最近处理心跳",
+      value: formatDateTimeText(health.worker.lastProcessingHeartbeatAt),
+    });
+  }
+
+  return details;
+}
+
+
+export function getWorkerHealthDetails(
+  health: VectorIndexHealthResponse | null,
+  errorMessage: string
+): WorkerHealthDetails {
+  const label = getWorkerHealthLabel(health, errorMessage);
+
+  if (errorMessage) {
+    return {
+      summary: label.label,
+      tone: label.tone,
+      checkedAtLabel: "未知",
+      details: [],
+      suggestedActions: ["确认后端服务已启动，并检查登录状态后重新刷新。"],
+    };
+  }
+
+  if (!health) {
+    return {
+      summary: label.label,
+      tone: label.tone,
+      checkedAtLabel: "读取中",
+      details: [],
+      suggestedActions: ["等待状态接口返回，或稍后手动刷新。"],
+    };
+  }
+
+  const suggestedActions: string[] = [];
+
+  if (health.worker.status === "idle") {
+    suggestedActions.push("无需操作；上传文件或手动向量化后会进入队列。");
+  } else if (health.worker.status === "waiting") {
+    suggestedActions.push("确认 vector index worker 已启动，排队任务会自动被领取。");
+  } else if (health.worker.status === "active") {
+    suggestedActions.push("等待当前任务完成；长时间无变化时可刷新状态或查看 worker 日志。");
+  } else if (health.worker.status === "attention_needed") {
+    if (health.worker.staleQueued > 0) {
+      suggestedActions.push("存在长时间未领取任务，优先启动或重启 vector index worker。");
+    }
+
+    if (health.worker.staleProcessing > 0) {
+      suggestedActions.push("存在长时间处理中的任务，查看 worker 日志后决定是否重试。");
+    }
+  } else {
+    suggestedActions.push("状态无法识别，请刷新后再判断是否需要查看后端日志。");
+  }
+
+  if (health.queue.failed > 0) {
+    suggestedActions.push("失败任务可在下方任务列表或文件卡片中按红色状态快速定位。");
+  }
+
+  if (health.worker.hint && !suggestedActions.includes(health.worker.hint)) {
+    suggestedActions.push(health.worker.hint);
+  }
+
+  return {
+    summary: label.label,
+    tone: label.tone,
+    checkedAtLabel: formatDateTimeText(health.worker.checkedAt),
+    details: buildWorkerHealthDetails(health),
+    suggestedActions,
+  };
+}
+
 export function getWorkerHealthToneClass(tone: WorkerHealthTone) {
   if (tone === "danger") {
     return "border-[#e36b4f] bg-[#fff1ed] text-[#9b3c29]";
@@ -1407,6 +1549,23 @@ export function getWorkerHealthToneClass(tone: WorkerHealthTone) {
   }
 
   return "border-[#d5ded9] bg-[#f7faf8] text-[#64716d]";
+}
+
+
+export function getWorkerHealthDetailToneClass(tone?: WorkerHealthTone) {
+  if (tone === "danger") {
+    return "border-[#e36b4f] bg-[#fff1ed] text-[#9b3c29]";
+  }
+
+  if (tone === "warning") {
+    return "border-[#d9aa2f] bg-[#fff7df] text-[#7a5a12]";
+  }
+
+  if (tone === "success") {
+    return "border-[#9fc6bd] bg-[#edf7f3] text-[#176b62]";
+  }
+
+  return "border-current/20 bg-white/45";
 }
 
 

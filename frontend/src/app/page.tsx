@@ -26,20 +26,19 @@ import {
   formatDiagnosticScore,
   formatDiagnosticTiming,
   formatDiagnosticValue,
-  formatDurationSeconds,
   formatFileSize,
   formatRetrievalDecision,
   getAssistantContent,
   getAssistantMessageId,
   getChatSources,
   getConversationDiagnostics,
-  getQueueStatusLabel,
   getRetrievalState,
   getSseAnswerContent,
   getVectorIndexJobs,
   getVectorIndexStatusText,
   getVectorStatus,
-  getWorkerHealthLabel,
+  getWorkerHealthDetailToneClass,
+  getWorkerHealthDetails,
   getWorkerHealthToneClass,
   isAuthExpiredMessage,
   isVectorIndexJobDone,
@@ -598,7 +597,7 @@ export default function Home() {
   );
   const selectedKnowledgeBaseFileCount =
     selectedKnowledgeFiles.length || selectedKnowledgeBase?.fileCount || 0;
-  const workerHealthLabel = getWorkerHealthLabel(
+  const workerHealthDetails = getWorkerHealthDetails(
     vectorIndexHealth,
     vectorIndexHealthError
   );
@@ -4228,13 +4227,21 @@ export default function Home() {
                     <p className="mt-1 text-xs text-[#72807b]">
                       {isLoadingVectorIndexHealth
                         ? "正在读取任务状态..."
-                        : workerHealthLabel.label}
+                        : workerHealthDetails.summary}
                     </p>
                   </div>
                   <div className="flex items-center gap-3">
                     <span className="font-utility text-[10px] text-[#72807b]">
                       {String(vectorQueueCount).padStart(2, "0")}
                     </span>
+                    <button
+                      type="button"
+                      onClick={() => void loadVectorIndexHealth()}
+                      disabled={isLoadingVectorIndexHealth}
+                      className="text-xs font-semibold text-[#72807b] underline decoration-[#176b62] underline-offset-4 transition hover:text-[#176b62] disabled:cursor-not-allowed disabled:text-[#9aa5a0]"
+                    >
+                      {isLoadingVectorIndexHealth ? "刷新中" : "刷新"}
+                    </button>
                     {vectorIndexQueue.some(isVectorIndexJobDone) && (
                       <button
                         type="button"
@@ -4254,32 +4261,42 @@ export default function Home() {
                 <div className="border-b border-[#d5ded9] px-4 py-3">
                   <div
                     className={`border px-3 py-2 text-xs ${getWorkerHealthToneClass(
-                      workerHealthLabel.tone
+                      workerHealthDetails.tone
                     )}`}
                   >
-                    <p className="font-semibold">{workerHealthLabel.label}</p>
-                    {vectorIndexHealth && (
-                      <p className="mt-1 text-[11px]">
-                        {getQueueStatusLabel(vectorIndexHealth.queue.status)} · 排队{" "}
-                        {vectorIndexHealth.queue.queued} · 处理中{" "}
-                        {vectorIndexHealth.queue.processing} · 失败{" "}
-                        {vectorIndexHealth.queue.failed} · 已完成{" "}
-                        {vectorIndexHealth.queue.succeeded}
+                    <div className="flex flex-wrap items-start justify-between gap-2">
+                      <p className="font-semibold">{workerHealthDetails.summary}</p>
+                      <p className="font-utility text-[10px] uppercase">
+                        检查 {workerHealthDetails.checkedAtLabel}
                       </p>
+                    </div>
+
+                    {workerHealthDetails.details.length > 0 && (
+                      <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
+                        {workerHealthDetails.details.map((detail) => (
+                          <div
+                            key={`${detail.label}-${detail.value}`}
+                            className={`border px-2 py-2 ${getWorkerHealthDetailToneClass(
+                              detail.tone
+                            )}`}
+                          >
+                            <p className="font-utility text-[10px] uppercase opacity-75">
+                              {detail.label}
+                            </p>
+                            <p className="mt-1 font-semibold">{detail.value}</p>
+                          </div>
+                        ))}
+                      </div>
                     )}
-                    {vectorIndexHealth?.worker.hint && (
-                      <p className="mt-2 font-semibold">
-                        {vectorIndexHealth.worker.hint}
-                      </p>
-                    )}
-                    {vectorIndexHealth &&
-                      vectorIndexHealth.worker.oldestActiveSeconds !== null && (
-                      <p className="mt-1 text-[11px]">
-                        最老活跃任务已等待{" "}
-                        {formatDurationSeconds(
-                          vectorIndexHealth.worker.oldestActiveSeconds
-                        )}
-                      </p>
+
+                    {workerHealthDetails.suggestedActions.length > 0 && (
+                      <div className="mt-3 space-y-1">
+                        {workerHealthDetails.suggestedActions.map((action) => (
+                          <p key={action} className="text-[11px] font-semibold">
+                            {action}
+                          </p>
+                        ))}
+                      </div>
                     )}
                   </div>
                 </div>
