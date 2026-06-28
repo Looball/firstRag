@@ -63,7 +63,7 @@
 | `T-006` | `PLAN-20260628-01` | `P2` | `Todo` | 扩充 RAG eval case 覆盖面 | - | - |
 | `T-007` | `PLAN-20260628-01` | `P2` | `Todo` | 梳理本地启动与验收工作流文档 | - | - |
 | `T-008` | `PLAN-20260628-01` | `P2` | `Todo` | 为部署目录补齐可运行 Docker Compose 方案 | - | - |
-| `T-009` | `PLAN-20260628-01` | `P1` | `Todo` | 继续拆分前端聊天工作台 UI 面板 | - | - |
+| `T-009` | `PLAN-20260628-01` | `P1` | `Done` | 继续拆分前端聊天工作台 UI 面板 | 2026-06-28 | `bdd53c8` |
 
 ## 新计划接入流程
 
@@ -274,17 +274,24 @@ docker compose config
 
 - 来源计划：`PLAN-20260628-01`
 - 优先级：`P1`
-- 状态：`Todo`
+- 状态：`Done`
 - 目标：在 `T-001` 的类型和工具拆分基础上，继续降低 `frontend/src/app/page.tsx` 的 UI 维护成本。
 - 范围：拆分文件管理面板、任务队列面板、诊断展示面板等 UI 组件；优先复用 `frontend/src/lib/chat-workspace/` 中的类型和工具，不改变现有接口协议和用户可见行为。
 - 验收标准：
   - 主要聊天、上传、向量化、诊断展示行为保持不变。
   - `page.tsx` 只保留页面级状态编排、请求副作用和顶层布局。
   - `npm run lint` 和 `npm run build` 通过。
+- 完成记录：
+  - 完成日期：2026-06-28
+  - 相关 commit：`bdd53c8`
+  - 新增 `FileManagerDialog`、`TaskQueuePanel`、`MessageDiagnosticsPanel` 三个聊天工作台组件。
+  - `frontend/src/app/page.tsx` 从 4607 行降至 3663 行，文件管理、任务队列和诊断展示 JSX 已外移。
+  - `scripts/acceptance_check.sh --skip-real-eval` 已通过。
 - 建议验证命令：
 
 ```bash
 cd frontend
+npm run test
 npm run lint
 npm run build
 ```
