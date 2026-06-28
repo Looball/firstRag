@@ -87,6 +87,46 @@ class EvalRagQualityGateTests(unittest.TestCase):
         self.assertFalse(results["max_average_first_token_ms"])
         self.assertTrue(results["max_average_elapsed_seconds"])
 
+    def test_evaluate_case_checks_reason_and_diagnostics(self):
+        """case 可声明路由原因和 diagnostics 点路径期望。"""
+        chat_result = eval_rag.ChatResult(
+            answer="answer",
+            sources=[],
+            retrieval={
+                "need_retrieval": False,
+                "final_need_retrieval": False,
+                "reason": "当前知识库设置为永不检索",
+                "diagnostics": {
+                    "settings": {
+                        "retrieval_mode": "never",
+                        "enable_rerank": False,
+                    },
+                    "reranked_count": 0,
+                    "timing": {},
+                    "llm": {},
+                },
+            },
+            message_id="message-id",
+            elapsed_seconds=1.0,
+        )
+
+        result = eval_rag.evaluate_case(
+            {
+                "id": "never_mode",
+                "question": "测试",
+                "expect_retrieval": False,
+                "expected_reason_keywords": ["永不检索"],
+                "expected_diagnostics": {
+                    "settings.retrieval_mode": "never",
+                    "settings.enable_rerank": False,
+                    "reranked_count": 0,
+                },
+            },
+            chat_result,
+        )
+
+        self.assertTrue(result["passed"])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -8,10 +8,10 @@
 
 | 检查项 | 命令 | 结果 |
 | --- | --- | --- |
-| 后端核心测试 | `cd backend && conda run -n firstrag python -m unittest discover tests -v` | 通过，71 个测试全部 OK。 |
+| 后端核心测试 | `cd backend && conda run -n firstrag python -m unittest discover tests -v` | 通过，78 个测试全部 OK。 |
 | 前端 lint | `cd frontend && npm run lint` | 通过。 |
 | 前端 build | `cd frontend && npm run build` | 通过。沙箱环境首次运行因 Turbopack 需要创建辅助进程并绑定本地端口被拦截，提权重跑后通过。 |
-| RAG eval gate | `FIRSTRAG_EVAL_USERNAME=你的用户名 FIRSTRAG_EVAL_PASSWORD=你的密码 scripts/rag_eval_gate.sh` | 通过，6/6 case 通过，质量门禁全部 PASS。 |
+| RAG eval gate | `FIRSTRAG_EVAL_USERNAME=你的用户名 FIRSTRAG_EVAL_PASSWORD=你的密码 scripts/rag_eval_gate.sh` | 通过，10/10 case 通过，质量门禁全部 PASS。 |
 | Indexing eval | `FIRSTRAG_EVAL_USERNAME=你的用户名 FIRSTRAG_EVAL_PASSWORD=你的密码 conda run -n firstrag python scripts/eval_indexing.py --base-url http://127.0.0.1:8000` | 通过，上传、auto index、worker 完成、文件 indexed、聊天 Sources 命中新文件均通过。 |
 
 本轮生成的最新报告：
@@ -103,6 +103,16 @@ conda run -n firstrag python scripts/eval_rag.py \
 - `docs/evals/latest_rag_eval_report.md`：最新 Markdown 报告。
 - `docs/evals/runs/YYYYMMDD_HHMMSS.json`：带时间戳的历史 JSON 记录。
 
+当前内置评测集覆盖：
+
+- 基础法律文档检索。
+- RAG 核心概念和 RRF 检索策略。
+- 问候自动跳过检索和强制检索。
+- 多轮追问。
+- 低相关问题在 `retrieval_mode=never` 下跳过检索。
+- 禁用 rerank。
+- 禁用 query router。
+
 历史文件默认被 `.gitignore` 忽略，只保留在本地。再次运行评测时，最新报告会自动对比上一轮历史记录。
 
 如果只想生成最新 Markdown 报告，不写历史记录：
@@ -177,11 +187,14 @@ scripts/rag_eval_gate.sh
 | `id` | 评测用例唯一标识。 |
 | `knowledge_base_name` | 要使用的知识库名称，找不到时会使用默认知识库。 |
 | `question` | 用户问题。 |
+| `pre_questions` | 可选。同一临时会话中先发送的预热问题，用于覆盖多轮追问。 |
 | `retrieval_settings` | 运行该 case 前临时应用的知识库检索策略。评测结束会尽力恢复原设置。 |
 | `expect_retrieval` | 期望最终是否检索。 |
 | `min_sources` | 期望最少展示引用数量。 |
 | `expected_files` | 期望引用命中的文件名列表，命中任意一个即可。 |
 | `expected_keywords` | 期望答案中包含的关键词，默认全部需要命中。 |
+| `expected_reason_keywords` | 期望 retrieval reason 中包含的关键词，默认全部需要命中。 |
+| `expected_diagnostics` | 可选。按点路径检查 diagnostics 中的字段，例如 `settings.enable_rerank` 或 `reranked_count`。 |
 
 ## 注意
 

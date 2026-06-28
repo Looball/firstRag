@@ -445,6 +445,36 @@ def evaluate_case(case: dict[str, Any], chat_result: ChatResult) -> dict[str, An
             },
         })
 
+    expected_reason_keywords = case.get("expected_reason_keywords") or []
+    if expected_reason_keywords:
+        reason = str(retrieval.get("reason") or "")
+        missing_reason_keywords = [
+            keyword
+            for keyword in expected_reason_keywords
+            if str(keyword) not in reason
+        ]
+        checks.append({
+            "name": "expected_reason_keywords",
+            "passed": not missing_reason_keywords,
+            "expected": expected_reason_keywords,
+            "actual": {
+                "reason": reason,
+                "missing": missing_reason_keywords,
+            },
+        })
+
+    expected_diagnostics = case.get("expected_diagnostics") or {}
+    if isinstance(expected_diagnostics, dict):
+        diagnostics = compact_diagnostics(retrieval)
+        for path, expected_value in expected_diagnostics.items():
+            actual_value = get_path_value(diagnostics, str(path))
+            checks.append({
+                "name": f"diagnostics.{path}",
+                "passed": actual_value == expected_value,
+                "expected": expected_value,
+                "actual": actual_value,
+            })
+
     return {
         "case": case,
         "chat_result": chat_result,
@@ -498,8 +528,19 @@ def compact_diagnostics(retrieval: dict[str, Any]) -> dict[str, Any]:
         "reranked_count": diagnostics.get("reranked_count"),
         "timing": diagnostics.get("timing") or {},
         "llm": diagnostics.get("llm") or {},
+        "settings": diagnostics.get("settings") or {},
         "reason": retrieval.get("reason"),
     }
+
+
+def get_path_value(value: dict[str, Any], path: str) -> Any:
+    """按点分隔路径读取嵌套 dict 值。"""
+    current: Any = value
+    for part in path.split("."):
+        if not isinstance(current, dict):
+            return None
+        current = current.get(part)
+    return current
 
 
 def build_summary(results: list[dict[str, Any]]) -> dict[str, Any]:
@@ -975,6 +1016,15 @@ def main() -> int:
                 str(case["id"]),
                 args.timeout,
             )
+            for pre_question in case.get("pre_questions") or []:
+                stream_chat(
+                    base_url,
+                    token,
+                    knowledge_base_id,
+                    conversation_id,
+                    str(pre_question),
+                    args.timeout,
+                )
             chat_result = stream_chat(
                 base_url,
                 token,
