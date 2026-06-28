@@ -57,7 +57,7 @@
 | --- | --- | --- | --- | --- | --- | --- |
 | `T-001` | `PLAN-20260628-01` | `P1` | `Done` | 拆分前端聊天工作台基础类型和工具 | 2026-06-28 | `f70e0a6` |
 | `T-002` | `PLAN-20260628-01` | `P1` | `Done` | 建立前端解析/状态工具测试底座 | 2026-06-28 | `48a3d53` |
-| `T-003` | `PLAN-20260628-01` | `P1` | `Todo` | 增加 eval 历史趋势摘要 | - | - |
+| `T-003` | `PLAN-20260628-01` | `P1` | `Done` | 增加 eval 历史趋势摘要 | 2026-06-28 | `419b10d` |
 | `T-004` | `PLAN-20260628-01` | `P1` | `Todo` | 产品化 vector worker health 展示 | - | - |
 | `T-005` | `PLAN-20260628-01` | `P2` | `Todo` | 完善 indexing failure recovery 分类与操作闭环 | - | - |
 | `T-006` | `PLAN-20260628-01` | `P2` | `Todo` | 扩充 RAG eval case 覆盖面 | - | - |
@@ -150,13 +150,19 @@ scripts/acceptance_check.sh --skip-real-eval
 
 - 来源计划：`PLAN-20260628-01`
 - 优先级：`P1`
-- 状态：`Todo`
+- 状态：`Done`
 - 目标：把 RAG 和 indexing eval 的历史结果沉淀成趋势摘要，便于观察回归质量变化。
 - 范围：基于 `docs/evals/runs/*.json` 与 `docs/evals/indexing_runs/*.json` 生成 `docs/evals/latest_summary.md`。
 - 验收标准：
   - 摘要展示最近 N 次通过率、平均耗时、首 token、平均引用数和 indexing 成功状态。
   - 脚本可重复运行，输出稳定。
   - 报告不包含账号密码、API Key、JWT 或数据库连接串。
+- 完成记录：
+  - 完成日期：2026-06-28
+  - 相关 commit：`419b10d`
+  - 新增 `scripts/eval_summary.py` 和 `backend/tests/test_eval_summary_script.py`。
+  - 生成 `docs/evals/latest_summary.md`，该报告被 `.gitignore` 忽略，避免本地趋势报告产生无关提交。
+  - `scripts/acceptance_check.sh --skip-real-eval` 已通过。
 - 建议验证命令：
 
 ```bash
