@@ -58,7 +58,7 @@
 | `T-001` | `PLAN-20260628-01` | `P1` | `Done` | 拆分前端聊天工作台基础类型和工具 | 2026-06-28 | `f70e0a6` |
 | `T-002` | `PLAN-20260628-01` | `P1` | `Done` | 建立前端解析/状态工具测试底座 | 2026-06-28 | `48a3d53` |
 | `T-003` | `PLAN-20260628-01` | `P1` | `Done` | 增加 eval 历史趋势摘要 | 2026-06-28 | `419b10d` |
-| `T-004` | `PLAN-20260628-01` | `P1` | `Todo` | 产品化 vector worker health 展示 | - | - |
+| `T-004` | `PLAN-20260628-01` | `P1` | `Done` | 产品化 vector worker health 展示 | 2026-06-28 | `c61dcfa` |
 | `T-005` | `PLAN-20260628-01` | `P2` | `Todo` | 完善 indexing failure recovery 分类与操作闭环 | - | - |
 | `T-006` | `PLAN-20260628-01` | `P2` | `Todo` | 扩充 RAG eval case 覆盖面 | - | - |
 | `T-007` | `PLAN-20260628-01` | `P2` | `Todo` | 梳理本地启动与验收工作流文档 | - | - |
@@ -174,17 +174,24 @@ git diff -- docs/evals/latest_summary.md
 
 - 来源计划：`PLAN-20260628-01`
 - 优先级：`P1`
-- 状态：`Todo`
+- 状态：`Done`
 - 目标：让前端任务队列区域更清楚地展示 worker 和队列状态，帮助快速判断是否需要启动 worker、等待或处理失败任务。
 - 范围：优先复用现有 `GET /chat/vector-index-jobs/health` 返回值，不新增后端 API。
 - 验收标准：
   - 空队列、排队中、处理中、疑似卡住、失败任务均有清晰展示。
   - 展示最近检查时间、手动刷新入口、卡住任务数量和建议操作。
   - 用户能从失败状态快速定位相关文件并看到恢复建议。
+- 完成记录：
+  - 完成日期：2026-06-28
+  - 相关 commit：`c61dcfa`
+  - 任务队列面板新增手动刷新、最近检查时间、队列指标、疑似卡住数量和建议操作。
+  - 新增 `getWorkerHealthDetails` 等前端 helper，并用 Vitest 覆盖 idle、waiting、active、attention_needed 和 failed queue 场景。
+  - `scripts/acceptance_check.sh --skip-real-eval` 已通过。
 - 建议验证命令：
 
 ```bash
 cd frontend
+npm run test
 npm run lint
 npm run build
 ```
