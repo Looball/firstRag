@@ -28,6 +28,18 @@ def classify_vector_index_failure(error_message: str | None) -> str | None:
     if any(
         keyword in normalized
         for keyword in [
+            "timeout",
+            "timed out",
+            "deadline",
+            "lease expired",
+            "任务超时",
+            "超时",
+        ]
+    ):
+        return "task_timeout"
+    if any(
+        keyword in normalized
+        for keyword in [
             "parse",
             "loader",
             "pdf",
@@ -41,6 +53,31 @@ def classify_vector_index_failure(error_message: str | None) -> str | None:
         ]
     ):
         return "parse_error"
+    if any(
+        keyword in normalized
+        for keyword in [
+            "knowledge_file_chunks",
+            "chunk repository",
+            "chunk insert",
+            "chunk write",
+            "chunk 写入",
+            "分块写入",
+            "全文分块写入",
+        ]
+    ):
+        return "chunk_write_error"
+    if any(
+        keyword in normalized
+        for keyword in [
+            "database",
+            "postgres",
+            "psycopg",
+            "sql",
+            "deadlock",
+            "数据库",
+        ]
+    ):
+        return "database_error"
     if any(
         keyword in normalized
         for keyword in [
@@ -73,18 +110,6 @@ def classify_vector_index_failure(error_message: str | None) -> str | None:
         ]
     ):
         return "vector_store_error"
-    if any(
-        keyword in normalized
-        for keyword in [
-            "database",
-            "postgres",
-            "psycopg",
-            "sql",
-            "deadlock",
-            "数据库",
-        ]
-    ):
-        return "database_error"
     if "版本已过期" in error_message:
         return "stale_job"
     return "unknown_error"
@@ -98,8 +123,12 @@ def build_vector_index_failure_hint(failure_type: str | None) -> str | None:
         return "Embedding 调用失败。请检查向量模型 API Key、网络连通性或稍后重新向量化。"
     if failure_type == "vector_store_error":
         return "向量库写入失败。请确认 Chroma/vector_db 可用，可删除向量后重新向量化。"
+    if failure_type == "chunk_write_error":
+        return "全文分块写入失败。请检查 PostgreSQL chunk 表和迁移状态，然后重新向量化。"
     if failure_type == "database_error":
         return "数据库写入失败。请检查数据库连接和迁移状态，然后重新向量化。"
+    if failure_type == "task_timeout":
+        return "向量化任务超时。请检查 worker 日志和文件大小，必要时重启 worker 后重新向量化。"
     if failure_type == "stale_job":
         return "该任务版本已过期，通常是文件向量被重置或重新提交导致，可直接重新向量化。"
     if failure_type == "unknown_error":

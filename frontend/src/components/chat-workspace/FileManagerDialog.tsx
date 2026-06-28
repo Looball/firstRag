@@ -134,6 +134,14 @@ function KnowledgeFileRow({
             {vectorStatus.workerHint}
           </p>
         )}
+        {vectorStatus.recoveryActions &&
+          vectorStatus.recoveryActions.length > 0 && (
+            <ul className="mt-2 list-disc space-y-1 pl-4 text-xs text-[#7a5a12]">
+              {vectorStatus.recoveryActions.map((action) => (
+                <li key={action}>{action}</li>
+              ))}
+            </ul>
+          )}
       </div>
       <div className="flex shrink-0 items-center gap-2">
         {vectorStatus.canDeleteVector && (

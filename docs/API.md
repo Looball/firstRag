@@ -140,6 +140,19 @@ Authorization: Bearer <access_token>
 }
 ```
 
+当前稳定的 `failure_type` 包括：
+
+| 类型 | 说明 |
+| --- | --- |
+| `parse_error` | 文件解析、编码或文本分块失败。 |
+| `embedding_error` | Embedding provider 调用失败。 |
+| `vector_store_error` | Chroma/vector_db 写入或查询失败。 |
+| `chunk_write_error` | PostgreSQL 文本 chunk 写入失败。 |
+| `database_error` | 数据库连接、SQL 或迁移相关失败。 |
+| `task_timeout` | 向量化任务超时或租约过期。 |
+| `stale_job` | 任务版本已过期。 |
+| `unknown_error` | 未能归入以上类型的失败。 |
+
 ## 会话
 
 | 方法 | 路径 | 说明 |

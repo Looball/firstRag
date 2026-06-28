@@ -218,6 +218,7 @@ export type VectorStatus = {
   errorMessage?: string;
   workerHint?: string;
   failureHint?: string;
+  recoveryActions?: string[];
   canRetry?: boolean;
 };
 

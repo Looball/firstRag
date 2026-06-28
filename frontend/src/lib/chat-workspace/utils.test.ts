@@ -5,6 +5,7 @@ import {
   getChatSources,
   getRetrievalState,
   getVectorStatus,
+  getVectorFailureRecoveryActions,
   getWorkerHealthDetails,
   getWorkerHealthLabel,
   parseVectorIndexHealth,
@@ -269,8 +270,28 @@ describe("chat workspace vector status parsing", () => {
       canPoll: false,
       errorMessage: "解析失败",
       failureHint: "请确认文件内容可读取。",
+      recoveryActions: [
+        "确认文件可打开且内容可复制",
+        "必要时转为 PDF、Markdown 或 TXT 后重新上传",
+        "重新向量化",
+      ],
       canRetry: true,
     });
+  });
+
+  it("maps vector failure types to recovery actions", () => {
+    expect(getVectorFailureRecoveryActions("vector_store_error", true)).toEqual([
+      "确认 Chroma/vector_db 可写",
+      "删除旧向量后重新向量化",
+    ]);
+    expect(getVectorFailureRecoveryActions("chunk_write_error", true)).toEqual([
+      "检查 PostgreSQL chunk 表和迁移状态",
+      "修复数据库后重新向量化",
+    ]);
+    expect(getVectorFailureRecoveryActions("task_timeout", true)).toEqual([
+      "查看 worker 日志和文件大小",
+      "必要时重启 worker 后重新向量化",
+    ]);
   });
 });
 

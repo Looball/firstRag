@@ -1182,6 +1182,70 @@ export function getKnowledgeFileStatus(value: unknown): KnowledgeFileStatus {
 }
 
 
+export function getVectorFailureRecoveryActions(
+  failureType: string | null,
+  canRetry: boolean
+) {
+  const retryAction = canRetry ? ["重新向量化"] : [];
+
+  if (failureType === "parse_error") {
+    return [
+      "确认文件可打开且内容可复制",
+      "必要时转为 PDF、Markdown 或 TXT 后重新上传",
+      ...retryAction,
+    ];
+  }
+
+  if (failureType === "embedding_error") {
+    return [
+      "检查 embedding provider 的 API Key、额度和网络",
+      "确认后重试向量化",
+    ];
+  }
+
+  if (failureType === "vector_store_error") {
+    return [
+      "确认 Chroma/vector_db 可写",
+      "删除旧向量后重新向量化",
+    ];
+  }
+
+  if (failureType === "chunk_write_error") {
+    return [
+      "检查 PostgreSQL chunk 表和迁移状态",
+      "修复数据库后重新向量化",
+    ];
+  }
+
+  if (failureType === "database_error") {
+    return [
+      "检查 PostgreSQL 连接和迁移状态",
+      "数据库恢复后重新向量化",
+    ];
+  }
+
+  if (failureType === "task_timeout") {
+    return [
+      "查看 worker 日志和文件大小",
+      "必要时重启 worker 后重新向量化",
+    ];
+  }
+
+  if (failureType === "stale_job") {
+    return ["任务版本已过期，可直接重新向量化"];
+  }
+
+  if (failureType === "unknown_error") {
+    return [
+      "查看错误信息和 worker 日志",
+      "确认模型配置、文件内容和服务状态后重新向量化",
+    ];
+  }
+
+  return retryAction;
+}
+
+
 export function getVectorStatus(file: KnowledgeFile): VectorStatus {
   const job = file.latestIndexJob;
 
@@ -1228,6 +1292,11 @@ export function getVectorStatus(file: KnowledgeFile): VectorStatus {
   }
 
   if (job.status === "failed") {
+    const recoveryActions = getVectorFailureRecoveryActions(
+      job.failureType,
+      job.canRetry
+    );
+
     return {
       label: "向量化失败",
       type: "failed",
@@ -1236,6 +1305,7 @@ export function getVectorStatus(file: KnowledgeFile): VectorStatus {
       canPoll: false,
       ...(job.errorMessage ? { errorMessage: job.errorMessage } : {}),
       ...(job.failureHint ? { failureHint: job.failureHint } : {}),
+      ...(recoveryActions.length > 0 ? { recoveryActions } : {}),
       canRetry: job.canRetry,
     };
   }
