@@ -51,7 +51,7 @@
 | --- | --- | --- | --- | --- |
 | `PLAN-20260628-01` | 2026-06-28 | `Done` | 基于代码和功能审查，建立可维护性、可观测性和验收自动化方向的第一批 backlog。 | `T-001` - `T-009` |
 | `PLAN-20260628-02` | 2026-06-28 | `Done` | 优化知识库检索速度，优先降低 rerank 对首 token 前等待时间的影响。 | `T-010` |
-| `PLAN-20260628-03` | 2026-06-28 | `Doing` | 优化 RAG 检索前置阶段，减少 knowledge profile 与文件范围查询开销。 | `T-011` |
+| `PLAN-20260628-03` | 2026-06-28 | `Done` | 优化 RAG 检索前置阶段，减少 knowledge profile 与文件范围查询开销。 | `T-011` |
 
 ## 任务总览
 
@@ -67,7 +67,7 @@
 | `T-008` | `PLAN-20260628-01` | `P2` | `Done` | 为部署目录补齐可运行 Docker Compose 方案 | 2026-06-28 | `7c52ae8` |
 | `T-009` | `PLAN-20260628-01` | `P1` | `Done` | 继续拆分前端聊天工作台 UI 面板 | 2026-06-28 | `bdd53c8` |
 | `T-010` | `PLAN-20260628-02` | `P1` | `Done` | 优化知识库检索速度，降低 rerank 开销 | 2026-06-28 | `8c9ac21` |
-| `T-011` | `PLAN-20260628-03` | `P1` | `Doing` | 增加知识库画像进程内轻量缓存 | - | - |
+| `T-011` | `PLAN-20260628-03` | `P1` | `Done` | 增加知识库画像进程内轻量缓存 | 2026-06-28 | `9f178fc` |
 
 ## 新计划接入流程
 
@@ -365,7 +365,7 @@ scripts/rag_eval_gate.sh
 
 - 来源计划：`PLAN-20260628-03`
 - 优先级：`P1`
-- 状态：`Doing`
+- 状态：`Done`
 - 目标：减少 RAG 前置阶段重复读取知识库文件列表的开销，降低 `knowledge_profile_ms` 和检索前等待时间。
 - 范围：新增进程内短 TTL cache，缓存知识库 profile 文本和已索引 file_ids；文件上传、知识库文件关联变化、向量化状态变化和删除向量结果时主动失效；diagnostics 暴露缓存命中情况。
 - 验收标准：
@@ -373,6 +373,15 @@ scripts/rag_eval_gate.sh
   - 本请求发生过缓存 miss 时，diagnostics 不被后续同请求 hit 误报为 true。
   - 文件关系和索引状态变化后相关缓存会失效。
   - 后端测试、前端 lint/test/build 和 RAG eval 通过。
+- 完成记录：
+  - 完成日期：2026-06-28
+  - 相关 commit：`9f178fc`
+  - 新增 `knowledge_profile_cache` 进程内短 TTL cache，缓存知识库 profile 文本和已索引 file_ids。
+  - `rag_service` 的 profile 构建和检索文件范围复用同一份缓存上下文。
+  - 文件上传、知识库文件关联变化、向量化状态变化和删除向量结果时会主动失效相关缓存。
+  - retrieval diagnostics 会合并 `knowledge_profile_cache_hit`、已索引文件数和总文件数。
+  - `scripts/acceptance_check.sh --skip-real-eval` 已通过：后端 80 个 unittest、前端 lint/test/build 通过。
+  - `scripts/rag_eval_gate.sh` 已通过：10/10 PASS。
 - 建议验证命令：
 
 ```bash
