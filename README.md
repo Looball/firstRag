@@ -83,6 +83,16 @@ conda activate firstrag
 python -m app.workers.vector_index_worker
 ```
 
+### 5. 可选：使用 Docker Compose
+
+仓库提供本地 Docker Compose 方案，可启动 PostgreSQL、后端、前端和 worker：
+
+```bash
+docker compose up --build
+```
+
+compose 会挂载 `uploads/`、`vector_db/` 和 `models/`，并默认让后端与 worker 连接 compose 内的 `postgres` 服务。首次使用新数据库时，仍需按项目数据库初始化流程准备基础表。更多细节见 `docs/DEPLOYMENT.md`。
+
 ## 项目结构
 
 ```text
@@ -95,7 +105,7 @@ FirstRAG/
 │   └── nginx/
 ├── scripts/                  # 初始化、迁移、测试脚本
 ├── .env.example              # 环境变量模板
-├── docker-compose.yml        # Docker Compose 占位配置
+├── docker-compose.yml        # 本地 Docker Compose 配置
 ├── README.md
 └── .gitignore
 ```
