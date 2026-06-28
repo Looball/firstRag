@@ -15,6 +15,7 @@
 | `DEPLOYMENT.md` | 本地启动、环境变量、部署目录约定。 |
 | `AGENT_GUIDE.md` | AI Agent / Codex / Claude Code 协作规范。 |
 | `CODING_STYLE.md` | 代码风格、提交和测试约定。 |
+| `TASKS.md` | 后续任务台账、优先级、状态和验收标准。 |
 | `evals/README.md` | RAG 真实链路评测集和一键评测脚本说明。 |
 
 ## 附录资料
