@@ -2,6 +2,25 @@
 
 这里放项目内置的轻量 RAG 回归评测，用于检查真实后端链路中的检索判断、召回、引用和回答质量。
 
+## 最近整体回归验收
+
+2026-06-28 已完成一轮关键链路整体回归验收，覆盖后端单元测试、前端静态检查与构建、RAG 真实评测门禁、上传与向量化真实链路验收。
+
+| 检查项 | 命令 | 结果 |
+| --- | --- | --- |
+| 后端核心测试 | `cd backend && conda run -n firstrag python -m unittest discover tests -v` | 通过，71 个测试全部 OK。 |
+| 前端 lint | `cd frontend && npm run lint` | 通过。 |
+| 前端 build | `cd frontend && npm run build` | 通过。沙箱环境首次运行因 Turbopack 需要创建辅助进程并绑定本地端口被拦截，提权重跑后通过。 |
+| RAG eval gate | `FIRSTRAG_EVAL_USERNAME=你的用户名 FIRSTRAG_EVAL_PASSWORD=你的密码 scripts/rag_eval_gate.sh` | 通过，6/6 case 通过，质量门禁全部 PASS。 |
+| Indexing eval | `FIRSTRAG_EVAL_USERNAME=你的用户名 FIRSTRAG_EVAL_PASSWORD=你的密码 conda run -n firstrag python scripts/eval_indexing.py --base-url http://127.0.0.1:8000` | 通过，上传、auto index、worker 完成、文件 indexed、聊天 Sources 命中新文件均通过。 |
+
+本轮生成的最新报告：
+
+- `docs/evals/latest_rag_eval_report.md`
+- `docs/evals/latest_indexing_eval_report.md`
+
+该记录用于进入文档整理、提交、推送或 PR 前的 release readiness 检查。再次修改 RAG 检索、token usage、eval gate、indexing、worker health、vector failure recovery 或前端文件管理链路后，应重新运行上述验收。
+
 ## 运行前提
 
 - 后端服务已经启动。
