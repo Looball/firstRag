@@ -55,7 +55,7 @@
 | `PLAN-20260628-04` | 2026-06-28 | `Done` | 补强 RAG eval 性能观测，让后续检索优化有稳定报告依据。 | `T-012` |
 | `PLAN-20260628-05` | 2026-06-28 | `Done` | 修正 knowledge profile cache diagnostics 在真实 RAG eval 报告中缺失的问题。 | `T-013` |
 | `PLAN-20260629-01` | 2026-06-29 | `Doing` | RAG 检索性能二阶段优化，继续降低首 token 前等待时间，优先处理 settings 读取、混合检索和重复查询开销。 | `T-014` - `T-018` |
-| `PLAN-20260629-02` | 2026-06-29 | `Todo` | 基于 `code-review-skill` 仓库级审查，整理安全边界、可维护性和测试补强的后续修改计划。 | `T-019` - `T-024` |
+| `PLAN-20260629-02` | 2026-06-29 | `Doing` | 基于 `code-review-skill` 仓库级审查，整理安全边界、可维护性和测试补强的后续修改计划。 | `T-019` - `T-024` |
 
 ## 任务总览
 
@@ -79,9 +79,9 @@
 | `T-016` | `PLAN-20260629-01` | `P1` | `Done` | 优化 hybrid retrieval 粗召回执行路径 | 2026-06-29 | `2477565` |
 | `T-017` | `PLAN-20260629-01` | `P2` | `Done` | 增加 query embedding 进程内短 TTL 缓存 | 2026-06-29 | `cbd00d8` |
 | `T-018` | `PLAN-20260629-01` | `P2` | `Done` | 固化 RAG eval 性能门槛和趋势字段 | 2026-06-29 | `7793856` |
-| `T-019` | `PLAN-20260629-02` | `P1` | `Todo` | 加固用户自定义 LLM Base URL SSRF 防护 |  |  |
-| `T-020` | `PLAN-20260629-02` | `P1` | `Todo` | 收紧知识文件上传类型与解析失败反馈 |  |  |
-| `T-021` | `PLAN-20260629-02` | `P1` | `Todo` | 抽取前端 API proxy 共享 helper |  |  |
+| `T-019` | `PLAN-20260629-02` | `P1` | `Done` | 加固用户自定义 LLM Base URL SSRF 防护 | 2026-06-29 | `fd64b6d` |
+| `T-020` | `PLAN-20260629-02` | `P1` | `Done` | 收紧知识文件上传类型与解析失败反馈 | 2026-06-29 | `fd64b6d` |
+| `T-021` | `PLAN-20260629-02` | `P1` | `Done` | 抽取前端 API proxy 共享 helper | 2026-06-29 | `fd64b6d` |
 | `T-022` | `PLAN-20260629-02` | `P1` | `Todo` | 继续拆分聊天工作台请求与流式状态逻辑 |  |  |
 | `T-023` | `PLAN-20260629-02` | `P2` | `Todo` | 拆分 RAG service 的路由、诊断和引用序列化职责 |  |  |
 | `T-024` | `PLAN-20260629-02` | `P2` | `Todo` | 建立权限、上传和流式代理的回归测试矩阵 |  |  |
@@ -621,7 +621,7 @@ scripts/rag_eval_gate.sh
 
 - 来源计划：`PLAN-20260629-02`
 - 优先级：`P1`
-- 状态：`Todo`
+- 状态：`Done`
 - 审查依据：`backend/app/services/user_settings_service.py` 已限制自定义 Base URL 开关、HTTPS、本机域名和字面 IP 私网地址，但非 IP 域名解析到私网地址的场景当前依赖部署环境出口策略。
 - 目标：补齐应用层 SSRF 防御纵深，避免开启 `ALLOW_USER_CUSTOM_LLM_BASE_URL` 后被构造域名绕过私网地址检查。
 - 范围：增强 `_validate_user_base_url`；解析域名 A/AAAA 记录并拒绝 loopback、private、link-local、multicast、reserved 等非公网地址；必要时限制重定向或在模型连通性测试前复核最终请求地址；保留当前厂商预设地址的兼容行为。
@@ -630,6 +630,12 @@ scripts/rag_eval_gate.sh
   - 公网 HTTPS 域名在开关开启时仍可保存和测试。
   - 错误信息不泄露用户 API Key、JWT 或内部网络细节。
   - 单元测试覆盖 DNS 解析成功、解析失败、IPv4/IPv6 私网和公网场景。
+- 完成记录：
+  - 完成日期：2026-06-29
+  - 相关 commit：`fd64b6d`
+  - `_validate_user_base_url` 已补充 DNS 解析校验，拒绝解析到非公网地址、解析失败和 IPv6 私网地址。
+  - 新增服务单测覆盖公网 DNS、DNS 私网目标、DNS 失败和 IPv6 私网。
+  - `scripts/acceptance_check.sh --skip-real-eval` 已通过。
 - 建议验证命令：
 
 ```bash
@@ -642,7 +648,7 @@ conda run -n firstrag python -m unittest tests.services.test_user_settings_servi
 
 - 来源计划：`PLAN-20260629-02`
 - 优先级：`P1`
-- 状态：`Todo`
+- 状态：`Done`
 - 审查依据：`backend/app/api/knowledge_files.py` 接收上传后按原始扩展名落盘，`document_service.load_document` 只支持 `.pdf`、`.docx`、`.md`、`.txt`，不支持的文件会到 worker 阶段才表现为“未解析出可入库的文本分块”。
 - 目标：在上传或入队前给用户明确、可恢复的文件类型反馈，减少无效 vector job 和失败噪音。
 - 范围：统一定义支持的扩展名和 MIME 类型；上传阶段拒绝明显不支持的文件；indexing 阶段保留解析失败分类，区分“不支持类型”“空文档”“解析器异常”；同步更新前端提示和 API 文档。
@@ -651,6 +657,13 @@ conda run -n firstrag python -m unittest tests.services.test_user_settings_servi
   - 支持的 `.pdf`、`.docx`、`.md`、`.txt` 上传和自动向量化行为保持不变。
   - 失败记录能在任务队列中展示可理解原因。
   - 后端测试覆盖支持类型、不支持类型、空内容和解析异常路径。
+- 完成记录：
+  - 完成日期：2026-06-29
+  - 相关 commit：`fd64b6d`
+  - 上传入口会在创建文件记录和 vector job 前拒绝不支持的扩展名或明显不匹配的 MIME 类型。
+  - 文档解析层新增 `UnsupportedDocumentTypeError` 和 `EmptyDocumentError`，向量任务失败分类新增 `unsupported_file_type` 与 `empty_document`。
+  - `docs/API.md` 已补充支持类型和新增 failure type。
+  - `scripts/acceptance_check.sh --skip-real-eval` 已通过。
 - 建议验证命令：
 
 ```bash
@@ -664,7 +677,7 @@ scripts/acceptance_check.sh --skip-real-eval
 
 - 来源计划：`PLAN-20260629-02`
 - 优先级：`P1`
-- 状态：`Todo`
+- 状态：`Done`
 - 审查依据：`frontend/src/app/api/**/route.ts` 当前约有 23 个 proxy route，重复实现 backend URL 拼接、`Authorization` 转发、`cache: "no-store"`、错误兜底和 streaming header。
 - 目标：降低前端 API proxy 的复制粘贴风险，后续调整超时、错误格式、认证 header 或 SSE header 时只改一处。
 - 范围：新增 `frontend/src/lib/api-proxy.ts` 或等价 helper；覆盖普通 JSON proxy、multipart upload proxy、DELETE/PATCH/POST 透传和 SSE streaming proxy；保留动态 route handler 的显式 `params` 类型。
@@ -673,6 +686,13 @@ scripts/acceptance_check.sh --skip-real-eval
   - 普通 API 继续透传后端状态码、`Content-Type` 和安全的错误信息。
   - 23 个 route 中重复样板明显减少，业务路径和方法映射清晰。
   - 前端 lint/build 通过，并补充 proxy helper 单元测试或最小 route 测试。
+- 完成记录：
+  - 完成日期：2026-06-29
+  - 相关 commit：`fd64b6d`
+  - 新增 `frontend/src/lib/api-proxy.ts`，集中处理 backend URL、Authorization、文本 body、FormData、Set-Cookie 和 SSE no-buffer header。
+  - 23 个 Next API route 已迁移到共享 helper；`/api/chat` 继续直接返回 upstream body，保持 streaming。
+  - 新增 `frontend/src/lib/api-proxy.test.ts` 覆盖 JSON、SSE 和 multipart proxy 行为。
+  - `scripts/acceptance_check.sh --skip-real-eval` 已通过。
 - 建议验证命令：
 
 ```bash
