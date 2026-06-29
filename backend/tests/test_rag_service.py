@@ -13,8 +13,10 @@ from app.services.rag_service import (
     build_configured_retrieval_decision,
     finalize_retrieval_decision,
     get_knowledge_base_file_ids,
+    get_retrieval_settings_diagnostics,
     get_res_doc,
     get_chain,
+    load_retrieval_settings,
     normalize_retrieval_decision,
     parse_retrieval_decision,
     retrieve_documents,
@@ -658,10 +660,42 @@ class RagQueryRouterTests(unittest.TestCase):
         self.assertFalse(kwargs["rerank"])
         self.assertEqual(doc.metadata["rerank_score_threshold"], 0.5)
 
+    def test_load_retrieval_settings_records_substage_diagnostics(
+        self,
+    ) -> None:
+        """读取检索设置时应记录 SQL 查询和 normalize 子阶段耗时。"""
+        knowledge_base_id = uuid4()
+        with unittest.mock.patch(
+            "app.services.rag_service.get_knowledge_base_retrieval_settings",
+            return_value={"top_k": 3},
+        ):
+            settings = load_retrieval_settings({
+                "user_id": 1,
+                "knowledge_base_id": knowledge_base_id,
+            })
+
+        diagnostics = get_retrieval_settings_diagnostics()
+        self.assertEqual(settings["top_k"], 3)
+        self.assertIsNotNone(diagnostics)
+        assert diagnostics is not None
+        self.assertEqual(diagnostics["retrieval_settings_source"], "database")
+        self.assertIsInstance(
+            diagnostics["retrieval_settings_query_ms"],
+            float,
+        )
+        self.assertIsInstance(
+            diagnostics["retrieval_settings_normalize_ms"],
+            float,
+        )
+        self.assertIsInstance(
+            diagnostics["retrieval_settings_load_total_ms"],
+            float,
+        )
+
     def test_retrieve_documents_persists_profile_cache_diagnostics(
         self,
     ) -> None:
-        """检索文档 metadata 应携带 knowledge profile 缓存诊断兜底。"""
+        """检索文档 metadata 应携带 profile 和 settings 诊断兜底。"""
         knowledge_base_id = uuid4()
         indexed_file_id = uuid4()
         doc = Document(
@@ -669,6 +703,14 @@ class RagQueryRouterTests(unittest.TestCase):
             metadata={"file_id": str(indexed_file_id)},
         )
         invalidate_knowledge_base_context(1, knowledge_base_id)
+        with unittest.mock.patch(
+            "app.services.rag_service.get_knowledge_base_retrieval_settings",
+            return_value={"top_k": 5},
+        ):
+            settings = load_retrieval_settings({
+                "user_id": 1,
+                "knowledge_base_id": knowledge_base_id,
+            })
 
         with unittest.mock.patch(
             "app.services.rag_service.get_knowledge_base_files",
@@ -691,16 +733,7 @@ class RagQueryRouterTests(unittest.TestCase):
                 "user_id": 1,
                 "knowledge_base_id": knowledge_base_id,
                 "standalone_question": "什么是诉讼法",
-                "retrieval_settings": {
-                    "retrieval_mode": "auto",
-                    "enable_query_router": True,
-                    "enable_rerank": True,
-                    "top_k": 5,
-                    "vector_top_k": 20,
-                    "fulltext_top_k": 20,
-                    "rrf_k": 10,
-                    "rerank_score_threshold": 0.0,
-                },
+                "retrieval_settings": settings,
                 "retrieval_decision": {
                     "need_retrieval": True,
                     "rewritten_query": "诉讼法",
@@ -712,6 +745,9 @@ class RagQueryRouterTests(unittest.TestCase):
         self.assertFalse(diagnostics["knowledge_profile_cache_hit"])
         self.assertEqual(diagnostics["knowledge_profile_indexed_file_count"], 1)
         self.assertEqual(diagnostics["knowledge_profile_total_file_count"], 1)
+        self.assertIn("retrieval_settings_query_ms", diagnostics["timing"])
+        self.assertIn("retrieval_settings_normalize_ms", diagnostics["timing"])
+        self.assertIn("retrieval_settings_load_total_ms", diagnostics["timing"])
 
     def test_build_knowledge_base_profile_uses_indexed_files(self) -> None:
         """知识库画像应只使用已索引文件，供 Router 识别知识库范围。"""

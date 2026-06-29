@@ -1,5 +1,6 @@
 import json
 from collections.abc import Iterator
+from contextvars import ContextVar
 from time import perf_counter
 from typing import Any, cast
 from uuid import UUID
@@ -51,6 +52,10 @@ type RetrievalDecision = dict[str, Any]
 
 REFERENCE_RERANK_SCORE_THRESHOLD = 0.0
 MAX_KNOWLEDGE_PROFILE_FILES = 30
+RETRIEVAL_SETTINGS_DIAGNOSTICS_KEY = "_retrieval_settings_diagnostics"
+_retrieval_settings_diagnostics: ContextVar[dict[str, Any] | None] = (
+    ContextVar("retrieval_settings_diagnostics", default=None)
+)
 RAG_STAGE_TIMING_FIELDS = {
     "standalone_question": "standalone_question",
     "retrieval_settings": "retrieval_settings",
@@ -64,6 +69,65 @@ RAG_STAGE_TIMING_FIELDS = {
 def elapsed_ms(started_at: float) -> float:
     """计算从指定时间点到当前的毫秒耗时。"""
     return round((perf_counter() - started_at) * 1000, 2)
+
+
+def reset_retrieval_settings_diagnostics() -> None:
+    """重置当前请求的 retrieval settings 子阶段诊断。"""
+    _retrieval_settings_diagnostics.set(None)
+
+
+def get_retrieval_settings_diagnostics() -> dict[str, Any] | None:
+    """读取当前请求的 retrieval settings 子阶段诊断。"""
+    diagnostics = _retrieval_settings_diagnostics.get()
+    if diagnostics is None:
+        return None
+    return dict(diagnostics)
+
+
+def extract_retrieval_settings_diagnostics(
+    settings: Any,
+) -> dict[str, Any] | None:
+    """从 retrieval settings 对象中提取随 Runnable 传递的子阶段诊断。"""
+    if isinstance(settings, dict):
+        diagnostics = settings.get(RETRIEVAL_SETTINGS_DIAGNOSTICS_KEY)
+        if isinstance(diagnostics, dict):
+            return dict(diagnostics)
+    return get_retrieval_settings_diagnostics()
+
+
+def merge_retrieval_settings_diagnostics(
+    diagnostics: dict[str, Any] | None,
+    settings_diagnostics: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """将 retrieval settings 子阶段诊断合并进 retrieval diagnostics。"""
+    merged = dict(diagnostics or {})
+    settings_diagnostics = (
+        settings_diagnostics
+        if settings_diagnostics is not None
+        else get_retrieval_settings_diagnostics()
+    )
+    if settings_diagnostics is None:
+        return merged
+
+    existing_timing = merged.get("timing")
+    if not isinstance(existing_timing, dict):
+        existing_timing = {}
+    merged["timing"] = {
+        **existing_timing,
+        "retrieval_settings_query_ms": settings_diagnostics[
+            "retrieval_settings_query_ms"
+        ],
+        "retrieval_settings_normalize_ms": settings_diagnostics[
+            "retrieval_settings_normalize_ms"
+        ],
+        "retrieval_settings_load_total_ms": settings_diagnostics[
+            "retrieval_settings_load_total_ms"
+        ],
+    }
+    merged["retrieval_settings_source"] = settings_diagnostics[
+        "retrieval_settings_source"
+    ]
+    return merged
 
 
 def merge_diagnostics_timing(
@@ -82,7 +146,7 @@ def merge_diagnostics_timing(
     }
     if llm_diagnostics is not None:
         merged["llm"] = llm_diagnostics
-    return merged
+    return merge_retrieval_settings_diagnostics(merged)
 
 
 def merge_knowledge_profile_cache_diagnostics(
@@ -266,11 +330,28 @@ def normalize_retrieval_settings(settings: dict[str, Any] | None) -> dict:
 
 def load_retrieval_settings(inputs: ChainInput) -> dict:
     """读取当前知识库的检索设置，未配置时使用默认值。"""
+    total_started_at = perf_counter()
+    query_started_at = perf_counter()
     settings = get_knowledge_base_retrieval_settings(
         knowledge_base_id=inputs["knowledge_base_id"],
         user_id=inputs["user_id"],
     )
-    return normalize_retrieval_settings(settings)
+    query_ms = elapsed_ms(query_started_at)
+
+    normalize_started_at = perf_counter()
+    normalized_settings = normalize_retrieval_settings(settings)
+    normalize_ms = elapsed_ms(normalize_started_at)
+    settings_diagnostics = {
+        "retrieval_settings_query_ms": query_ms,
+        "retrieval_settings_normalize_ms": normalize_ms,
+        "retrieval_settings_load_total_ms": elapsed_ms(total_started_at),
+        "retrieval_settings_source": "database" if settings else "default",
+    }
+    _retrieval_settings_diagnostics.set(settings_diagnostics)
+    normalized_settings[RETRIEVAL_SETTINGS_DIAGNOSTICS_KEY] = dict(
+        settings_diagnostics,
+    )
+    return normalized_settings
 
 
 def should_run_query_router(inputs: ChainInput) -> bool:
@@ -643,7 +724,8 @@ def retrieve_documents(inputs: ChainInput) -> RetrievedDocs:
     """根据当前知识库范围执行混合检索。"""
     user_id = inputs["user_id"]
     knowledge_base_id = inputs["knowledge_base_id"]
-    settings = normalize_retrieval_settings(inputs.get("retrieval_settings"))
+    raw_settings = inputs.get("retrieval_settings")
+    settings = normalize_retrieval_settings(raw_settings)
     decision = normalize_retrieval_decision(
         inputs.get("retrieval_decision"),
     )
@@ -672,6 +754,10 @@ def retrieve_documents(inputs: ChainInput) -> RetrievedDocs:
     diagnostics = get_retrieval_diagnostics()
     if diagnostics is not None:
         diagnostics["settings"] = settings
+        diagnostics = merge_retrieval_settings_diagnostics(
+            diagnostics,
+            extract_retrieval_settings_diagnostics(raw_settings),
+        )
         diagnostics = merge_knowledge_profile_cache_diagnostics(diagnostics)
         # LCEL 流式执行过程中 ContextVar 可能跨 Runnable 丢失。
         # 将诊断挂到文档 metadata，确保后续 SSE 和落库能稳定读取。
@@ -852,6 +938,7 @@ def stream_rag_response(
 ) -> Iterator[RagStreamEvent]:
     """流式返回 RAG 事件，包括引用文档和答案片段。"""
     reset_knowledge_profile_cache_diagnostics()
+    reset_retrieval_settings_diagnostics()
     stream_started_at = perf_counter()
     current_stage_started_at = stream_started_at
     rag_timing: dict[str, float] = {}
@@ -883,6 +970,7 @@ def stream_rag_response(
     sources_sent = False
     retrieval_sent = False
     retrieval_decision: RetrievalDecision | None = None
+    retrieval_settings_diagnostics: dict[str, Any] | None = None
     llm_diagnostics: dict[str, Any] | None = None
     first_answer_token_recorded = False
     for chunk in response:
@@ -892,6 +980,13 @@ def stream_rag_response(
 
         if isinstance(chunk.get("llm_diagnostics"), dict):
             llm_diagnostics = chunk["llm_diagnostics"]
+
+        if isinstance(chunk.get("retrieval_settings"), dict):
+            retrieval_settings_diagnostics = (
+                extract_retrieval_settings_diagnostics(
+                    chunk["retrieval_settings"],
+                )
+            )
 
         if "retrieval_decision" in chunk:
             retrieval_decision = normalize_retrieval_decision(
@@ -913,6 +1008,10 @@ def stream_rag_response(
                 diagnostics,
                 rag_timing,
                 llm_diagnostics,
+            )
+            diagnostics_with_timing = merge_retrieval_settings_diagnostics(
+                diagnostics_with_timing,
+                retrieval_settings_diagnostics,
             )
             diagnostics_with_timing = merge_knowledge_profile_cache_diagnostics(
                 diagnostics_with_timing,

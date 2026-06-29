@@ -65,6 +65,9 @@ class EvalRagQualityGateTests(unittest.TestCase):
                     "first_answer_token_ms": 500,
                     "pre_answer_total_ms": 700,
                     "retrieval_settings_ms": 10,
+                    "retrieval_settings_load_total_ms": 3,
+                    "retrieval_settings_query_ms": 2,
+                    "retrieval_settings_normalize_ms": 1,
                     "knowledge_profile_ms": 20,
                     "query_router_ms": 30,
                     "retrieve_documents_ms": 40,
@@ -81,6 +84,12 @@ class EvalRagQualityGateTests(unittest.TestCase):
         self.assertEqual(summary["average_first_token_ms"], 750)
         self.assertEqual(summary["average_pre_answer_ms"], 850)
         self.assertEqual(summary["average_retrieval_settings_ms"], 10)
+        self.assertEqual(summary["average_retrieval_settings_load_total_ms"], 3)
+        self.assertEqual(summary["average_retrieval_settings_query_ms"], 2)
+        self.assertEqual(
+            summary["average_retrieval_settings_normalize_ms"],
+            1,
+        )
         self.assertEqual(summary["average_knowledge_profile_ms"], 20)
         self.assertEqual(summary["average_query_router_ms"], 30)
         self.assertEqual(summary["average_retrieve_documents_ms"], 40)
@@ -160,6 +169,9 @@ class EvalRagQualityGateTests(unittest.TestCase):
             timing={
                 "pre_answer_total_ms": 100,
                 "retrieval_settings_ms": 2,
+                "retrieval_settings_load_total_ms": 0.8,
+                "retrieval_settings_query_ms": 0.6,
+                "retrieval_settings_normalize_ms": 0.1,
                 "knowledge_profile_ms": 3,
                 "query_router_ms": 4,
                 "retrieve_documents_ms": 5,
@@ -187,7 +199,14 @@ class EvalRagQualityGateTests(unittest.TestCase):
             report = report_path.read_text(encoding="utf-8")
 
         self.assertIn("## 阶段耗时摘要", report)
-        self.assertIn("| case-id | 100 | 2 | 3 | 是 | 4 | 5 | 6 | 7 |", report)
+        self.assertIn(
+            "| case-id | 100 | 2 | 0.80 | 0.60 | 0.10 | 3 | 是 | 4 | 5 | 6 | 7 |",
+            report,
+        )
+        self.assertIn(
+            "settings 子阶段：load=0.80ms，query=0.60ms，normalize=0.10ms",
+            report,
+        )
         self.assertIn("knowledge profile 缓存命中：1/1", report)
         self.assertIn("知识库画像缓存：hit=是，indexed_files=2，total_files=3", report)
 

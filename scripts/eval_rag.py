@@ -576,6 +576,9 @@ def build_summary(results: list[dict[str, Any]]) -> dict[str, Any]:
     total_token_values: list[float] = []
     stage_values: dict[str, list[float]] = {
         "retrieval_settings_ms": [],
+        "retrieval_settings_load_total_ms": [],
+        "retrieval_settings_query_ms": [],
+        "retrieval_settings_normalize_ms": [],
         "knowledge_profile_ms": [],
         "query_router_ms": [],
         "retrieve_documents_ms": [],
@@ -629,6 +632,15 @@ def build_summary(results: list[dict[str, Any]]) -> dict[str, Any]:
         "average_pre_answer_ms": average_or_none(pre_answer_values),
         "average_retrieval_settings_ms": average_or_none(
             stage_values["retrieval_settings_ms"],
+        ),
+        "average_retrieval_settings_load_total_ms": average_or_none(
+            stage_values["retrieval_settings_load_total_ms"],
+        ),
+        "average_retrieval_settings_query_ms": average_or_none(
+            stage_values["retrieval_settings_query_ms"],
+        ),
+        "average_retrieval_settings_normalize_ms": average_or_none(
+            stage_values["retrieval_settings_normalize_ms"],
         ),
         "average_knowledge_profile_ms": average_or_none(
             stage_values["knowledge_profile_ms"],
@@ -848,6 +860,9 @@ def append_history_comparison(
         "average_first_token_ms": "平均首 token 毫秒",
         "average_pre_answer_ms": "平均回答前等待毫秒",
         "average_retrieval_settings_ms": "平均 settings 毫秒",
+        "average_retrieval_settings_load_total_ms": "平均 settings load 毫秒",
+        "average_retrieval_settings_query_ms": "平均 settings query 毫秒",
+        "average_retrieval_settings_normalize_ms": "平均 settings normalize 毫秒",
         "average_knowledge_profile_ms": "平均 profile 毫秒",
         "average_query_router_ms": "平均 router 毫秒",
         "average_retrieve_documents_ms": "平均检索 Runnable 毫秒",
@@ -902,6 +917,17 @@ def write_report(
             router=format_number(summary["average_query_router_ms"]),
             retrieve=format_number(summary["average_retrieve_documents_ms"]),
             rerank=format_number(summary["average_rerank_ms"]),
+        ),
+        "- settings 子阶段：load={load}ms，query={query}ms，normalize={normalize}ms".format(
+            load=format_number(
+                summary["average_retrieval_settings_load_total_ms"],
+            ),
+            query=format_number(
+                summary["average_retrieval_settings_query_ms"],
+            ),
+            normalize=format_number(
+                summary["average_retrieval_settings_normalize_ms"],
+            ),
         ),
         "- knowledge profile 缓存命中：{hits}/{observed}（{rate}）".format(
             hits=summary["knowledge_profile_cache_hit_count"],
@@ -959,18 +985,27 @@ def write_report(
         "",
         "## 阶段耗时摘要",
         "",
-        "| Case | pre-answer | settings | profile | cache | router | retrieve | hybrid | rerank |",
-        "| --- | ---: | ---: | ---: | --- | ---: | ---: | ---: | ---: |",
+        "| Case | pre-answer | settings | settings-load | settings-query | settings-normalize | profile | cache | router | retrieve | hybrid | rerank |",
+        "| --- | ---: | ---: | ---: | ---: | ---: | ---: | --- | ---: | ---: | ---: | ---: |",
     ])
     for result in results:
         case = result["case"]
         diagnostics = compact_diagnostics(result["chat_result"].retrieval)
         timing = diagnostics["timing"]
         lines.append(
-            "| {case_id} | {pre_answer} | {settings} | {profile} | {cache} | {router} | {retrieve} | {hybrid} | {rerank} |".format(
+            "| {case_id} | {pre_answer} | {settings} | {settings_load} | {settings_query} | {settings_normalize} | {profile} | {cache} | {router} | {retrieve} | {hybrid} | {rerank} |".format(
                 case_id=case["id"],
                 pre_answer=format_number(timing.get("pre_answer_total_ms")),
                 settings=format_number(timing.get("retrieval_settings_ms")),
+                settings_load=format_number(
+                    timing.get("retrieval_settings_load_total_ms"),
+                ),
+                settings_query=format_number(
+                    timing.get("retrieval_settings_query_ms"),
+                ),
+                settings_normalize=format_number(
+                    timing.get("retrieval_settings_normalize_ms"),
+                ),
                 profile=format_number(timing.get("knowledge_profile_ms")),
                 cache=format_bool(diagnostics["knowledge_profile_cache_hit"]),
                 router=format_number(timing.get("query_router_ms")),
@@ -1002,9 +1037,21 @@ def write_report(
                 indexed=diagnostics["knowledge_profile_indexed_file_count"] or "—",
                 total=diagnostics["knowledge_profile_total_file_count"] or "—",
             ),
-            "- 关键耗时：pre_answer={pre_answer}ms，settings={settings}ms，profile={profile}ms，router={router}ms，retrieve={retrieve}ms，hybrid={retrieval}ms，rerank={rerank}ms".format(
+            "- 关键耗时：pre_answer={pre_answer}ms，settings={settings}ms，settings_load={settings_load}ms，settings_query={settings_query}ms，settings_normalize={settings_normalize}ms，profile={profile}ms，router={router}ms，retrieve={retrieve}ms，hybrid={retrieval}ms，rerank={rerank}ms".format(
                 pre_answer=diagnostics["timing"].get("pre_answer_total_ms", "—"),
                 settings=diagnostics["timing"].get("retrieval_settings_ms", "—"),
+                settings_load=diagnostics["timing"].get(
+                    "retrieval_settings_load_total_ms",
+                    "—",
+                ),
+                settings_query=diagnostics["timing"].get(
+                    "retrieval_settings_query_ms",
+                    "—",
+                ),
+                settings_normalize=diagnostics["timing"].get(
+                    "retrieval_settings_normalize_ms",
+                    "—",
+                ),
                 profile=diagnostics["timing"].get("knowledge_profile_ms", "—"),
                 router=diagnostics["timing"].get("query_router_ms", "—"),
                 retrieve=diagnostics["timing"].get("retrieve_documents_ms", "—"),

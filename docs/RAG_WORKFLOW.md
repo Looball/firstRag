@@ -71,7 +71,10 @@
 常见耗时字段：
 
 - `standalone_question_ms`：生成独立问题阶段耗时。
-- `retrieval_settings_ms`：读取知识库检索配置耗时。
+- `retrieval_settings_ms`：LCEL 外层观察到的 retrieval settings 阶段耗时，可能包含上游 Runnable 调度等待。
+- `retrieval_settings_load_total_ms`：后端实际读取并规范化 retrieval settings 的总耗时。
+- `retrieval_settings_query_ms`：查询知识库检索配置的数据库耗时。
+- `retrieval_settings_normalize_ms`：合并默认值并规范化检索配置的耗时。
 - `knowledge_profile_ms`：构建知识库文件画像耗时。
 - `query_router_ms`：Query Router 判断耗时。
 - `finalize_decision_ms`：规则覆盖和最终检索决策耗时。
