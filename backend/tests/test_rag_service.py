@@ -27,6 +27,9 @@ from app.services.knowledge_profile_cache import (
     get_knowledge_profile_cache_diagnostics,
     invalidate_knowledge_base_context,
 )
+from app.services.retrieval_settings_cache import (
+    invalidate_retrieval_settings_cache,
+)
 from app.services.user_settings_service import EffectiveChatModelConfig
 
 
@@ -665,20 +668,28 @@ class RagQueryRouterTests(unittest.TestCase):
     ) -> None:
         """读取检索设置时应记录 SQL 查询和 normalize 子阶段耗时。"""
         knowledge_base_id = uuid4()
+        invalidate_retrieval_settings_cache(1, knowledge_base_id)
         with unittest.mock.patch(
             "app.services.rag_service.get_knowledge_base_retrieval_settings",
             return_value={"top_k": 3},
-        ):
+        ) as settings_mock:
             settings = load_retrieval_settings({
+                "user_id": 1,
+                "knowledge_base_id": knowledge_base_id,
+            })
+            cached_settings = load_retrieval_settings({
                 "user_id": 1,
                 "knowledge_base_id": knowledge_base_id,
             })
 
         diagnostics = get_retrieval_settings_diagnostics()
         self.assertEqual(settings["top_k"], 3)
+        self.assertEqual(cached_settings["top_k"], 3)
+        settings_mock.assert_called_once()
         self.assertIsNotNone(diagnostics)
         assert diagnostics is not None
-        self.assertEqual(diagnostics["retrieval_settings_source"], "database")
+        self.assertEqual(diagnostics["retrieval_settings_source"], "cache")
+        self.assertTrue(diagnostics["cache"]["retrieval_settings_cache_hit"])
         self.assertIsInstance(
             diagnostics["retrieval_settings_query_ms"],
             float,
@@ -691,6 +702,7 @@ class RagQueryRouterTests(unittest.TestCase):
             diagnostics["retrieval_settings_load_total_ms"],
             float,
         )
+        invalidate_retrieval_settings_cache(1, knowledge_base_id)
 
     def test_retrieve_documents_persists_profile_cache_diagnostics(
         self,
@@ -703,6 +715,7 @@ class RagQueryRouterTests(unittest.TestCase):
             metadata={"file_id": str(indexed_file_id)},
         )
         invalidate_knowledge_base_context(1, knowledge_base_id)
+        invalidate_retrieval_settings_cache(1, knowledge_base_id)
         with unittest.mock.patch(
             "app.services.rag_service.get_knowledge_base_retrieval_settings",
             return_value={"top_k": 5},

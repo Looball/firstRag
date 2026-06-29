@@ -29,6 +29,9 @@ from app.services.vectors.vector_index_queue_service import (
 from app.services.knowledge_profile_cache import (
     invalidate_knowledge_base_context,
 )
+from app.services.retrieval_settings_cache import (
+    invalidate_retrieval_settings_cache,
+)
 
 
 router = APIRouter(prefix="/chat", tags=["knowledge-bases"])
@@ -142,6 +145,7 @@ def update_retrieval_settings(
     )
     if saved_settings is None:
         raise HTTPException(status_code=404, detail="知识库不存在")
+    invalidate_retrieval_settings_cache(user_id, knowledge_base_id)
 
     return {
         "success": True,

@@ -65,6 +65,7 @@
 | 召回排序 | `diagnostics.vector_count`、`fulltext_count`、`fused_count`、`reranked_count` | vector/fulltext 召回数量、RRF 融合后数量和 rerank 精排后数量。 |
 | 阶段耗时 | `diagnostics.timing.*_ms` | 问题改写、Router、检索、RRF、rerank、首 token 和整体流式回答耗时，单位毫秒。 |
 | 画像缓存 | `knowledge_profile_cache_hit`、`knowledge_profile_indexed_file_count` | 本轮知识库画像是否命中进程内短 TTL 缓存，以及画像中的已索引文件数量。 |
+| 设置缓存 | `retrieval_settings_cache_hit`、`retrieval_settings_source` | 本轮知识库检索设置是否命中进程内短 TTL 缓存，以及设置来源。 |
 | LLM 配置 | `diagnostics.llm.provider`、`model`、`credential_mode`、`temperature`、`max_tokens` | 本轮实际使用的模型厂商、模型名、凭据来源和生成参数，不包含 API Key。 |
 | 最终引用 | `retrieval_sources`、`sources` | 最终展示给用户的引用片段及这些片段命中的召回通道。 |
 
@@ -90,6 +91,10 @@
 知识库文件画像和已索引文件 ID 使用进程内短 TTL 缓存，默认用于减少同一知识库在连续
 对话中的重复数据库查询。文件上传、知识库文件关联变化、向量化状态变化和删除向量结果
 会主动失效相关缓存；TTL 负责兜底处理未覆盖的边界场景。
+
+知识库 retrieval settings 也使用进程内短 TTL 缓存，默认用于减少聊天和本地问候短路
+判断中的重复设置查询。更新 retrieval settings 后会主动失效对应知识库缓存，下一轮聊天
+会立即读取新配置；TTL 负责兜底处理未覆盖的边界场景。
 - `answer_stream_ms`：首个回答 token 后到回答完成的流式耗时。
 - `chat_stream_total_ms`：本轮后端流式回答总耗时。
 

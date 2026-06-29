@@ -535,6 +535,12 @@ def compact_diagnostics(retrieval: dict[str, Any]) -> dict[str, Any]:
         "knowledge_profile_total_file_count": diagnostics.get(
             "knowledge_profile_total_file_count",
         ),
+        "retrieval_settings_cache_hit": diagnostics.get(
+            "retrieval_settings_cache_hit",
+        ),
+        "retrieval_settings_source": diagnostics.get(
+            "retrieval_settings_source",
+        ),
         "timing": diagnostics.get("timing") or {},
         "llm": diagnostics.get("llm") or {},
         "settings": diagnostics.get("settings") or {},
@@ -587,6 +593,8 @@ def build_summary(results: list[dict[str, Any]]) -> dict[str, Any]:
     }
     cache_hit_count = 0
     cache_observed_count = 0
+    settings_cache_hit_count = 0
+    settings_cache_observed_count = 0
     for result in results:
         diagnostics = compact_diagnostics(result["chat_result"].retrieval)
         timing = diagnostics["timing"]
@@ -618,6 +626,12 @@ def build_summary(results: list[dict[str, Any]]) -> dict[str, Any]:
             cache_observed_count += 1
             if cache_hit:
                 cache_hit_count += 1
+
+        settings_cache_hit = diagnostics.get("retrieval_settings_cache_hit")
+        if isinstance(settings_cache_hit, bool):
+            settings_cache_observed_count += 1
+            if settings_cache_hit:
+                settings_cache_hit_count += 1
 
     return {
         "total": total,
@@ -660,6 +674,15 @@ def build_summary(results: list[dict[str, Any]]) -> dict[str, Any]:
         "knowledge_profile_cache_hit_rate": (
             cache_hit_count / cache_observed_count
             if cache_observed_count
+            else None
+        ),
+        "retrieval_settings_cache_hit_count": settings_cache_hit_count,
+        "retrieval_settings_cache_observed_count": (
+            settings_cache_observed_count
+        ),
+        "retrieval_settings_cache_hit_rate": (
+            settings_cache_hit_count / settings_cache_observed_count
+            if settings_cache_observed_count
             else None
         ),
         "average_total_tokens": average_or_none(total_token_values),
@@ -869,6 +892,7 @@ def append_history_comparison(
         "average_retrieval_total_ms": "平均混合检索毫秒",
         "average_rerank_ms": "平均 rerank 毫秒",
         "knowledge_profile_cache_hit_rate": "profile 缓存命中率",
+        "retrieval_settings_cache_hit_rate": "settings 缓存命中率",
         "average_total_tokens": "平均 token",
         "retrieval_cases": "触发检索数",
     }
@@ -933,6 +957,11 @@ def write_report(
             hits=summary["knowledge_profile_cache_hit_count"],
             observed=summary["knowledge_profile_cache_observed_count"],
             rate=format_number(summary["knowledge_profile_cache_hit_rate"]),
+        ),
+        "- retrieval settings 缓存命中：{hits}/{observed}（{rate}）".format(
+            hits=summary["retrieval_settings_cache_hit_count"],
+            observed=summary["retrieval_settings_cache_observed_count"],
+            rate=format_number(summary["retrieval_settings_cache_hit_rate"]),
         ),
         f"- 平均 token：{format_number(summary['average_total_tokens'])}",
         f"- 质量门禁：{'通过' if quality_gate_passed else '未通过'}",
@@ -1036,6 +1065,10 @@ def write_report(
                 hit=format_bool(diagnostics["knowledge_profile_cache_hit"]),
                 indexed=diagnostics["knowledge_profile_indexed_file_count"] or "—",
                 total=diagnostics["knowledge_profile_total_file_count"] or "—",
+            ),
+            "- 检索设置缓存：hit={hit}，source={source}".format(
+                hit=format_bool(diagnostics["retrieval_settings_cache_hit"]),
+                source=diagnostics["retrieval_settings_source"] or "—",
             ),
             "- 关键耗时：pre_answer={pre_answer}ms，settings={settings}ms，settings_load={settings_load}ms，settings_query={settings_query}ms，settings_normalize={settings_normalize}ms，profile={profile}ms，router={router}ms，retrieve={retrieve}ms，hybrid={retrieval}ms，rerank={rerank}ms".format(
                 pre_answer=diagnostics["timing"].get("pre_answer_total_ms", "—"),

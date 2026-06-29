@@ -74,7 +74,9 @@ class KnowledgeBaseRetrievalSettingsTests(unittest.TestCase):
                 "rrf_k": 10,
                 "rerank_score_threshold": 0.0,
             },
-        ) as upsert_mock:
+        ) as upsert_mock, patch(
+            "app.api.knowledge_bases.invalidate_retrieval_settings_cache",
+        ) as invalidate_mock:
             response = self.client.patch(
                 f"/chat/knowledge-base/{knowledge_base_id}/retrieval-settings",
                 json={
@@ -90,6 +92,7 @@ class KnowledgeBaseRetrievalSettingsTests(unittest.TestCase):
         self.assertFalse(kwargs["settings"]["enable_rerank"])
         self.assertEqual(kwargs["settings"]["top_k"], 3)
         self.assertEqual(response.json()["settings"]["retrieval_mode"], "always")
+        invalidate_mock.assert_called_once_with(1, knowledge_base_id)
 
 
 if __name__ == "__main__":

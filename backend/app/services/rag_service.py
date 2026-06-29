@@ -42,6 +42,11 @@ from app.services.knowledge_profile_cache import (
     get_knowledge_profile_cache_diagnostics,
     reset_knowledge_profile_cache_diagnostics,
 )
+from app.services.retrieval_settings_cache import (
+    get_cached_knowledge_base_retrieval_settings,
+    get_retrieval_settings_cache_diagnostics,
+    reset_retrieval_settings_cache_diagnostics,
+)
 
 
 type RetrievedDocs = list[Document]
@@ -109,6 +114,7 @@ def merge_retrieval_settings_diagnostics(
     if settings_diagnostics is None:
         return merged
 
+    cache_diagnostics = settings_diagnostics.get("cache")
     existing_timing = merged.get("timing")
     if not isinstance(existing_timing, dict):
         existing_timing = {}
@@ -124,6 +130,18 @@ def merge_retrieval_settings_diagnostics(
             "retrieval_settings_load_total_ms"
         ],
     }
+    if isinstance(cache_diagnostics, dict):
+        merged["retrieval_settings_cache_hit"] = cache_diagnostics.get(
+            "retrieval_settings_cache_hit",
+        )
+        merged["retrieval_settings_cache_ttl_seconds"] = (
+            cache_diagnostics.get("retrieval_settings_cache_ttl_seconds")
+        )
+        merged["retrieval_settings_source"] = cache_diagnostics.get(
+            "retrieval_settings_source",
+        )
+        return merged
+
     merged["retrieval_settings_source"] = settings_diagnostics[
         "retrieval_settings_source"
     ]
@@ -332,20 +350,30 @@ def load_retrieval_settings(inputs: ChainInput) -> dict:
     """读取当前知识库的检索设置，未配置时使用默认值。"""
     total_started_at = perf_counter()
     query_started_at = perf_counter()
-    settings = get_knowledge_base_retrieval_settings(
+    settings = get_cached_knowledge_base_retrieval_settings(
         knowledge_base_id=inputs["knowledge_base_id"],
         user_id=inputs["user_id"],
+        load_settings=lambda: get_knowledge_base_retrieval_settings(
+            knowledge_base_id=inputs["knowledge_base_id"],
+            user_id=inputs["user_id"],
+        ),
     )
     query_ms = elapsed_ms(query_started_at)
 
     normalize_started_at = perf_counter()
     normalized_settings = normalize_retrieval_settings(settings)
     normalize_ms = elapsed_ms(normalize_started_at)
+    cache_diagnostics = get_retrieval_settings_cache_diagnostics()
     settings_diagnostics = {
         "retrieval_settings_query_ms": query_ms,
         "retrieval_settings_normalize_ms": normalize_ms,
         "retrieval_settings_load_total_ms": elapsed_ms(total_started_at),
-        "retrieval_settings_source": "database" if settings else "default",
+        "retrieval_settings_source": (
+            cache_diagnostics.get("retrieval_settings_source")
+            if isinstance(cache_diagnostics, dict)
+            else ("database" if settings else "default")
+        ),
+        "cache": cache_diagnostics,
     }
     _retrieval_settings_diagnostics.set(settings_diagnostics)
     normalized_settings[RETRIEVAL_SETTINGS_DIAGNOSTICS_KEY] = dict(
@@ -939,6 +967,7 @@ def stream_rag_response(
     """流式返回 RAG 事件，包括引用文档和答案片段。"""
     reset_knowledge_profile_cache_diagnostics()
     reset_retrieval_settings_diagnostics()
+    reset_retrieval_settings_cache_diagnostics()
     stream_started_at = perf_counter()
     current_stage_started_at = stream_started_at
     rag_timing: dict[str, float] = {}

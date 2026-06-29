@@ -58,7 +58,10 @@ class EvalRagQualityGateTests(unittest.TestCase):
             self.build_result(
                 timing={"pre_answer_total_ms": 1000},
                 total_tokens=300,
-                diagnostics={"knowledge_profile_cache_hit": False},
+                diagnostics={
+                    "knowledge_profile_cache_hit": False,
+                    "retrieval_settings_cache_hit": False,
+                },
             ),
             self.build_result(
                 timing={
@@ -75,7 +78,10 @@ class EvalRagQualityGateTests(unittest.TestCase):
                     "rerank_ms": 60,
                 },
                 total_tokens=100,
-                diagnostics={"knowledge_profile_cache_hit": True},
+                diagnostics={
+                    "knowledge_profile_cache_hit": True,
+                    "retrieval_settings_cache_hit": True,
+                },
             ),
         ]
 
@@ -98,6 +104,9 @@ class EvalRagQualityGateTests(unittest.TestCase):
         self.assertEqual(summary["knowledge_profile_cache_hit_count"], 1)
         self.assertEqual(summary["knowledge_profile_cache_observed_count"], 2)
         self.assertEqual(summary["knowledge_profile_cache_hit_rate"], 0.5)
+        self.assertEqual(summary["retrieval_settings_cache_hit_count"], 1)
+        self.assertEqual(summary["retrieval_settings_cache_observed_count"], 2)
+        self.assertEqual(summary["retrieval_settings_cache_hit_rate"], 0.5)
         self.assertEqual(summary["average_total_tokens"], 200)
 
     def test_quality_gate_checks_thresholds(self):
@@ -182,6 +191,8 @@ class EvalRagQualityGateTests(unittest.TestCase):
                 "knowledge_profile_cache_hit": True,
                 "knowledge_profile_indexed_file_count": 2,
                 "knowledge_profile_total_file_count": 3,
+                "retrieval_settings_cache_hit": True,
+                "retrieval_settings_source": "cache",
                 "vector_count": 10,
                 "fulltext_count": 8,
                 "fused_count": 5,
@@ -208,7 +219,9 @@ class EvalRagQualityGateTests(unittest.TestCase):
             report,
         )
         self.assertIn("knowledge profile 缓存命中：1/1", report)
+        self.assertIn("retrieval settings 缓存命中：1/1", report)
         self.assertIn("知识库画像缓存：hit=是，indexed_files=2，total_files=3", report)
+        self.assertIn("检索设置缓存：hit=是，source=cache", report)
 
 
 if __name__ == "__main__":

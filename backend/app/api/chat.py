@@ -21,6 +21,9 @@ from app.services.chat_service import (
     stream_local_answer_and_save,
 )
 from app.services.rag_service import get_chain
+from app.services.retrieval_settings_cache import (
+    get_cached_knowledge_base_retrieval_settings,
+)
 
 
 router = APIRouter(tags=["chat"])
@@ -31,9 +34,13 @@ def should_use_local_chat_response(
     knowledge_base_id: UUID,
 ) -> bool:
     """判断当前知识库设置是否允许本地问候短路。"""
-    settings = get_knowledge_base_retrieval_settings(
+    settings = get_cached_knowledge_base_retrieval_settings(
         knowledge_base_id=knowledge_base_id,
         user_id=user_id,
+        load_settings=lambda: get_knowledge_base_retrieval_settings(
+            knowledge_base_id=knowledge_base_id,
+            user_id=user_id,
+        ),
     ) or DEFAULT_RETRIEVAL_SETTINGS
     retrieval_mode = settings.get("retrieval_mode", "auto")
 
