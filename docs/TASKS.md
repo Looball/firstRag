@@ -53,7 +53,7 @@
 | `PLAN-20260628-02` | 2026-06-28 | `Done` | 优化知识库检索速度，优先降低 rerank 对首 token 前等待时间的影响。 | `T-010` |
 | `PLAN-20260628-03` | 2026-06-28 | `Done` | 优化 RAG 检索前置阶段，减少 knowledge profile 与文件范围查询开销。 | `T-011` |
 | `PLAN-20260628-04` | 2026-06-28 | `Done` | 补强 RAG eval 性能观测，让后续检索优化有稳定报告依据。 | `T-012` |
-| `PLAN-20260628-05` | 2026-06-28 | `Doing` | 修正 knowledge profile cache diagnostics 在真实 RAG eval 报告中缺失的问题。 | `T-013` |
+| `PLAN-20260628-05` | 2026-06-28 | `Done` | 修正 knowledge profile cache diagnostics 在真实 RAG eval 报告中缺失的问题。 | `T-013` |
 | `PLAN-20260629-01` | 2026-06-29 | `Todo` | RAG 检索性能二阶段优化，继续降低首 token 前等待时间，优先处理 settings 读取、混合检索和重复查询开销。 | `T-014` - `T-018` |
 
 ## 任务总览
@@ -72,7 +72,7 @@
 | `T-010` | `PLAN-20260628-02` | `P1` | `Done` | 优化知识库检索速度，降低 rerank 开销 | 2026-06-28 | `8c9ac21` |
 | `T-011` | `PLAN-20260628-03` | `P1` | `Done` | 增加知识库画像进程内轻量缓存 | 2026-06-28 | `9f178fc` |
 | `T-012` | `PLAN-20260628-04` | `P1` | `Done` | RAG eval 报告补齐缓存与阶段耗时摘要 | 2026-06-28 | `e123014` |
-| `T-013` | `PLAN-20260628-05` | `P1` | `Doing` | 修正真实 RAG eval 缓存命中字段为空 | - | - |
+| `T-013` | `PLAN-20260628-05` | `P1` | `Done` | 修正真实 RAG eval 缓存命中字段为空 | 2026-06-29 | `cf01e5b` |
 | `T-014` | `PLAN-20260629-01` | `P1` | `Todo` | 定位并优化 retrieval settings 阶段耗时 | - | - |
 | `T-015` | `PLAN-20260629-01` | `P1` | `Todo` | 为知识库检索设置增加进程内轻量缓存 | - | - |
 | `T-016` | `PLAN-20260629-01` | `P1` | `Todo` | 优化 hybrid retrieval 粗召回执行路径 | - | - |
@@ -435,13 +435,21 @@ scripts/rag_eval_gate.sh
 
 - 来源计划：`PLAN-20260628-05`
 - 优先级：`P1`
-- 状态：`Doing`
+- 状态：`Done`
 - 目标：确保 `knowledge_profile_cache_hit`、已索引文件数和总文件数能穿过 LCEL 流式边界，稳定进入真实 RAG eval 报告。
 - 范围：修正 `rag_service` 中 cache diagnostics 的传递时机，必要时复用 retrieval diagnostics metadata 兜底路径；补充单元测试。
 - 验收标准：
   - `retrieve_documents` 返回的文档 metadata 中包含 knowledge profile cache diagnostics。
   - `stream_rag_response` 在 ContextVar 丢失时仍能从文档 metadata 读到 cache diagnostics。
   - 静态验收和真实 RAG eval 通过。
+- 完成记录：
+  - 完成日期：2026-06-29
+  - 相关 commit：`cf01e5b`
+  - `retrieve_documents` 已将 knowledge profile cache diagnostics 合并进文档 metadata，作为 LCEL 流式边界丢失 ContextVar 时的兜底来源。
+  - `stream_rag_response` 复用同一合并逻辑，确保 SSE retrieval diagnostics 和 eval 报告能稳定读取缓存命中字段。
+  - `conda run -n firstrag python -m unittest tests.test_rag_service -v` 已通过：22 个用例通过。
+  - `scripts/acceptance_check.sh --skip-real-eval` 已通过后端 82 个 unittest、前端 lint、Vitest 10 个用例；Next build 在沙箱内因 Turbopack 端口权限限制失败，已单独提权运行 `npm run build` 并通过。
+  - `scripts/rag_eval_gate.sh` 已通过：10/10 PASS；最新报告显示 knowledge profile 缓存命中 `7/8（0.88）`，不再是 `0/0（—）`。
 - 建议验证命令：
 
 ```bash
