@@ -77,7 +77,7 @@
 | `T-015` | `PLAN-20260629-01` | `P1` | `Done` | 为知识库检索设置增加进程内轻量缓存 | 2026-06-29 | `6d1ee1a` |
 | `T-016` | `PLAN-20260629-01` | `P1` | `Done` | 优化 hybrid retrieval 粗召回执行路径 | 2026-06-29 | `2477565` |
 | `T-017` | `PLAN-20260629-01` | `P2` | `Done` | 增加 query embedding 进程内短 TTL 缓存 | 2026-06-29 | `cbd00d8` |
-| `T-018` | `PLAN-20260629-01` | `P2` | `Todo` | 固化 RAG eval 性能门槛和趋势字段 | - | - |
+| `T-018` | `PLAN-20260629-01` | `P2` | `Done` | 固化 RAG eval 性能门槛和趋势字段 | 2026-06-29 | `7793856` |
 
 ## 新计划接入流程
 
@@ -591,6 +591,12 @@ scripts/rag_eval_gate.sh
   - RAG eval Markdown 报告展示关键性能门槛和本次是否通过。
   - 历史 JSON 保留必要字段，便于后续比较。
   - 单元测试覆盖 summary 字段和 Markdown 输出。
+- 完成记录：
+  - 完成日期：2026-06-29。
+  - 相关 commit：`7793856`。
+  - 实现内容：RAG eval Markdown 增加建议性能门槛表，历史 JSON 写入 `performance_thresholds`；summary 报告增加最近 N 次 settings、profile、retrieve、hybrid、rerank 阶段耗时趋势和阈值状态。
+  - 验证命令：`conda run -n firstrag python scripts/eval_summary.py`；`cd backend && conda run -n firstrag python -m unittest tests.test_eval_rag_script tests.test_eval_summary_script -v`；`cd backend && conda run -n firstrag python -m unittest discover tests -v`；`conda run -n firstrag python -m compileall scripts backend/tests`；`scripts/acceptance_check.sh --skip-real-eval`；`cd frontend && npm run build`；`FIRSTRAG_EVAL_USERNAME=... FIRSTRAG_EVAL_PASSWORD=... scripts/rag_eval_gate.sh`。
+  - 真实 RAG eval：10/10 PASS，平均 sources 2.60，平均首 token 5124.83ms，平均总耗时 8.43s；报告 `docs/evals/latest_rag_eval_report.md`，历史记录 `docs/evals/runs/20260629_142851.json`。
 - 建议验证命令：
 
 ```bash
