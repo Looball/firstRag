@@ -85,6 +85,17 @@ def merge_diagnostics_timing(
     return merged
 
 
+def merge_knowledge_profile_cache_diagnostics(
+    diagnostics: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """将知识库画像缓存诊断合并进 retrieval diagnostics。"""
+    merged = dict(diagnostics or {})
+    cache_diagnostics = get_knowledge_profile_cache_diagnostics()
+    if cache_diagnostics is not None:
+        merged.update(cache_diagnostics)
+    return merged
+
+
 def create_chat_model(user_id: int) -> ChatOpenAI:
     """创建当前用户生效的 OpenAI 兼容聊天模型。"""
     settings = get_effective_chat_model_settings(user_id)
@@ -661,6 +672,7 @@ def retrieve_documents(inputs: ChainInput) -> RetrievedDocs:
     diagnostics = get_retrieval_diagnostics()
     if diagnostics is not None:
         diagnostics["settings"] = settings
+        diagnostics = merge_knowledge_profile_cache_diagnostics(diagnostics)
         # LCEL 流式执行过程中 ContextVar 可能跨 Runnable 丢失。
         # 将诊断挂到文档 metadata，确保后续 SSE 和落库能稳定读取。
         for doc in docs:
@@ -902,9 +914,9 @@ def stream_rag_response(
                 rag_timing,
                 llm_diagnostics,
             )
-            cache_diagnostics = get_knowledge_profile_cache_diagnostics()
-            if cache_diagnostics is not None:
-                diagnostics_with_timing.update(cache_diagnostics)
+            diagnostics_with_timing = merge_knowledge_profile_cache_diagnostics(
+                diagnostics_with_timing,
+            )
             if not retrieval_sent:
                 decision = normalize_retrieval_decision(retrieval_decision)
                 retrieval_event = {

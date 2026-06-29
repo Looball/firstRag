@@ -658,6 +658,61 @@ class RagQueryRouterTests(unittest.TestCase):
         self.assertFalse(kwargs["rerank"])
         self.assertEqual(doc.metadata["rerank_score_threshold"], 0.5)
 
+    def test_retrieve_documents_persists_profile_cache_diagnostics(
+        self,
+    ) -> None:
+        """检索文档 metadata 应携带 knowledge profile 缓存诊断兜底。"""
+        knowledge_base_id = uuid4()
+        indexed_file_id = uuid4()
+        doc = Document(
+            page_content="相关内容",
+            metadata={"file_id": str(indexed_file_id)},
+        )
+        invalidate_knowledge_base_context(1, knowledge_base_id)
+
+        with unittest.mock.patch(
+            "app.services.rag_service.get_knowledge_base_files",
+            return_value=[
+                {
+                    "id": indexed_file_id,
+                    "original_name": "民事诉讼法.pdf",
+                    "mime_type": "application/pdf",
+                    "status": "indexed",
+                },
+            ],
+        ), unittest.mock.patch(
+            "app.services.rag_service.get_hybrid_documents",
+            return_value=[doc],
+        ), unittest.mock.patch(
+            "app.services.rag_service.get_retrieval_diagnostics",
+            return_value={"vector_count": 1},
+        ):
+            docs = retrieve_documents({
+                "user_id": 1,
+                "knowledge_base_id": knowledge_base_id,
+                "standalone_question": "什么是诉讼法",
+                "retrieval_settings": {
+                    "retrieval_mode": "auto",
+                    "enable_query_router": True,
+                    "enable_rerank": True,
+                    "top_k": 5,
+                    "vector_top_k": 20,
+                    "fulltext_top_k": 20,
+                    "rrf_k": 10,
+                    "rerank_score_threshold": 0.0,
+                },
+                "retrieval_decision": {
+                    "need_retrieval": True,
+                    "rewritten_query": "诉讼法",
+                    "reason": "测试",
+                },
+            })
+
+        diagnostics = docs[0].metadata["retrieval_diagnostics"]
+        self.assertFalse(diagnostics["knowledge_profile_cache_hit"])
+        self.assertEqual(diagnostics["knowledge_profile_indexed_file_count"], 1)
+        self.assertEqual(diagnostics["knowledge_profile_total_file_count"], 1)
+
     def test_build_knowledge_base_profile_uses_indexed_files(self) -> None:
         """知识库画像应只使用已索引文件，供 Router 识别知识库范围。"""
         knowledge_base_id = uuid4()
