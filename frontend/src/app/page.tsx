@@ -1724,11 +1724,16 @@ export default function Home() {
           const messages = [...session.messages];
           const lastMessage = messages[messages.length - 1];
 
-          if (lastMessage?.role === "assistant" && !lastMessage.content) {
+          if (lastMessage?.role === "assistant") {
             messages[messages.length - 1] = {
               ...lastMessage,
               content,
             };
+          } else {
+            messages.push({
+              role: "assistant",
+              content,
+            });
           }
 
           return {

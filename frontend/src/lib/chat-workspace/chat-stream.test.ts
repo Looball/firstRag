@@ -227,4 +227,47 @@ describe("chat stream response handling", () => {
     );
     expect(handlers.setAssistantFallback).not.toHaveBeenCalled();
   });
+
+  it("repairs partial streamed content with the final done answer", async () => {
+    let assistantContent = "";
+    const handlers = {
+      ...createHandlers(),
+      appendAssistantContent: vi.fn((content: string) => {
+        assistantContent += content;
+      }),
+      setAssistantFallback: vi.fn((content: string) => {
+        assistantContent = content;
+      }),
+    };
+    const encoder = new TextEncoder();
+    const response = new Response(
+      new ReadableStream({
+        start(controller) {
+          controller.enqueue(
+            encoder.encode('event: answer\ndata: {"answer":"partial"}\n\n'),
+          );
+          controller.enqueue(
+            encoder.encode(
+              'event: done\ndata: {"message_id":"assistant-5","answer":"final answer"}\n\n',
+            ),
+          );
+          controller.close();
+        },
+      }),
+      {
+        headers: {
+          "Content-Type": "text/event-stream; charset=utf-8",
+        },
+      },
+    );
+
+    await streamChatResponse(response, handlers, {
+      waitForPaint: async () => undefined,
+    });
+
+    expect(assistantContent).toBe("final answer");
+    expect(handlers.setAssistantFallback).toHaveBeenCalledWith(
+      "final answer",
+    );
+  });
 });
