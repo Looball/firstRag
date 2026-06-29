@@ -30,8 +30,7 @@
 4. 普通问题加载历史消息，构建 RAG 链。
 5. `rag_service` 读取当前知识库的 retrieval settings，判断是否需要检索，并可改写多轮问题。
 6. 召回候选片段：
-   - Chroma 向量检索。
-   - PostgreSQL 全文检索。
+   - Chroma 向量检索和 PostgreSQL 全文检索并行粗召回。
    - RRF 融合多路结果。
    - CrossEncoder reranker 精排。
 7. DeepSeek 或用户配置的 OpenAI 兼容模型流式生成回答。
@@ -63,6 +62,7 @@
 | Router 判断 | `llm_need_retrieval`、`llm_reason` | LLM Router 对本轮问题是否需要检索的原始判断与原因。 |
 | 规则覆盖 | `override_applied`、`override_reason` | 后端确定性规则是否覆盖 Router 判断，例如命中知识库文件画像。 |
 | 召回排序 | `diagnostics.vector_count`、`fulltext_count`、`fused_count`、`reranked_count` | vector/fulltext 召回数量、RRF 融合后数量和 rerank 精排后数量。 |
+| 召回降级 | `vector_degraded`、`fulltext_degraded`、`vector_errors`、`fulltext_errors` | 单路粗召回失败时的降级状态和错误摘要，另一通道仍可兜底。 |
 | 阶段耗时 | `diagnostics.timing.*_ms` | 问题改写、Router、检索、RRF、rerank、首 token 和整体流式回答耗时，单位毫秒。 |
 | 画像缓存 | `knowledge_profile_cache_hit`、`knowledge_profile_indexed_file_count` | 本轮知识库画像是否命中进程内短 TTL 缓存，以及画像中的已索引文件数量。 |
 | 设置缓存 | `retrieval_settings_cache_hit`、`retrieval_settings_source` | 本轮知识库检索设置是否命中进程内短 TTL 缓存，以及设置来源。 |
@@ -87,6 +87,10 @@
 当 RRF 融合后的候选数量不超过最终 `top_k` 时，后端会跳过 CrossEncoder rerank，
 并在 diagnostics 中写入 `rerank_skipped=true` 与 `rerank_skip_reason`。该策略用于避免
 小候选集场景下的无收益精排开销；候选数超过 `top_k` 时仍会执行 rerank。
+
+向量检索和全文检索在 hybrid retrieval 中并行执行。任一路粗召回失败时，失败通道会
+降级为空候选并写入对应 degraded/error diagnostics，另一通道的候选仍会进入 RRF 和后续
+rerank 流程。
 
 知识库文件画像和已索引文件 ID 使用进程内短 TTL 缓存，默认用于减少同一知识库在连续
 对话中的重复数据库查询。文件上传、知识库文件关联变化、向量化状态变化和删除向量结果

@@ -1,6 +1,8 @@
 """检索降级与中文兜底能力的回归测试。"""
 
+import time
 import unittest
+from threading import Event
 
 from langchain_core.documents import Document
 
@@ -211,6 +213,93 @@ class RetrievalResilienceTests(unittest.TestCase):
         self.assertEqual(fake_reranker.last_max_length, 384)
         self.assertIn("rerank_ms", diagnostics["timing"])
         self.assertFalse(diagnostics.get("rerank_skipped", False))
+
+    def test_hybrid_retrieval_keeps_vector_results_when_fulltext_fails(
+        self,
+    ) -> None:
+        """全文粗召回失败时，向量结果仍应作为兜底返回。"""
+        vector_doc = Document(
+            page_content="向量候选",
+            metadata={
+                "user_id": "6",
+                "file_id": "vector-file",
+                "chunk_index": 1,
+                "retrieval_source": "vector",
+            },
+        )
+
+        with unittest.mock.patch(
+            "app.services.retrieval.hybrid_retriever.get_vector_documents",
+            return_value=[vector_doc],
+        ), unittest.mock.patch(
+            "app.services.retrieval.hybrid_retriever.get_fulltext_documents",
+            side_effect=RuntimeError("postgres timeout"),
+        ):
+            docs = get_hybrid_documents(
+                query="诉讼法的任务是什么",
+                user_id=6,
+                file_ids=["good-file"],
+                k=5,
+                rerank=True,
+            )
+
+        diagnostics = get_retrieval_diagnostics()
+
+        self.assertEqual(docs, [vector_doc])
+        self.assertIsNotNone(diagnostics)
+        assert diagnostics is not None
+        self.assertEqual(diagnostics["vector_count"], 1)
+        self.assertEqual(diagnostics["fulltext_count"], 0)
+        self.assertTrue(diagnostics["fulltext_degraded"])
+        self.assertEqual(diagnostics["fulltext_errors"], ["全文粗召回失败"])
+        self.assertIn("fulltext_ms", diagnostics["timing"])
+
+    def test_hybrid_retrieval_runs_coarse_recall_in_parallel(self) -> None:
+        """vector 和 fulltext 粗召回应并行执行，避免串行等待。"""
+        vector_started = Event()
+        fulltext_started = Event()
+        vector_observed_fulltext = False
+        fulltext_observed_vector = False
+
+        def fake_vector_documents(*args, **kwargs) -> list[Document]:
+            nonlocal vector_observed_fulltext
+            vector_started.set()
+            vector_observed_fulltext = fulltext_started.wait(timeout=1)
+            time.sleep(0.02)
+            return []
+
+        def fake_fulltext_documents(*args, **kwargs) -> list[Document]:
+            nonlocal fulltext_observed_vector
+            fulltext_started.set()
+            fulltext_observed_vector = vector_started.wait(timeout=1)
+            time.sleep(0.02)
+            return []
+
+        with unittest.mock.patch(
+            "app.services.retrieval.hybrid_retriever.get_vector_documents",
+            side_effect=fake_vector_documents,
+        ), unittest.mock.patch(
+            "app.services.retrieval.hybrid_retriever.get_fulltext_documents",
+            side_effect=fake_fulltext_documents,
+        ):
+            docs = get_hybrid_documents(
+                query="诉讼法的任务是什么",
+                user_id=6,
+                file_ids=["good-file"],
+                k=5,
+                rerank=True,
+            )
+
+        diagnostics = get_retrieval_diagnostics()
+
+        self.assertEqual(docs, [])
+        self.assertTrue(vector_started.is_set())
+        self.assertTrue(fulltext_started.is_set())
+        self.assertTrue(vector_observed_fulltext)
+        self.assertTrue(fulltext_observed_vector)
+        self.assertIsNotNone(diagnostics)
+        assert diagnostics is not None
+        self.assertIn("fulltext_ms", diagnostics["timing"])
 
     def test_rrf_deduplicates_vector_and_fulltext_same_chunk(self) -> None:
         """同一文件同一 chunk 被两路召回时，Sources 里只应展示一次。"""

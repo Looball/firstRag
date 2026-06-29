@@ -17,6 +17,7 @@
 
 import logging
 from collections.abc import Sequence
+from concurrent.futures import ThreadPoolExecutor
 from contextvars import ContextVar
 from time import perf_counter
 from typing import Any
@@ -47,6 +48,8 @@ def reset_retrieval_diagnostics() -> None:
     _RETRIEVAL_DIAGNOSTICS.set({
         "vector_degraded": False,
         "vector_errors": [],
+        "fulltext_degraded": False,
+        "fulltext_errors": [],
         "vector_count": 0,
         "fulltext_count": 0,
         "fused_count": 0,
@@ -80,6 +83,17 @@ def add_vector_diagnostic_error(message: str) -> None:
 
     diagnostics["vector_degraded"] = True
     errors = diagnostics.setdefault("vector_errors", [])
+    errors.append(message)
+
+
+def add_fulltext_diagnostic_error(message: str) -> None:
+    """记录一次全文检索降级原因。"""
+    diagnostics = _RETRIEVAL_DIAGNOSTICS.get()
+    if diagnostics is None:
+        return
+
+    diagnostics["fulltext_degraded"] = True
+    errors = diagnostics.setdefault("fulltext_errors", [])
     errors.append(message)
 
 
@@ -212,6 +226,74 @@ def get_vector_documents(
     return documents
 
 
+def get_vector_documents_with_diagnostics(
+    *,
+    query: str,
+    user_id: int,
+    file_ids: Sequence[UUID | str] | None,
+    k: int,
+) -> tuple[list[Document], dict[str, Any]]:
+    """在线程内执行向量召回，并返回该线程产生的诊断信息。"""
+    reset_retrieval_diagnostics()
+    try:
+        documents = get_vector_documents(
+            query=query,
+            user_id=user_id,
+            file_ids=file_ids,
+            k=k,
+        )
+    except Exception:
+        logger.exception("向量粗召回失败，降级为空向量结果")
+        add_vector_diagnostic_error("向量粗召回失败")
+        documents = []
+
+    diagnostics = get_retrieval_diagnostics() or {}
+    return documents, diagnostics
+
+
+def get_fulltext_documents_with_timing(
+    *,
+    query: str,
+    user_id: int,
+    file_ids: Sequence[UUID | str] | None,
+    k: int,
+) -> tuple[list[Document], float, str | None]:
+    """执行全文召回并返回耗时；失败时返回空结果和错误信息。"""
+    started_at = perf_counter()
+    try:
+        documents = get_fulltext_documents(
+            query=query,
+            user_id=user_id,
+            file_ids=file_ids,
+            k=k,
+        )
+        error_message = None
+    except Exception:
+        logger.exception("全文粗召回失败，降级为空全文结果")
+        documents = []
+        error_message = "全文粗召回失败"
+
+    elapsed_ms = round((perf_counter() - started_at) * 1000, 2)
+    return documents, elapsed_ms, error_message
+
+
+def merge_vector_diagnostics(diagnostics: dict[str, Any]) -> None:
+    """将线程内向量召回诊断合并回当前请求诊断。"""
+    timing = diagnostics.get("timing")
+    if isinstance(timing, dict):
+        current = _RETRIEVAL_DIAGNOSTICS.get()
+        if current is not None:
+            current_timing = current.setdefault("timing", {})
+            for key in ("embedding_ms", "vector_ms"):
+                if key in timing:
+                    current_timing[key] = timing[key]
+
+    update_retrieval_diagnostics(
+        vector_degraded=bool(diagnostics.get("vector_degraded")),
+        vector_errors=list(diagnostics.get("vector_errors") or []),
+    )
+
+
 def get_hybrid_documents(
     query: str,
     user_id: int,
@@ -234,20 +316,35 @@ def get_hybrid_documents(
     reset_retrieval_diagnostics()
     total_started_at = perf_counter()
 
-    vector_documents = get_vector_documents(
-        query=query,
-        user_id=user_id,
-        file_ids=file_ids,
-        k=vector_k,
-    )
-    fulltext_started_at = perf_counter()
-    fulltext_documents = get_fulltext_documents(
-        query=query,
-        user_id=user_id,
-        file_ids=file_ids,
-        k=fulltext_k,
-    )
-    record_retrieval_timing("fulltext", fulltext_started_at)
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        vector_future = executor.submit(
+            get_vector_documents_with_diagnostics,
+            query=query,
+            user_id=user_id,
+            file_ids=file_ids,
+            k=vector_k,
+        )
+        fulltext_future = executor.submit(
+            get_fulltext_documents_with_timing,
+            query=query,
+            user_id=user_id,
+            file_ids=file_ids,
+            k=fulltext_k,
+        )
+
+        vector_documents, vector_diagnostics = vector_future.result()
+        fulltext_documents, fulltext_ms, fulltext_error = (
+            fulltext_future.result()
+        )
+
+    merge_vector_diagnostics(vector_diagnostics)
+    if fulltext_error:
+        add_fulltext_diagnostic_error(fulltext_error)
+    current_diagnostics = _RETRIEVAL_DIAGNOSTICS.get()
+    if current_diagnostics is not None:
+        current_diagnostics.setdefault("timing", {})["fulltext_ms"] = (
+            fulltext_ms
+        )
     update_retrieval_diagnostics(
         vector_count=len(vector_documents),
         fulltext_count=len(fulltext_documents),
