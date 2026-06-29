@@ -40,7 +40,7 @@
 
 ## 当前基线
 
-- 2026-06-28 已完成整体回归验收：后端测试通过、前端 lint/build 通过、RAG eval gate 10/10 通过、indexing eval 通过；当前前端静态验收为 lint、Vitest 19 个用例和 Next build 通过。
+- 2026-06-28 已完成整体回归验收：后端测试通过、前端 lint/build 通过、RAG eval gate 10/10 通过、indexing eval 通过；当前前端静态验收为 lint、Vitest 20 个用例和 Next build 通过。
 - 本地 push 前推荐运行 `scripts/acceptance_check.sh`；只做静态检查时可运行 `scripts/acceptance_check.sh --skip-real-eval`。
 - 当前阶段优先做“可维护性 + 可观测性 + 验收自动化”，避免在关键链路刚稳定后继续堆叠大功能；前端工作台已开始引入 React Query 和 Zod 做请求层集中化与轻量响应校验。
 - 修改项目文件后，继续遵守只暂存当前任务相关文件、不混入 unrelated refactor 的规则。
@@ -82,7 +82,7 @@
 | `T-019` | `PLAN-20260629-02` | `P1` | `Done` | 加固用户自定义 LLM Base URL SSRF 防护 | 2026-06-29 | `fd64b6d` |
 | `T-020` | `PLAN-20260629-02` | `P1` | `Done` | 收紧知识文件上传类型与解析失败反馈 | 2026-06-29 | `fd64b6d` |
 | `T-021` | `PLAN-20260629-02` | `P1` | `Done` | 抽取前端 API proxy 共享 helper | 2026-06-29 | `fd64b6d` |
-| `T-022` | `PLAN-20260629-02` | `P1` | `Done` | 继续拆分聊天工作台请求与流式状态逻辑 | 2026-06-29 | `017526b` |
+| `T-022` | `PLAN-20260629-02` | `P1` | `Done` | 继续拆分聊天工作台请求与流式状态逻辑 | 2026-06-29 | `017526b`, `cab5f9f` |
 | `T-023` | `PLAN-20260629-02` | `P2` | `Todo` | 拆分 RAG service 的路由、诊断和引用序列化职责 |  |  |
 | `T-024` | `PLAN-20260629-02` | `P2` | `Todo` | 建立权限、上传和流式代理的回归测试矩阵 |  |  |
 | `T-025` | `PLAN-20260629-02` | `P1` | `Done` | 引入 React Query 与 Zod 集中前端数据请求层 | 2026-06-29 | `986a9a3` |
@@ -718,11 +718,12 @@ npm run build
   - 前端 lint/test/build 通过。
 - 完成记录：
   - 完成日期：2026-06-29
-  - 相关 commit：`017526b`
+  - 相关 commit：`017526b`, `cab5f9f`
   - 新增 `frontend/src/lib/chat-workspace/chat-stream.ts`，集中处理 JSON、纯文本和 SSE streaming response，并保留页面侧 assistant 状态更新 callback。
   - 新增 `frontend/src/lib/chat-workspace/chat-stream.test.ts`，覆盖 answer、done、sources、retrieval、分片 SSE、done-only fallback 等流式边界。
   - `frontend/src/app/page.tsx` 从 3663 行降至 3497 行；vector job 轮询 effect 未调整，清理逻辑保持原状。
-  - `npm run test`、`npm run lint`、`npm run build` 已通过。
+  - 2026-06-29 复验发现 done event 的最终 answer 与已流式 partial 不一致时，页面 fallback callback 只填空内容，无法修正 partial；`cab5f9f` 已改为替换最后一条 assistant 内容，并补充回归测试。
+  - `npm run test`、`npm run lint`、`npm run build` 已通过；复验后前端 Vitest 为 20 个用例。
 - 建议验证命令：
 
 ```bash
