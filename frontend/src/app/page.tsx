@@ -1,5 +1,6 @@
 "use client";
 
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { FileManagerDialog } from "@/components/chat-workspace/FileManagerDialog";
 import { MessageDiagnosticsPanel } from "@/components/chat-workspace/MessageDiagnosticsPanel";
@@ -7,160 +8,46 @@ import {
   type ReactNode,
   useCallback,
   useEffect,
+  useMemo,
   useRef,
   useState,
 } from "react";
 import {
   AUTH_STORAGE_KEY,
-  buildAuthorizationHeader,
   getAuthUsername,
   parseAuthState,
 } from "@/lib/auth";
 import {
-  CURRENT_SESSION_KEY,
+  redirectToLogin,
+} from "@/lib/frontend-api";
+import {
   DEFAULT_KNOWLEDGE_BASE_ID,
   DEFAULT_RETRIEVAL_SETTINGS,
-  STORAGE_KEY,
 } from "@/lib/chat-workspace/constants";
+import * as chatApi from "@/lib/chat-workspace/api";
 import {
   buildSessionTitle,
-  getConversationDiagnostics,
-  getVectorIndexJobs,
   getVectorStatus,
-  isAuthExpiredMessage,
   isVectorIndexJobDone,
-  parseJsonValue,
-  parseVectorIndexHealth,
-  removeLegacyInitialMessage,
-  serializeRetrievalSettings,
-  toChatSession,
-  toKnowledgeBase,
-  toKnowledgeFile,
-  toMessages,
-  toRetrievalSettings,
   wait,
 } from "@/lib/chat-workspace/utils";
 import { streamChatResponse } from "@/lib/chat-workspace/chat-stream";
 import type {
-  BackendKnowledgeBase,
   ChatSession,
   ChatSource,
-  CreateConversationResponse,
-  CreateKnowledgeBaseResponse,
   KnowledgeBase,
   KnowledgeBaseFile,
   KnowledgeBaseRetrievalSettings,
   KnowledgeFile,
-  ListKnowledgeBasesResponse,
-  ListKnowledgeFilesResponse,
-  ListMessagesResponse,
   Message,
   MessageDiagnostic,
   RetrievalMode,
   RetrievalState,
-  RetrievalSettingsResponse,
-  UploadKnowledgeFilesResponse,
-  VectorIndexHealthResponse,
   VectorIndexJob,
   VectorIndexQueueItem,
-  VectorIndexResponse,
 } from "@/lib/chat-workspace/types";
 
-function redirectToLogin() {
-  localStorage.removeItem(AUTH_STORAGE_KEY);
-  localStorage.removeItem(STORAGE_KEY);
-  localStorage.removeItem(CURRENT_SESSION_KEY);
-
-  if (window.location.pathname !== "/login") {
-    window.location.href = "/login";
-  }
-}
-
-function getResponseErrorMessage(
-  errorText: string,
-  fallback: string,
-  status?: number
-) {
-  const getStringValue = (value: unknown) =>
-    typeof value === "string" && value.trim() ? value.trim() : "";
-
-  if (status === 401 || status === 403 || isAuthExpiredMessage(errorText)) {
-    redirectToLogin();
-  }
-
-  try {
-    const errorData = JSON.parse(errorText) as {
-      answer?: unknown;
-      detail?: unknown;
-      error?: unknown;
-      message?: unknown;
-    };
-    const directMessage =
-      getStringValue(errorData.answer) ||
-      getStringValue(errorData.detail) ||
-      getStringValue(errorData.error) ||
-      getStringValue(errorData.message);
-
-    if (directMessage) {
-      if (isAuthExpiredMessage(directMessage)) {
-        redirectToLogin();
-      }
-
-      return directMessage;
-    }
-
-    if (Array.isArray(errorData.detail)) {
-      const detailMessages = errorData.detail
-        .map((detail) => {
-          if (typeof detail === "string") {
-            return detail;
-          }
-
-          if (typeof detail !== "object" || detail === null) {
-            return "";
-          }
-
-          const candidate = detail as {
-            loc?: unknown;
-            msg?: unknown;
-            type?: unknown;
-          };
-          const location = Array.isArray(candidate.loc)
-            ? candidate.loc.join(".")
-            : getStringValue(candidate.loc);
-          const message = getStringValue(candidate.msg);
-          const type = getStringValue(candidate.type);
-
-          if (location && message) {
-            return `${location}: ${message}`;
-          }
-
-          return message || type;
-        })
-        .filter(Boolean);
-
-      if (detailMessages.length > 0) {
-        const detailMessage = detailMessages.join("；");
-
-        if (isAuthExpiredMessage(detailMessage)) {
-          redirectToLogin();
-        }
-
-        return detailMessage;
-      }
-    }
-
-    return fallback;
-  } catch {
-    const message = errorText.trim() || fallback;
-
-    if (isAuthExpiredMessage(message)) {
-      redirectToLogin();
-    }
-
-    return message;
-  }
-}
+const VECTOR_INDEX_HEALTH_QUERY_KEY = ["chat-workspace", "vector-index-health"] as const;
 
 function renderInlineMarkdown(
   text: string,
@@ -486,11 +373,6 @@ export default function Home() {
     useState(false);
   const [vectorIndexMessage, setVectorIndexMessage] = useState("");
   const [vectorIndexError, setVectorIndexError] = useState("");
-  const [vectorIndexHealth, setVectorIndexHealth] =
-    useState<VectorIndexHealthResponse | null>(null);
-  const [vectorIndexHealthError, setVectorIndexHealthError] = useState("");
-  const [isLoadingVectorIndexHealth, setIsLoadingVectorIndexHealth] =
-    useState(false);
   const [pageError, setPageError] = useState("");
   const [currentUsername, setCurrentUsername] = useState("");
   const [knowledgeBases, setKnowledgeBases] = useState<KnowledgeBase[]>([
@@ -530,9 +412,25 @@ export default function Home() {
   const previousSessionIdRef = useRef("");
   const previousMessageCountRef = useRef(0);
   const previousLoadingRef = useRef(false);
+  const queryClient = useQueryClient();
+  const vectorIndexHealthQuery = useQuery({
+    queryKey: VECTOR_INDEX_HEALTH_QUERY_KEY,
+    queryFn: chatApi.loadVectorIndexHealth,
+    enabled: hasCheckedAuth,
+    staleTime: 5_000,
+  });
+  const vectorIndexHealth = vectorIndexHealthQuery.data ?? null;
+  const vectorIndexHealthError = vectorIndexHealthQuery.error
+    ? "任务状态暂不可用"
+    : "";
+  const isLoadingVectorIndexHealth = vectorIndexHealthQuery.isFetching;
 
-  const visibleSessions = sessions.filter(
-    (session) => session.knowledgeBaseId === selectedKnowledgeBaseId
+  const visibleSessions = useMemo(
+    () =>
+      sessions.filter(
+        (session) => session.knowledgeBaseId === selectedKnowledgeBaseId,
+      ),
+    [selectedKnowledgeBaseId, sessions],
   );
   const currentSession =
     visibleSessions.find((session) => session.id === currentSessionId) ||
@@ -552,29 +450,39 @@ export default function Home() {
     : null;
   const shouldShowThinkingIndicator =
     isCurrentSessionLoading && currentSessionLastMessage?.role !== "assistant";
-  const selectedKnowledgeBase =
-    knowledgeBases.find(
-      (knowledgeBase) => knowledgeBase.id === selectedKnowledgeBaseId
-    ) || knowledgeBases[0];
+  const selectedKnowledgeBase = useMemo(
+    () =>
+      knowledgeBases.find(
+        (knowledgeBase) => knowledgeBase.id === selectedKnowledgeBaseId,
+      ) || knowledgeBases[0],
+    [knowledgeBases, selectedKnowledgeBaseId],
+  );
   const selectedRetrievalSettings =
     retrievalSettingsByKnowledgeBaseId[selectedKnowledgeBaseId] ||
     DEFAULT_RETRIEVAL_SETTINGS;
-  const selectedKnowledgeFileIds = new Set(
-    knowledgeBaseFiles
-      .filter(
-        (association) =>
-          association.knowledgeBaseId === selectedKnowledgeBaseId
-      )
-      .map((association) => association.knowledgeFileId)
+  const selectedKnowledgeFileIds = useMemo(
+    () =>
+      new Set(
+        knowledgeBaseFiles
+          .filter(
+            (association) =>
+              association.knowledgeBaseId === selectedKnowledgeBaseId,
+          )
+          .map((association) => association.knowledgeFileId),
+      ),
+    [knowledgeBaseFiles, selectedKnowledgeBaseId],
   );
-  const selectedKnowledgeFiles = knowledgeFiles.filter((file) =>
-    selectedKnowledgeFileIds.has(file.id)
+  const selectedKnowledgeFiles = useMemo(
+    () => knowledgeFiles.filter((file) => selectedKnowledgeFileIds.has(file.id)),
+    [knowledgeFiles, selectedKnowledgeFileIds],
   );
-  const reusableKnowledgeFiles = knowledgeFiles.filter(
-    (file) => !selectedKnowledgeFileIds.has(file.id)
+  const reusableKnowledgeFiles = useMemo(
+    () => knowledgeFiles.filter((file) => !selectedKnowledgeFileIds.has(file.id)),
+    [knowledgeFiles, selectedKnowledgeFileIds],
   );
-  const hasPollingIndexJobs = knowledgeFiles.some(
-    (file) => getVectorStatus(file).canPoll
+  const hasPollingIndexJobs = useMemo(
+    () => knowledgeFiles.some((file) => getVectorStatus(file).canPoll),
+    [knowledgeFiles],
   );
   const selectedKnowledgeBaseFileCount =
     selectedKnowledgeFiles.length || selectedKnowledgeBase?.fileCount || 0;
@@ -582,14 +490,6 @@ export default function Home() {
   const loadKnowledgeBaseFiles = useCallback(
     async (knowledgeBaseId: string, options?: { showLoading?: boolean }) => {
       if (!knowledgeBaseId || knowledgeBaseId === DEFAULT_KNOWLEDGE_BASE_ID) {
-        return;
-      }
-
-      const authState = parseAuthState(localStorage.getItem(AUTH_STORAGE_KEY));
-
-      if (!authState) {
-        localStorage.removeItem(AUTH_STORAGE_KEY);
-        window.location.href = "/login";
         return;
       }
 
@@ -602,38 +502,7 @@ export default function Home() {
       setKnowledgeFileLoadError("");
 
       try {
-        const response = await fetch(
-          `/api/chat/knowledge-base/${encodeURIComponent(
-            knowledgeBaseId
-          )}/files`,
-          {
-            method: "GET",
-            headers: {
-              Authorization: buildAuthorizationHeader(authState),
-            },
-            cache: "no-store",
-          }
-        );
-
-        if (!response.ok) {
-          const errorText = await response.text();
-          throw new Error(
-            getResponseErrorMessage(
-              errorText,
-              "读取知识库文件失败，请稍后再试。",
-              response.status
-            )
-          );
-        }
-
-        const data = (await response.json()) as ListKnowledgeFilesResponse;
-        const fileValues = Array.isArray(data.files) ? data.files : [];
-        const loadedFiles = fileValues
-          .map((value) => toKnowledgeFile(value))
-          .filter(
-            (knowledgeFile): knowledgeFile is KnowledgeFile =>
-              knowledgeFile !== null
-          );
+        const loadedFiles = await chatApi.listKnowledgeBaseFiles(knowledgeBaseId);
         const loadedFileIds = new Set(loadedFiles.map((file) => file.id));
 
         setKnowledgeFiles((prev) => {
@@ -689,14 +558,6 @@ export default function Home() {
   );
 
   const loadAllKnowledgeFiles = useCallback(async (options?: { showLoading?: boolean }) => {
-    const authState = parseAuthState(localStorage.getItem(AUTH_STORAGE_KEY));
-
-    if (!authState) {
-      localStorage.removeItem(AUTH_STORAGE_KEY);
-      window.location.href = "/login";
-      return;
-    }
-
     const shouldShowLoading = options?.showLoading !== false;
 
     if (shouldShowLoading) {
@@ -706,35 +567,7 @@ export default function Home() {
     setReusableFileLoadError("");
 
     try {
-      const response = await fetch("/api/chat/knowledge-files", {
-        method: "GET",
-        headers: {
-          Authorization: buildAuthorizationHeader(authState),
-        },
-        cache: "no-store",
-      });
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(
-          getResponseErrorMessage(
-            errorText,
-            "读取用户文件列表失败，请稍后再试。",
-            response.status
-          )
-        );
-      }
-
-      const data = (await response.json()) as ListKnowledgeFilesResponse;
-      const fileValues = Array.isArray(data.files) ? data.files : [];
-      const loadedFiles = fileValues
-        .map((value) => toKnowledgeFile(value))
-        .filter(
-          (knowledgeFile): knowledgeFile is KnowledgeFile =>
-            knowledgeFile !== null
-        );
-
-      setKnowledgeFiles(loadedFiles);
+      setKnowledgeFiles(await chatApi.listAllKnowledgeFiles());
     } catch (error) {
       setReusableFileLoadError(
         error instanceof Error
@@ -750,58 +583,19 @@ export default function Home() {
 
   const loadVectorIndexHealth = useCallback(
     async (options?: { showLoading?: boolean }) => {
-      const authState = parseAuthState(localStorage.getItem(AUTH_STORAGE_KEY));
-
-      if (!authState) {
-        localStorage.removeItem(AUTH_STORAGE_KEY);
-        window.location.href = "/login";
-        return;
-      }
-
-      const shouldShowLoading = options?.showLoading !== false;
-
-      if (shouldShowLoading) {
-        setIsLoadingVectorIndexHealth(true);
-      }
+      void options;
 
       try {
-        const response = await fetch("/api/chat/vector-index-jobs/health", {
-          method: "GET",
-          headers: {
-            Authorization: buildAuthorizationHeader(authState),
-          },
-          cache: "no-store",
+        await queryClient.fetchQuery({
+          queryKey: VECTOR_INDEX_HEALTH_QUERY_KEY,
+          queryFn: chatApi.loadVectorIndexHealth,
+          staleTime: 0,
         });
-        const data = (await response.json().catch(() => null)) as unknown;
-
-        if (!response.ok) {
-          throw new Error(
-            getResponseErrorMessage(
-              JSON.stringify(data),
-              "任务状态暂不可用",
-              response.status
-            )
-          );
-        }
-
-        const health = parseVectorIndexHealth(data);
-
-        if (!health) {
-          throw new Error("任务状态暂不可用");
-        }
-
-        setVectorIndexHealth(health);
-        setVectorIndexHealthError("");
       } catch {
-        setVectorIndexHealth(null);
-        setVectorIndexHealthError("任务状态暂不可用");
-      } finally {
-        if (shouldShowLoading) {
-          setIsLoadingVectorIndexHealth(false);
-        }
+        // Health is advisory; the panel renders the query error state.
       }
     },
-    []
+    [queryClient]
   );
 
   async function handleOpenFileManager() {
@@ -820,46 +614,11 @@ export default function Home() {
       return;
     }
 
-    const authState = parseAuthState(localStorage.getItem(AUTH_STORAGE_KEY));
-
-    if (!authState) {
-      localStorage.removeItem(AUTH_STORAGE_KEY);
-      window.location.href = "/login";
-      return;
-    }
-
     setIsCreatingKnowledgeBase(true);
     setPageError("");
 
     try {
-      const response = await fetch("/api/chat/knowledge-base", {
-        method: "POST",
-        headers: {
-          Authorization: buildAuthorizationHeader(authState),
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          name: normalizedName,
-        }),
-      });
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(
-          getResponseErrorMessage(
-            errorText,
-            "创建知识库失败，请稍后再试。",
-            response.status
-          )
-        );
-      }
-
-      const data = (await response.json()) as CreateKnowledgeBaseResponse;
-      const knowledgeBase = toKnowledgeBase(data.knowledge_base);
-
-      if (!knowledgeBase) {
-        throw new Error("创建知识库响应缺少有效的 knowledge_base。");
-      }
+      const knowledgeBase = await chatApi.createKnowledgeBase(normalizedName);
 
       setKnowledgeBases((prev) => [
         ...prev.filter((candidate) => candidate.id !== knowledgeBase.id),
@@ -901,44 +660,11 @@ export default function Home() {
       return;
     }
 
-    const authState = parseAuthState(localStorage.getItem(AUTH_STORAGE_KEY));
-
-    if (!authState) {
-      localStorage.removeItem(AUTH_STORAGE_KEY);
-      window.location.href = "/login";
-      return;
-    }
-
     setIsLoadingRetrievalSettings(true);
     setRetrievalSettingsError("");
 
     try {
-      const response = await fetch(
-        `/api/chat/knowledge-base/${encodeURIComponent(
-          knowledgeBaseId
-        )}/retrieval-settings`,
-        {
-          method: "GET",
-          headers: {
-            Authorization: buildAuthorizationHeader(authState),
-          },
-          cache: "no-store",
-        }
-      );
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(
-          getResponseErrorMessage(
-            errorText,
-            "读取检索设置失败，请稍后再试。",
-            response.status
-          )
-        );
-      }
-
-      const data = (await response.json()) as RetrievalSettingsResponse;
-      const settings = toRetrievalSettings(data.settings);
+      const settings = await chatApi.getRetrievalSettings(knowledgeBaseId);
 
       setRetrievalSettingsByKnowledgeBaseId((prev) => ({
         ...prev,
@@ -964,48 +690,15 @@ export default function Home() {
       return;
     }
 
-    const authState = parseAuthState(localStorage.getItem(AUTH_STORAGE_KEY));
-
-    if (!authState) {
-      localStorage.removeItem(AUTH_STORAGE_KEY);
-      window.location.href = "/login";
-      return;
-    }
-
     setIsSavingRetrievalSettings(true);
     setRetrievalSettingsMessage("");
     setRetrievalSettingsError("");
 
     try {
-      const response = await fetch(
-        `/api/chat/knowledge-base/${encodeURIComponent(
-          selectedKnowledgeBaseId
-        )}/retrieval-settings`,
-        {
-          method: "PATCH",
-          headers: {
-            Authorization: buildAuthorizationHeader(authState),
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify(
-            serializeRetrievalSettings(selectedRetrievalSettings)
-          ),
-        }
+      const settings = await chatApi.saveRetrievalSettings(
+        selectedKnowledgeBaseId,
+        selectedRetrievalSettings,
       );
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(
-          getResponseErrorMessage(
-            errorText,
-            "保存检索设置失败，请稍后再试。",
-            response.status
-          )
-        );
-      }
-
-      const data = (await response.json()) as RetrievalSettingsResponse;
-      const settings = toRetrievalSettings(data.settings);
 
       setRetrievalSettingsByKnowledgeBaseId((prev) => ({
         ...prev,
@@ -1048,60 +741,12 @@ export default function Home() {
       return;
     }
 
-    const authState = parseAuthState(localStorage.getItem(AUTH_STORAGE_KEY));
-
-    if (!authState) {
-      localStorage.removeItem(AUTH_STORAGE_KEY);
-      window.location.href = "/login";
-      return;
-    }
-
-    const formData = new FormData();
-    selectedFiles.forEach((file) => formData.append("files", file));
-    formData.append("description", "");
-    formData.append("auto_index", "false");
-
     setIsUploadingKnowledgeFiles(true);
     setKnowledgeFileUploadError("");
     setIsFileManagerOpen(true);
 
     try {
-      const response = await fetch(
-        `/api/chat/knowledge-base/${encodeURIComponent(
-          selectedKnowledgeBaseId
-        )}/files`,
-        {
-          method: "POST",
-          headers: {
-            Authorization: buildAuthorizationHeader(authState),
-          },
-          body: formData,
-        }
-      );
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(
-          getResponseErrorMessage(
-            errorText,
-            "上传文件失败，请稍后再试。",
-            response.status
-          )
-        );
-      }
-
-      const data = (await response.json()) as UploadKnowledgeFilesResponse;
-      const uploadedValues = Array.isArray(data.files) ? data.files : [];
-      const uploadedFiles = uploadedValues
-        .map((value, index) => toKnowledgeFile(value, selectedFiles[index]))
-        .filter(
-          (knowledgeFile): knowledgeFile is KnowledgeFile =>
-            knowledgeFile !== null
-        );
-
-      if (uploadedFiles.length === 0) {
-        throw new Error("上传响应缺少有效的 files 数据。");
-      }
+      await chatApi.uploadKnowledgeFiles(selectedKnowledgeBaseId, selectedFiles);
 
       await Promise.all([
         loadKnowledgeBaseFiles(selectedKnowledgeBaseId),
@@ -1131,40 +776,11 @@ export default function Home() {
       return;
     }
 
-    const authState = parseAuthState(localStorage.getItem(AUTH_STORAGE_KEY));
-
-    if (!authState) {
-      localStorage.removeItem(AUTH_STORAGE_KEY);
-      window.location.href = "/login";
-      return;
-    }
-
     setAttachingKnowledgeFileId(fileId);
     setKnowledgeFileAttachError("");
 
     try {
-      const response = await fetch(
-        `/api/chat/knowledge-base/${encodeURIComponent(
-          selectedKnowledgeBaseId
-        )}/files/${encodeURIComponent(fileId)}`,
-        {
-          method: "POST",
-          headers: {
-            Authorization: buildAuthorizationHeader(authState),
-          },
-        }
-      );
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(
-          getResponseErrorMessage(
-            errorText,
-            "添加文件关联失败，请稍后再试。",
-            response.status
-          )
-        );
-      }
+      await chatApi.attachKnowledgeFile(selectedKnowledgeBaseId, fileId);
 
       await Promise.all([
         loadKnowledgeBaseFiles(selectedKnowledgeBaseId),
@@ -1190,40 +806,11 @@ export default function Home() {
       return;
     }
 
-    const authState = parseAuthState(localStorage.getItem(AUTH_STORAGE_KEY));
-
-    if (!authState) {
-      localStorage.removeItem(AUTH_STORAGE_KEY);
-      window.location.href = "/login";
-      return;
-    }
-
     setDetachingKnowledgeFileId(fileId);
     setKnowledgeFileDetachError("");
 
     try {
-      const response = await fetch(
-        `/api/chat/knowledge-base/${encodeURIComponent(
-          selectedKnowledgeBaseId
-        )}/files/${encodeURIComponent(fileId)}`,
-        {
-          method: "DELETE",
-          headers: {
-            Authorization: buildAuthorizationHeader(authState),
-          },
-        }
-      );
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(
-          getResponseErrorMessage(
-            errorText,
-            "解除文件关联失败，请稍后再试。",
-            response.status
-          )
-        );
-      }
+      await chatApi.removeKnowledgeFile(selectedKnowledgeBaseId, fileId);
 
       await Promise.all([
         loadKnowledgeBaseFiles(selectedKnowledgeBaseId),
@@ -1240,34 +827,8 @@ export default function Home() {
     }
   }
 
-  async function loadVectorIndexJob(
-    jobId: string,
-    authState: NonNullable<ReturnType<typeof parseAuthState>>
-  ) {
-    const response = await fetch(
-      `/api/chat/vector-index-jobs/${encodeURIComponent(jobId)}`,
-      {
-        method: "GET",
-        headers: {
-          Authorization: buildAuthorizationHeader(authState),
-        },
-        cache: "no-store",
-      }
-    );
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(
-        getResponseErrorMessage(
-          errorText,
-          "查询向量化任务失败，请稍后再试。",
-          response.status
-        )
-      );
-    }
-
-    const data = (await response.json()) as VectorIndexResponse;
-    return getVectorIndexJobs(data)[0] || null;
+  async function loadVectorIndexJob(jobId: string) {
+    return chatApi.getVectorIndexJob(jobId);
   }
 
   function updateVectorIndexQueue(
@@ -1300,7 +861,6 @@ export default function Home() {
 
   async function waitForVectorIndexJobs(
     jobs: VectorIndexJob[],
-    authState: NonNullable<ReturnType<typeof parseAuthState>>,
     onJobsUpdated?: (jobs: VectorIndexJob[]) => void
   ) {
     if (jobs.length === 0) {
@@ -1323,7 +883,7 @@ export default function Home() {
             return job;
           }
 
-          return (await loadVectorIndexJob(job.id, authState)) || job;
+          return (await loadVectorIndexJob(job.id)) || job;
         })
       );
 
@@ -1351,42 +911,12 @@ export default function Home() {
       targetName: targetFile?.name || "知识库文件",
       targetType: "file" as const,
     };
-    const authState = parseAuthState(localStorage.getItem(AUTH_STORAGE_KEY));
-
-    if (!authState) {
-      localStorage.removeItem(AUTH_STORAGE_KEY);
-      window.location.href = "/login";
-      return;
-    }
-
     setVectorIndexingFileIds((prev) => ({ ...prev, [fileId]: true }));
     setVectorIndexError("");
     setVectorIndexMessage("");
 
     try {
-      const response = await fetch(
-        `/api/chat/knowledge-files/${encodeURIComponent(fileId)}/vectors`,
-        {
-          method: "POST",
-          headers: {
-            Authorization: buildAuthorizationHeader(authState),
-          },
-        }
-      );
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(
-          getResponseErrorMessage(
-            errorText,
-            "提交文件向量化失败，请稍后再试。",
-            response.status
-          )
-        );
-      }
-
-      const data = (await response.json()) as VectorIndexResponse;
-      const jobs = getVectorIndexJobs(data);
+      const jobs = await chatApi.indexKnowledgeFile(fileId);
       updateVectorIndexQueue(jobs, target);
 
       setVectorIndexMessage("文件向量化任务已提交。");
@@ -1409,40 +939,12 @@ export default function Home() {
       return;
     }
 
-    const authState = parseAuthState(localStorage.getItem(AUTH_STORAGE_KEY));
-
-    if (!authState) {
-      localStorage.removeItem(AUTH_STORAGE_KEY);
-      window.location.href = "/login";
-      return;
-    }
-
     setDeletingVectorFileId(fileId);
     setVectorIndexError("");
     setVectorIndexMessage("");
 
     try {
-      const response = await fetch(
-        `/api/chat/knowledge-files/${encodeURIComponent(fileId)}/vectors`,
-        {
-          method: "DELETE",
-          headers: {
-            Authorization: buildAuthorizationHeader(authState),
-          },
-        }
-      );
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(
-          getResponseErrorMessage(
-            errorText,
-            "删除文件向量失败，请稍后再试。",
-            response.status
-          )
-        );
-      }
-
+      await chatApi.deleteKnowledgeFileVectors(fileId);
       setVectorIndexMessage("文件向量已删除，可重新向量化。");
       await refreshKnowledgeFiles();
     } catch (error) {
@@ -1465,14 +967,6 @@ export default function Home() {
       return;
     }
 
-    const authState = parseAuthState(localStorage.getItem(AUTH_STORAGE_KEY));
-
-    if (!authState) {
-      localStorage.removeItem(AUTH_STORAGE_KEY);
-      window.location.href = "/login";
-      return;
-    }
-
     setIsIndexingKnowledgeBase(true);
     setVectorIndexError("");
     setVectorIndexMessage("");
@@ -1482,38 +976,13 @@ export default function Home() {
         targetName: selectedKnowledgeBase?.name || "当前知识库",
         targetType: "knowledge-base" as const,
       };
-      const response = await fetch(
-        `/api/chat/knowledge-base/${encodeURIComponent(
-          selectedKnowledgeBaseId
-        )}/vectors`,
-        {
-          method: "POST",
-          headers: {
-            Authorization: buildAuthorizationHeader(authState),
-          },
-        }
-      );
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(
-          getResponseErrorMessage(
-            errorText,
-            "提交知识库向量化失败，请稍后再试。",
-            response.status
-          )
-        );
-      }
-
-      const data = (await response.json()) as VectorIndexResponse;
-      const jobs = getVectorIndexJobs(data);
+      const jobs = await chatApi.indexKnowledgeBase(selectedKnowledgeBaseId);
       updateVectorIndexQueue(jobs, target);
 
       setVectorIndexMessage("知识库向量化任务已提交。");
 
       const finishedJobs = await waitForVectorIndexJobs(
         jobs,
-        authState,
         (latestJobs) => updateVectorIndexQueue(latestJobs, target)
       );
       const failedJob = finishedJobs.find((job) => job.status === "failed");
@@ -1540,94 +1009,11 @@ export default function Home() {
     knowledgeBaseId: string,
     title = "新对话"
   ) {
-    const authState = parseAuthState(localStorage.getItem(AUTH_STORAGE_KEY));
-
-    if (!authState) {
-      localStorage.removeItem(AUTH_STORAGE_KEY);
-      window.location.href = "/login";
-      throw new Error("登录已失效，请重新登录。");
-    }
-
-    const response = await fetch(
-      `/api/chat/knowledge-bases/${encodeURIComponent(
-        knowledgeBaseId
-      )}/conversations`,
-      {
-        method: "POST",
-        headers: {
-          Authorization: buildAuthorizationHeader(authState),
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ title }),
-      }
-    );
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(
-        getResponseErrorMessage(
-          errorText,
-          "创建对话失败，请稍后再试。",
-          response.status
-        )
-      );
-    }
-
-    const data = (await response.json()) as CreateConversationResponse;
-    const conversation = data.conversation || data;
-    const conversationId = conversation.id;
-
-    if (typeof conversationId !== "string" || !conversationId.trim()) {
-      throw new Error("创建对话响应缺少 conversation.id。");
-    }
-
-    return {
-      id: conversationId,
-      knowledgeBaseId,
-      title:
-        typeof conversation.title === "string" && conversation.title.trim()
-          ? conversation.title.trim()
-          : title,
-      messages: [],
-      messagesLoaded: true,
-    };
+    return chatApi.createConversation(knowledgeBaseId, title);
   }
 
   async function loadBackendMessages(conversationId: string) {
-    const authState = parseAuthState(localStorage.getItem(AUTH_STORAGE_KEY));
-
-    if (!authState) {
-      localStorage.removeItem(AUTH_STORAGE_KEY);
-      window.location.href = "/login";
-      throw new Error("登录已失效，请重新登录。");
-    }
-
-    const response = await fetch(
-      `/api/chat/conversations/${encodeURIComponent(conversationId)}/messages`,
-      {
-        method: "GET",
-        headers: {
-          Authorization: buildAuthorizationHeader(authState),
-        },
-        cache: "no-store",
-      }
-    );
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(
-        getResponseErrorMessage(
-          errorText,
-          "读取会话消息失败，请稍后再试。",
-          response.status
-        )
-      );
-    }
-
-    const data = (await response.json()) as ListMessagesResponse;
-    return Array.isArray(data.messages)
-      ? removeLegacyInitialMessage(toMessages(data.messages))
-      : [];
+    return chatApi.listConversationMessages(conversationId);
   }
 
   async function handleSelectSession(session: ChatSession) {
@@ -1660,70 +1046,7 @@ export default function Home() {
   }
 
   async function loadBackendKnowledgeBases() {
-    const authState = parseAuthState(localStorage.getItem(AUTH_STORAGE_KEY));
-
-    if (!authState) {
-      localStorage.removeItem(AUTH_STORAGE_KEY);
-      window.location.href = "/login";
-      throw new Error("登录已失效，请重新登录。");
-    }
-
-    const response = await fetch("/api/chat/knowledge-bases", {
-      method: "GET",
-      headers: {
-        Authorization: buildAuthorizationHeader(authState),
-      },
-      cache: "no-store",
-    });
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(
-        getResponseErrorMessage(
-          errorText,
-          "读取知识库列表失败，请稍后再试。",
-          response.status
-        )
-      );
-    }
-
-    const data = (await response.json()) as ListKnowledgeBasesResponse;
-    const knowledgeBaseValues = Array.isArray(data.knowledge_bases)
-      ? data.knowledge_bases
-      : [];
-
-    const nextKnowledgeBases: KnowledgeBase[] = [];
-    const sessionMap = new Map<string, ChatSession>();
-
-    for (const value of knowledgeBaseValues) {
-      const knowledgeBase = toKnowledgeBase(value);
-
-      if (!knowledgeBase) {
-        continue;
-      }
-
-      nextKnowledgeBases.push(knowledgeBase);
-
-      const backendKnowledgeBase = value as BackendKnowledgeBase;
-      const conversations = Array.isArray(
-        backendKnowledgeBase.conversations
-      )
-        ? backendKnowledgeBase.conversations
-        : [];
-
-      for (const conversation of conversations) {
-        const session = toChatSession(conversation, knowledgeBase.id);
-
-        if (session) {
-          sessionMap.set(session.id, session);
-        }
-      }
-    }
-
-    return {
-      knowledgeBases: nextKnowledgeBases,
-      sessions: Array.from(sessionMap.values()),
-    };
+    return chatApi.listKnowledgeBasesAndSessions();
   }
 
   useEffect(() => {
@@ -1731,15 +1054,14 @@ export default function Home() {
       const authState = parseAuthState(localStorage.getItem(AUTH_STORAGE_KEY));
 
       if (!authState) {
-        localStorage.removeItem(AUTH_STORAGE_KEY);
-        window.location.href = "/login";
+        redirectToLogin();
         return;
       }
 
       setCurrentUsername(getAuthUsername(authState));
     } catch (error) {
       console.error("Failed to read auth state:", error);
-      window.location.href = "/login";
+      redirectToLogin();
       return;
     }
 
@@ -1925,10 +1247,7 @@ export default function Home() {
   }, [currentSession?.id, currentSession?.messages.length, isCurrentSessionLoading]);
 
   function handleLogout() {
-    localStorage.removeItem(AUTH_STORAGE_KEY);
-    localStorage.removeItem(STORAGE_KEY);
-    localStorage.removeItem(CURRENT_SESSION_KEY);
-    window.location.href = "/login";
+    redirectToLogin();
   }
 
   async function handleCreateSession() {
@@ -1963,14 +1282,6 @@ export default function Home() {
       return;
     }
 
-    const authState = parseAuthState(localStorage.getItem(AUTH_STORAGE_KEY));
-
-    if (!authState) {
-      localStorage.removeItem(AUTH_STORAGE_KEY);
-      window.location.href = "/login";
-      return;
-    }
-
     setDeletingSessionId(sessionId);
     setPageError("");
 
@@ -1980,28 +1291,7 @@ export default function Home() {
       );
       const knowledgeBaseId =
         session?.knowledgeBaseId || selectedKnowledgeBaseId;
-      const response = await fetch(
-        `/api/chat/knowledge-bases/${encodeURIComponent(
-          knowledgeBaseId
-        )}/conversations/${encodeURIComponent(sessionId)}`,
-        {
-          method: "DELETE",
-          headers: {
-            Authorization: buildAuthorizationHeader(authState),
-          },
-        }
-      );
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(
-          getResponseErrorMessage(
-            errorText,
-            "删除会话失败，请稍后再试。",
-            response.status
-          )
-        );
-      }
+      await chatApi.deleteConversation(knowledgeBaseId, sessionId);
 
       const allRemainingSessions = sessions.filter(
         (session) => session.id !== sessionId
@@ -2059,13 +1349,6 @@ export default function Home() {
     );
     const knowledgeBaseId =
       session?.knowledgeBaseId || selectedKnowledgeBaseId;
-    const authState = parseAuthState(localStorage.getItem(AUTH_STORAGE_KEY));
-
-    if (!authState) {
-      localStorage.removeItem(AUTH_STORAGE_KEY);
-      window.location.href = "/login";
-      return;
-    }
 
     setRenamingSessionId(editingSessionId);
     setSessionErrors((prev) => ({
@@ -2074,32 +1357,11 @@ export default function Home() {
     }));
 
     try {
-      const response = await fetch(
-        `/api/chat/knowledge-bases/${encodeURIComponent(
-          knowledgeBaseId
-        )}/conversations/${encodeURIComponent(editingSessionId)}`,
-        {
-          method: "PATCH",
-          headers: {
-            Authorization: buildAuthorizationHeader(authState),
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            title: normalizedTitle,
-          }),
-        }
+      await chatApi.renameConversation(
+        knowledgeBaseId,
+        editingSessionId,
+        normalizedTitle,
       );
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(
-          getResponseErrorMessage(
-            errorText,
-            "重命名失败，请稍后再试。",
-            response.status
-          )
-        );
-      }
 
       setSessions((prev) =>
         prev.map((session) =>
@@ -2182,14 +1444,6 @@ export default function Home() {
     conversationId: string,
     options: { silent?: boolean } = {}
   ) {
-    const authState = parseAuthState(localStorage.getItem(AUTH_STORAGE_KEY));
-
-    if (!authState) {
-      localStorage.removeItem(AUTH_STORAGE_KEY);
-      window.location.href = "/login";
-      return;
-    }
-
     if (!options.silent) {
       setLoadingDiagnostics((prev) => ({
         ...prev,
@@ -2202,31 +1456,7 @@ export default function Home() {
     }
 
     try {
-      const response = await fetch(
-        `/api/chat/conversations/${encodeURIComponent(
-          conversationId
-        )}/diagnostics`,
-        {
-          method: "GET",
-          headers: {
-            Authorization: buildAuthorizationHeader(authState),
-          },
-        }
-      );
-      const responseText = await response.text();
-
-      if (!response.ok) {
-        throw new Error(
-          getResponseErrorMessage(
-            responseText,
-            "加载诊断信息失败，请稍后再试。",
-            response.status
-          )
-        );
-      }
-
-      const data = parseJsonValue(responseText);
-      const diagnostics = getConversationDiagnostics(data);
+      const diagnostics = await chatApi.loadConversationDiagnostics(conversationId);
 
       setConversationDiagnostics((prev) => ({
         ...prev,
@@ -2294,14 +1524,6 @@ export default function Home() {
       selectedKnowledgeBaseId === DEFAULT_KNOWLEDGE_BASE_ID
     ) {
       setPageError("请先选择一个知识库。");
-      return;
-    }
-
-    const authState = parseAuthState(localStorage.getItem(AUTH_STORAGE_KEY));
-
-    if (!authState) {
-      localStorage.removeItem(AUTH_STORAGE_KEY);
-      window.location.href = "/login";
       return;
     }
 
@@ -2518,33 +1740,11 @@ export default function Home() {
     };
 
     try {
-      const response = await fetch("/api/chat", {
-        method: "POST",
-        headers: {
-          Authorization: buildAuthorizationHeader(authState),
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          conversation_id: activeSessionId,
-          knowledge_base_id: activeKnowledgeBaseId,
-          message: messageContent,
-        }),
-      });
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        const errorMessage = getResponseErrorMessage(
-          errorText,
-          "请求失败了，请稍后再试。",
-          response.status
-        );
-
-        setSessionErrors((prev) => ({
-          ...prev,
-          [activeSessionId]: errorMessage,
-        }));
-        return;
-      }
+      const response = await chatApi.postChatMessage(
+        activeSessionId,
+        activeKnowledgeBaseId,
+        messageContent,
+      );
 
       await streamChatResponse(response, {
         appendAssistantContent,
@@ -2560,7 +1760,8 @@ export default function Home() {
       console.error(error);
       setSessionErrors((prev) => ({
         ...prev,
-        [activeSessionId]: "请求失败了，请稍后再试。",
+        [activeSessionId]:
+          error instanceof Error ? error.message : "请求失败了，请稍后再试。",
       }));
     } finally {
       setLoadingSessions((prev) => ({
