@@ -265,6 +265,100 @@ class KnowledgeFileListTests(unittest.TestCase):
         self.assertEqual(file_payload["status"], "pending")
         self.assertIsNone(file_payload["latest_index_job"])
 
+    def test_upload_rejects_unsupported_file_extension(self) -> None:
+        """上传入口应在创建文件记录前拒绝不支持的文件类型。"""
+        knowledge_base_id = uuid4()
+        with patch(
+            "app.api.knowledge_files.knowledge_base_exists",
+            return_value=True,
+        ), patch(
+            "app.api.knowledge_files.calculate_file_hash",
+        ) as calculate_file_hash, patch(
+            "app.api.knowledge_files.create_file_with_relation",
+        ) as create_file:
+            response = self.client.post(
+                f"/chat/knowledge-base/{knowledge_base_id}/files",
+                files={
+                    "files": (
+                        "malware.exe",
+                        b"not a document",
+                        "application/octet-stream",
+                    )
+                },
+            )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("不支持的文件类型", response.json()["detail"])
+        calculate_file_hash.assert_not_called()
+        create_file.assert_not_called()
+
+    def test_upload_rejects_supported_extension_with_unsafe_mime(self) -> None:
+        """扩展名支持但 MIME 明显不匹配时也应拒绝。"""
+        knowledge_base_id = uuid4()
+        with patch(
+            "app.api.knowledge_files.knowledge_base_exists",
+            return_value=True,
+        ), patch(
+            "app.api.knowledge_files.calculate_file_hash",
+        ) as calculate_file_hash:
+            response = self.client.post(
+                f"/chat/knowledge-base/{knowledge_base_id}/files",
+                files={
+                    "files": (
+                        "notes.md",
+                        b"# title",
+                        "image/png",
+                    )
+                },
+            )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("不支持的文件类型", response.json()["detail"])
+        calculate_file_hash.assert_not_called()
+
+    def test_upload_allows_supported_markdown_file(self) -> None:
+        """支持类型仍应走原有复用和关联流程。"""
+        knowledge_base_id = uuid4()
+        file_id = uuid4()
+        existing_file = {
+            "id": file_id,
+            "original_name": "notes.md",
+            "mime_type": "text/markdown",
+            "size_bytes": 7,
+            "status": "pending",
+            "index_version": 0,
+            "created_at": "2026-06-29T00:00:00+08:00",
+            "updated_at": "2026-06-29T00:00:00+08:00",
+        }
+        with patch(
+            "app.api.knowledge_files.knowledge_base_exists",
+            return_value=True,
+        ), patch(
+            "app.api.knowledge_files.calculate_file_hash",
+            return_value=("hash", 7),
+        ) as calculate_file_hash, patch(
+            "app.api.knowledge_files.get_file_by_hash",
+            return_value=existing_file,
+        ), patch(
+            "app.api.knowledge_files.add_existing_file_relation",
+            return_value=True,
+        ):
+            response = self.client.post(
+                f"/chat/knowledge-base/{knowledge_base_id}/files",
+                files={
+                    "files": (
+                        "notes.md",
+                        b"# title",
+                        "text/markdown",
+                    )
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json()["success"])
+        self.assertTrue(response.json()["files"][0]["reused"])
+        calculate_file_hash.assert_called_once()
+
 
 if __name__ == "__main__":
     unittest.main()

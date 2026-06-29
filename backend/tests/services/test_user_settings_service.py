@@ -196,6 +196,83 @@ class UserLLMSettingsServiceTests(unittest.TestCase):
                 "https://llm.example.com/v1",
             )
 
+    def test_custom_user_base_url_accepts_public_dns_target(self) -> None:
+        """开启开关后，解析到公网地址的 HTTPS 域名可保存。"""
+        with patch(
+            "app.services.user_settings_service.ALLOW_USER_CUSTOM_LLM_BASE_URL",
+            True,
+        ), patch(
+            "app.services.user_settings_service.socket.getaddrinfo",
+            return_value=[
+                (
+                    0,
+                    0,
+                    0,
+                    "",
+                    ("93.184.216.34", 443),
+                )
+            ],
+        ) as getaddrinfo:
+            base_url = _validate_user_base_url(
+                "openai_compatible",
+                "https://llm.example.com/v1",
+            )
+
+        self.assertEqual(base_url, "https://llm.example.com/v1")
+        getaddrinfo.assert_called_once()
+
+    def test_custom_user_base_url_rejects_dns_private_target(self) -> None:
+        """域名解析到私网地址时应拒绝，避免 DNS 绕过 SSRF 防护。"""
+        with patch(
+            "app.services.user_settings_service.ALLOW_USER_CUSTOM_LLM_BASE_URL",
+            True,
+        ), patch(
+            "app.services.user_settings_service.socket.getaddrinfo",
+            return_value=[
+                (
+                    0,
+                    0,
+                    0,
+                    "",
+                    ("10.0.0.8", 443),
+                )
+            ],
+        ):
+            with self.assertRaisesRegex(ValueError, "不能解析到私网地址"):
+                _validate_user_base_url(
+                    "openai_compatible",
+                    "https://llm.example.com/v1",
+                )
+
+    def test_custom_user_base_url_rejects_dns_resolution_failure(self) -> None:
+        """DNS 解析失败时应失败关闭，而不是保存不可验证地址。"""
+        import socket
+
+        with patch(
+            "app.services.user_settings_service.ALLOW_USER_CUSTOM_LLM_BASE_URL",
+            True,
+        ), patch(
+            "app.services.user_settings_service.socket.getaddrinfo",
+            side_effect=socket.gaierror("not found"),
+        ):
+            with self.assertRaisesRegex(ValueError, "无法解析"):
+                _validate_user_base_url(
+                    "openai_compatible",
+                    "https://missing.example.com/v1",
+                )
+
+    def test_custom_user_base_url_rejects_literal_private_ipv6(self) -> None:
+        """IPv6 私网或链路本地地址也不能作为自定义 LLM 地址。"""
+        with patch(
+            "app.services.user_settings_service.ALLOW_USER_CUSTOM_LLM_BASE_URL",
+            True,
+        ):
+            with self.assertRaisesRegex(ValueError, "不能指向私网地址"):
+                _validate_user_base_url(
+                    "openai_compatible",
+                    "https://[fd00::1]/v1",
+                )
+
     def test_user_mode_rejects_whitespace_only_model(self) -> None:
         """仅由空白组成的模型名不能被持久化为无效用户配置。"""
         record = build_user_record()

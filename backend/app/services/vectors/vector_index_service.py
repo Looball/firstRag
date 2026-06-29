@@ -15,6 +15,7 @@ from app.repositories.knowledge_chunk_repository import (
 )
 from app.repositories.knowledge_file_repository import update_knowledge_file_status
 from app.services.documents.document_service import (
+    EmptyDocumentError,
     load_document,
     split_documents,
 )
@@ -108,7 +109,7 @@ def index_file_vectors(
     )
     chunks = split_documents(documents)
     if not chunks:
-        raise ValueError("文件未解析出可入库的文本分块")
+        raise EmptyDocumentError("文件为空，未解析出可入库的文本分块")
 
     for chunk in chunks:
         chunk.metadata["index_version"] = index_version

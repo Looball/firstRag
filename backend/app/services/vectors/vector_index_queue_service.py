@@ -31,6 +31,24 @@ def classify_vector_index_failure(error_message: str | None) -> str | None:
     if any(
         keyword in normalized
         for keyword in [
+            "unsupported",
+            "不支持的文件类型",
+            "不支持",
+        ]
+    ):
+        return "unsupported_file_type"
+    if any(
+        keyword in normalized
+        for keyword in [
+            "empty document",
+            "文件为空",
+            "空文档",
+        ]
+    ):
+        return "empty_document"
+    if any(
+        keyword in normalized
+        for keyword in [
             "timeout",
             "timed out",
             "deadline",
@@ -120,6 +138,10 @@ def classify_vector_index_failure(error_message: str | None) -> str | None:
 
 def build_vector_index_failure_hint(failure_type: str | None) -> str | None:
     """根据失败类型生成可恢复建议。"""
+    if failure_type == "unsupported_file_type":
+        return "文件类型暂不支持。请上传 PDF、DOCX、Markdown 或 TXT 文件后重新向量化。"
+    if failure_type == "empty_document":
+        return "文件没有解析出可入库文本。请确认文件不是空文件或扫描图片，必要时转为可复制文本后重新上传。"
     if failure_type == "parse_error":
         return "文件解析失败。请确认文件内容可读取，必要时转为 PDF、Markdown 或 TXT 后重新上传。"
     if failure_type == "embedding_error":

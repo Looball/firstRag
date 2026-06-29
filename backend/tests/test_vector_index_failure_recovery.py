@@ -22,6 +22,8 @@ class VectorIndexFailureRecoveryTests(unittest.TestCase):
     def test_classify_main_failure_types(self) -> None:
         """常见失败信息应归类为稳定的 failure_type。"""
         cases = {
+            "不支持的文件类型：.exe": "unsupported_file_type",
+            "文件为空，未解析出可入库的文本分块": "empty_document",
             "PDF loader 解析失败": "parse_error",
             "Embedding request returned 429": "embedding_error",
             "Chroma collection write failed": "vector_store_error",
@@ -42,6 +44,8 @@ class VectorIndexFailureRecoveryTests(unittest.TestCase):
         """每类失败都应给出面向恢复的提示。"""
         for failure_type in [
             "parse_error",
+            "unsupported_file_type",
+            "empty_document",
             "embedding_error",
             "vector_store_error",
             "chunk_write_error",

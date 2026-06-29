@@ -25,6 +25,16 @@ from app.services.vectors.embedding_model import ZhipuAIEmbeddings
 
 logger = logging.getLogger(__name__)
 
+SUPPORTED_DOCUMENT_EXTENSIONS = {".pdf", ".docx", ".md", ".txt"}
+SUPPORTED_DOCUMENT_MIME_TYPES = {
+    "application/pdf",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "application/octet-stream",
+    "application/markdown",
+    "text/x-markdown",
+    "text/markdown",
+    "text/plain",
+}
 MARKDOWN_HEADERS_TO_SPLIT_ON = [
     ("#", "h1"),
     ("##", "h2"),
@@ -36,15 +46,55 @@ MARKDOWN_HEADERS_TO_SPLIT_ON = [
 TEXT_SEPARATORS = ["\n\n", "\n", "。", "！", "？", "；", "，", " ", ""]
 
 
+class UnsupportedDocumentTypeError(ValueError):
+    """文件类型不在知识库解析支持范围内时抛出。"""
+
+
+class EmptyDocumentError(ValueError):
+    """文件可读取但没有解析出可入库文本时抛出。"""
+
+
+def get_supported_document_type_text() -> str:
+    """返回面向用户展示的支持文件类型说明。"""
+    return "PDF、DOCX、Markdown 或 TXT"
+
+
+def is_supported_document_file(
+    file_name: str,
+    mime_type: str | None = None,
+) -> bool:
+    """判断上传文件是否属于当前解析链路支持的类型。"""
+    suffix = Path(file_name).suffix.lower()
+    if suffix not in SUPPORTED_DOCUMENT_EXTENSIONS:
+        return False
+
+    if not mime_type:
+        return True
+
+    normalized_mime_type = mime_type.split(";", maxsplit=1)[0].strip().lower()
+    return (
+        not normalized_mime_type
+        or normalized_mime_type in SUPPORTED_DOCUMENT_MIME_TYPES
+    )
+
+
+def build_unsupported_document_type_message(file_name: str) -> str:
+    """生成不支持文件类型的安全错误信息。"""
+    suffix = Path(file_name).suffix.lower() or "无扩展名"
+    return (
+        f"不支持的文件类型：{suffix}。"
+        f"请上传 {get_supported_document_type_text()} 文件。"
+    )
+
+
 def get_document_paths(folder_path: str | Path = "./local_doc") -> list[Path]:
     """获取本地知识库中的PDF和Markdown文件路径。"""
-    supported_extensions = {".pdf", ".md", ".txt", ".docx"}
     document_paths = []
 
     for root, _, files in os.walk(folder_path):
         for file_name in files:
             file_path = Path(root) / file_name
-            if file_path.suffix.lower() in supported_extensions:
+            if file_path.suffix.lower() in SUPPORTED_DOCUMENT_EXTENSIONS:
                 document_paths.append(file_path)
 
     # 文件系统遍历顺序不保证稳定；固定排序可避免批量建库时文件 ID 随运行变化。
@@ -70,6 +120,10 @@ def load_document(
 ) -> list[Document]:
     """根据文件类型加载单个本地文档。"""
     suffix = file_path.suffix.lower()
+    if suffix not in SUPPORTED_DOCUMENT_EXTENSIONS:
+        raise UnsupportedDocumentTypeError(
+            build_unsupported_document_type_message(file_path.name),
+        )
 
     base_metadata = {
         "source": str(file_path),
@@ -125,7 +179,9 @@ def load_document(
             })
         return documents
 
-    return []
+    raise UnsupportedDocumentTypeError(
+        build_unsupported_document_type_message(file_path.name),
+    )
 
 
 def split_document(document: Document) -> list[Document]:

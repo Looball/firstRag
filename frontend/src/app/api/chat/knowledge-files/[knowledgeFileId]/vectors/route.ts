@@ -1,15 +1,13 @@
-import { NextResponse } from "next/server";
+import {
+  backendProxyError,
+  encodeBackendPathSegment,
+  proxyToBackend,
+} from "@/lib/api-proxy";
 
 export const runtime = "nodejs";
 
-const backendOrigin =
-  process.env.BACKEND_ORIGIN?.replace(/\/+$/, "") || "http://127.0.0.1:8000";
-const backendApiPrefix = process.env.BACKEND_API_PREFIX
-  ? `/${process.env.BACKEND_API_PREFIX.replace(/^\/+|\/+$/g, "")}`
-  : "";
-
-function getBackendUrl(knowledgeFileId: string) {
-  return `${backendOrigin}${backendApiPrefix}/chat/knowledge-files/${encodeURIComponent(
+function getBackendPath(knowledgeFileId: string) {
+  return `/chat/knowledge-files/${encodeBackendPathSegment(
     knowledgeFileId
   )}/vectors`;
 }
@@ -20,33 +18,18 @@ export async function POST(
 ) {
   try {
     const { knowledgeFileId } = await params;
-    const headers = new Headers({ Accept: "application/json" });
-    const authorization = request.headers.get("Authorization");
-
-    if (authorization) {
-      headers.set("Authorization", authorization);
-    }
-
-    const response = await fetch(getBackendUrl(knowledgeFileId), {
+    return await proxyToBackend({
+      request,
       method: "POST",
-      headers,
-      cache: "no-store",
-    });
-    const responseText = await response.text();
-
-    return new NextResponse(responseText, {
-      status: response.status,
-      headers: {
-        "Content-Type":
-          response.headers.get("Content-Type") || "application/json",
-      },
+      path: getBackendPath(knowledgeFileId),
+      bodyMode: "none",
     });
   } catch (error) {
     console.error("Backend file vector index proxy error:", error);
 
-    return NextResponse.json(
+    return backendProxyError(
       { detail: "连接后端文件向量化接口失败，请确认后端服务已启动。" },
-      { status: 502 }
+      502
     );
   }
 }
@@ -57,33 +40,17 @@ export async function DELETE(
 ) {
   try {
     const { knowledgeFileId } = await params;
-    const headers = new Headers({ Accept: "application/json" });
-    const authorization = request.headers.get("Authorization");
-
-    if (authorization) {
-      headers.set("Authorization", authorization);
-    }
-
-    const response = await fetch(getBackendUrl(knowledgeFileId), {
+    return await proxyToBackend({
+      request,
       method: "DELETE",
-      headers,
-      cache: "no-store",
-    });
-    const responseText = await response.text();
-
-    return new NextResponse(responseText, {
-      status: response.status,
-      headers: {
-        "Content-Type":
-          response.headers.get("Content-Type") || "application/json",
-      },
+      path: getBackendPath(knowledgeFileId),
     });
   } catch (error) {
     console.error("Backend file vector delete proxy error:", error);
 
-    return NextResponse.json(
+    return backendProxyError(
       { detail: "连接后端删除文件向量接口失败，请确认后端服务已启动。" },
-      { status: 502 }
+      502
     );
   }
 }

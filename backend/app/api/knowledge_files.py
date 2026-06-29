@@ -21,6 +21,10 @@ from app.services.file_service import (
     build_storage_path,
     calculate_file_hash,
 )
+from app.services.documents.document_service import (
+    build_unsupported_document_type_message,
+    is_supported_document_file,
+)
 from app.services.vectors.vector_index_queue_service import (
     enqueue_file_vector_index,
     serialize_current_vector_index_job,
@@ -95,7 +99,14 @@ async def upload_knowledge_files(
     for file in files:
         # 判断文件名是否存在
         if not file.filename:
+            await file.close()
             raise HTTPException(status_code=400, detail="文件名不能为空")
+        if not is_supported_document_file(file.filename, file.content_type):
+            await file.close()
+            raise HTTPException(
+                status_code=400,
+                detail=build_unsupported_document_type_message(file.filename),
+            )
 
         # 计算文件hash值和文件大小
         try:

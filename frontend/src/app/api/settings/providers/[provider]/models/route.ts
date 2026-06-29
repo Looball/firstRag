@@ -1,9 +1,10 @@
-import { NextResponse } from "next/server";
+import {
+  backendProxyError,
+  encodeBackendPathSegment,
+  proxyToBackend,
+} from "@/lib/api-proxy";
 
 export const runtime = "nodejs";
-
-const backendOrigin =
-  process.env.BACKEND_ORIGIN?.replace(/\/+$/, "") || "http://127.0.0.1:8000";
 
 export async function POST(
   request: Request,
@@ -11,31 +12,20 @@ export async function POST(
 ) {
   try {
     const { provider } = await params;
-    const headers = new Headers({ Accept: "application/json" });
-    const authorization = request.headers.get("Authorization");
-
-    if (authorization) {
-      headers.set("Authorization", authorization);
-    }
-
-    const upstreamResponse = await fetch(
-      `${backendOrigin}/user/settings/providers/${encodeURIComponent(provider)}/models`,
-      { method: "POST", headers, cache: "no-store" }
-    );
-
-    return new Response(upstreamResponse.body, {
-      status: upstreamResponse.status,
-      headers: {
-        "Cache-Control": "no-cache, no-transform",
-        "Content-Type":
-          upstreamResponse.headers.get("Content-Type") || "application/json",
-      },
+    return await proxyToBackend({
+      request,
+      method: "POST",
+      path: `/user/settings/providers/${encodeBackendPathSegment(
+        provider
+      )}/models`,
+      bodyMode: "none",
+      includeApiPrefix: false,
     });
   } catch (error) {
     console.error("Backend provider models proxy error:", error);
-    return NextResponse.json(
+    return backendProxyError(
       { detail: "读取厂商模型列表失败，请确认后端服务已启动。" },
-      { status: 502 }
+      502
     );
   }
 }

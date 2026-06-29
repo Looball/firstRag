@@ -75,6 +75,8 @@ Authorization: Bearer <access_token>
 | `description` | string | 可选说明。 |
 | `auto_index` | boolean | 是否上传后提交向量化任务。 |
 
+上传入口当前支持 `.pdf`、`.docx`、`.md`、`.txt`。不支持的扩展名或明显不匹配的 MIME 类型会返回 `400`，不会创建无效文件记录或向量化任务。
+
 ## 向量化
 
 | 方法 | 路径 | 说明 |
@@ -144,6 +146,8 @@ Authorization: Bearer <access_token>
 
 | 类型 | 说明 |
 | --- | --- |
+| `unsupported_file_type` | 文件类型不在当前解析链路支持范围内。 |
+| `empty_document` | 文件可读取，但没有解析出可入库文本。 |
 | `parse_error` | 文件解析、编码或文本分块失败。 |
 | `embedding_error` | Embedding provider 调用失败。 |
 | `vector_store_error` | Chroma/vector_db 写入或查询失败。 |

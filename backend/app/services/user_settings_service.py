@@ -3,6 +3,7 @@
 from dataclasses import dataclass, replace
 from decimal import Decimal
 from ipaddress import ip_address
+import socket
 from typing import Any
 from urllib.parse import urlparse
 
@@ -61,6 +62,53 @@ def _validate_provider(provider: str) -> str:
     return normalized_provider
 
 
+def _ensure_public_host(host: str, port: int | None = None) -> None:
+    """校验自定义 LLM 主机只能解析到公网地址。"""
+    normalized_host = host.rstrip(".").lower()
+    if (
+        normalized_host == "localhost"
+        or normalized_host.endswith(".localhost")
+        or normalized_host.endswith(".local")
+    ):
+        raise ValueError("用户自定义 LLM_BASE_URL 不能指向本机地址")
+
+    try:
+        host_ip = ip_address(normalized_host)
+    except ValueError as exc:
+        if normalized_host.replace(".", "").isdigit():
+            raise ValueError("LLM_BASE_URL 的 IP 地址无效") from exc
+    else:
+        if not host_ip.is_global:
+            raise ValueError("用户自定义 LLM_BASE_URL 不能指向私网地址")
+        return
+
+    try:
+        resolved_addresses = socket.getaddrinfo(
+            normalized_host,
+            port or 443,
+            type=socket.SOCK_STREAM,
+        )
+    except socket.gaierror as exc:
+        raise ValueError("无法解析用户自定义 LLM_BASE_URL 主机") from exc
+
+    resolved_ips = {
+        address[0]
+        for *_, address in resolved_addresses
+        if address and address[0]
+    }
+    if not resolved_ips:
+        raise ValueError("无法解析用户自定义 LLM_BASE_URL 主机")
+
+    for resolved_ip in resolved_ips:
+        try:
+            parsed_ip = ip_address(resolved_ip)
+        except ValueError as exc:
+            raise ValueError("LLM_BASE_URL 解析结果无效") from exc
+
+        if not parsed_ip.is_global:
+            raise ValueError("用户自定义 LLM_BASE_URL 不能解析到私网地址")
+
+
 def _validate_user_base_url(provider: str, base_url: str | None) -> str | None:
     """限制用户自定义地址，避免设置接口成为访问内网的跳板。"""
     if base_url is None:
@@ -84,18 +132,7 @@ def _validate_user_base_url(provider: str, base_url: str | None) -> str | None:
         or not host
     ):
         raise ValueError("用户自定义 LLM_BASE_URL 必须是不含凭据的 HTTPS 地址")
-    if host == "localhost" or host.endswith(".localhost") or host.endswith(".local"):
-        raise ValueError("用户自定义 LLM_BASE_URL 不能指向本机地址")
-
-    try:
-        host_ip = ip_address(host)
-    except ValueError as exc:
-        # 非 IP 主机名交给部署环境的出口策略处理；无效 IP 会进入此分支。
-        if host.replace(".", "").isdigit():
-            raise ValueError("LLM_BASE_URL 的 IP 地址无效") from exc
-    else:
-        if not host_ip.is_global:
-            raise ValueError("用户自定义 LLM_BASE_URL 不能指向私网地址")
+    _ensure_public_host(host, parsed_url.port)
 
     return normalized_base_url
 
