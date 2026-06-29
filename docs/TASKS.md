@@ -75,7 +75,7 @@
 | `T-013` | `PLAN-20260628-05` | `P1` | `Done` | 修正真实 RAG eval 缓存命中字段为空 | 2026-06-29 | `cf01e5b` |
 | `T-014` | `PLAN-20260629-01` | `P1` | `Done` | 定位并优化 retrieval settings 阶段耗时 | 2026-06-29 | `6e3c1d7` |
 | `T-015` | `PLAN-20260629-01` | `P1` | `Done` | 为知识库检索设置增加进程内轻量缓存 | 2026-06-29 | `6d1ee1a` |
-| `T-016` | `PLAN-20260629-01` | `P1` | `Todo` | 优化 hybrid retrieval 粗召回执行路径 | - | - |
+| `T-016` | `PLAN-20260629-01` | `P1` | `Done` | 优化 hybrid retrieval 粗召回执行路径 | 2026-06-29 | `2477565` |
 | `T-017` | `PLAN-20260629-01` | `P2` | `Todo` | 增加 query embedding 进程内短 TTL 缓存 | - | - |
 | `T-018` | `PLAN-20260629-01` | `P2` | `Todo` | 固化 RAG eval 性能门槛和趋势字段 | - | - |
 
@@ -523,7 +523,7 @@ scripts/rag_eval_gate.sh
 
 - 来源计划：`PLAN-20260629-01`
 - 优先级：`P1`
-- 状态：`Todo`
+- 状态：`Done`
 - 目标：压缩 vector、fulltext、RRF 和 rerank 前的检索等待，继续降低启用检索场景的首 token 前耗时。
 - 范围：优先评估并实现 vector 与 fulltext 粗召回的安全并行；保留现有权限过滤、软删除过滤、diagnostics、向量降级和单路失败兜底行为。
 - 验收标准：
@@ -531,6 +531,12 @@ scripts/rag_eval_gate.sh
   - diagnostics 仍包含 `vector_count`、`fulltext_count`、`fused_count`、`reranked_count` 和阶段耗时。
   - vector 或 fulltext 单路失败时，另一通道仍可返回候选并记录降级信息。
   - 静态验收和真实 RAG eval 通过。
+- 完成记录：
+  - 完成日期：2026-06-29。
+  - 相关 commit：`2477565`。
+  - 实现内容：vector 和 fulltext 粗召回改为并行执行；新增 fulltext 降级 diagnostics；单路失败时另一通道仍可兜底进入 RRF/rerank。
+  - 验证命令：`cd backend && conda run -n firstrag python -m unittest tests.test_retrieval_resilience -v`；`cd backend && conda run -n firstrag python -m compileall app tests`；`scripts/acceptance_check.sh --skip-real-eval`；`FIRSTRAG_EVAL_USERNAME=... FIRSTRAG_EVAL_PASSWORD=... scripts/rag_eval_gate.sh`。
+  - 真实 RAG eval：10/10 PASS，平均 sources 2.60，平均首 token 4164.16ms，平均总耗时 6.07s；报告 `docs/evals/latest_rag_eval_report.md`，历史记录 `docs/evals/runs/20260629_132041.json`。
 - 建议验证命令：
 
 ```bash
