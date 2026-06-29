@@ -40,7 +40,7 @@
 
 ## 当前基线
 
-- 2026-06-28 已完成整体回归验收：后端测试通过、前端 lint/build 通过、RAG eval gate 10/10 通过、indexing eval 通过；当前前端静态验收为 lint、Vitest 20 个用例和 Next build 通过。
+- 2026-06-29 已完成静态回归验收：后端 107 个 unittest 通过、前端 lint 通过、Vitest 32 个用例通过、Next build 通过；真实 RAG eval 和 indexing eval 可在发布前按需运行。
 - 本地 push 前推荐运行 `scripts/acceptance_check.sh`；只做静态检查时可运行 `scripts/acceptance_check.sh --skip-real-eval`。
 - 当前阶段优先做“可维护性 + 可观测性 + 验收自动化”，避免在关键链路刚稳定后继续堆叠大功能；前端工作台已开始引入 React Query 和 Zod 做请求层集中化与轻量响应校验。
 - 修改项目文件后，继续遵守只暂存当前任务相关文件、不混入 unrelated refactor 的规则。
@@ -84,7 +84,7 @@
 | `T-021` | `PLAN-20260629-02` | `P1` | `Done` | 抽取前端 API proxy 共享 helper | 2026-06-29 | `fd64b6d` |
 | `T-022` | `PLAN-20260629-02` | `P1` | `Done` | 继续拆分聊天工作台请求与流式状态逻辑 | 2026-06-29 | `017526b`, `cab5f9f` |
 | `T-023` | `PLAN-20260629-02` | `P2` | `Todo` | 拆分 RAG service 的路由、诊断和引用序列化职责 |  |  |
-| `T-024` | `PLAN-20260629-02` | `P2` | `Todo` | 建立权限、上传和流式代理的回归测试矩阵 |  |  |
+| `T-024` | `PLAN-20260629-02` | `P2` | `Done` | 建立权限、上传和流式代理的回归测试矩阵 | 2026-06-29 | `49e0ba7` |
 | `T-025` | `PLAN-20260629-02` | `P1` | `Done` | 引入 React Query 与 Zod 集中前端数据请求层 | 2026-06-29 | `986a9a3` |
 
 ## 新计划接入流程
@@ -762,7 +762,7 @@ scripts/rag_eval_gate.sh
 
 - 来源计划：`PLAN-20260629-02`
 - 优先级：`P2`
-- 状态：`Todo`
+- 状态：`Done`
 - 审查依据：当前后端已有 conversation、knowledge file、vector index、RAG 等测试，前端也有解析工具测试；但跨用户 IDOR、防 unsupported upload、Next API proxy streaming/错误透传这些审查重点仍缺少集中矩阵。
 - 目标：把代码审查中最容易回归的边界固化成测试，减少依赖人工抽查。
 - 范围：补充后端权限隔离测试、软删除过滤测试、上传类型/大小测试；补充前端 proxy helper、`frontend-api`、`chat-workspace/api` 和 SSE 解析测试；将关键命令纳入 `scripts/acceptance_check.sh --skip-real-eval` 或明确可选开关。
@@ -774,6 +774,14 @@ scripts/rag_eval_gate.sh
   - 静态验收脚本能一键覆盖新增测试。
 - 调整记录：
   - 2026-06-29：`T-025` 已完成前端请求层集中化，后续测试矩阵需要覆盖新的 `frontend/src/lib/frontend-api.ts` 与 `frontend/src/lib/chat-workspace/api.ts` 边界。
+- 完成记录：
+  - 完成日期：2026-06-29
+  - 相关 commit：`49e0ba7`
+  - 后端新增会话消息/诊断/重命名的权限隔离测试，补齐 vector job、单文件向量化提交和删除向量的跨用户 404 边界。
+  - 上传回归测试补齐超大文件 `413`；worker 测试补齐空文档解析结果失败入库路径。
+  - 前端新增 `frontend-api` 与 `chat-workspace/api` 单测，覆盖 auth header、401 清理跳转、Zod 外壳校验、错误解析、chat 原生 Response 和工作台响应归一化。
+  - `api-proxy` 新增流式响应非 eager read 测试，确认 SSE body 不会在 proxy 层被提前完整读取。
+  - `scripts/acceptance_check.sh --skip-real-eval` 已通过后端 107 个 unittest、前端 lint、Vitest 32 个用例和 Next build。
 - 建议验证命令：
 
 ```bash
@@ -782,6 +790,7 @@ conda run -n firstrag python -m unittest discover tests -v
 cd ../frontend
 npm run test
 npm run lint
+npm run build
 cd ..
 scripts/acceptance_check.sh --skip-real-eval
 ```
