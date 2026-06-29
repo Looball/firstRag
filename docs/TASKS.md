@@ -40,9 +40,9 @@
 
 ## 当前基线
 
-- 2026-06-28 已完成整体回归验收：后端测试通过、前端 lint/build 通过、RAG eval gate 10/10 通过、indexing eval 通过；当前静态验收为后端 78 个 unittest、前端 lint、Vitest 10 个用例和 Next build 通过。
+- 2026-06-28 已完成整体回归验收：后端测试通过、前端 lint/build 通过、RAG eval gate 10/10 通过、indexing eval 通过；当前前端静态验收为 lint、Vitest 19 个用例和 Next build 通过。
 - 本地 push 前推荐运行 `scripts/acceptance_check.sh`；只做静态检查时可运行 `scripts/acceptance_check.sh --skip-real-eval`。
-- 当前阶段优先做“可维护性 + 可观测性 + 验收自动化”，避免在关键链路刚稳定后继续堆叠大功能。
+- 当前阶段优先做“可维护性 + 可观测性 + 验收自动化”，避免在关键链路刚稳定后继续堆叠大功能；前端工作台已开始引入 React Query 和 Zod 做请求层集中化与轻量响应校验。
 - 修改项目文件后，继续遵守只暂存当前任务相关文件、不混入 unrelated refactor 的规则。
 
 ## 计划批次
@@ -55,7 +55,7 @@
 | `PLAN-20260628-04` | 2026-06-28 | `Done` | 补强 RAG eval 性能观测，让后续检索优化有稳定报告依据。 | `T-012` |
 | `PLAN-20260628-05` | 2026-06-28 | `Done` | 修正 knowledge profile cache diagnostics 在真实 RAG eval 报告中缺失的问题。 | `T-013` |
 | `PLAN-20260629-01` | 2026-06-29 | `Doing` | RAG 检索性能二阶段优化，继续降低首 token 前等待时间，优先处理 settings 读取、混合检索和重复查询开销。 | `T-014` - `T-018` |
-| `PLAN-20260629-02` | 2026-06-29 | `Doing` | 基于 `code-review-skill` 仓库级审查，整理安全边界、可维护性和测试补强的后续修改计划。 | `T-019` - `T-024` |
+| `PLAN-20260629-02` | 2026-06-29 | `Doing` | 基于 `code-review-skill` 仓库级审查，整理安全边界、可维护性和测试补强的后续修改计划。 | `T-019` - `T-025` |
 
 ## 任务总览
 
@@ -82,9 +82,10 @@
 | `T-019` | `PLAN-20260629-02` | `P1` | `Done` | 加固用户自定义 LLM Base URL SSRF 防护 | 2026-06-29 | `fd64b6d` |
 | `T-020` | `PLAN-20260629-02` | `P1` | `Done` | 收紧知识文件上传类型与解析失败反馈 | 2026-06-29 | `fd64b6d` |
 | `T-021` | `PLAN-20260629-02` | `P1` | `Done` | 抽取前端 API proxy 共享 helper | 2026-06-29 | `fd64b6d` |
-| `T-022` | `PLAN-20260629-02` | `P1` | `Todo` | 继续拆分聊天工作台请求与流式状态逻辑 |  |  |
+| `T-022` | `PLAN-20260629-02` | `P1` | `Done` | 继续拆分聊天工作台请求与流式状态逻辑 | 2026-06-29 | `017526b` |
 | `T-023` | `PLAN-20260629-02` | `P2` | `Todo` | 拆分 RAG service 的路由、诊断和引用序列化职责 |  |  |
 | `T-024` | `PLAN-20260629-02` | `P2` | `Todo` | 建立权限、上传和流式代理的回归测试矩阵 |  |  |
+| `T-025` | `PLAN-20260629-02` | `P1` | `Done` | 引入 React Query 与 Zod 集中前端数据请求层 | 2026-06-29 | `986a9a3` |
 
 ## 新计划接入流程
 
@@ -706,7 +707,7 @@ npm run build
 
 - 来源计划：`PLAN-20260629-02`
 - 优先级：`P1`
-- 状态：`Todo`
+- 状态：`Done`
 - 审查依据：`frontend/src/app/page.tsx` 已从早期规模下降，但仍约 3663 行，包含 30 多个 `useState`、多组 knowledge base/file/vector 请求、轮询、会话管理和 SSE 解析。
 - 目标：把页面组件从“大型状态容器”继续拆成可测试 hook 和纯函数，降低后续改聊天流、文件管理、诊断面板时的回归风险。
 - 范围：优先抽取认证守卫、knowledge base/file 数据请求、vector job 轮询、chat streaming reducer；保留现有 UI 文案和视觉结构；避免在同一任务中做大规模样式重写。
@@ -715,6 +716,13 @@ npm run build
   - SSE block 解析、done/sources/retrieval 事件合并和 fallback answer 逻辑有单元测试覆盖。
   - 轮询 effect 卸载时继续正确清理 interval，不产生重复请求。
   - 前端 lint/test/build 通过。
+- 完成记录：
+  - 完成日期：2026-06-29
+  - 相关 commit：`017526b`
+  - 新增 `frontend/src/lib/chat-workspace/chat-stream.ts`，集中处理 JSON、纯文本和 SSE streaming response，并保留页面侧 assistant 状态更新 callback。
+  - 新增 `frontend/src/lib/chat-workspace/chat-stream.test.ts`，覆盖 answer、done、sources、retrieval、分片 SSE、done-only fallback 等流式边界。
+  - `frontend/src/app/page.tsx` 从 3663 行降至 3497 行；vector job 轮询 effect 未调整，清理逻辑保持原状。
+  - `npm run test`、`npm run lint`、`npm run build` 已通过。
 - 建议验证命令：
 
 ```bash
@@ -756,12 +764,15 @@ scripts/rag_eval_gate.sh
 - 状态：`Todo`
 - 审查依据：当前后端已有 conversation、knowledge file、vector index、RAG 等测试，前端也有解析工具测试；但跨用户 IDOR、防 unsupported upload、Next API proxy streaming/错误透传这些审查重点仍缺少集中矩阵。
 - 目标：把代码审查中最容易回归的边界固化成测试，减少依赖人工抽查。
-- 范围：补充后端权限隔离测试、软删除过滤测试、上传类型/大小测试；补充前端 proxy helper 和 SSE 解析测试；将关键命令纳入 `scripts/acceptance_check.sh --skip-real-eval` 或明确可选开关。
+- 范围：补充后端权限隔离测试、软删除过滤测试、上传类型/大小测试；补充前端 proxy helper、`frontend-api`、`chat-workspace/api` 和 SSE 解析测试；将关键命令纳入 `scripts/acceptance_check.sh --skip-real-eval` 或明确可选开关。
 - 验收标准：
   - 跨用户访问知识库、文件、会话、vector job 均返回 `404` 或安全错误。
   - 不支持上传类型、超大文件、空解析结果都有稳定测试。
   - SSE proxy 测试证明 body 不被提前完整读取，错误响应仍保留状态码。
+  - 前端请求层测试覆盖 auth header、401 跳转、Zod 响应外壳校验和错误消息解析。
   - 静态验收脚本能一键覆盖新增测试。
+- 调整记录：
+  - 2026-06-29：`T-025` 已完成前端请求层集中化，后续测试矩阵需要覆盖新的 `frontend/src/lib/frontend-api.ts` 与 `frontend/src/lib/chat-workspace/api.ts` 边界。
 - 建议验证命令：
 
 ```bash
@@ -772,6 +783,36 @@ npm run test
 npm run lint
 cd ..
 scripts/acceptance_check.sh --skip-real-eval
+```
+
+## T-025 引入 React Query 与 Zod 集中前端数据请求层
+
+- 来源计划：`PLAN-20260629-02`
+- 优先级：`P1`
+- 状态：`Done`
+- 审查依据：`frontend/src/app/page.tsx` 在完成 SSE streaming 抽取后仍保留大量直接 `fetch`、Authorization 拼接、401 跳转、错误解析、响应外壳判断和高频派生数据计算。
+- 目标：把工作台请求样板集中到前端 API 层，引入 React Query 承接可重复读取的 server state，并使用 Zod 对后端响应外壳做轻量运行时校验。
+- 范围：安装 `@tanstack/react-query` 和 `zod`；新增全局 `QueryClientProvider`；新增 `frontend-api` 和 `chat-workspace/api`；保留 `/api/chat` 原生 Web Stream 处理，不强行改为 axios；先迁移工作台知识库、文件、vector health、会话、diagnostics 和 chat response 获取入口。
+- 验收标准：
+  - `frontend/src/app/page.tsx` 不再直接调用 `fetch`，认证 header、401 清理和错误消息解析集中到共享 API helper。
+  - `vector index health` 使用 React Query 管理查询状态，页面继续保持原有刷新和轮询行为。
+  - Zod 仅做响应外壳轻量校验，不替代现有 domain adapter 和后端安全校验。
+  - `npm run test`、`npm run lint`、`npm run build` 通过。
+- 完成记录：
+  - 完成日期：2026-06-29
+  - 相关 commit：`986a9a3`
+  - 新增 `frontend/src/app/providers.tsx`，在 `frontend/src/app/layout.tsx` 接入 `QueryClientProvider`。
+  - 新增 `frontend/src/lib/frontend-api.ts`，统一 auth header、登录失效跳转、错误响应解析和 fetch wrapper。
+  - 新增 `frontend/src/lib/chat-workspace/api.ts`，集中工作台 domain API，并用 Zod 校验 `files`、`knowledge_bases`、`settings` 等响应外壳。
+  - `frontend/src/app/page.tsx` 从约 3498 行降至 2699 行，页面内直接 `fetch` 清零；高频派生数据补充 `useMemo`。
+  - `npm run test`、`npm run lint`、`npm run build` 已通过；沙箱内 build 因 Turbopack 进程/端口限制失败后，已在提权环境重跑通过。
+- 建议验证命令：
+
+```bash
+cd frontend
+npm run test
+npm run lint
+npm run build
 ```
 
 ## 更新规则
