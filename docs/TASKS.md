@@ -55,6 +55,7 @@
 | `PLAN-20260628-04` | 2026-06-28 | `Done` | 补强 RAG eval 性能观测，让后续检索优化有稳定报告依据。 | `T-012` |
 | `PLAN-20260628-05` | 2026-06-28 | `Done` | 修正 knowledge profile cache diagnostics 在真实 RAG eval 报告中缺失的问题。 | `T-013` |
 | `PLAN-20260629-01` | 2026-06-29 | `Doing` | RAG 检索性能二阶段优化，继续降低首 token 前等待时间，优先处理 settings 读取、混合检索和重复查询开销。 | `T-014` - `T-018` |
+| `PLAN-20260629-02` | 2026-06-29 | `Todo` | 基于 `code-review-skill` 仓库级审查，整理安全边界、可维护性和测试补强的后续修改计划。 | `T-019` - `T-024` |
 
 ## 任务总览
 
@@ -78,6 +79,12 @@
 | `T-016` | `PLAN-20260629-01` | `P1` | `Done` | 优化 hybrid retrieval 粗召回执行路径 | 2026-06-29 | `2477565` |
 | `T-017` | `PLAN-20260629-01` | `P2` | `Done` | 增加 query embedding 进程内短 TTL 缓存 | 2026-06-29 | `cbd00d8` |
 | `T-018` | `PLAN-20260629-01` | `P2` | `Done` | 固化 RAG eval 性能门槛和趋势字段 | 2026-06-29 | `7793856` |
+| `T-019` | `PLAN-20260629-02` | `P1` | `Todo` | 加固用户自定义 LLM Base URL SSRF 防护 |  |  |
+| `T-020` | `PLAN-20260629-02` | `P1` | `Todo` | 收紧知识文件上传类型与解析失败反馈 |  |  |
+| `T-021` | `PLAN-20260629-02` | `P1` | `Todo` | 抽取前端 API proxy 共享 helper |  |  |
+| `T-022` | `PLAN-20260629-02` | `P1` | `Todo` | 继续拆分聊天工作台请求与流式状态逻辑 |  |  |
+| `T-023` | `PLAN-20260629-02` | `P2` | `Todo` | 拆分 RAG service 的路由、诊断和引用序列化职责 |  |  |
+| `T-024` | `PLAN-20260629-02` | `P2` | `Todo` | 建立权限、上传和流式代理的回归测试矩阵 |  |  |
 
 ## 新计划接入流程
 
@@ -608,6 +615,143 @@ scripts/acceptance_check.sh --skip-real-eval
 FIRSTRAG_EVAL_USERNAME=你的用户名 \
 FIRSTRAG_EVAL_PASSWORD=你的密码 \
 scripts/rag_eval_gate.sh
+```
+
+## T-019 加固用户自定义 LLM Base URL SSRF 防护
+
+- 来源计划：`PLAN-20260629-02`
+- 优先级：`P1`
+- 状态：`Todo`
+- 审查依据：`backend/app/services/user_settings_service.py` 已限制自定义 Base URL 开关、HTTPS、本机域名和字面 IP 私网地址，但非 IP 域名解析到私网地址的场景当前依赖部署环境出口策略。
+- 目标：补齐应用层 SSRF 防御纵深，避免开启 `ALLOW_USER_CUSTOM_LLM_BASE_URL` 后被构造域名绕过私网地址检查。
+- 范围：增强 `_validate_user_base_url`；解析域名 A/AAAA 记录并拒绝 loopback、private、link-local、multicast、reserved 等非公网地址；必要时限制重定向或在模型连通性测试前复核最终请求地址；保留当前厂商预设地址的兼容行为。
+- 验收标准：
+  - `localhost`、`.localhost`、`.local`、私网字面 IP 和解析到私网 IP 的域名都会被拒绝。
+  - 公网 HTTPS 域名在开关开启时仍可保存和测试。
+  - 错误信息不泄露用户 API Key、JWT 或内部网络细节。
+  - 单元测试覆盖 DNS 解析成功、解析失败、IPv4/IPv6 私网和公网场景。
+- 建议验证命令：
+
+```bash
+cd backend
+conda run -n firstrag python -m unittest tests.test_user_settings -v
+conda run -n firstrag python -m unittest tests.services.test_user_settings_service -v
+```
+
+## T-020 收紧知识文件上传类型与解析失败反馈
+
+- 来源计划：`PLAN-20260629-02`
+- 优先级：`P1`
+- 状态：`Todo`
+- 审查依据：`backend/app/api/knowledge_files.py` 接收上传后按原始扩展名落盘，`document_service.load_document` 只支持 `.pdf`、`.docx`、`.md`、`.txt`，不支持的文件会到 worker 阶段才表现为“未解析出可入库的文本分块”。
+- 目标：在上传或入队前给用户明确、可恢复的文件类型反馈，减少无效 vector job 和失败噪音。
+- 范围：统一定义支持的扩展名和 MIME 类型；上传阶段拒绝明显不支持的文件；indexing 阶段保留解析失败分类，区分“不支持类型”“空文档”“解析器异常”；同步更新前端提示和 API 文档。
+- 验收标准：
+  - 不支持的文件类型返回 `400` 或清晰业务错误，不创建无效 indexing job。
+  - 支持的 `.pdf`、`.docx`、`.md`、`.txt` 上传和自动向量化行为保持不变。
+  - 失败记录能在任务队列中展示可理解原因。
+  - 后端测试覆盖支持类型、不支持类型、空内容和解析异常路径。
+- 建议验证命令：
+
+```bash
+cd backend
+conda run -n firstrag python -m unittest tests.test_knowledge_files tests.test_vector_index_failure_recovery -v
+cd ..
+scripts/acceptance_check.sh --skip-real-eval
+```
+
+## T-021 抽取前端 API proxy 共享 helper
+
+- 来源计划：`PLAN-20260629-02`
+- 优先级：`P1`
+- 状态：`Todo`
+- 审查依据：`frontend/src/app/api/**/route.ts` 当前约有 23 个 proxy route，重复实现 backend URL 拼接、`Authorization` 转发、`cache: "no-store"`、错误兜底和 streaming header。
+- 目标：降低前端 API proxy 的复制粘贴风险，后续调整超时、错误格式、认证 header 或 SSE header 时只改一处。
+- 范围：新增 `frontend/src/lib/api-proxy.ts` 或等价 helper；覆盖普通 JSON proxy、multipart upload proxy、DELETE/PATCH/POST 透传和 SSE streaming proxy；保留动态 route handler 的显式 `params` 类型。
+- 验收标准：
+  - `/api/chat` 继续保持 streaming body，不提前读取完整响应。
+  - 普通 API 继续透传后端状态码、`Content-Type` 和安全的错误信息。
+  - 23 个 route 中重复样板明显减少，业务路径和方法映射清晰。
+  - 前端 lint/build 通过，并补充 proxy helper 单元测试或最小 route 测试。
+- 建议验证命令：
+
+```bash
+cd frontend
+npm run lint
+npm run test
+npm run build
+```
+
+## T-022 继续拆分聊天工作台请求与流式状态逻辑
+
+- 来源计划：`PLAN-20260629-02`
+- 优先级：`P1`
+- 状态：`Todo`
+- 审查依据：`frontend/src/app/page.tsx` 已从早期规模下降，但仍约 3663 行，包含 30 多个 `useState`、多组 knowledge base/file/vector 请求、轮询、会话管理和 SSE 解析。
+- 目标：把页面组件从“大型状态容器”继续拆成可测试 hook 和纯函数，降低后续改聊天流、文件管理、诊断面板时的回归风险。
+- 范围：优先抽取认证守卫、knowledge base/file 数据请求、vector job 轮询、chat streaming reducer；保留现有 UI 文案和视觉结构；避免在同一任务中做大规模样式重写。
+- 验收标准：
+  - `page.tsx` 行数和状态分支明显下降，核心渲染结构更容易扫描。
+  - SSE block 解析、done/sources/retrieval 事件合并和 fallback answer 逻辑有单元测试覆盖。
+  - 轮询 effect 卸载时继续正确清理 interval，不产生重复请求。
+  - 前端 lint/test/build 通过。
+- 建议验证命令：
+
+```bash
+cd frontend
+npm run test
+npm run lint
+npm run build
+```
+
+## T-023 拆分 RAG service 的路由、诊断和引用序列化职责
+
+- 来源计划：`PLAN-20260629-02`
+- 优先级：`P2`
+- 状态：`Todo`
+- 审查依据：`backend/app/services/rag_service.py` 约 1106 行，同时承担 LLM 配置、Query Router、knowledge profile、retrieval settings diagnostics、retrieval 执行、引用序列化和 LCEL chain 组装。
+- 目标：保持 RAG 行为不变的前提下降低单文件复杂度，让后续检索策略、diagnostics 和 prompt 调整更容易局部验证。
+- 范围：按职责拆出 `retrieval_decision`、`rag_diagnostics`、`reference_serializer`、`chain_builder` 等模块或同等边界；保留现有 public function 兼容入口；不改变 SSE 协议和 eval 指标字段。
+- 验收标准：
+  - 现有 RAG 单元测试全部通过，真实 RAG eval 继续 10/10 PASS。
+  - diagnostics 字段名称、sources 序列化结构和 message 持久化行为保持兼容。
+  - 拆分后模块之间只传基础类型或明确的 dataclass/TypedDict，减少 ContextVar 泄漏风险。
+  - 文档同步说明 RAG service 新边界。
+- 建议验证命令：
+
+```bash
+cd backend
+conda run -n firstrag python -m unittest tests.test_rag_service tests.test_retrieval_resilience -v
+cd ..
+scripts/acceptance_check.sh --skip-real-eval
+FIRSTRAG_EVAL_USERNAME=你的用户名 \
+FIRSTRAG_EVAL_PASSWORD=你的密码 \
+scripts/rag_eval_gate.sh
+```
+
+## T-024 建立权限、上传和流式代理的回归测试矩阵
+
+- 来源计划：`PLAN-20260629-02`
+- 优先级：`P2`
+- 状态：`Todo`
+- 审查依据：当前后端已有 conversation、knowledge file、vector index、RAG 等测试，前端也有解析工具测试；但跨用户 IDOR、防 unsupported upload、Next API proxy streaming/错误透传这些审查重点仍缺少集中矩阵。
+- 目标：把代码审查中最容易回归的边界固化成测试，减少依赖人工抽查。
+- 范围：补充后端权限隔离测试、软删除过滤测试、上传类型/大小测试；补充前端 proxy helper 和 SSE 解析测试；将关键命令纳入 `scripts/acceptance_check.sh --skip-real-eval` 或明确可选开关。
+- 验收标准：
+  - 跨用户访问知识库、文件、会话、vector job 均返回 `404` 或安全错误。
+  - 不支持上传类型、超大文件、空解析结果都有稳定测试。
+  - SSE proxy 测试证明 body 不被提前完整读取，错误响应仍保留状态码。
+  - 静态验收脚本能一键覆盖新增测试。
+- 建议验证命令：
+
+```bash
+cd backend
+conda run -n firstrag python -m unittest discover tests -v
+cd ../frontend
+npm run test
+npm run lint
+cd ..
+scripts/acceptance_check.sh --skip-real-eval
 ```
 
 ## 更新规则
