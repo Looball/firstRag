@@ -74,7 +74,7 @@
 | `T-012` | `PLAN-20260628-04` | `P1` | `Done` | RAG eval 报告补齐缓存与阶段耗时摘要 | 2026-06-28 | `e123014` |
 | `T-013` | `PLAN-20260628-05` | `P1` | `Done` | 修正真实 RAG eval 缓存命中字段为空 | 2026-06-29 | `cf01e5b` |
 | `T-014` | `PLAN-20260629-01` | `P1` | `Done` | 定位并优化 retrieval settings 阶段耗时 | 2026-06-29 | `6e3c1d7` |
-| `T-015` | `PLAN-20260629-01` | `P1` | `Todo` | 为知识库检索设置增加进程内轻量缓存 | - | - |
+| `T-015` | `PLAN-20260629-01` | `P1` | `Done` | 为知识库检索设置增加进程内轻量缓存 | 2026-06-29 | `6d1ee1a` |
 | `T-016` | `PLAN-20260629-01` | `P1` | `Todo` | 优化 hybrid retrieval 粗召回执行路径 | - | - |
 | `T-017` | `PLAN-20260629-01` | `P2` | `Todo` | 增加 query embedding 进程内短 TTL 缓存 | - | - |
 | `T-018` | `PLAN-20260629-01` | `P2` | `Todo` | 固化 RAG eval 性能门槛和趋势字段 | - | - |
@@ -491,7 +491,7 @@ scripts/rag_eval_gate.sh
 
 - 来源计划：`PLAN-20260629-01`
 - 优先级：`P1`
-- 状态：`Todo`
+- 状态：`Done`
 - 目标：减少每轮聊天重复读取 `knowledge_base_retrieval_settings` 的开销，降低 settings 阶段对首 token 前等待时间的影响。
 - 范围：实现进程内短 TTL cache，key 使用 `user_id + knowledge_base_id`；更新 retrieval settings 后主动失效；普通读取路径复用缓存；不新增 Redis。
 - 验收标准：
@@ -499,6 +499,14 @@ scripts/rag_eval_gate.sh
   - 普通聊天路径能命中缓存并在 diagnostics 或测试中可观察。
   - 后端测试覆盖 cache miss、hit、主动失效、TTL 过期和默认值路径。
   - 静态验收和真实 RAG eval 通过。
+- 完成记录：
+  - 完成日期：2026-06-29
+  - 相关 commit：`6d1ee1a`
+  - 新增 `retrieval_settings_cache` 进程内短 TTL cache，缓存 key 为 `user_id + knowledge_base_id`；知识库不存在时不缓存 `None`。
+  - RAG 读取路径和本地问候短路判断已复用缓存；PATCH retrieval settings 成功后会主动失效对应知识库缓存。
+  - diagnostics 和 RAG eval 报告新增 `retrieval_settings_cache_hit`、`retrieval_settings_source` 和 settings 缓存命中率。
+  - 最新真实 RAG eval 10/10 PASS，报告显示 retrieval settings 缓存命中 `2/9（0.22）`，settings 子阶段为 `load=9.68ms`、`query=9.67ms`、`normalize=0.00ms`。
+  - `scripts/acceptance_check.sh --skip-real-eval` 已通过后端 87 个 unittest、前端 lint、Vitest 10 个用例；Next build 在沙箱内因 Turbopack 端口权限限制失败，已单独提权运行 `npm run build` 并通过。
 - 建议验证命令：
 
 ```bash
