@@ -54,7 +54,7 @@
 | `PLAN-20260628-03` | 2026-06-28 | `Done` | 优化 RAG 检索前置阶段，减少 knowledge profile 与文件范围查询开销。 | `T-011` |
 | `PLAN-20260628-04` | 2026-06-28 | `Done` | 补强 RAG eval 性能观测，让后续检索优化有稳定报告依据。 | `T-012` |
 | `PLAN-20260628-05` | 2026-06-28 | `Done` | 修正 knowledge profile cache diagnostics 在真实 RAG eval 报告中缺失的问题。 | `T-013` |
-| `PLAN-20260629-01` | 2026-06-29 | `Todo` | RAG 检索性能二阶段优化，继续降低首 token 前等待时间，优先处理 settings 读取、混合检索和重复查询开销。 | `T-014` - `T-018` |
+| `PLAN-20260629-01` | 2026-06-29 | `Doing` | RAG 检索性能二阶段优化，继续降低首 token 前等待时间，优先处理 settings 读取、混合检索和重复查询开销。 | `T-014` - `T-018` |
 
 ## 任务总览
 
@@ -73,7 +73,7 @@
 | `T-011` | `PLAN-20260628-03` | `P1` | `Done` | 增加知识库画像进程内轻量缓存 | 2026-06-28 | `9f178fc` |
 | `T-012` | `PLAN-20260628-04` | `P1` | `Done` | RAG eval 报告补齐缓存与阶段耗时摘要 | 2026-06-28 | `e123014` |
 | `T-013` | `PLAN-20260628-05` | `P1` | `Done` | 修正真实 RAG eval 缓存命中字段为空 | 2026-06-29 | `cf01e5b` |
-| `T-014` | `PLAN-20260629-01` | `P1` | `Todo` | 定位并优化 retrieval settings 阶段耗时 | - | - |
+| `T-014` | `PLAN-20260629-01` | `P1` | `Done` | 定位并优化 retrieval settings 阶段耗时 | 2026-06-29 | `6e3c1d7` |
 | `T-015` | `PLAN-20260629-01` | `P1` | `Todo` | 为知识库检索设置增加进程内轻量缓存 | - | - |
 | `T-016` | `PLAN-20260629-01` | `P1` | `Todo` | 优化 hybrid retrieval 粗召回执行路径 | - | - |
 | `T-017` | `PLAN-20260629-01` | `P2` | `Todo` | 增加 query embedding 进程内短 TTL 缓存 | - | - |
@@ -463,13 +463,21 @@ scripts/rag_eval_gate.sh
 
 - 来源计划：`PLAN-20260629-01`
 - 优先级：`P1`
-- 状态：`Todo`
+- 状态：`Done`
 - 目标：解释并降低最新 RAG eval 报告中 `retrieval_settings_ms` 平均约 2.39s 的异常耗时。
 - 范围：补充 settings 子阶段计时，确认耗时来源是数据库连接、SQL 查询、LCEL 调度、真实 eval 设置 PATCH 影响，还是其它链路开销；本任务不引入 Redis。
 - 验收标准：
   - RAG eval 报告能区分 settings 子阶段耗时，不再只有不可解释的 `retrieval_settings_ms` 黑盒指标。
   - 若发现明确瓶颈，完成对应轻量优化或拆出新的后续任务。
   - 静态验收和真实 RAG eval 通过。
+- 完成记录：
+  - 完成日期：2026-06-29
+  - 相关 commit：`6e3c1d7`
+  - 新增 `retrieval_settings_load_total_ms`、`retrieval_settings_query_ms`、`retrieval_settings_normalize_ms`，并随 `retrieval_settings` Runnable 输出传递，避免 ContextVar 跨 LCEL 边界丢失。
+  - RAG eval summary、历史 JSON、Markdown 阶段耗时表和 case 详情均展示 settings 子阶段。
+  - 最新真实 RAG eval 10/10 PASS，报告显示平均 `retrieval_settings_ms=926.90ms`，但实际 `settings_load=6.38ms`、`settings_query=6.37ms`、`settings_normalize=0.00ms`。
+  - 结论：秒级 `retrieval_settings_ms` 主要不是数据库查询本身，而是 LCEL 外层阶段观测口径包含相邻 Runnable 调度或等待；后续 `T-015` 的检索设置缓存可降低查询抖动，但不应预期单独消除全部外层 settings 等待。
+  - `scripts/acceptance_check.sh --skip-real-eval` 已通过后端 83 个 unittest、前端 lint、Vitest 10 个用例；Next build 在沙箱内因 Turbopack 端口权限限制失败，已单独提权运行 `npm run build` 并通过。
 - 建议验证命令：
 
 ```bash
