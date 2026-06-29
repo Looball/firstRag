@@ -53,6 +53,8 @@
 | `PLAN-20260628-02` | 2026-06-28 | `Done` | 优化知识库检索速度，优先降低 rerank 对首 token 前等待时间的影响。 | `T-010` |
 | `PLAN-20260628-03` | 2026-06-28 | `Done` | 优化 RAG 检索前置阶段，减少 knowledge profile 与文件范围查询开销。 | `T-011` |
 | `PLAN-20260628-04` | 2026-06-28 | `Done` | 补强 RAG eval 性能观测，让后续检索优化有稳定报告依据。 | `T-012` |
+| `PLAN-20260628-05` | 2026-06-28 | `Doing` | 修正 knowledge profile cache diagnostics 在真实 RAG eval 报告中缺失的问题。 | `T-013` |
+| `PLAN-20260629-01` | 2026-06-29 | `Todo` | RAG 检索性能二阶段优化，继续降低首 token 前等待时间，优先处理 settings 读取、混合检索和重复查询开销。 | `T-014` - `T-018` |
 
 ## 任务总览
 
@@ -70,6 +72,12 @@
 | `T-010` | `PLAN-20260628-02` | `P1` | `Done` | 优化知识库检索速度，降低 rerank 开销 | 2026-06-28 | `8c9ac21` |
 | `T-011` | `PLAN-20260628-03` | `P1` | `Done` | 增加知识库画像进程内轻量缓存 | 2026-06-28 | `9f178fc` |
 | `T-012` | `PLAN-20260628-04` | `P1` | `Done` | RAG eval 报告补齐缓存与阶段耗时摘要 | 2026-06-28 | `e123014` |
+| `T-013` | `PLAN-20260628-05` | `P1` | `Doing` | 修正真实 RAG eval 缓存命中字段为空 | - | - |
+| `T-014` | `PLAN-20260629-01` | `P1` | `Todo` | 定位并优化 retrieval settings 阶段耗时 | - | - |
+| `T-015` | `PLAN-20260629-01` | `P1` | `Todo` | 为知识库检索设置增加进程内轻量缓存 | - | - |
+| `T-016` | `PLAN-20260629-01` | `P1` | `Todo` | 优化 hybrid retrieval 粗召回执行路径 | - | - |
+| `T-017` | `PLAN-20260629-01` | `P2` | `Todo` | 增加 query embedding 进程内短 TTL 缓存 | - | - |
+| `T-018` | `PLAN-20260629-01` | `P2` | `Todo` | 固化 RAG eval 性能门槛和趋势字段 | - | - |
 
 ## 新计划接入流程
 
@@ -417,6 +425,143 @@ scripts/rag_eval_gate.sh
 - 建议验证命令：
 
 ```bash
+scripts/acceptance_check.sh --skip-real-eval
+FIRSTRAG_EVAL_USERNAME=你的用户名 \
+FIRSTRAG_EVAL_PASSWORD=你的密码 \
+scripts/rag_eval_gate.sh
+```
+
+## T-013 修正真实 RAG eval 缓存命中字段为空
+
+- 来源计划：`PLAN-20260628-05`
+- 优先级：`P1`
+- 状态：`Doing`
+- 目标：确保 `knowledge_profile_cache_hit`、已索引文件数和总文件数能穿过 LCEL 流式边界，稳定进入真实 RAG eval 报告。
+- 范围：修正 `rag_service` 中 cache diagnostics 的传递时机，必要时复用 retrieval diagnostics metadata 兜底路径；补充单元测试。
+- 验收标准：
+  - `retrieve_documents` 返回的文档 metadata 中包含 knowledge profile cache diagnostics。
+  - `stream_rag_response` 在 ContextVar 丢失时仍能从文档 metadata 读到 cache diagnostics。
+  - 静态验收和真实 RAG eval 通过。
+- 建议验证命令：
+
+```bash
+scripts/acceptance_check.sh --skip-real-eval
+FIRSTRAG_EVAL_USERNAME=你的用户名 \
+FIRSTRAG_EVAL_PASSWORD=你的密码 \
+scripts/rag_eval_gate.sh
+```
+
+## T-014 定位并优化 retrieval settings 阶段耗时
+
+- 来源计划：`PLAN-20260629-01`
+- 优先级：`P1`
+- 状态：`Todo`
+- 目标：解释并降低最新 RAG eval 报告中 `retrieval_settings_ms` 平均约 2.39s 的异常耗时。
+- 范围：补充 settings 子阶段计时，确认耗时来源是数据库连接、SQL 查询、LCEL 调度、真实 eval 设置 PATCH 影响，还是其它链路开销；本任务不引入 Redis。
+- 验收标准：
+  - RAG eval 报告能区分 settings 子阶段耗时，不再只有不可解释的 `retrieval_settings_ms` 黑盒指标。
+  - 若发现明确瓶颈，完成对应轻量优化或拆出新的后续任务。
+  - 静态验收和真实 RAG eval 通过。
+- 建议验证命令：
+
+```bash
+scripts/acceptance_check.sh --skip-real-eval
+FIRSTRAG_EVAL_USERNAME=你的用户名 \
+FIRSTRAG_EVAL_PASSWORD=你的密码 \
+scripts/rag_eval_gate.sh
+```
+
+## T-015 为知识库检索设置增加进程内轻量缓存
+
+- 来源计划：`PLAN-20260629-01`
+- 优先级：`P1`
+- 状态：`Todo`
+- 目标：减少每轮聊天重复读取 `knowledge_base_retrieval_settings` 的开销，降低 settings 阶段对首 token 前等待时间的影响。
+- 范围：实现进程内短 TTL cache，key 使用 `user_id + knowledge_base_id`；更新 retrieval settings 后主动失效；普通读取路径复用缓存；不新增 Redis。
+- 验收标准：
+  - 设置更新后下一轮聊天立即读取新配置。
+  - 普通聊天路径能命中缓存并在 diagnostics 或测试中可观察。
+  - 后端测试覆盖 cache miss、hit、主动失效、TTL 过期和默认值路径。
+  - 静态验收和真实 RAG eval 通过。
+- 建议验证命令：
+
+```bash
+cd backend
+conda run -n firstrag python -m unittest discover tests -v
+cd ..
+scripts/acceptance_check.sh --skip-real-eval
+FIRSTRAG_EVAL_USERNAME=你的用户名 \
+FIRSTRAG_EVAL_PASSWORD=你的密码 \
+scripts/rag_eval_gate.sh
+```
+
+## T-016 优化 hybrid retrieval 粗召回执行路径
+
+- 来源计划：`PLAN-20260629-01`
+- 优先级：`P1`
+- 状态：`Todo`
+- 目标：压缩 vector、fulltext、RRF 和 rerank 前的检索等待，继续降低启用检索场景的首 token 前耗时。
+- 范围：优先评估并实现 vector 与 fulltext 粗召回的安全并行；保留现有权限过滤、软删除过滤、diagnostics、向量降级和单路失败兜底行为。
+- 验收标准：
+  - RAG eval 继续 10/10 PASS。
+  - diagnostics 仍包含 `vector_count`、`fulltext_count`、`fused_count`、`reranked_count` 和阶段耗时。
+  - vector 或 fulltext 单路失败时，另一通道仍可返回候选并记录降级信息。
+  - 静态验收和真实 RAG eval 通过。
+- 建议验证命令：
+
+```bash
+cd backend
+conda run -n firstrag python -m unittest discover tests -v
+cd ..
+scripts/acceptance_check.sh --skip-real-eval
+FIRSTRAG_EVAL_USERNAME=你的用户名 \
+FIRSTRAG_EVAL_PASSWORD=你的密码 \
+scripts/rag_eval_gate.sh
+```
+
+## T-017 增加 query embedding 进程内短 TTL 缓存
+
+- 来源计划：`PLAN-20260629-01`
+- 优先级：`P2`
+- 状态：`Todo`
+- 目标：减少短时间内重复问题、eval 重跑和多轮相近测试对 embedding provider 的重复调用。
+- 范围：缓存 query embedding，不缓存最终答案或用户私密内容；key 使用 provider、model 和 normalized query；embedding 生成失败不写入缓存；不新增 Redis。
+- 验收标准：
+  - 重复 query 在 TTL 内命中缓存。
+  - TTL 过期后会重新生成 embedding。
+  - embedding provider 报错时不会污染缓存，后续请求仍可正常重试。
+  - 后端测试覆盖命中、过期和失败不缓存路径。
+- 建议验证命令：
+
+```bash
+cd backend
+conda run -n firstrag python -m unittest discover tests -v
+cd ..
+scripts/acceptance_check.sh --skip-real-eval
+FIRSTRAG_EVAL_USERNAME=你的用户名 \
+FIRSTRAG_EVAL_PASSWORD=你的密码 \
+scripts/rag_eval_gate.sh
+```
+
+## T-018 固化 RAG eval 性能门槛和趋势字段
+
+- 来源计划：`PLAN-20260629-01`
+- 优先级：`P2`
+- 状态：`Todo`
+- 目标：把 RAG 性能优化从单次报告观察升级为可持续追踪，让性能回退在验收报告中显眼暴露。
+- 范围：扩展 eval summary/report，记录 settings、profile、retrieve、hybrid、rerank 的最近 N 次均值和变化，并加入建议阈值；不在报告中输出账号密码、API Key、JWT 或数据库连接串。
+- 验收标准：
+  - `docs/evals/latest_summary.md` 展示阶段耗时趋势。
+  - RAG eval Markdown 报告展示关键性能门槛和本次是否通过。
+  - 历史 JSON 保留必要字段，便于后续比较。
+  - 单元测试覆盖 summary 字段和 Markdown 输出。
+- 建议验证命令：
+
+```bash
+conda run -n firstrag python scripts/eval_summary.py
+cd backend
+conda run -n firstrag python -m unittest discover tests -v
+cd ..
 scripts/acceptance_check.sh --skip-real-eval
 FIRSTRAG_EVAL_USERNAME=你的用户名 \
 FIRSTRAG_EVAL_PASSWORD=你的密码 \
