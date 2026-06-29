@@ -13,6 +13,38 @@ from typing import Any
 DEFAULT_RAG_RUNS_DIR = Path("docs/evals/runs")
 DEFAULT_INDEXING_RUNS_DIR = Path("docs/evals/indexing_runs")
 DEFAULT_REPORT_PATH = Path("docs/evals/latest_summary.md")
+RAG_STAGE_THRESHOLDS = [
+    {
+        "key": "average_retrieval_settings_ms",
+        "label": "settings",
+        "threshold": 1000.0,
+        "unit": "ms",
+    },
+    {
+        "key": "average_knowledge_profile_ms",
+        "label": "profile",
+        "threshold": 1000.0,
+        "unit": "ms",
+    },
+    {
+        "key": "average_retrieve_documents_ms",
+        "label": "retrieve",
+        "threshold": 5000.0,
+        "unit": "ms",
+    },
+    {
+        "key": "average_retrieval_total_ms",
+        "label": "hybrid",
+        "threshold": 3000.0,
+        "unit": "ms",
+    },
+    {
+        "key": "average_rerank_ms",
+        "label": "rerank",
+        "threshold": 3000.0,
+        "unit": "ms",
+    },
+]
 
 
 class EvalSummaryError(RuntimeError):
@@ -259,6 +291,64 @@ def rag_recent_rows(records: list[dict[str, Any]], limit: int) -> list[str]:
     return rows
 
 
+def rag_stage_trend_rows(records: list[dict[str, Any]], limit: int) -> list[str]:
+    """生成最近 RAG 阶段耗时趋势表格行。"""
+    recent_summaries = [
+        record.get("summary")
+        for record in records[-limit:]
+        if isinstance(record.get("summary"), dict)
+    ]
+    latest_summary = recent_summaries[-1] if recent_summaries else {}
+    previous_summary = (
+        recent_summaries[-2]
+        if len(recent_summaries) >= 2
+        else {}
+    )
+    rows: list[str] = []
+    for threshold in RAG_STAGE_THRESHOLDS:
+        key = threshold["key"]
+        recent_values = [
+            value
+            for summary in recent_summaries
+            if (value := number_value(summary.get(key))) is not None
+        ]
+        latest_value = number_value(latest_summary.get(key))
+        threshold_value = threshold["threshold"]
+        rows.append(
+            "| {label} | {latest} | {recent_average} | {delta} | <= {threshold} | {status} |".format(
+                label=threshold["label"],
+                latest=format_number(
+                    latest_value,
+                    2,
+                    threshold["unit"],
+                ),
+                recent_average=format_number(
+                    average(recent_values),
+                    2,
+                    threshold["unit"],
+                ),
+                delta=format_delta(
+                    latest_value,
+                    previous_summary.get(key)
+                    if isinstance(previous_summary, dict)
+                    else None,
+                    2,
+                ),
+                threshold=format_number(
+                    threshold_value,
+                    2,
+                    threshold["unit"],
+                ),
+                status=(
+                    "通过"
+                    if latest_value is None or latest_value <= threshold_value
+                    else "需关注"
+                ),
+            )
+        )
+    return rows
+
+
 def indexing_recent_rows(records: list[dict[str, Any]], limit: int) -> list[str]:
     """生成最近 indexing 运行表格行。"""
     rows: list[str] = []
@@ -326,6 +416,18 @@ def build_report(
 
     lines.extend([
         "",
+        "## RAG 阶段耗时趋势",
+        "",
+        "| 阶段 | 最新均值 | 最近均值 | 较上次变化 | 建议阈值 | 状态 |",
+        "| --- | ---: | ---: | ---: | ---: | --- |",
+    ])
+    lines.extend(
+        rag_stage_trend_rows(rag_records, limit)
+        or ["| - | - | - | - | - | - |"]
+    )
+
+    lines.extend([
+        "",
         "## Indexing 总览",
         "",
         "| 指标 | 值 |",
@@ -352,6 +454,7 @@ def build_report(
         "- 本报告只读取本地历史 JSON，不访问后端服务。",
         "- 报告不输出账号密码、令牌、密钥或数据库连接串。",
         "- `首 token 变化` 表示本轮 RAG 平均首 token 等待相对上一条展示记录的变化，单位毫秒。",
+        "- `RAG 阶段耗时趋势` 使用最近 N 次 RAG 历史 JSON 的 summary 字段计算；建议阈值用于暴露性能回退，不代表脚本退出门禁。",
     ])
     return "\n".join(lines) + "\n"
 

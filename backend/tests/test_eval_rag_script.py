@@ -210,6 +210,15 @@ class EvalRagQualityGateTests(unittest.TestCase):
             report = report_path.read_text(encoding="utf-8")
 
         self.assertIn("## 阶段耗时摘要", report)
+        self.assertIn("## 性能门槛", report)
+        self.assertIn(
+            "| 平均 settings | ✅ | 2.00ms | <= 1000.00ms |",
+            report,
+        )
+        self.assertIn(
+            "| 平均 hybrid | ✅ | 6.00ms | <= 3000.00ms |",
+            report,
+        )
         self.assertIn(
             "| case-id | 100 | 2 | 0.80 | 0.60 | 0.10 | 3 | 是 | 4 | 5 | 6 | 7 |",
             report,

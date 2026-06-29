@@ -19,6 +19,43 @@ from urllib.request import Request, urlopen
 DEFAULT_CASES_PATH = Path("docs/evals/rag_eval_cases.jsonl")
 DEFAULT_REPORT_PATH = Path("docs/evals/latest_rag_eval_report.md")
 DEFAULT_RUNS_DIR = Path("docs/evals/runs")
+SUGGESTED_PERFORMANCE_THRESHOLDS = [
+    {
+        "name": "average_retrieval_settings_ms",
+        "label": "平均 settings",
+        "operator": "<=",
+        "threshold": 1000.0,
+        "unit": "ms",
+    },
+    {
+        "name": "average_knowledge_profile_ms",
+        "label": "平均 profile",
+        "operator": "<=",
+        "threshold": 1000.0,
+        "unit": "ms",
+    },
+    {
+        "name": "average_retrieve_documents_ms",
+        "label": "平均 retrieve",
+        "operator": "<=",
+        "threshold": 5000.0,
+        "unit": "ms",
+    },
+    {
+        "name": "average_retrieval_total_ms",
+        "label": "平均 hybrid",
+        "operator": "<=",
+        "threshold": 3000.0,
+        "unit": "ms",
+    },
+    {
+        "name": "average_rerank_ms",
+        "label": "平均 rerank",
+        "operator": "<=",
+        "threshold": 3000.0,
+        "unit": "ms",
+    },
+]
 
 
 class EvalError(RuntimeError):
@@ -749,6 +786,21 @@ def build_quality_gate_checks(
     return checks
 
 
+def build_suggested_performance_checks(
+    summary: dict[str, Any],
+) -> list[dict[str, Any]]:
+    """根据建议阈值生成性能观察项，不影响脚本退出码。"""
+    checks: list[dict[str, Any]] = []
+    for threshold in SUGGESTED_PERFORMANCE_THRESHOLDS:
+        current = numeric_value(summary.get(threshold["name"]))
+        checks.append({
+            **threshold,
+            "actual": current,
+            "passed": current is None or current <= threshold["threshold"],
+        })
+    return checks
+
+
 def serialize_source_summary(source: dict[str, Any]) -> dict[str, Any]:
     """序列化历史 JSON 中的引用摘要，避免写入过多正文。"""
     return {
@@ -802,6 +854,9 @@ def build_run_record(
             "passed": all(check["passed"] for check in quality_gate_checks),
             "checks": quality_gate_checks,
         },
+        "performance_thresholds": build_suggested_performance_checks(
+            build_summary(results),
+        ),
         "cases": [
             serialize_result(result)
             for result in results
@@ -926,6 +981,7 @@ def write_report(
     summary = build_summary(results)
     quality_gate_checks = quality_gate_checks or []
     quality_gate_passed = all(check["passed"] for check in quality_gate_checks)
+    performance_checks = build_suggested_performance_checks(summary)
     lines = [
         "# RAG 评测报告",
         "",
@@ -987,6 +1043,28 @@ def write_report(
                 ),
             )
         lines.append("")
+
+    lines.extend([
+        "## 性能门槛",
+        "",
+        "| 指标 | 结果 | 当前 | 建议阈值 |",
+        "| --- | --- | ---: | ---: |",
+    ])
+    for check in performance_checks:
+        current = format_number(check["actual"])
+        threshold = format_number(check["threshold"])
+        unit = check["unit"]
+        lines.append(
+            "| {label} | {status} | {current}{unit} | {operator} {threshold}{unit} |".format(
+                label=check["label"],
+                status="✅" if check["passed"] else "❌",
+                current=current,
+                unit=unit if current != "—" else "",
+                operator=check["operator"],
+                threshold=threshold,
+            ),
+        )
+    lines.append("")
 
     lines.extend([
         "| Case | 结果 | 耗时 | 是否检索 | 引用数 | 命中文件 |",

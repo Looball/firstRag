@@ -27,6 +27,11 @@ class EvalSummaryScriptTests(unittest.TestCase):
                     "average_sources": 1.0,
                     "average_first_token_ms": 1000.0,
                     "average_total_tokens": 200.0,
+                    "average_retrieval_settings_ms": 30.0,
+                    "average_knowledge_profile_ms": 40.0,
+                    "average_retrieve_documents_ms": 500.0,
+                    "average_retrieval_total_ms": 450.0,
+                    "average_rerank_ms": 80.0,
                 },
                 "quality_gate": {"passed": False},
             },
@@ -40,6 +45,11 @@ class EvalSummaryScriptTests(unittest.TestCase):
                     "average_sources": 2.0,
                     "average_first_token_ms": 800.0,
                     "average_total_tokens": 180.0,
+                    "average_retrieval_settings_ms": 10.0,
+                    "average_knowledge_profile_ms": 20.0,
+                    "average_retrieve_documents_ms": 300.0,
+                    "average_retrieval_total_ms": 250.0,
+                    "average_rerank_ms": 60.0,
                 },
                 "quality_gate": {"passed": True},
             },
@@ -68,6 +78,15 @@ class EvalSummaryScriptTests(unittest.TestCase):
 
         self.assertIn("| 平均通过率 | 0.75 |", report)
         self.assertIn("| 2026-06-28T09:00:00 | 2/2 | 1.00", report)
+        self.assertIn("## RAG 阶段耗时趋势", report)
+        self.assertIn(
+            "| settings | 10.00ms | 20.00ms | -20.00 | <= 1000.00ms | 通过 |",
+            report,
+        )
+        self.assertIn(
+            "| hybrid | 250.00ms | 350.00ms | -200.00 | <= 3000.00ms | 通过 |",
+            report,
+        )
         self.assertIn("| 通过次数 | 1/1 |", report)
         self.assertIn("| 2026-06-28T09:10:00 | 通过 | succeeded", report)
         self.assertIn("-200.00", report)
