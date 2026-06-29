@@ -82,6 +82,49 @@ class VectorIndexWorkerLoggingTests(unittest.TestCase):
         self.assertIn("向量化任务失败", "\n".join(logs.output))
         mark_failed.assert_called_once_with(job_id, "boom")
 
+    def test_process_empty_document_failure_marks_job_failed(self) -> None:
+        """空文档解析结果应稳定落入失败状态，便于前端展示和重试。"""
+        job_id = uuid4()
+        file_id = uuid4()
+        job = {
+            "id": job_id,
+            "user_id": 1,
+            "knowledge_file_id": file_id,
+            "index_version": 1,
+        }
+        file_record = {
+            "id": file_id,
+            "status": "pending",
+            "index_version": 1,
+        }
+        error_message = "文件为空，未解析出可入库的文本分块"
+
+        with unittest.mock.patch(
+            "app.workers.vector_index_worker.reclaim_expired_vector_index_jobs",
+            return_value=0,
+        ), unittest.mock.patch(
+            "app.workers.vector_index_worker.claim_next_vector_index_job",
+            return_value=job,
+        ), unittest.mock.patch(
+            "app.workers.vector_index_worker.get_user_knowledge_file",
+            return_value=file_record,
+        ), unittest.mock.patch(
+            "app.workers.vector_index_worker.index_knowledge_file_record",
+            side_effect=ValueError(error_message),
+        ), unittest.mock.patch(
+            "app.workers.vector_index_worker.mark_vector_index_job_failed",
+        ) as mark_failed, self.assertLogs(
+            "app.workers.vector_index_worker",
+            level="ERROR",
+        ):
+            stdout = io.StringIO()
+            with redirect_stdout(stdout):
+                processed = process_next_vector_index_job("worker-1")
+
+        self.assertTrue(processed)
+        self.assertEqual(stdout.getvalue(), "")
+        mark_failed.assert_called_once_with(job_id, error_message)
+
 
 if __name__ == "__main__":
     unittest.main()

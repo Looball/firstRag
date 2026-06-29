@@ -8,6 +8,7 @@ from fastapi.testclient import TestClient
 
 from app.core.security import get_current_user_id
 from app.main import app
+from app.services.file_service import FileTooLargeError
 
 
 class KnowledgeFileListTests(unittest.TestCase):
@@ -315,6 +316,33 @@ class KnowledgeFileListTests(unittest.TestCase):
         self.assertEqual(response.status_code, 400)
         self.assertIn("不支持的文件类型", response.json()["detail"])
         calculate_file_hash.assert_not_called()
+
+    def test_upload_rejects_oversized_supported_file(self) -> None:
+        """超过大小限制的合法类型文件应稳定返回 413。"""
+        knowledge_base_id = uuid4()
+        with patch(
+            "app.api.knowledge_files.knowledge_base_exists",
+            return_value=True,
+        ), patch(
+            "app.api.knowledge_files.calculate_file_hash",
+            side_effect=FileTooLargeError("文件超过 200MB 限制"),
+        ), patch(
+            "app.api.knowledge_files.create_file_with_relation",
+        ) as create_file:
+            response = self.client.post(
+                f"/chat/knowledge-base/{knowledge_base_id}/files",
+                files={
+                    "files": (
+                        "large.pdf",
+                        b"%PDF-1.7",
+                        "application/pdf",
+                    )
+                },
+            )
+
+        self.assertEqual(response.status_code, 413)
+        self.assertEqual(response.json(), {"detail": "文件超过 200MB 限制"})
+        create_file.assert_not_called()
 
     def test_upload_allows_supported_markdown_file(self) -> None:
         """支持类型仍应走原有复用和关联流程。"""

@@ -77,6 +77,44 @@ describe("api proxy helpers", () => {
     await expect(response.text()).resolves.toBe("event: done\n\n");
   });
 
+  it("returns streaming proxy responses before upstream body is consumed", async () => {
+    let controller: ReadableStreamDefaultController<Uint8Array> | null = null;
+    const upstreamStream = new ReadableStream<Uint8Array>({
+      start(nextController) {
+        controller = nextController;
+      },
+    });
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(upstreamStream, {
+        headers: { "Content-Type": "text/event-stream; charset=utf-8" },
+      })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const request = new Request("http://localhost/api/chat", {
+      method: "POST",
+      body: "{}",
+    });
+
+    const response = await Promise.race([
+      proxyToBackend({
+        request,
+        method: "POST",
+        path: "/chat",
+        accept: "text/event-stream",
+        fallbackContentType: "text/plain; charset=utf-8",
+        stream: true,
+      }),
+      new Promise<"timeout">((resolve) => {
+        setTimeout(() => resolve("timeout"), 20);
+      }),
+    ]);
+
+    expect(response).toBeInstanceOf(Response);
+    controller?.enqueue(new TextEncoder().encode("event: done\n\n"));
+    controller?.close();
+    await expect((response as Response).text()).resolves.toBe("event: done\n\n");
+  });
+
   it("forwards multipart form data without forcing content type", async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response('{"success":true}', {

@@ -117,6 +117,23 @@ class CreateConversationTests(unittest.TestCase):
             retrieval,
         )
 
+    def test_get_messages_returns_404_for_inaccessible_conversation(self) -> None:
+        """跨用户或已软删除的会话不应继续读取消息。"""
+        conversation_id = uuid4()
+        with patch(
+            "app.api.conversations.conversation_exists",
+            return_value=False,
+        ), patch(
+            "app.api.conversations.get_user_conversation_messages",
+        ) as get_messages:
+            response = self.client.get(
+                f"/chat/conversations/{conversation_id}/messages",
+            )
+
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(response.json(), {"detail": "会话不存在"})
+        get_messages.assert_not_called()
+
     def test_get_conversation_diagnostics_returns_rag_debug_summary(
         self,
     ) -> None:
@@ -211,6 +228,45 @@ class CreateConversationTests(unittest.TestCase):
             diagnostic["sources_preview"][0]["fulltext_score"],
             3.45,
         )
+
+    def test_get_diagnostics_returns_404_for_inaccessible_conversation(
+        self,
+    ) -> None:
+        """跨用户或已软删除的会话不应继续读取诊断信息。"""
+        conversation_id = uuid4()
+        with patch(
+            "app.api.conversations.conversation_exists",
+            return_value=False,
+        ), patch(
+            "app.api.conversations.get_user_conversation_messages",
+        ) as get_messages:
+            response = self.client.get(
+                f"/chat/conversations/{conversation_id}/diagnostics",
+            )
+
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(response.json(), {"detail": "会话不存在"})
+        get_messages.assert_not_called()
+
+    def test_rename_returns_404_for_cross_base_conversation(self) -> None:
+        """重命名时必须同时校验会话属于当前知识库和用户。"""
+        knowledge_base_id = uuid4()
+        conversation_id = uuid4()
+        with patch(
+            "app.api.conversations.conversation_belongs_base",
+            return_value=False,
+        ), patch(
+            "app.api.conversations.rename_conversation_record",
+        ) as rename_record:
+            response = self.client.patch(
+                f"/chat/knowledge-bases/{knowledge_base_id}/conversations/"
+                f"{conversation_id}",
+                json={"title": "新标题"},
+            )
+
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(response.json(), {"detail": "禁止跨知识库提问"})
+        rename_record.assert_not_called()
 
 
 if __name__ == "__main__":

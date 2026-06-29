@@ -2,6 +2,7 @@
 
 import unittest
 from unittest.mock import patch
+from uuid import uuid4
 
 from fastapi.testclient import TestClient
 
@@ -97,6 +98,48 @@ class VectorIndexJobHealthTests(unittest.TestCase):
         self.assertEqual(payload["worker"]["oldest_active_seconds"], 2400)
         self.assertEqual(payload["worker"]["stale_queued"], 1)
         self.assertEqual(payload["worker"]["stale_processing"], 1)
+
+    def test_get_vector_index_job_returns_404_for_inaccessible_job(self) -> None:
+        """跨用户向量化任务不能通过 job id 被探测。"""
+        job_id = uuid4()
+        with patch(
+            "app.api.vector_indexes.get_user_vector_index_job",
+            return_value=None,
+        ):
+            response = self.client.get(f"/chat/vector-index-jobs/{job_id}")
+
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(response.json(), {"detail": "任务不存在"})
+
+    def test_index_file_vectors_returns_404_for_inaccessible_file(self) -> None:
+        """跨用户或已软删除的文件不能提交向量化任务。"""
+        file_id = uuid4()
+        with patch(
+            "app.api.vector_indexes.get_user_knowledge_file",
+            return_value=None,
+        ), patch(
+            "app.api.vector_indexes.enqueue_file_vector_index",
+        ) as enqueue:
+            response = self.client.post(f"/chat/knowledge-files/{file_id}/vectors")
+
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(response.json(), {"detail": "文件不存在"})
+        enqueue.assert_not_called()
+
+    def test_delete_file_vectors_returns_404_for_inaccessible_file(self) -> None:
+        """删除向量化结果前必须先确认文件属于当前用户。"""
+        file_id = uuid4()
+        with patch(
+            "app.api.vector_indexes.get_user_knowledge_file",
+            return_value=None,
+        ), patch(
+            "app.api.vector_indexes.cancel_active_vector_index_jobs",
+        ) as cancel_jobs:
+            response = self.client.delete(f"/chat/knowledge-files/{file_id}/vectors")
+
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(response.json(), {"detail": "文件不存在"})
+        cancel_jobs.assert_not_called()
 
 
 if __name__ == "__main__":
