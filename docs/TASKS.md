@@ -76,7 +76,7 @@
 | `T-014` | `PLAN-20260629-01` | `P1` | `Done` | 定位并优化 retrieval settings 阶段耗时 | 2026-06-29 | `6e3c1d7` |
 | `T-015` | `PLAN-20260629-01` | `P1` | `Done` | 为知识库检索设置增加进程内轻量缓存 | 2026-06-29 | `6d1ee1a` |
 | `T-016` | `PLAN-20260629-01` | `P1` | `Done` | 优化 hybrid retrieval 粗召回执行路径 | 2026-06-29 | `2477565` |
-| `T-017` | `PLAN-20260629-01` | `P2` | `Todo` | 增加 query embedding 进程内短 TTL 缓存 | - | - |
+| `T-017` | `PLAN-20260629-01` | `P2` | `Done` | 增加 query embedding 进程内短 TTL 缓存 | 2026-06-29 | `cbd00d8` |
 | `T-018` | `PLAN-20260629-01` | `P2` | `Todo` | 固化 RAG eval 性能门槛和趋势字段 | - | - |
 
 ## 新计划接入流程
@@ -561,6 +561,12 @@ scripts/rag_eval_gate.sh
   - TTL 过期后会重新生成 embedding。
   - embedding provider 报错时不会污染缓存，后续请求仍可正常重试。
   - 后端测试覆盖命中、过期和失败不缓存路径。
+- 完成记录：
+  - 完成日期：2026-06-29。
+  - 相关 commit：`cbd00d8`。
+  - 实现内容：新增 query embedding 短 TTL 进程内缓存，key 使用 provider、model 和 normalized query；缓存命中写入 retrieval diagnostics；embedding 失败不写缓存。
+  - 验证命令：`cd backend && conda run -n firstrag python -m unittest tests.test_retrieval_resilience -v`；`cd backend && conda run -n firstrag python -m unittest discover tests -v`；`cd backend && conda run -n firstrag python -m compileall app tests`；`scripts/acceptance_check.sh --skip-real-eval`；`cd frontend && npm run build`；`FIRSTRAG_EVAL_USERNAME=... FIRSTRAG_EVAL_PASSWORD=... scripts/rag_eval_gate.sh`。
+  - 真实 RAG eval：10/10 PASS，平均 sources 2.40，平均首 token 3456.01ms，平均总耗时 6.14s；报告 `docs/evals/latest_rag_eval_report.md`，历史记录 `docs/evals/runs/20260629_132659.json`。
 - 建议验证命令：
 
 ```bash
