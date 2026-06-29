@@ -19,6 +19,8 @@ import logging
 from collections.abc import Sequence
 from concurrent.futures import ThreadPoolExecutor
 from contextvars import ContextVar
+from threading import RLock
+from time import monotonic
 from time import perf_counter
 from typing import Any
 from uuid import UUID
@@ -37,6 +39,16 @@ from app.services.vectors.vector_index_service import get_vector_store
 
 logger = logging.getLogger(__name__)
 
+QUERY_EMBEDDING_PROVIDER = "zhipuai"
+QUERY_EMBEDDING_MODEL = "embedding-3"
+QUERY_EMBEDDING_CACHE_TTL_SECONDS = 300.0
+
+_QUERY_EMBEDDING_CACHE: dict[
+    tuple[str, str, str],
+    tuple[float, list[float]],
+] = {}
+_QUERY_EMBEDDING_CACHE_LOCK = RLock()
+
 _RETRIEVAL_DIAGNOSTICS: ContextVar[dict[str, Any] | None] = ContextVar(
     "retrieval_diagnostics",
     default=None,
@@ -50,6 +62,9 @@ def reset_retrieval_diagnostics() -> None:
         "vector_errors": [],
         "fulltext_degraded": False,
         "fulltext_errors": [],
+        "query_embedding_cache_hit": False,
+        "query_embedding_cache_key": "",
+        "query_embedding_cache_ttl_seconds": QUERY_EMBEDDING_CACHE_TTL_SECONDS,
         "vector_count": 0,
         "fulltext_count": 0,
         "fused_count": 0,
@@ -105,6 +120,59 @@ def record_retrieval_timing(name: str, started_at: float) -> None:
 
     timing = diagnostics.setdefault("timing", {})
     timing[f"{name}_ms"] = round((perf_counter() - started_at) * 1000, 2)
+
+
+def normalize_query_embedding_cache_text(query: str) -> str:
+    """归一化 query embedding 缓存 key 中的文本部分。"""
+    return " ".join(query.strip().lower().split())
+
+
+def build_query_embedding_cache_key(query: str) -> tuple[str, str, str]:
+    """构造 query embedding 缓存 key。"""
+    return (
+        QUERY_EMBEDDING_PROVIDER,
+        QUERY_EMBEDDING_MODEL,
+        normalize_query_embedding_cache_text(query),
+    )
+
+
+def clear_query_embedding_cache() -> None:
+    """清空 query embedding 进程内缓存，主要用于测试。"""
+    with _QUERY_EMBEDDING_CACHE_LOCK:
+        _QUERY_EMBEDDING_CACHE.clear()
+
+
+def get_query_embedding(query: str) -> list[float]:
+    """读取或生成 query embedding，成功结果写入短 TTL 进程内缓存。"""
+    cache_key = build_query_embedding_cache_key(query)
+    now = monotonic()
+
+    with _QUERY_EMBEDDING_CACHE_LOCK:
+        cached = _QUERY_EMBEDDING_CACHE.get(cache_key)
+        if cached is not None:
+            expires_at, embedding = cached
+            if expires_at > now:
+                update_retrieval_diagnostics(
+                    query_embedding_cache_hit=True,
+                    query_embedding_cache_key=":".join(cache_key),
+                )
+                return list(embedding)
+            _QUERY_EMBEDDING_CACHE.pop(cache_key, None)
+
+    update_retrieval_diagnostics(
+        query_embedding_cache_hit=False,
+        query_embedding_cache_key=":".join(cache_key),
+    )
+    embedding_model = ZhipuAIEmbeddings()
+    embedding = list(embedding_model.embed_query(query))
+
+    with _QUERY_EMBEDDING_CACHE_LOCK:
+        _QUERY_EMBEDDING_CACHE[cache_key] = (
+            now + QUERY_EMBEDDING_CACHE_TTL_SECONDS,
+            list(embedding),
+        )
+
+    return embedding
 
 
 def build_chroma_filter(
@@ -164,8 +232,7 @@ def get_vector_documents(
     embedding_started_at = perf_counter()
     try:
         # 外部预计算 embedding，绕过 ChromaDB query_texts 路径
-        embedding_model = ZhipuAIEmbeddings()
-        query_embedding = embedding_model.embed_query(query)
+        query_embedding = get_query_embedding(query)
     except Exception:
         logger.exception("查询向量生成失败，降级为空向量结果")
         add_vector_diagnostic_error("查询向量生成失败")
@@ -291,6 +358,12 @@ def merge_vector_diagnostics(diagnostics: dict[str, Any]) -> None:
     update_retrieval_diagnostics(
         vector_degraded=bool(diagnostics.get("vector_degraded")),
         vector_errors=list(diagnostics.get("vector_errors") or []),
+        query_embedding_cache_hit=bool(
+            diagnostics.get("query_embedding_cache_hit"),
+        ),
+        query_embedding_cache_key=str(
+            diagnostics.get("query_embedding_cache_key") or "",
+        ),
     )
 
 

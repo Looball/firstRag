@@ -8,6 +8,8 @@ from langchain_core.documents import Document
 
 from app.repositories.knowledge_chunk_repository import build_search_terms
 from app.services.retrieval.hybrid_retriever import (
+    QUERY_EMBEDDING_CACHE_TTL_SECONDS,
+    clear_query_embedding_cache,
     get_hybrid_documents,
     get_retrieval_diagnostics,
     get_vector_documents,
@@ -68,6 +70,10 @@ class FakeReranker:
 
 class RetrievalResilienceTests(unittest.TestCase):
     """验证向量检索异常不会破坏全文兜底与其它文件召回。"""
+
+    def setUp(self) -> None:
+        """清空进程内缓存，保证用例彼此独立。"""
+        clear_query_embedding_cache()
 
     def test_chinese_query_builds_keyword_fallback_terms(self) -> None:
         """连续中文问题应提取出可命中文档的关键词片段。"""
@@ -253,6 +259,126 @@ class RetrievalResilienceTests(unittest.TestCase):
         self.assertTrue(diagnostics["fulltext_degraded"])
         self.assertEqual(diagnostics["fulltext_errors"], ["全文粗召回失败"])
         self.assertIn("fulltext_ms", diagnostics["timing"])
+
+    def test_query_embedding_cache_hits_for_repeated_query(self) -> None:
+        """TTL 内重复 query 应复用缓存的 query embedding。"""
+        fulltext_doc = Document(
+            page_content="全文候选",
+            metadata={
+                "user_id": "6",
+                "file_id": "good-file",
+                "chunk_index": 1,
+                "retrieval_source": "fulltext",
+            },
+        )
+
+        with unittest.mock.patch(
+            "app.services.retrieval.hybrid_retriever.ZhipuAIEmbeddings",
+        ) as embedding_cls, unittest.mock.patch(
+            "app.services.retrieval.hybrid_retriever.get_vector_store",
+            return_value=FakeVectorStore(),
+        ), unittest.mock.patch(
+            "app.services.retrieval.hybrid_retriever.get_fulltext_documents",
+            return_value=[fulltext_doc],
+        ):
+            embedding_cls.return_value.embed_query.return_value = [0.1, 0.2]
+
+            get_hybrid_documents(
+                query="  Hello   World  ",
+                user_id=6,
+                file_ids=["good-file"],
+                k=5,
+                rerank=True,
+            )
+            get_hybrid_documents(
+                query="hello world",
+                user_id=6,
+                file_ids=["good-file"],
+                k=5,
+                rerank=True,
+            )
+
+        diagnostics = get_retrieval_diagnostics()
+
+        embedding_cls.return_value.embed_query.assert_called_once()
+        self.assertIsNotNone(diagnostics)
+        assert diagnostics is not None
+        self.assertTrue(diagnostics["query_embedding_cache_hit"])
+        self.assertEqual(
+            diagnostics["query_embedding_cache_key"],
+            "zhipuai:embedding-3:hello world",
+        )
+
+    def test_query_embedding_cache_expires(self) -> None:
+        """TTL 过期后应重新调用 embedding provider。"""
+        with unittest.mock.patch(
+            "app.services.retrieval.hybrid_retriever.ZhipuAIEmbeddings",
+        ) as embedding_cls, unittest.mock.patch(
+            "app.services.retrieval.hybrid_retriever.get_vector_store",
+            return_value=FakeVectorStore(),
+        ), unittest.mock.patch(
+            "app.services.retrieval.hybrid_retriever.get_fulltext_documents",
+            return_value=[],
+        ), unittest.mock.patch(
+            "app.services.retrieval.hybrid_retriever.monotonic",
+            side_effect=[
+                100.0,
+                100.0 + QUERY_EMBEDDING_CACHE_TTL_SECONDS + 1,
+            ],
+        ):
+            embedding_cls.return_value.embed_query.return_value = [0.1, 0.2]
+
+            get_hybrid_documents(
+                query="诉讼法的任务是什么",
+                user_id=6,
+                file_ids=["good-file"],
+                k=5,
+                rerank=True,
+            )
+            get_hybrid_documents(
+                query="诉讼法的任务是什么",
+                user_id=6,
+                file_ids=["good-file"],
+                k=5,
+                rerank=True,
+            )
+
+        diagnostics = get_retrieval_diagnostics()
+
+        self.assertEqual(embedding_cls.return_value.embed_query.call_count, 2)
+        self.assertIsNotNone(diagnostics)
+        assert diagnostics is not None
+        self.assertFalse(diagnostics["query_embedding_cache_hit"])
+
+    def test_query_embedding_failure_does_not_pollute_cache(self) -> None:
+        """embedding 生成失败不应写入缓存，后续请求仍可重试。"""
+        with unittest.mock.patch(
+            "app.services.retrieval.hybrid_retriever.ZhipuAIEmbeddings",
+        ) as embedding_cls, unittest.mock.patch(
+            "app.services.retrieval.hybrid_retriever.get_vector_store",
+            return_value=FakeVectorStore(),
+        ):
+            embedding_cls.return_value.embed_query.side_effect = [
+                RuntimeError("embedding timeout"),
+                [0.1, 0.2],
+            ]
+
+            failed_docs = get_vector_documents(
+                query="诉讼法的任务是什么",
+                user_id=6,
+                file_ids=["good-file"],
+                k=5,
+            )
+            retried_docs = get_vector_documents(
+                query="诉讼法的任务是什么",
+                user_id=6,
+                file_ids=["good-file"],
+                k=5,
+            )
+
+        self.assertEqual(failed_docs, [])
+        self.assertEqual(len(retried_docs), 1)
+        self.assertEqual(embedding_cls.return_value.embed_query.call_count, 2)
 
     def test_hybrid_retrieval_runs_coarse_recall_in_parallel(self) -> None:
         """vector 和 fulltext 粗召回应并行执行，避免串行等待。"""
