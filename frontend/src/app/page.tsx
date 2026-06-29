@@ -24,18 +24,12 @@ import {
 } from "@/lib/chat-workspace/constants";
 import {
   buildSessionTitle,
-  getAssistantContent,
-  getAssistantMessageId,
-  getChatSources,
   getConversationDiagnostics,
-  getRetrievalState,
-  getSseAnswerContent,
   getVectorIndexJobs,
   getVectorStatus,
   isAuthExpiredMessage,
   isVectorIndexJobDone,
   parseJsonValue,
-  parseSseBlock,
   parseVectorIndexHealth,
   removeLegacyInitialMessage,
   serializeRetrievalSettings,
@@ -46,6 +40,7 @@ import {
   toRetrievalSettings,
   wait,
 } from "@/lib/chat-workspace/utils";
+import { streamChatResponse } from "@/lib/chat-workspace/chat-stream";
 import type {
   BackendKnowledgeBase,
   ChatSession,
@@ -165,12 +160,6 @@ function getResponseErrorMessage(
 
     return message;
   }
-}
-
-function waitForNextPaint() {
-  return new Promise<void>((resolve) => {
-    requestAnimationFrame(() => resolve());
-  });
 }
 
 function renderInlineMarkdown(
@@ -2557,170 +2546,16 @@ export default function Home() {
         return;
       }
 
-      appendAssistantContent("");
-
-      const contentType = response.headers.get("Content-Type") || "";
-
-      if (contentType.includes("application/json")) {
-        const data = (await response.json()) as unknown;
-        const answer = getAssistantContent(data);
-        const sources = getChatSources(data);
-        const retrieval = getRetrievalState(data);
-        const messageId = getAssistantMessageId(data);
-
-        if (retrieval) {
-          setAssistantRetrieval(retrieval);
-        }
-        setAssistantMessageId(messageId);
-        setAssistantSources(sources);
-        setAssistantFallback(answer || "模型暂时没有返回内容。");
-        return;
-      }
-
-      if (!response.body) {
-        const answer = await response.text();
-        setAssistantFallback(answer || "模型暂时没有返回内容。");
-        return;
-      }
-
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      let streamedAnswer = "";
-      let sseBuffer = "";
-      const isSseStream = contentType.includes("text/event-stream");
-
-      const handleSseBlock = (block: string) => {
-        const { event, data } = parseSseBlock(block);
-
-        if (event === "retrieval") {
-          const retrieval = getRetrievalState(data);
-
-          if (retrieval) {
-            setAssistantRetrieval(retrieval);
-          }
-
-          return false;
-        }
-
-        if (event === "sources") {
-          setAssistantSources(getChatSources(data));
-          return false;
-        }
-
-        if (event === "answer") {
-          const answerContent = getSseAnswerContent(data);
-
-          if (answerContent) {
-            streamedAnswer += answerContent;
-            appendAssistantContent(answerContent);
-          }
-
-          return false;
-        }
-
-        if (event === "done") {
-          const parsedData = parseJsonValue(data);
-          const retrieval = getRetrievalState(parsedData);
-          const doneSources = getChatSources(parsedData);
-          const messageId = getAssistantMessageId(parsedData);
-
-          if (retrieval) {
-            setAssistantRetrieval(retrieval);
-          }
-
-          setAssistantMessageId(messageId);
-          setAssistantSources(doneSources);
+      await streamChatResponse(response, {
+        appendAssistantContent,
+        setAssistantFallback,
+        setAssistantMessageId,
+        setAssistantRetrieval,
+        setAssistantSources,
+        onDone: () => {
           void loadConversationDiagnostics(activeSessionId, { silent: true });
-
-          const doneAnswer = getAssistantContent(parsedData);
-
-          if (doneAnswer) {
-            if (!streamedAnswer) {
-              appendAssistantContent(doneAnswer);
-            } else if (doneAnswer !== streamedAnswer) {
-              setAssistantFallback(doneAnswer);
-            }
-          } else if (!streamedAnswer) {
-            setAssistantFallback("模型暂时没有返回内容。");
-          }
-
-          return true;
-        }
-
-        if (data) {
-          const answerContent = getSseAnswerContent(data);
-
-          if (answerContent) {
-            streamedAnswer += answerContent;
-            appendAssistantContent(answerContent);
-          }
-        }
-
-        return false;
-      };
-
-      while (true) {
-        const { done, value } = await reader.read();
-
-        if (done) {
-          break;
-        }
-
-        const chunk = decoder.decode(value, { stream: true });
-
-        if (chunk && isSseStream) {
-          sseBuffer += chunk;
-
-          while (true) {
-            const separatorIndex = sseBuffer.search(/\r?\n\r?\n/);
-
-            if (separatorIndex === -1) {
-              break;
-            }
-
-            const block = sseBuffer.slice(0, separatorIndex);
-            const separatorMatch = sseBuffer
-              .slice(separatorIndex)
-              .match(/^\r?\n\r?\n/);
-            sseBuffer = sseBuffer.slice(
-              separatorIndex + (separatorMatch?.[0].length || 2)
-            );
-
-            if (handleSseBlock(block)) {
-              await reader.cancel();
-              break;
-            }
-          }
-
-          await waitForNextPaint();
-          continue;
-        }
-
-        if (chunk) {
-          streamedAnswer += chunk;
-          appendAssistantContent(chunk);
-          await waitForNextPaint();
-        }
-      }
-
-      const finalChunk = decoder.decode();
-
-      if (finalChunk && isSseStream) {
-        sseBuffer += finalChunk;
-      } else if (finalChunk) {
-        streamedAnswer += finalChunk;
-        appendAssistantContent(finalChunk);
-        await waitForNextPaint();
-      }
-
-      if (isSseStream && sseBuffer.trim()) {
-        handleSseBlock(sseBuffer.trim());
-        await waitForNextPaint();
-      }
-
-      if (!streamedAnswer) {
-        setAssistantFallback("模型暂时没有返回内容。");
-      }
+        },
+      });
     } catch (error) {
       console.error(error);
       setSessionErrors((prev) => ({
