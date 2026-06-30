@@ -16,6 +16,7 @@ COPY backend/requirements.txt /app/backend/requirements.txt
 RUN pip install -r /app/backend/requirements.txt
 
 COPY backend /app/backend
+COPY scripts/migrate_db.py /app/scripts/migrate_db.py
 
 WORKDIR /app/backend
 

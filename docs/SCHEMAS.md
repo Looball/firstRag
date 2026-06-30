@@ -23,7 +23,8 @@
 数据库 SQL 位于 `backend/app/db/sql/`。当前项目尚未进入生产环境，已整理为
 `000_initial_schema.sql` 作为空库初始化基线；后续新增表、字段、索引或约束时，
 从 `001_xxx.sql` 开始新增增量 migration，不再把本地数据库完整导出文件直接覆盖
-为新的基线。
+为新的基线。使用 `scripts/migrate_db.py` 执行迁移时，脚本会自动维护
+`schema_migrations` 记录表，保存 migration 文件名、checksum、执行状态和耗时。
 
 ## PostgreSQL 字段摘要
 

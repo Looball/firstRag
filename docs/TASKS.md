@@ -92,8 +92,8 @@
 | `T-027` | `PLAN-20260630-01` | `P1` | `Done` | 增强 sources 展示与引用有用性标记 | 2026-06-30 | `ce66821` |
 | `T-028` | `PLAN-20260630-01` | `P2` | `Done` | 支持从真实问答沉淀 RAG eval case 草稿 | 2026-06-30 | `d523917` |
 | `T-029` | `PLAN-20260630-01` | `P2` | `Done` | 增加回答质量和检索表现看板雏形 | 2026-06-30 | `aa70530` |
-| `T-030` | `PLAN-20260630-02` | `P1` | `Doing` | 增加数据库迁移执行脚本 | - | - |
-| `T-031` | `PLAN-20260630-02` | `P1` | `Todo` | 接入 Docker Compose 初始化流程 | - | - |
+| `T-030` | `PLAN-20260630-02` | `P1` | `Done` | 增加数据库迁移执行脚本 | 2026-06-30 | 待补充 |
+| `T-031` | `PLAN-20260630-02` | `P1` | `Done` | 接入 Docker Compose 初始化流程 | 2026-06-30 | 待补充 |
 | `T-032` | `PLAN-20260630-02` | `P1` | `Todo` | 增加 GitHub Actions CI | - | - |
 | `T-033` | `PLAN-20260630-02` | `P2` | `Todo` | 强化本地验收脚本为发布前检查入口 | - | - |
 | `T-034` | `PLAN-20260630-02` | `P2` | `Todo` | 补充 README 截图和演示说明 | - | - |
@@ -916,7 +916,7 @@ ON message_feedback (rating, reason, created_at DESC);
 
 - 来源计划：`PLAN-20260630-01`
 - 优先级：`P1`
-- 状态：`Doing`
+- 状态：`Done`
 - 背景：当前回答已返回 sources 和 retrieval diagnostics，但用户只能被动查看引用，无法标记“哪些引用真的有用”。这会限制后续分析检索失败原因和 rerank 调参。
 - 目标：让用户能对回答中的单个 source 标记有用/无关，并在前端更清楚地展示来源文件、chunk、score 和 retrieval 来源。
 - 范围：
@@ -973,7 +973,7 @@ ON message_source_feedback (rating, created_at DESC);
 
 - 来源计划：`PLAN-20260630-01`
 - 优先级：`P2`
-- 状态：`Todo`
+- 状态：`Done`
 - 背景：当前 eval 体系已经可以持续追踪性能和回答结果，但 eval case 主要依赖人工维护。真实差评问题如果不能低成本进入 eval，会反复出现同类退化。
 - 目标：支持把一次真实问答和反馈转成 eval case 草稿，作为后续人工审核、补充 expected keywords 和批量评估的输入。
 - 范围：
@@ -1024,7 +1024,7 @@ ON message_source_feedback (rating, created_at DESC);
 
 - 来源计划：`PLAN-20260630-02`
 - 优先级：`P1`
-- 状态：`Doing`
+- 状态：`Done`
 - 背景：当前 `backend/app/db/sql/` 已维护基础建表 SQL 和增量 migration，但新数据库首次运行仍依赖人工按顺序执行 SQL，Docker Compose 和新环境验收存在不确定性。
 - 目标：提供一个可重复运行的数据库迁移入口，支持从空库初始化完整表结构，并能跳过已经应用的 migration。
 - 范围：
@@ -1042,18 +1042,27 @@ ON message_source_feedback (rating, created_at DESC);
   - 文档说明本地和 compose 环境下的执行方式。
 - 进展记录：
   - 2026-06-30：完成 SQL rebaseline，新增 `000_initial_schema.sql` 和 SQL 目录维护说明；历史增量 SQL 已合并进当前基线，后续结构变化从 `001_xxx.sql` 开始。
+- 完成记录：
+  - 完成日期：2026-06-30
+  - 相关 commit：待补充
+  - 新增 `scripts/migrate_db.py`，支持 `--list`、`--dry-run`、按编号执行 migration、自动维护 `schema_migrations` 和 checksum 校验。
+  - 新增 `backend/tests/test_migrate_db_script.py`，覆盖 migration 排序、跳过已执行项、checksum mismatch 和失败停止场景。
+  - 已同步更新 `README.md`、`docs/DEPLOYMENT.md`、`docs/SCHEMAS.md` 和 `backend/app/db/sql/README.md`。
+  - 已使用一次性 PostgreSQL 空库验证：首次执行应用 `000_initial_schema.sql`，二次 `--dry-run` 返回 skipped，并确认 `schema_migrations` 记录和 13 张业务表。
+  - 验证命令：`conda run -n firstrag python scripts/migrate_db.py --list`；`conda run -n firstrag python -m unittest backend.tests.test_migrate_db_script -v`；`conda run -n firstrag python -m compileall scripts/migrate_db.py backend/tests/test_migrate_db_script.py`；`cd backend && conda run -n firstrag python -m unittest discover tests -v`。
 - 建议验证命令：
 
 ```bash
 conda run -n firstrag python scripts/migrate_db.py --dry-run
-conda run -n firstrag python -m pytest backend/tests
+cd backend
+conda run -n firstrag python -m unittest discover tests -v
 ```
 
 ## T-031 接入 Docker Compose 初始化流程
 
 - 来源计划：`PLAN-20260630-02`
 - 优先级：`P1`
-- 状态：`Todo`
+- 状态：`Done`
 - 背景：当前 `docs/DEPLOYMENT.md` 明确说明 compose 不会自动创建业务基础表，新环境需要人工初始化数据库，影响项目可交付性。
 - 目标：让 Docker Compose 新环境具备清晰、低摩擦的数据库初始化路径，减少首次启动失败。
 - 范围：
@@ -1067,11 +1076,19 @@ conda run -n firstrag python -m pytest backend/tests
   - 重复执行初始化命令不会破坏已有数据。
   - `docs/DEPLOYMENT.md` 不再停留在“当前 compose 不会自动创建业务基础表”的未解决描述，而是给出明确流程。
   - 不把数据库密码、JWT、API Key 等敏感值写入日志或提交到仓库。
+- 完成记录：
+  - 完成日期：2026-06-30
+  - 相关 commit：待补充
+  - `docker-compose.yml` 新增 `migrate` service，复用 backend 镜像执行 `/app/scripts/migrate_db.py`。
+  - backend 和 worker 会等待 `postgres` 健康检查通过、`migrate` 成功退出后再启动。
+  - backend Dockerfile 已复制 `scripts/migrate_db.py` 到容器内，迁移脚本可访问 `/app/backend/app/db/sql/` 中的 SQL 文件。
+  - 已同步更新 `README.md` 与 `docs/DEPLOYMENT.md`，说明 `COMPOSE_DATABASE_URL`、`DATABASE_URL`、自动迁移和手动 dry-run 命令。
+  - 验证命令：`docker compose config --quiet`；`conda run -n firstrag python -m unittest backend.tests.test_migrate_db_script -v`；`conda run -n firstrag python -m compileall scripts/migrate_db.py backend/tests/test_migrate_db_script.py`。
 - 建议验证命令：
 
 ```bash
 docker compose config --quiet
-COMPOSE_DATABASE_URL=postgresql://firstrag:firstrag-password@postgres:5432/first_rag docker compose run --rm backend python /app/scripts/migrate_db.py --dry-run
+docker compose run --rm migrate python /app/scripts/migrate_db.py --dry-run
 ```
 
 ## T-032 增加 GitHub Actions CI

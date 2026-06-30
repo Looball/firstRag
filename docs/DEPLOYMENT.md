@@ -34,7 +34,32 @@ conda activate firstrag
 python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
-后端默认读取仓库根目录 `.env`。如果本地数据库为空，请先执行 `backend/app/db/sql/000_initial_schema.sql` 初始化当前完整 schema；后续数据库结构变化会从 `001_xxx.sql` 开始追加增量 migration。
+后端默认读取仓库根目录 `.env`。如果本地数据库为空，请先运行迁移脚本初始化当前完整 schema；后续数据库结构变化会从 `001_xxx.sql` 开始追加增量 migration。
+
+### 数据库初始化与迁移
+
+迁移脚本默认读取仓库根目录 `.env` 中的 `DATABASE_URL`，不会打印 `.env` 内容或数据库密码。
+
+查看本地 migration 文件：
+
+```bash
+conda run -n firstrag python scripts/migrate_db.py --list
+```
+
+查看当前数据库待执行 migration：
+
+```bash
+conda run -n firstrag python scripts/migrate_db.py --dry-run
+```
+
+执行迁移：
+
+```bash
+conda run -n firstrag python scripts/migrate_db.py
+```
+
+脚本会自动创建 `schema_migrations` 记录表。已执行文件的 checksum 如果发生变化，
+脚本会停止并提示不一致，避免继续执行后续 migration。
 
 ### 2. 启动前端
 
@@ -116,6 +141,7 @@ docker compose up --build
 | 服务 | 默认地址 | 说明 |
 | --- | --- | --- |
 | `postgres` | `localhost:5432` | PostgreSQL 16，数据保存在 named volume `postgres_data`。 |
+| `migrate` | 不暴露端口 | 执行 `scripts/migrate_db.py`，初始化或升级 PostgreSQL schema。 |
 | `backend` | `http://127.0.0.1:8000` | FastAPI 后端。 |
 | `frontend` | `http://localhost:3000` | Next.js 前端，容器内代理到 `http://backend:8000`。 |
 | `worker` | 不暴露端口 | 消费 `vector_index_jobs` 的向量化 worker。 |
@@ -135,6 +161,14 @@ compose 默认让后端和 worker 连接：
 postgresql://firstrag:firstrag-password@postgres:5432/first_rag
 ```
 
+compose 会在 `postgres` 健康检查通过后运行一次 `migrate` service。`backend` 和
+`worker` 会等待 `migrate` 成功退出后再启动。`migrate`、`backend` 和 `worker`
+都使用同一份 compose 内部数据库连接配置：
+
+```text
+DATABASE_URL=${COMPOSE_DATABASE_URL:-postgresql://firstrag:firstrag-password@postgres:5432/first_rag}
+```
+
 如需覆盖 compose 内数据库连接，使用 `COMPOSE_DATABASE_URL`，不要复用指向宿主机 `localhost` 的 `DATABASE_URL`：
 
 ```bash
@@ -147,11 +181,14 @@ docker compose up --build
 ```bash
 docker compose config --quiet
 docker compose up --build
-docker compose logs -f backend worker
+docker compose run --rm migrate python /app/scripts/migrate_db.py --dry-run
+docker compose logs -f migrate backend worker
 docker compose down
 ```
 
-当前 compose 不会自动创建业务基础表。新数据库首次运行前，需要执行 `backend/app/db/sql/000_initial_schema.sql` 初始化 `users`、`knowledge_bases`、`messages` 等业务表；后续如果补齐迁移执行脚本，应把该脚本接入 compose 或文档启动流程。
+新数据库首次运行时，`migrate` 会自动应用 `000_initial_schema.sql` 并创建
+`schema_migrations` 记录表。重复启动 compose 时，已应用且 checksum 一致的
+migration 会被跳过，不会破坏已有数据。
 
 ## 端口约定
 

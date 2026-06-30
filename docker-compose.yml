@@ -43,6 +43,20 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+
+  migrate:
+    build:
+      context: .
+      dockerfile: deploy/docker/backend.Dockerfile
+    restart: "no"
+    environment:
+      DATABASE_URL: ${COMPOSE_DATABASE_URL:-postgresql://firstrag:firstrag-password@postgres:5432/first_rag}
+    command: ["python", "/app/scripts/migrate_db.py"]
+    depends_on:
+      postgres:
+        condition: service_healthy
 
   worker:
     build:
@@ -64,6 +78,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
 
   frontend:
     build:

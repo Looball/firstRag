@@ -51,6 +51,13 @@ cp .env.example .env
 
 后端运行时会读取仓库根目录的 `.env`。
 
+初始化或升级 PostgreSQL schema：
+
+```bash
+conda run -n firstrag python scripts/migrate_db.py --dry-run
+conda run -n firstrag python scripts/migrate_db.py
+```
+
 ### 2. 启动后端
 
 ```bash
@@ -91,7 +98,7 @@ python -m app.workers.vector_index_worker
 docker compose up --build
 ```
 
-compose 会挂载 `uploads/`、`vector_db/` 和 `models/`，并默认让后端与 worker 连接 compose 内的 `postgres` 服务。首次使用新数据库时，先执行 `backend/app/db/sql/000_initial_schema.sql` 初始化完整 schema。更多细节见 `docs/DEPLOYMENT.md`。
+compose 会挂载 `uploads/`、`vector_db/` 和 `models/`，并默认让后端与 worker 连接 compose 内的 `postgres` 服务。启动时会先运行 `migrate` service 初始化或升级 PostgreSQL schema，成功后再启动后端和 worker。更多细节见 `docs/DEPLOYMENT.md`。
 
 ## 项目结构
 
