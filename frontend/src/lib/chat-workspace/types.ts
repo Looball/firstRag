@@ -6,6 +6,25 @@ export type Message = {
   errorMessage?: string | null;
   sources?: ChatSource[];
   retrieval?: RetrievalState;
+  feedback?: MessageFeedback | null;
+};
+
+export type MessageFeedbackRating = "positive" | "negative";
+
+export type MessageFeedbackReason =
+  | "irrelevant_sources"
+  | "missing_answer"
+  | "hallucination"
+  | "outdated_or_wrong"
+  | "too_slow"
+  | "format_issue"
+  | "other";
+
+export type MessageFeedback = {
+  id?: string;
+  rating: MessageFeedbackRating;
+  reason?: MessageFeedbackReason | null;
+  note?: string | null;
 };
 
 export type ChatSource = {
@@ -310,6 +329,13 @@ export type CreateConversationResponse = {
 
 export type ListMessagesResponse = {
   messages?: unknown;
+  detail?: string;
+  error?: string;
+  message?: string;
+};
+
+export type MessageFeedbackResponse = {
+  feedback?: unknown;
   detail?: string;
   error?: string;
   message?: string;

@@ -102,6 +102,13 @@ class CreateConversationTests(unittest.TestCase):
                     "error_message": None,
                     "sources": sources,
                     "retrieval": retrieval,
+                    "feedback_id": 7,
+                    "feedback_rating": "negative",
+                    "feedback_reason": "missing_answer",
+                    "feedback_note": "没有回答核心问题",
+                    "feedback_metadata": {"status": "completed"},
+                    "feedback_created_at": "2026-06-25T00:00:02+08:00",
+                    "feedback_updated_at": "2026-06-25T00:00:02+08:00",
                     "created_at": "2026-06-25T00:00:00+08:00",
                 }
             ],
@@ -115,6 +122,18 @@ class CreateConversationTests(unittest.TestCase):
         self.assertEqual(
             response.json()["messages"][0]["retrieval"],
             retrieval,
+        )
+        self.assertEqual(
+            response.json()["messages"][0]["feedback"],
+            {
+                "id": "7",
+                "rating": "negative",
+                "reason": "missing_answer",
+                "note": "没有回答核心问题",
+                "metadata": {"status": "completed"},
+                "created_at": "2026-06-25T00:00:02+08:00",
+                "updated_at": "2026-06-25T00:00:02+08:00",
+            },
         )
 
     def test_get_messages_returns_404_for_inaccessible_conversation(self) -> None:
@@ -133,6 +152,87 @@ class CreateConversationTests(unittest.TestCase):
         self.assertEqual(response.status_code, 404)
         self.assertEqual(response.json(), {"detail": "会话不存在"})
         get_messages.assert_not_called()
+
+    def test_submit_message_feedback_upserts_for_owned_assistant_message(
+        self,
+    ) -> None:
+        """用户可以对自己的助手消息提交或更新质量反馈。"""
+        with patch(
+            "app.api.conversations.get_user_assistant_message",
+            return_value={
+                "id": 42,
+                "role": "assistant",
+                "status": "completed",
+                "conversation_id": uuid4(),
+            },
+        ) as get_message, patch(
+            "app.api.conversations.upsert_message_feedback",
+            return_value={
+                "id": 9,
+                "user_id": 1,
+                "message_id": 42,
+                "rating": "negative",
+                "reason": "missing_answer",
+                "note": "没有回答核心问题",
+                "metadata": {"status": "completed"},
+                "created_at": "2026-06-25T00:00:02+08:00",
+                "updated_at": "2026-06-25T00:00:03+08:00",
+            },
+        ) as upsert_feedback:
+            response = self.client.post(
+                "/chat/messages/42/feedback",
+                json={
+                    "rating": "negative",
+                    "reason": "missing_answer",
+                    "note": " 没有回答核心问题 ",
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json()["success"])
+        self.assertEqual(response.json()["feedback"]["rating"], "negative")
+        self.assertEqual(response.json()["feedback"]["note"], "没有回答核心问题")
+        get_message.assert_called_once_with(1, 42)
+        upsert_feedback.assert_called_once_with(
+            user_id=1,
+            message_id=42,
+            rating="negative",
+            reason="missing_answer",
+            note="没有回答核心问题",
+            metadata={"status": "completed"},
+        )
+
+    def test_submit_message_feedback_returns_404_for_inaccessible_message(
+        self,
+    ) -> None:
+        """跨用户或非助手消息不能提交反馈。"""
+        with patch(
+            "app.api.conversations.get_user_assistant_message",
+            return_value=None,
+        ), patch(
+            "app.api.conversations.upsert_message_feedback",
+        ) as upsert_feedback:
+            response = self.client.post(
+                "/chat/messages/42/feedback",
+                json={"rating": "positive"},
+            )
+
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(response.json(), {"detail": "消息不存在"})
+        upsert_feedback.assert_not_called()
+
+    def test_submit_message_feedback_rejects_invalid_reason(self) -> None:
+        """反馈原因必须使用受控枚举，避免脏数据扩散。"""
+        with patch(
+            "app.api.conversations.get_user_assistant_message",
+        ) as get_message:
+            response = self.client.post(
+                "/chat/messages/42/feedback",
+                json={"rating": "negative", "reason": "bad_reason"},
+            )
+
+        self.assertEqual(response.status_code, 422)
+        get_message.assert_not_called()
 
     def test_get_conversation_diagnostics_returns_rag_debug_summary(
         self,

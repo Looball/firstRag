@@ -56,7 +56,7 @@
 | `PLAN-20260628-05` | 2026-06-28 | `Done` | 修正 knowledge profile cache diagnostics 在真实 RAG eval 报告中缺失的问题。 | `T-013` |
 | `PLAN-20260629-01` | 2026-06-29 | `Doing` | RAG 检索性能二阶段优化，继续降低首 token 前等待时间，优先处理 settings 读取、混合检索和重复查询开销。 | `T-014` - `T-018` |
 | `PLAN-20260629-02` | 2026-06-29 | `Done` | 基于 `code-review-skill` 仓库级审查，整理安全边界、可维护性和测试补强的后续修改计划。 | `T-019` - `T-025` |
-| `PLAN-20260630-01` | 2026-06-30 | `Todo` | 建立 RAG 回答质量反馈闭环，把真实用户反馈沉淀为后续 eval 和检索优化依据。 | `T-026` - `T-029` |
+| `PLAN-20260630-01` | 2026-06-30 | `Doing` | 建立 RAG 回答质量反馈闭环，把真实用户反馈沉淀为后续 eval 和检索优化依据。 | `T-026` - `T-029` |
 
 ## 任务总览
 
@@ -87,7 +87,7 @@
 | `T-023` | `PLAN-20260629-02` | `P2` | `Done` | 拆分 RAG service 的路由、诊断和引用序列化职责 | 2026-06-30 | `36ad4ee` |
 | `T-024` | `PLAN-20260629-02` | `P2` | `Done` | 建立权限、上传和流式代理的回归测试矩阵 | 2026-06-29 | `49e0ba7` |
 | `T-025` | `PLAN-20260629-02` | `P1` | `Done` | 引入 React Query 与 Zod 集中前端数据请求层 | 2026-06-29 | `986a9a3` |
-| `T-026` | `PLAN-20260630-01` | `P1` | `Todo` | 增加聊天回答质量反馈闭环 | - | - |
+| `T-026` | `PLAN-20260630-01` | `P1` | `Done` | 增加聊天回答质量反馈闭环 | 2026-06-30 | `待提交` |
 | `T-027` | `PLAN-20260630-01` | `P1` | `Todo` | 增强 sources 展示与引用有用性标记 | - | - |
 | `T-028` | `PLAN-20260630-01` | `P2` | `Todo` | 支持从真实问答沉淀 RAG eval case 草稿 | - | - |
 | `T-029` | `PLAN-20260630-01` | `P2` | `Todo` | 增加回答质量和检索表现看板雏形 | - | - |
@@ -109,7 +109,7 @@
 
 - 来源计划：`PLAN-YYYYMMDD-NN`
 - 优先级：`P1`
-- 状态：`Todo`
+- 状态：`Doing`
 - 目标：
 - 范围：
 - 验收标准：
@@ -566,7 +566,7 @@ scripts/rag_eval_gate.sh
 
 - 来源计划：`PLAN-20260629-01`
 - 优先级：`P2`
-- 状态：`Todo`
+- 状态：`Done`
 - 目标：减少短时间内重复问题、eval 重跑和多轮相近测试对 embedding provider 的重复调用。
 - 范围：缓存 query embedding，不缓存最终答案或用户私密内容；key 使用 provider、model 和 normalized query；embedding 生成失败不写入缓存；不新增 Redis。
 - 验收标准：
@@ -896,6 +896,14 @@ ON message_feedback (rating, reason, created_at DESC);
   - 前端刷新会话后能恢复已提交的反馈状态。
   - 后端测试覆盖正反馈、负反馈、原因校验、跨用户隔离和重复提交更新。
   - 前端测试覆盖按钮状态、提交失败回滚或提示、已反馈状态回显。
+- 完成记录：
+  - 完成日期：2026-06-30
+  - 相关 commit：`待提交`
+  - 新增 `POST /chat/messages/{message_id}/feedback`，提交前校验当前用户可访问的 assistant message；同一用户同一消息使用 `message_feedback(user_id, message_id)` 唯一约束 upsert。
+  - 历史消息接口返回当前用户的 `feedback` 字段，前端刷新会话后可回显已提交反馈。
+  - 前端 assistant message 增加“有用 / 有问题”反馈入口；负反馈支持选择原因和填写备注。
+  - 已同步更新 `docs/API.md` 与 `docs/SCHEMAS.md`。
+  - 验证命令：`cd backend && conda run -n firstrag python -m unittest tests.test_conversations -v`；`cd backend && conda run -n firstrag python -m compileall app tests/test_conversations.py`；`cd backend && conda run -n firstrag python -m unittest discover tests -v`；`cd frontend && npm run test -- chat-workspace/api.test.ts`；`cd frontend && npm run test`；`cd frontend && npm run lint`；`cd frontend && npm run build`。
 
 ## T-027 增强 sources 展示与引用有用性标记
 

@@ -40,6 +40,8 @@ import type {
   KnowledgeBaseRetrievalSettings,
   KnowledgeFile,
   Message,
+  MessageFeedbackReason,
+  MessageFeedbackRating,
   MessageDiagnostic,
   RetrievalMode,
   RetrievalState,
@@ -48,6 +50,19 @@ import type {
 } from "@/lib/chat-workspace/types";
 
 const VECTOR_INDEX_HEALTH_QUERY_KEY = ["chat-workspace", "vector-index-health"] as const;
+
+const MESSAGE_FEEDBACK_REASON_OPTIONS: Array<{
+  value: MessageFeedbackReason;
+  label: string;
+}> = [
+  { value: "missing_answer", label: "没有答到点" },
+  { value: "irrelevant_sources", label: "引用不相关" },
+  { value: "hallucination", label: "疑似幻觉" },
+  { value: "outdated_or_wrong", label: "内容错误或过时" },
+  { value: "too_slow", label: "回答太慢" },
+  { value: "format_issue", label: "格式不好" },
+  { value: "other", label: "其他" },
+];
 
 function renderInlineMarkdown(
   text: string,
@@ -405,6 +420,17 @@ export default function Home() {
     useState(false);
   const [isFileManagerOpen, setIsFileManagerOpen] = useState(false);
   const [newKnowledgeBaseName, setNewKnowledgeBaseName] = useState("");
+  const [activeFeedbackMessageKey, setActiveFeedbackMessageKey] = useState("");
+  const [feedbackReasonDrafts, setFeedbackReasonDrafts] = useState<
+    Record<string, MessageFeedbackReason>
+  >({});
+  const [feedbackNoteDrafts, setFeedbackNoteDrafts] = useState<
+    Record<string, string>
+  >({});
+  const [submittingFeedback, setSubmittingFeedback] = useState<
+    Record<string, boolean>
+  >({});
+  const [feedbackErrors, setFeedbackErrors] = useState<Record<string, string>>({});
 
   const bottomRef = useRef<HTMLDivElement | null>(null);
   const messagesContainerRef = useRef<HTMLDivElement | null>(null);
@@ -1440,6 +1466,79 @@ export default function Home() {
     }
   }
 
+  async function handleSubmitMessageFeedback({
+    sessionId,
+    messageKey,
+    messageId,
+    rating,
+    reason,
+    note,
+  }: {
+    sessionId: string;
+    messageKey: string;
+    messageId?: string;
+    rating: MessageFeedbackRating;
+    reason?: MessageFeedbackReason | null;
+    note?: string | null;
+  }) {
+    if (!messageId) {
+      setFeedbackErrors((prev) => ({
+        ...prev,
+        [messageKey]: "这条回答还没有保存完成，稍后再反馈。",
+      }));
+      return;
+    }
+
+    setSubmittingFeedback((prev) => ({
+      ...prev,
+      [messageKey]: true,
+    }));
+    setFeedbackErrors((prev) => ({
+      ...prev,
+      [messageKey]: "",
+    }));
+
+    try {
+      const feedback = await chatApi.submitMessageFeedback(messageId, {
+        rating,
+        reason: rating === "negative" ? reason || "other" : null,
+        note: rating === "negative" ? note?.trim() || null : null,
+      });
+
+      setSessions((prev) =>
+        prev.map((session) =>
+          session.id === sessionId
+            ? {
+                ...session,
+                messages: session.messages.map((message) =>
+                  message.id === messageId
+                    ? {
+                        ...message,
+                        feedback,
+                      }
+                    : message
+                ),
+              }
+            : session
+        )
+      );
+      setActiveFeedbackMessageKey((current) =>
+        current === messageKey ? "" : current
+      );
+    } catch (error) {
+      setFeedbackErrors((prev) => ({
+        ...prev,
+        [messageKey]:
+          error instanceof Error ? error.message : "保存反馈失败，请稍后再试。",
+      }));
+    } finally {
+      setSubmittingFeedback((prev) => ({
+        ...prev,
+        [messageKey]: false,
+      }));
+    }
+  }
+
   async function loadConversationDiagnostics(
     conversationId: string,
     options: { silent?: boolean } = {}
@@ -2121,6 +2220,18 @@ export default function Home() {
                   message.retrieval?.need_retrieval === true &&
                   message.retrieval.source_count === 0 &&
                   !shouldShowSources;
+                const feedbackReason =
+                  feedbackReasonDrafts[messageKey] ||
+                  message.feedback?.reason ||
+                  "missing_answer";
+                const feedbackNote =
+                  feedbackNoteDrafts[messageKey] ?? message.feedback?.note ?? "";
+                const isFeedbackPanelOpen =
+                  activeFeedbackMessageKey === messageKey;
+                const isFeedbackSubmitting = Boolean(
+                  submittingFeedback[messageKey]
+                );
+                const feedbackError = feedbackErrors[messageKey] || "";
 
                 return (
                   <div
@@ -2252,30 +2363,138 @@ export default function Home() {
                         )}
 
                       {message.role === "assistant" && message.content && (
-                        <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-[#d6dedb] pt-3">
-                          <button
-                            type="button"
-                            onClick={() =>
-                              handleToggleDiagnostics(
-                                currentSession.id,
-                                messageKey
-                              )
-                            }
-                            className="font-utility text-[10px] font-semibold uppercase text-[#64716d] transition hover:text-[#176b62]"
-                          >
-                            {isDiagnosticExpanded ? "收起诊断" : "诊断"}
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() =>
-                              handleCopyMessage(messageKey, message.content)
-                            }
-                            className="font-utility text-[10px] font-semibold uppercase text-[#64716d] transition hover:text-[#176b62]"
-                          >
-                            {copiedMessageKey === messageKey
-                              ? "Copied"
-                              : "Copy Response"}
-                          </button>
+                        <div className="mt-4 border-t border-[#d6dedb] pt-3">
+                          <div className="flex flex-wrap items-center justify-between gap-3">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <button
+                                type="button"
+                                disabled={isFeedbackSubmitting}
+                                onClick={() =>
+                                  handleSubmitMessageFeedback({
+                                    sessionId: currentSession.id,
+                                    messageKey,
+                                    messageId: message.id,
+                                    rating: "positive",
+                                  })
+                                }
+                                className={`font-utility border px-2 py-1 text-[10px] font-semibold uppercase transition ${
+                                  message.feedback?.rating === "positive"
+                                    ? "border-[#176b62] bg-[#dcebe6] text-[#176b62]"
+                                    : "border-[#cbd5d1] text-[#64716d] hover:border-[#176b62] hover:text-[#176b62]"
+                                }`}
+                              >
+                                有用
+                              </button>
+                              <button
+                                type="button"
+                                disabled={isFeedbackSubmitting}
+                                onClick={() =>
+                                  setActiveFeedbackMessageKey((current) =>
+                                    current === messageKey ? "" : messageKey
+                                  )
+                                }
+                                className={`font-utility border px-2 py-1 text-[10px] font-semibold uppercase transition ${
+                                  message.feedback?.rating === "negative"
+                                    ? "border-[#e36b4f] bg-[#fff1ed] text-[#9b3c29]"
+                                    : "border-[#cbd5d1] text-[#64716d] hover:border-[#e36b4f] hover:text-[#9b3c29]"
+                                }`}
+                              >
+                                有问题
+                              </button>
+                            </div>
+                            <div className="flex flex-wrap items-center gap-3">
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  handleToggleDiagnostics(
+                                    currentSession.id,
+                                    messageKey
+                                  )
+                                }
+                                className="font-utility text-[10px] font-semibold uppercase text-[#64716d] transition hover:text-[#176b62]"
+                              >
+                                {isDiagnosticExpanded ? "收起诊断" : "诊断"}
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  handleCopyMessage(messageKey, message.content)
+                                }
+                                className="font-utility text-[10px] font-semibold uppercase text-[#64716d] transition hover:text-[#176b62]"
+                              >
+                                {copiedMessageKey === messageKey
+                                  ? "Copied"
+                                  : "Copy Response"}
+                              </button>
+                            </div>
+                          </div>
+                          {isFeedbackPanelOpen && (
+                            <div className="mt-3 grid gap-2 border border-[#d5ded9] bg-[#fcfdfb] p-3">
+                              <div className="grid gap-2 md:grid-cols-[180px_minmax(0,1fr)]">
+                                <select
+                                  value={feedbackReason}
+                                  onChange={(event) =>
+                                    setFeedbackReasonDrafts((prev) => ({
+                                      ...prev,
+                                      [messageKey]: event.target
+                                        .value as MessageFeedbackReason,
+                                    }))
+                                  }
+                                  className="border border-[#cbd5d1] bg-white px-2 py-2 text-xs text-[#26312f]"
+                                >
+                                  {MESSAGE_FEEDBACK_REASON_OPTIONS.map(
+                                    (option) => (
+                                      <option
+                                        key={option.value}
+                                        value={option.value}
+                                      >
+                                        {option.label}
+                                      </option>
+                                    )
+                                  )}
+                                </select>
+                                <input
+                                  value={feedbackNote}
+                                  onChange={(event) =>
+                                    setFeedbackNoteDrafts((prev) => ({
+                                      ...prev,
+                                      [messageKey]: event.target.value,
+                                    }))
+                                  }
+                                  maxLength={1000}
+                                  placeholder="可选补充说明"
+                                  className="border border-[#cbd5d1] bg-white px-2 py-2 text-xs text-[#26312f]"
+                                />
+                              </div>
+                              <div className="flex flex-wrap items-center justify-between gap-2">
+                                <p className="text-xs text-[#9b3c29]">
+                                  {feedbackError}
+                                </p>
+                                <button
+                                  type="button"
+                                  disabled={isFeedbackSubmitting}
+                                  onClick={() =>
+                                    handleSubmitMessageFeedback({
+                                      sessionId: currentSession.id,
+                                      messageKey,
+                                      messageId: message.id,
+                                      rating: "negative",
+                                      reason: feedbackReason,
+                                      note: feedbackNote,
+                                    })
+                                  }
+                                  className="font-utility border border-[#e36b4f] px-3 py-2 text-[10px] font-semibold uppercase text-[#9b3c29] transition hover:bg-[#fff1ed] disabled:cursor-not-allowed disabled:opacity-60"
+                                >
+                                  {isFeedbackSubmitting ? "保存中" : "提交反馈"}
+                                </button>
+                              </div>
+                            </div>
+                          )}
+                          {!isFeedbackPanelOpen && feedbackError && (
+                            <p className="mt-2 text-xs text-[#9b3c29]">
+                              {feedbackError}
+                            </p>
+                          )}
                         </div>
                       )}
                     </article>

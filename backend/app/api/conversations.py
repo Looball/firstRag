@@ -12,9 +12,14 @@ from app.repositories.conversation_repository import (
     soft_delete_conversation,
 )
 from app.repositories.knowledge_base_repository import knowledge_base_exists
+from app.repositories.message_feedback_repository import (
+    get_user_assistant_message,
+    upsert_message_feedback,
+)
 from app.repositories.message_repository import get_user_conversation_messages
 from app.schemas.conversation import (
     CreateConversationRequest,
+    MessageFeedbackRequest,
     RenameConversationRequest,
 )
 
@@ -63,6 +68,22 @@ def serialize_source_preview(source: dict) -> dict:
         "fulltext_score": source.get("fulltext_score"),
         "rrf_score": source.get("rrf_score"),
         "rerank_score": source.get("rerank_score"),
+    }
+
+
+def serialize_message_feedback(row: dict) -> dict | None:
+    """序列化当前用户对消息的质量反馈。"""
+    if not row.get("feedback_id"):
+        return None
+
+    return {
+        "id": str(row["feedback_id"]),
+        "rating": row["feedback_rating"],
+        "reason": row["feedback_reason"],
+        "note": row["feedback_note"],
+        "metadata": row.get("feedback_metadata") or {},
+        "created_at": row["feedback_created_at"],
+        "updated_at": row["feedback_updated_at"],
     }
 
 
@@ -191,10 +212,48 @@ def get_messages(
                 "error_message": row["error_message"],
                 "sources": row["sources"] or [],
                 "retrieval": serialize_message_retrieval(row),
+                "feedback": serialize_message_feedback(row),
                 "created_at": row["created_at"],
             }
             for row in rows
         ],
+    }
+
+
+@router.post("/messages/{message_id}/feedback")
+def submit_message_feedback(
+    message_id: int,
+    req: MessageFeedbackRequest,
+    user_id: int = Depends(get_current_user_id),
+):
+    """提交或更新当前用户对助手消息的质量反馈。"""
+    message = get_user_assistant_message(user_id, message_id)
+    if message is None:
+        raise HTTPException(status_code=404, detail="消息不存在")
+
+    feedback = upsert_message_feedback(
+        user_id=user_id,
+        message_id=message_id,
+        rating=req.rating,
+        reason=req.reason,
+        note=req.note.strip() if req.note else None,
+        metadata={"status": message["status"]},
+    )
+    if feedback is None:
+        raise HTTPException(status_code=500, detail="保存反馈失败")
+
+    return {
+        "success": True,
+        "feedback": {
+            "id": str(feedback["id"]),
+            "message_id": str(feedback["message_id"]),
+            "rating": feedback["rating"],
+            "reason": feedback["reason"],
+            "note": feedback["note"],
+            "metadata": feedback.get("metadata") or {},
+            "created_at": feedback["created_at"],
+            "updated_at": feedback["updated_at"],
+        },
     }
 
 

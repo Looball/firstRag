@@ -94,14 +94,24 @@ def get_user_conversation_messages(
             m.error_message,
             m.sources,
             m.retrieval,
-            m.created_at
+            m.created_at,
+            mf.id AS feedback_id,
+            mf.rating AS feedback_rating,
+            mf.reason AS feedback_reason,
+            mf.note AS feedback_note,
+            mf.metadata AS feedback_metadata,
+            mf.created_at AS feedback_created_at,
+            mf.updated_at AS feedback_updated_at
         FROM messages AS m
         JOIN conversations AS c
           ON c.id = m.conversation_id
+        LEFT JOIN message_feedback AS mf
+          ON mf.message_id = m.id
+         AND mf.user_id = %s
         WHERE c.id = %s
           AND c.user_id = %s
           AND c.deleted_at IS NULL
         ORDER BY m.created_at ASC, m.id ASC;
         """,
-        (conversation_id, user_id),
+        (user_id, conversation_id, user_id),
     )

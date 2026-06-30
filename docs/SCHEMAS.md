@@ -14,6 +14,7 @@
 | `knowledge_file_chunks` | 文本分块正文、metadata、全文检索索引和索引版本。 |
 | `conversations` | 会话，属于某个知识库。 |
 | `messages` | 会话消息，保存 role、content、status、sources、retrieval。 |
+| `message_feedback` | 用户对 assistant message 的回答质量反馈，使用 `user_id + message_id` 唯一约束，不使用外键。 |
 | `vector_index_jobs` | 向量化任务队列，支持租约、重试、取消和并发 worker。 |
 | `user_llm_settings` | 当前用户生效模型设置。 |
 | `user_llm_provider_credentials` | 按厂商保存的加密 API Key。 |
@@ -29,6 +30,7 @@
 | `ChatRequest` | `conversation_id`, `knowledge_base_id`, `message` | 聊天。 |
 | `CreateConversationRequest` | `title` | 新建会话。 |
 | `RenameConversationRequest` | `title` | 重命名会话。 |
+| `MessageFeedbackRequest` | `rating`, `reason`, `note` | 创建或更新助手消息质量反馈。 |
 | `CreateKnowledgeBaseRequest` | `name` | 新建知识库，1 到 50 字符。 |
 | `UpdateRetrievalSettingsRequest` | `retrieval_mode`, `enable_query_router`, `enable_rerank`, `top_k`, `vector_top_k`, `fulltext_top_k`, `rrf_k`, `rerank_score_threshold` | 更新知识库检索策略。 |
 | `UpdateUserLLMSettingsRequest` | `credential_mode`, `provider`, `model`, `base_url`, `api_key`, `temperature`, `max_tokens`, `timeout_seconds`, `max_retries` | 更新或测试用户模型设置。 |
@@ -79,6 +81,37 @@
 `llm_need_retrieval` 表示 Router LLM 的原始判断；
 `override_applied` 与 `override_reason` 表示后端规则是否覆盖了 LLM 判断，
 例如问题关键词命中当前知识库文件画像时强制检索。
+
+## 消息反馈结构
+
+`message_feedback.rating` 当前使用：
+
+- `positive`
+- `negative`
+
+`message_feedback.reason` 当前使用：
+
+- `irrelevant_sources`
+- `missing_answer`
+- `hallucination`
+- `outdated_or_wrong`
+- `too_slow`
+- `format_issue`
+- `other`
+
+历史消息接口会把当前用户对消息的反馈序列化到 `messages[].feedback`：
+
+```json
+{
+  "id": "7",
+  "rating": "negative",
+  "reason": "missing_answer",
+  "note": "没有回答核心问题",
+  "metadata": {
+    "status": "completed"
+  }
+}
+```
 
 ## 向量化任务状态
 

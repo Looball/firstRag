@@ -13,6 +13,10 @@ import type {
   KnowledgeBaseRetrievalSettings,
   KnowledgeFile,
   ListMessagesResponse,
+  MessageFeedback,
+  MessageFeedbackReason,
+  MessageFeedbackResponse,
+  MessageFeedbackRating,
   MessageDiagnostic,
   RetrievalSettingsResponse,
   UploadKnowledgeFilesResponse,
@@ -30,6 +34,7 @@ import {
   toChatSession,
   toKnowledgeBase,
   toKnowledgeFile,
+  toMessageFeedback,
   toMessages,
   toRetrievalSettings,
 } from "./utils";
@@ -284,6 +289,36 @@ export async function listConversationMessages(conversationId: string) {
   return Array.isArray(data.messages)
     ? removeLegacyInitialMessage(toMessages(data.messages))
     : [];
+}
+
+export async function submitMessageFeedback(
+  messageId: string,
+  feedback: {
+    rating: MessageFeedbackRating;
+    reason?: MessageFeedbackReason | null;
+    note?: string | null;
+  },
+) {
+  const data = await authenticatedJson<MessageFeedbackResponse>(
+    `/api/chat/messages/${encodeURIComponent(messageId)}/feedback`,
+    {
+      method: "POST",
+      headers: jsonHeaders(),
+      body: JSON.stringify({
+        rating: feedback.rating,
+        reason: feedback.reason || null,
+        note: feedback.note || null,
+      }),
+    },
+    { fallbackMessage: "保存反馈失败，请稍后再试。" },
+  );
+  const parsedFeedback = toMessageFeedback(data.feedback);
+
+  if (!parsedFeedback) {
+    throw new Error("反馈响应格式异常。");
+  }
+
+  return parsedFeedback satisfies MessageFeedback;
 }
 
 export async function listKnowledgeBasesAndSessions() {

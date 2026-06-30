@@ -7,9 +7,11 @@ import {
 import {
   createConversation,
   listAllKnowledgeFiles,
+  listConversationMessages,
   listKnowledgeBasesAndSessions,
   loadVectorIndexHealth,
   postChatMessage,
+  submitMessageFeedback,
 } from "./api";
 
 vi.mock("@/lib/frontend-api", () => ({
@@ -171,6 +173,73 @@ describe("chat workspace api", () => {
         }),
       },
       { fallbackMessage: "请求失败了，请稍后再试。" },
+    );
+  });
+
+  it("normalizes persisted message feedback from history", async () => {
+    authenticatedJsonMock.mockResolvedValueOnce({
+      messages: [
+        {
+          id: "42",
+          role: "assistant",
+          content: "回答",
+          feedback: {
+            id: "7",
+            rating: "negative",
+            reason: "missing_answer",
+            note: "没有回答核心问题",
+          },
+        },
+      ],
+    });
+
+    await expect(listConversationMessages("conversation-1")).resolves.toEqual([
+      expect.objectContaining({
+        id: "42",
+        feedback: {
+          id: "7",
+          rating: "negative",
+          reason: "missing_answer",
+          note: "没有回答核心问题",
+        },
+      }),
+    ]);
+  });
+
+  it("submits message feedback through the workspace API", async () => {
+    authenticatedJsonMock.mockResolvedValueOnce({
+      feedback: {
+        id: "9",
+        rating: "negative",
+        reason: "missing_answer",
+        note: "没有回答核心问题",
+      },
+    });
+
+    await expect(
+      submitMessageFeedback("42", {
+        rating: "negative",
+        reason: "missing_answer",
+        note: "没有回答核心问题",
+      }),
+    ).resolves.toEqual({
+      id: "9",
+      rating: "negative",
+      reason: "missing_answer",
+      note: "没有回答核心问题",
+    });
+    expect(authenticatedJsonMock).toHaveBeenCalledWith(
+      "/api/chat/messages/42/feedback",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          rating: "negative",
+          reason: "missing_answer",
+          note: "没有回答核心问题",
+        }),
+      },
+      { fallbackMessage: "保存反馈失败，请稍后再试。" },
     );
   });
 });

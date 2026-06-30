@@ -15,6 +15,9 @@ import type {
   LatestIndexJob,
   LatestIndexJobStatus,
   Message,
+  MessageFeedback,
+  MessageFeedbackRating,
+  MessageFeedbackReason,
   MessageDiagnostic,
   RetrievalDiagnostics,
   RetrievalMode,
@@ -112,6 +115,52 @@ export function buildSessionTitle(input: string) {
 }
 
 
+const MESSAGE_FEEDBACK_RATINGS = new Set<MessageFeedbackRating>([
+  "positive",
+  "negative",
+]);
+
+const MESSAGE_FEEDBACK_REASONS = new Set<MessageFeedbackReason>([
+  "irrelevant_sources",
+  "missing_answer",
+  "hallucination",
+  "outdated_or_wrong",
+  "too_slow",
+  "format_issue",
+  "other",
+]);
+
+export function toMessageFeedback(value: unknown): MessageFeedback | null {
+  if (typeof value !== "object" || value === null) {
+    return null;
+  }
+
+  const candidate = value as Record<string, unknown>;
+  const rating = candidate.rating;
+
+  if (
+    typeof rating !== "string" ||
+    !MESSAGE_FEEDBACK_RATINGS.has(rating as MessageFeedbackRating)
+  ) {
+    return null;
+  }
+
+  const reason = candidate.reason;
+  const note = candidate.note;
+
+  return {
+    ...(typeof candidate.id === "string" ? { id: candidate.id } : {}),
+    rating: rating as MessageFeedbackRating,
+    reason:
+      typeof reason === "string" &&
+      MESSAGE_FEEDBACK_REASONS.has(reason as MessageFeedbackReason)
+        ? (reason as MessageFeedbackReason)
+        : null,
+    note: typeof note === "string" ? note : null,
+  };
+}
+
+
 export function toMessage(value: unknown): Message | null {
   if (typeof value !== "object" || value === null) {
     return null;
@@ -145,6 +194,7 @@ export function toMessage(value: unknown): Message | null {
       : candidate.error_message === null
         ? null
         : undefined;
+  const feedback = toMessageFeedback(candidate.feedback);
 
   return {
     ...(id ? { id } : {}),
@@ -154,6 +204,7 @@ export function toMessage(value: unknown): Message | null {
     ...(errorMessage !== undefined ? { errorMessage } : {}),
     ...(sources.length > 0 ? { sources } : {}),
     ...(retrieval ? { retrieval } : {}),
+    ...(feedback ? { feedback } : {}),
   };
 }
 

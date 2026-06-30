@@ -167,6 +167,31 @@ Authorization: Bearer <access_token>
 | `DELETE` | `/chat/knowledge-bases/{knowledge_base_id}/conversations/{conversation_id}` | 软删除会话。 |
 | `GET` | `/chat/conversations/{conversation_id}/messages` | 会话消息列表。 |
 | `GET` | `/chat/conversations/{conversation_id}/diagnostics` | 会话 RAG 诊断。 |
+| `POST` | `/chat/messages/{message_id}/feedback` | 创建或更新助手消息质量反馈。 |
+
+### 消息质量反馈
+
+`POST /chat/messages/{message_id}/feedback` 只能提交当前用户可访问的 assistant message 反馈。资源不存在、跨用户或非助手消息统一返回 `404`。
+
+请求体：
+
+```json
+{
+  "rating": "negative",
+  "reason": "missing_answer",
+  "note": "没有回答核心问题"
+}
+```
+
+字段说明：
+
+| 字段 | 说明 |
+| --- | --- |
+| `rating` | 必填，`positive` 或 `negative`。 |
+| `reason` | 可选，负反馈原因，支持 `irrelevant_sources`、`missing_answer`、`hallucination`、`outdated_or_wrong`、`too_slow`、`format_issue`、`other`。 |
+| `note` | 可选，1000 字符以内的补充说明。 |
+
+同一用户对同一消息重复提交时执行 upsert。`GET /chat/conversations/{conversation_id}/messages` 会在消息对象中返回当前用户的 `feedback` 字段，用于前端回显。
 
 ## 用户模型设置
 
