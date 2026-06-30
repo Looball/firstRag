@@ -854,12 +854,10 @@ npm run build
 - 建表 SQL 草案：
 
 ```sql
-CREATE EXTENSION IF NOT EXISTS pgcrypto;
-
 CREATE TABLE IF NOT EXISTS message_feedback (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    message_id UUID NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+    id BIGSERIAL PRIMARY KEY,
+    user_id BIGINT NOT NULL,
+    message_id BIGINT NOT NULL,
     rating TEXT NOT NULL,
     reason TEXT,
     note TEXT,
@@ -914,20 +912,20 @@ ON message_feedback (rating, reason, created_at DESC);
 - 建表 SQL 草案：
 
 ```sql
-CREATE EXTENSION IF NOT EXISTS pgcrypto;
-
 CREATE TABLE IF NOT EXISTS message_source_feedback (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    message_id UUID NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+    id BIGSERIAL PRIMARY KEY,
+    user_id BIGINT NOT NULL,
+    message_id BIGINT NOT NULL,
     source_index INTEGER NOT NULL,
-    knowledge_file_id UUID REFERENCES knowledge_files(id) ON DELETE SET NULL,
+    knowledge_file_id UUID,
     chunk_index INTEGER,
     rating TEXT NOT NULL,
     note TEXT,
     metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT message_source_feedback_source_index_check
+        CHECK (source_index >= 0),
     CONSTRAINT message_source_feedback_rating_check
         CHECK (rating IN ('useful', 'irrelevant'))
 );
