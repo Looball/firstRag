@@ -15,8 +15,8 @@ DEFAULT_INDEXING_RUNS_DIR = Path("docs/evals/indexing_runs")
 DEFAULT_REPORT_PATH = Path("docs/evals/latest_summary.md")
 RAG_STAGE_THRESHOLDS = [
     {
-        "key": "average_retrieval_settings_ms",
-        "label": "settings",
+        "key": "average_retrieval_settings_load_total_ms",
+        "label": "settings-load",
         "threshold": 1000.0,
         "unit": "ms",
     },
@@ -454,6 +454,7 @@ def build_report(
         "- 本报告只读取本地历史 JSON，不访问后端服务。",
         "- 报告不输出账号密码、令牌、密钥或数据库连接串。",
         "- `首 token 变化` 表示本轮 RAG 平均首 token 等待相对上一条展示记录的变化，单位毫秒。",
+        "- `settings-load` 是读取、缓存命中检查和 normalize 检索设置的真实耗时；历史 JSON 中的 `average_retrieval_settings_ms` 是 LCEL streaming 外层 settings-wait 间隔。",
         "- `RAG 阶段耗时趋势` 使用最近 N 次 RAG 历史 JSON 的 summary 字段计算；建议阈值用于暴露性能回退，不代表脚本退出门禁。",
     ])
     return "\n".join(lines) + "\n"

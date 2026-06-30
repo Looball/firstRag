@@ -21,8 +21,8 @@ DEFAULT_REPORT_PATH = Path("docs/evals/latest_rag_eval_report.md")
 DEFAULT_RUNS_DIR = Path("docs/evals/runs")
 SUGGESTED_PERFORMANCE_THRESHOLDS = [
     {
-        "name": "average_retrieval_settings_ms",
-        "label": "平均 settings",
+        "name": "average_retrieval_settings_load_total_ms",
+        "label": "平均 settings-load",
         "operator": "<=",
         "threshold": 1000.0,
         "unit": "ms",
@@ -937,10 +937,10 @@ def append_history_comparison(
         "average_sources": "平均引用数",
         "average_first_token_ms": "平均首 token 毫秒",
         "average_pre_answer_ms": "平均回答前等待毫秒",
-        "average_retrieval_settings_ms": "平均 settings 毫秒",
-        "average_retrieval_settings_load_total_ms": "平均 settings load 毫秒",
-        "average_retrieval_settings_query_ms": "平均 settings query 毫秒",
-        "average_retrieval_settings_normalize_ms": "平均 settings normalize 毫秒",
+        "average_retrieval_settings_ms": "平均 settings-wait 毫秒",
+        "average_retrieval_settings_load_total_ms": "平均 settings-load 毫秒",
+        "average_retrieval_settings_query_ms": "平均 settings-query 毫秒",
+        "average_retrieval_settings_normalize_ms": "平均 settings-normalize 毫秒",
         "average_knowledge_profile_ms": "平均 profile 毫秒",
         "average_query_router_ms": "平均 router 毫秒",
         "average_retrieve_documents_ms": "平均检索 Runnable 毫秒",
@@ -991,8 +991,11 @@ def write_report(
         f"- 平均引用数：{summary['average_sources']:.2f}",
         f"- 平均首 token 等待：{format_number(summary['average_first_token_ms'])}ms",
         f"- 平均回答前等待：{format_number(summary['average_pre_answer_ms'])}ms",
-        "- 平均阶段耗时：settings={settings}ms，profile={profile}ms，router={router}ms，检索={retrieve}ms，rerank={rerank}ms".format(
-            settings=format_number(summary["average_retrieval_settings_ms"]),
+        "- 平均阶段耗时：settings-load={settings_load}ms，settings-wait={settings_wait}ms，profile={profile}ms，router={router}ms，检索={retrieve}ms，rerank={rerank}ms".format(
+            settings_load=format_number(
+                summary["average_retrieval_settings_load_total_ms"],
+            ),
+            settings_wait=format_number(summary["average_retrieval_settings_ms"]),
             profile=format_number(summary["average_knowledge_profile_ms"]),
             router=format_number(summary["average_query_router_ms"]),
             retrieve=format_number(summary["average_retrieve_documents_ms"]),
@@ -1009,6 +1012,7 @@ def write_report(
                 summary["average_retrieval_settings_normalize_ms"],
             ),
         ),
+        "- settings-wait 是 LCEL streaming 外层阶段间隔；settings-load/query/normalize 才是检索设置读取与规范化耗时。",
         "- knowledge profile 缓存命中：{hits}/{observed}（{rate}）".format(
             hits=summary["knowledge_profile_cache_hit_count"],
             observed=summary["knowledge_profile_cache_observed_count"],
@@ -1092,7 +1096,7 @@ def write_report(
         "",
         "## 阶段耗时摘要",
         "",
-        "| Case | pre-answer | settings | settings-load | settings-query | settings-normalize | profile | cache | router | retrieve | hybrid | rerank |",
+        "| Case | pre-answer | settings-wait | settings-load | settings-query | settings-normalize | profile | cache | router | retrieve | hybrid | rerank |",
         "| --- | ---: | ---: | ---: | ---: | ---: | ---: | --- | ---: | ---: | ---: | ---: |",
     ])
     for result in results:
@@ -1148,7 +1152,7 @@ def write_report(
                 hit=format_bool(diagnostics["retrieval_settings_cache_hit"]),
                 source=diagnostics["retrieval_settings_source"] or "—",
             ),
-            "- 关键耗时：pre_answer={pre_answer}ms，settings={settings}ms，settings_load={settings_load}ms，settings_query={settings_query}ms，settings_normalize={settings_normalize}ms，profile={profile}ms，router={router}ms，retrieve={retrieve}ms，hybrid={retrieval}ms，rerank={rerank}ms".format(
+            "- 关键耗时：pre_answer={pre_answer}ms，settings_wait={settings}ms，settings_load={settings_load}ms，settings_query={settings_query}ms，settings_normalize={settings_normalize}ms，profile={profile}ms，router={router}ms，retrieve={retrieve}ms，hybrid={retrieval}ms，rerank={rerank}ms".format(
                 pre_answer=diagnostics["timing"].get("pre_answer_total_ms", "—"),
                 settings=diagnostics["timing"].get("retrieval_settings_ms", "—"),
                 settings_load=diagnostics["timing"].get(

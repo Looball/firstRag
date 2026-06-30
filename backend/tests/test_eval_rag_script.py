@@ -212,11 +212,15 @@ class EvalRagQualityGateTests(unittest.TestCase):
         self.assertIn("## 阶段耗时摘要", report)
         self.assertIn("## 性能门槛", report)
         self.assertIn(
-            "| 平均 settings | ✅ | 2.00ms | <= 1000.00ms |",
+            "| 平均 settings-load | ✅ | 0.80ms | <= 1000.00ms |",
             report,
         )
         self.assertIn(
             "| 平均 hybrid | ✅ | 6.00ms | <= 3000.00ms |",
+            report,
+        )
+        self.assertIn(
+            "| Case | pre-answer | settings-wait | settings-load | settings-query | settings-normalize | profile | cache | router | retrieve | hybrid | rerank |",
             report,
         )
         self.assertIn(
@@ -225,6 +229,10 @@ class EvalRagQualityGateTests(unittest.TestCase):
         )
         self.assertIn(
             "settings 子阶段：load=0.80ms，query=0.60ms，normalize=0.10ms",
+            report,
+        )
+        self.assertIn(
+            "settings-wait 是 LCEL streaming 外层阶段间隔",
             report,
         )
         self.assertIn("knowledge profile 缓存命中：1/1", report)

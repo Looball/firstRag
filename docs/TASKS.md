@@ -57,7 +57,7 @@
 | `PLAN-20260629-01` | 2026-06-29 | `Doing` | RAG 检索性能二阶段优化，继续降低首 token 前等待时间，优先处理 settings 读取、混合检索和重复查询开销。 | `T-014` - `T-018` |
 | `PLAN-20260629-02` | 2026-06-29 | `Done` | 基于 `code-review-skill` 仓库级审查，整理安全边界、可维护性和测试补强的后续修改计划。 | `T-019` - `T-025` |
 | `PLAN-20260630-01` | 2026-06-30 | `Done` | 建立 RAG 回答质量反馈闭环，把真实用户反馈沉淀为后续 eval 和检索优化依据。 | `T-026` - `T-029` |
-| `PLAN-20260630-02` | 2026-06-30 | `Doing` | 补强工程化交付闭环，优先解决数据库迁移、Docker Compose 初始化、CI 和发布前验收可运行性。 | `T-030` - `T-036` |
+| `PLAN-20260630-02` | 2026-06-30 | `Done` | 补强工程化交付闭环，优先解决数据库迁移、Docker Compose 初始化、CI 和发布前验收可运行性。 | `T-030` - `T-036` |
 
 ## 任务总览
 
@@ -98,7 +98,7 @@
 | `T-033` | `PLAN-20260630-02` | `P2` | `Done` | 强化本地验收脚本为发布前检查入口 | 2026-06-30 | `4a03381` |
 | `T-034` | `PLAN-20260630-02` | `P2` | `Done` | 补充 README 截图和演示说明 | 2026-06-30 | `a0bccfa` |
 | `T-035` | `PLAN-20260630-02` | `P2` | `Done` | 跑一次真实 RAG eval 与 indexing eval 基线 | 2026-06-30 | `ee845e3` |
-| `T-036` | `PLAN-20260630-02` | `P2` | `Todo` | 调查 RAG settings 阶段耗时超阈值 | - | - |
+| `T-036` | `PLAN-20260630-02` | `P2` | `Done` | 调查 RAG settings 阶段耗时超阈值 | 2026-06-30 | 待补充 |
 
 ## 新计划接入流程
 
@@ -1221,7 +1221,7 @@ git status --short
   - 真实 indexing eval 已完成：临时 Markdown 上传成功，auto index job `succeeded`，文件状态 `indexed`，聊天检索命中临时文件，聊天耗时 7.20s，展示引用 1，清理关联完成。
   - 已运行 `conda run -n firstrag python scripts/eval_summary.py`，本地趋势摘要刷新为 RAG 历史 26 次、Indexing 历史 3 次。
   - `docs/evals/README.md` 已更新为 2026-06-30 真实链路 eval 基线；latest report 和 runs JSON 仍由 `.gitignore` 忽略，不提交原始运行输出。
-  - 趋势摘要显示 `settings` 阶段最新均值 1716.02ms，超过 1000ms 建议阈值，已新增 `T-036` 跟进调查。
+  - 趋势摘要显示旧 `settings` 阶段最新均值 1716.02ms，超过 1000ms 建议阈值；后续 `T-036` 已确认该字段是 settings-wait 观测口径，真实 `settings-load` 为 6.40ms。
 - 建议验证命令：
 
 ```bash
@@ -1233,7 +1233,7 @@ conda run -n firstrag python scripts/eval_summary.py
 
 - 来源计划：`PLAN-20260630-02`
 - 优先级：`P2`
-- 状态：`Todo`
+- 状态：`Done`
 - 背景：T-035 的 2026-06-30 真实 RAG eval 质量门禁通过，但趋势摘要显示 `settings` 阶段最新均值 1716.02ms，高于 1000ms 建议阈值；报告中的 settings load/query 子阶段只有个位数毫秒，需要确认指标口径或真实耗时来源。
 - 目标：判断 `settings` 阶段超阈值是 instrumentation 口径问题、阶段归因问题、数据库/缓存波动，还是实际性能回退，并给出修复或阈值调整建议。
 - 范围：
@@ -1246,6 +1246,15 @@ conda run -n firstrag python scripts/eval_summary.py
   - 若是指标口径问题，报告字段命名或计算逻辑已修正并有测试覆盖。
   - 若是实际性能问题，新增优化任务或完成对应修复。
   - 重新生成 eval summary 后，文档记录结论。
+- 完成记录：
+  - 完成日期：2026-06-30
+  - 相关 commit：待补充
+  - 结论：`retrieval_settings_ms` 来自 `backend/app/services/rag/streaming.py` 的 RAG stage chunk 间隔计时，表示 LCEL streaming 外层 settings-wait；`retrieval_settings_load_total_ms`、`retrieval_settings_query_ms` 和 `retrieval_settings_normalize_ms` 来自 `backend/app/services/rag/retrieval_pipeline.py` 的真实 settings 读取、缓存命中检查和 normalize 子阶段。
+  - 最新真实历史记录中 `settings-wait=1716.02ms`，但 `settings-load=6.40ms`、`settings-query=6.37ms`、`settings-normalize=0.01ms`，因此没有发现数据库 settings 读取或缓存层的真实性能回退。
+  - `scripts/eval_rag.py` 已把建议性能门槛从旧 `settings` 外层间隔改为 `settings-load`，报告中保留旧字段但改名为 `settings-wait`。
+  - `scripts/eval_summary.py` 已把 RAG 阶段趋势阈值改为 `settings-load`，重新生成后最新均值 6.40ms，状态为通过。
+  - 已补充 `backend/tests/test_eval_rag_script.py` 与 `backend/tests/test_eval_summary_script.py` 覆盖新字段命名和阈值口径。
+  - 验证命令：`conda run -n firstrag python scripts/eval_summary.py`；`cd backend && conda run -n firstrag python -m unittest tests.test_eval_rag_script tests.test_eval_summary_script -v`。
 - 建议验证命令：
 
 ```bash

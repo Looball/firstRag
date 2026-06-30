@@ -28,6 +28,7 @@ class EvalSummaryScriptTests(unittest.TestCase):
                     "average_first_token_ms": 1000.0,
                     "average_total_tokens": 200.0,
                     "average_retrieval_settings_ms": 30.0,
+                    "average_retrieval_settings_load_total_ms": 5.0,
                     "average_knowledge_profile_ms": 40.0,
                     "average_retrieve_documents_ms": 500.0,
                     "average_retrieval_total_ms": 450.0,
@@ -46,6 +47,7 @@ class EvalSummaryScriptTests(unittest.TestCase):
                     "average_first_token_ms": 800.0,
                     "average_total_tokens": 180.0,
                     "average_retrieval_settings_ms": 10.0,
+                    "average_retrieval_settings_load_total_ms": 3.0,
                     "average_knowledge_profile_ms": 20.0,
                     "average_retrieve_documents_ms": 300.0,
                     "average_retrieval_total_ms": 250.0,
@@ -80,7 +82,7 @@ class EvalSummaryScriptTests(unittest.TestCase):
         self.assertIn("| 2026-06-28T09:00:00 | 2/2 | 1.00", report)
         self.assertIn("## RAG 阶段耗时趋势", report)
         self.assertIn(
-            "| settings | 10.00ms | 20.00ms | -20.00 | <= 1000.00ms | 通过 |",
+            "| settings-load | 3.00ms | 4.00ms | -2.00 | <= 1000.00ms | 通过 |",
             report,
         )
         self.assertIn(

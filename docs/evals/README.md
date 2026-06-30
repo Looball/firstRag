@@ -18,7 +18,7 @@
 - `docs/evals/latest_indexing_eval_report.md`
 - `docs/evals/latest_summary.md`
 
-本轮 RAG 质量门禁通过，但趋势摘要显示 `settings` 阶段最新均值 1716.02ms，高于 1000ms 建议阈值；已登记 `T-036` 跟进调查。报告和历史 JSON 默认被 `.gitignore` 忽略，提交时只记录不含敏感信息的摘要。
+本轮 RAG 质量门禁通过。`T-036` 已确认旧趋势摘要中的 `settings=1716.02ms` 是 LCEL streaming 外层 settings-wait 间隔，不是检索设置读取耗时；真实 `settings-load` 最新均值为 6.40ms，低于 1000ms 建议阈值。报告和历史 JSON 默认被 `.gitignore` 忽略，提交时只记录不含敏感信息的摘要。
 
 该记录用于进入文档整理、提交、推送或 PR 前的 release readiness 检查。再次修改 RAG 检索、token usage、eval gate、indexing、worker health、vector failure recovery 或前端文件管理链路后，应重新运行上述验收。
 
