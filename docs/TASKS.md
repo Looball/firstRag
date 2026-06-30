@@ -95,7 +95,7 @@
 | `T-030` | `PLAN-20260630-02` | `P1` | `Done` | 增加数据库迁移执行脚本 | 2026-06-30 | `5d22e59` |
 | `T-031` | `PLAN-20260630-02` | `P1` | `Done` | 接入 Docker Compose 初始化流程 | 2026-06-30 | `5d22e59` |
 | `T-032` | `PLAN-20260630-02` | `P1` | `Done` | 增加 GitHub Actions CI | 2026-06-30 | `da990bd` |
-| `T-033` | `PLAN-20260630-02` | `P2` | `Done` | 强化本地验收脚本为发布前检查入口 | 2026-06-30 | 待补充 |
+| `T-033` | `PLAN-20260630-02` | `P2` | `Done` | 强化本地验收脚本为发布前检查入口 | 2026-06-30 | `4a03381` |
 | `T-034` | `PLAN-20260630-02` | `P2` | `Todo` | 补充 README 截图和演示说明 | - | - |
 | `T-035` | `PLAN-20260630-02` | `P2` | `Todo` | 跑一次真实 RAG eval 与 indexing eval 基线 | - | - |
 
@@ -1143,7 +1143,7 @@ scripts/acceptance_check.sh --skip-real-eval
   - `docs/DEPLOYMENT.md` 或 `docs/README.md` 更新本地验收说明。
 - 完成记录：
   - 完成日期：2026-06-30
-  - 相关 commit：待补充
+  - 相关 commit：`4a03381`
   - `scripts/acceptance_check.sh` 新增 migration check、后端 compileall 和阶段通过提示。
   - migration check 默认运行 `scripts/migrate_db.py --list`；存在 `DATABASE_URL` 或 `COMPOSE_DATABASE_URL` 时额外运行 `--dry-run`；可通过 `FIRSTRAG_REQUIRE_MIGRATION_DRY_RUN=1` 强制要求数据库 dry-run。
   - 新增 `--skip-migration-check`、`FIRSTRAG_SKIP_BACKEND_COMPILE` 等跳过开关，保留原有 `--skip-real-eval`、`--skip-frontend-tests` 和 `--skip-frontend-build`。
