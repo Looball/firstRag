@@ -136,6 +136,23 @@
 }
 ```
 
+## Eval Case 草稿结构
+
+真实问答可通过 `GET /chat/messages/{message_id}/eval-case-draft` 导出为草稿。草稿顶层字段尽量兼容 `docs/evals/rag_eval_cases.jsonl`：
+
+- `id`
+- `knowledge_base_name`
+- `question`
+- `retrieval_settings`
+- `expect_retrieval`
+- `min_sources`
+- `expected_files`
+- `expected_keywords`
+- `expected_reason_keywords`
+- `expected_diagnostics`
+
+额外的 `draft_metadata` 用于人工审核，包含原始 answer、feedback、retrieval diagnostics 和 sources，不作为正式 eval 断言字段。
+
 ## 向量化任务状态
 
 `vector_index_jobs.status` 当前使用：

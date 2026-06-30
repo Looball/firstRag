@@ -9,6 +9,7 @@ import type {
   ChatSession,
   CreateConversationResponse,
   CreateKnowledgeBaseResponse,
+  EvalCaseDraftResponse,
   KnowledgeBase,
   KnowledgeBaseRetrievalSettings,
   KnowledgeFile,
@@ -354,6 +355,20 @@ export async function submitMessageSourceFeedback(
   }
 
   return parsedFeedback satisfies MessageSourceFeedback;
+}
+
+export async function exportEvalCaseDraft(messageId: string) {
+  const data = await authenticatedJson<EvalCaseDraftResponse>(
+    `/api/chat/messages/${encodeURIComponent(messageId)}/eval-case-draft`,
+    { method: "GET" },
+    { fallbackMessage: "导出 eval case 草稿失败，请稍后再试。" },
+  );
+
+  if (typeof data.draft !== "object" || data.draft === null) {
+    throw new Error("eval case 草稿响应格式异常。");
+  }
+
+  return data.draft as Record<string, unknown>;
 }
 
 export async function listKnowledgeBasesAndSessions() {

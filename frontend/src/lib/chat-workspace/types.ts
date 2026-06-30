@@ -355,6 +355,13 @@ export type MessageFeedbackResponse = {
 
 export type MessageSourceFeedbackResponse = MessageFeedbackResponse;
 
+export type EvalCaseDraftResponse = {
+  draft?: unknown;
+  detail?: string;
+  error?: string;
+  message?: string;
+};
+
 export type ListKnowledgeBasesResponse = {
   knowledge_bases?: unknown;
   detail?: string;

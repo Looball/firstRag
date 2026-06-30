@@ -139,3 +139,61 @@ def upsert_message_source_feedback(
             Jsonb(metadata or {}),
         ),
     )
+
+
+def get_user_message_eval_draft_context(
+    user_id: int,
+    message_id: int,
+) -> Row | None:
+    """查询从真实助手消息生成 eval case 草稿所需的上下文。"""
+    return fetch_one(
+        """
+        SELECT
+            m.id AS message_id,
+            m.content AS answer,
+            m.sources,
+            m.retrieval,
+            m.created_at AS message_created_at,
+            c.id AS conversation_id,
+            c.title AS conversation_title,
+            kb.id AS knowledge_base_id,
+            kb.name AS knowledge_base_name,
+            user_message.content AS question,
+            user_message.id AS question_message_id,
+            mf.rating AS feedback_rating,
+            mf.reason AS feedback_reason,
+            mf.note AS feedback_note,
+            mf.metadata AS feedback_metadata
+        FROM messages AS m
+        JOIN conversations AS c
+          ON c.id = m.conversation_id
+        JOIN knowledge_bases AS kb
+          ON kb.id = c.knowledge_base_id
+        LEFT JOIN LATERAL (
+            SELECT previous_message.id, previous_message.content
+            FROM messages AS previous_message
+            WHERE previous_message.conversation_id = m.conversation_id
+              AND previous_message.role = 'user'
+              AND (
+                  previous_message.created_at < m.created_at
+                  OR (
+                      previous_message.created_at = m.created_at
+                      AND previous_message.id < m.id
+                  )
+              )
+            ORDER BY previous_message.created_at DESC, previous_message.id DESC
+            LIMIT 1
+        ) AS user_message ON TRUE
+        LEFT JOIN message_feedback AS mf
+          ON mf.message_id = m.id
+         AND mf.user_id = %s
+        WHERE m.id = %s
+          AND m.role = 'assistant'
+          AND c.user_id = %s
+          AND c.deleted_at IS NULL
+          AND kb.user_id = %s
+          AND kb.deleted_at IS NULL
+        LIMIT 1;
+        """,
+        (user_id, message_id, user_id, user_id),
+    )

@@ -14,6 +14,7 @@ from app.repositories.conversation_repository import (
 from app.repositories.knowledge_base_repository import knowledge_base_exists
 from app.repositories.message_feedback_repository import (
     find_message_source,
+    get_user_message_eval_draft_context,
     get_user_assistant_message,
     upsert_message_feedback,
     upsert_message_source_feedback,
@@ -124,6 +125,77 @@ def serialize_source_feedback(feedback: dict) -> dict:
         "metadata": feedback.get("metadata") or {},
         "created_at": feedback.get("created_at"),
         "updated_at": feedback.get("updated_at"),
+    }
+
+
+def build_eval_case_id(row: dict) -> str:
+    """构造稳定且便于人工识别的 eval case 草稿 ID。"""
+    message_id = str(row["message_id"])
+    return f"draft_message_{message_id}"
+
+
+def get_unique_source_file_names(sources: list[dict]) -> list[str]:
+    """从 sources 中提取去重后的文件名，用作 eval expected_files 草稿。"""
+    file_names: list[str] = []
+    seen: set[str] = set()
+    for source in sources:
+        file_name = source.get("file_name") or source.get("title")
+        if not isinstance(file_name, str) or not file_name.strip():
+            continue
+        normalized = file_name.strip()
+        if normalized not in seen:
+            seen.add(normalized)
+            file_names.append(normalized)
+
+    return file_names
+
+
+def build_eval_case_draft(row: dict) -> dict:
+    """把真实问答上下文转换为 RAG eval case 草稿。"""
+    sources = row.get("sources") or []
+    retrieval = row.get("retrieval") or {}
+    expected_files = get_unique_source_file_names(sources)
+    source_count = len(sources)
+    need_retrieval = bool(
+        retrieval.get("final_need_retrieval", retrieval.get("need_retrieval", source_count > 0)),
+    )
+    feedback = {
+        "rating": row.get("feedback_rating"),
+        "reason": row.get("feedback_reason"),
+        "note": row.get("feedback_note"),
+        "metadata": row.get("feedback_metadata") or {},
+    }
+
+    return {
+        "id": build_eval_case_id(row),
+        "knowledge_base_name": row.get("knowledge_base_name") or "默认知识库",
+        "question": row.get("question") or "",
+        "retrieval_settings": {
+            "retrieval_mode": "auto",
+            "enable_query_router": True,
+            "enable_rerank": True,
+        },
+        "expect_retrieval": need_retrieval,
+        "min_sources": 1 if source_count > 0 else 0,
+        "expected_files": expected_files,
+        "expected_keywords": [],
+        "expected_reason_keywords": [],
+        "expected_diagnostics": {},
+        "draft_metadata": {
+            "message_id": str(row["message_id"]),
+            "question_message_id": (
+                str(row["question_message_id"])
+                if row.get("question_message_id") is not None
+                else None
+            ),
+            "conversation_id": str(row["conversation_id"]),
+            "conversation_title": row.get("conversation_title"),
+            "knowledge_base_id": str(row["knowledge_base_id"]),
+            "answer": row.get("answer") or "",
+            "feedback": feedback,
+            "retrieval": retrieval,
+            "sources": sources,
+        },
     }
 
 
@@ -322,6 +394,24 @@ def submit_message_source_feedback(
     return {
         "success": True,
         "feedback": serialize_source_feedback(feedback),
+    }
+
+
+@router.get("/messages/{message_id}/eval-case-draft")
+def export_message_eval_case_draft(
+    message_id: int,
+    user_id: int = Depends(get_current_user_id),
+):
+    """导出当前用户真实问答对应的 RAG eval case 草稿。"""
+    row = get_user_message_eval_draft_context(user_id, message_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="消息不存在")
+    if not row.get("question"):
+        raise HTTPException(status_code=400, detail="缺少可导出的用户问题")
+
+    return {
+        "success": True,
+        "draft": build_eval_case_draft(row),
     }
 
 

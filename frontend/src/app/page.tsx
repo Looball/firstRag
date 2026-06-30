@@ -438,6 +438,12 @@ export default function Home() {
   const [sourceFeedbackErrors, setSourceFeedbackErrors] = useState<
     Record<string, string>
   >({});
+  const [exportingEvalDrafts, setExportingEvalDrafts] = useState<
+    Record<string, boolean>
+  >({});
+  const [evalDraftErrors, setEvalDraftErrors] = useState<Record<string, string>>(
+    {},
+  );
 
   const bottomRef = useRef<HTMLDivElement | null>(null);
   const messagesContainerRef = useRef<HTMLDivElement | null>(null);
@@ -1625,6 +1631,58 @@ export default function Home() {
     }
   }
 
+  async function handleExportEvalDraft(messageKey: string, messageId?: string) {
+    if (!messageId) {
+      setEvalDraftErrors((prev) => ({
+        ...prev,
+        [messageKey]: "这条回答还没有保存完成，稍后再导出。",
+      }));
+      return;
+    }
+
+    setExportingEvalDrafts((prev) => ({
+      ...prev,
+      [messageKey]: true,
+    }));
+    setEvalDraftErrors((prev) => ({
+      ...prev,
+      [messageKey]: "",
+    }));
+
+    try {
+      const draft = await chatApi.exportEvalCaseDraft(messageId);
+      const draftId =
+        typeof draft.id === "string" && draft.id.trim()
+          ? draft.id.trim()
+          : `draft_message_${messageId}`;
+      const blob = new Blob([`${JSON.stringify(draft, null, 2)}\n`], {
+        type: "application/json;charset=utf-8",
+      });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+
+      link.href = url;
+      link.download = `${draftId}.json`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      setEvalDraftErrors((prev) => ({
+        ...prev,
+        [messageKey]:
+          error instanceof Error
+            ? error.message
+            : "导出 eval case 草稿失败，请稍后再试。",
+      }));
+    } finally {
+      setExportingEvalDrafts((prev) => ({
+        ...prev,
+        [messageKey]: false,
+      }));
+    }
+  }
+
   async function loadConversationDiagnostics(
     conversationId: string,
     options: { silent?: boolean } = {}
@@ -2318,6 +2376,13 @@ export default function Home() {
                   submittingFeedback[messageKey]
                 );
                 const feedbackError = feedbackErrors[messageKey] || "";
+                const isExportingEvalDraft = Boolean(
+                  exportingEvalDrafts[messageKey]
+                );
+                const evalDraftError = evalDraftErrors[messageKey] || "";
+                const canExportEvalDraft =
+                  message.role === "assistant" &&
+                  message.feedback?.rating === "negative";
 
                 return (
                   <div
@@ -2558,6 +2623,23 @@ export default function Home() {
                               </button>
                             </div>
                             <div className="flex flex-wrap items-center gap-3">
+                              {canExportEvalDraft && (
+                                <button
+                                  type="button"
+                                  disabled={isExportingEvalDraft}
+                                  onClick={() =>
+                                    handleExportEvalDraft(
+                                      messageKey,
+                                      message.id
+                                    )
+                                  }
+                                  className="font-utility text-[10px] font-semibold uppercase text-[#64716d] transition hover:text-[#176b62] disabled:cursor-not-allowed disabled:opacity-60"
+                                >
+                                  {isExportingEvalDraft
+                                    ? "导出中"
+                                    : "Eval 草稿"}
+                                </button>
+                              )}
                               <button
                                 type="button"
                                 onClick={() =>
@@ -2648,6 +2730,11 @@ export default function Home() {
                           {!isFeedbackPanelOpen && feedbackError && (
                             <p className="mt-2 text-xs text-[#9b3c29]">
                               {feedbackError}
+                            </p>
+                          )}
+                          {evalDraftError && (
+                            <p className="mt-2 text-xs text-[#9b3c29]">
+                              {evalDraftError}
                             </p>
                           )}
                         </div>

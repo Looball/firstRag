@@ -6,6 +6,7 @@ import {
 } from "@/lib/frontend-api";
 import {
   createConversation,
+  exportEvalCaseDraft,
   listAllKnowledgeFiles,
   listConversationMessages,
   listKnowledgeBasesAndSessions,
@@ -303,6 +304,29 @@ describe("chat workspace api", () => {
         }),
       },
       { fallbackMessage: "保存引用反馈失败，请稍后再试。" },
+    );
+  });
+
+  it("exports eval case drafts through the workspace API", async () => {
+    authenticatedJsonMock.mockResolvedValueOnce({
+      draft: {
+        id: "draft_message_42",
+        knowledge_base_name: "默认知识库",
+        question: "民事诉讼法的任务是什么",
+        expected_keywords: [],
+      },
+    });
+
+    await expect(exportEvalCaseDraft("42")).resolves.toEqual({
+      id: "draft_message_42",
+      knowledge_base_name: "默认知识库",
+      question: "民事诉讼法的任务是什么",
+      expected_keywords: [],
+    });
+    expect(authenticatedJsonMock).toHaveBeenCalledWith(
+      "/api/chat/messages/42/eval-case-draft",
+      { method: "GET" },
+      { fallbackMessage: "导出 eval case 草稿失败，请稍后再试。" },
     );
   });
 });

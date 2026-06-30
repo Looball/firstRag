@@ -322,6 +322,97 @@ class CreateConversationTests(unittest.TestCase):
         self.assertEqual(response.json(), {"detail": "引用来源不存在"})
         upsert_feedback.assert_not_called()
 
+    def test_export_message_eval_case_draft_returns_rag_case_shape(self) -> None:
+        """差评助手消息应能导出可人工整理的 eval case 草稿。"""
+        conversation_id = uuid4()
+        knowledge_base_id = uuid4()
+        with patch(
+            "app.api.conversations.get_user_message_eval_draft_context",
+            return_value={
+                "message_id": 42,
+                "answer": "民事诉讼法的任务是保护当事人诉讼权利。",
+                "sources": [
+                    {
+                        "index": 1,
+                        "file_name": "中华人民共和国民事诉讼法_20230901.pdf",
+                        "chunk_index": 2,
+                    }
+                ],
+                "retrieval": {
+                    "need_retrieval": True,
+                    "source_count": 1,
+                    "retrieved_count": 5,
+                },
+                "message_created_at": "2026-06-30T09:00:00+08:00",
+                "conversation_id": conversation_id,
+                "conversation_title": "诉讼法问答",
+                "knowledge_base_id": knowledge_base_id,
+                "knowledge_base_name": "默认知识库",
+                "question": "民事诉讼法的任务是什么",
+                "question_message_id": 41,
+                "feedback_rating": "negative",
+                "feedback_reason": "missing_answer",
+                "feedback_note": "回答不完整",
+                "feedback_metadata": {},
+            },
+        ) as get_context:
+            response = self.client.get("/chat/messages/42/eval-case-draft")
+
+        self.assertEqual(response.status_code, 200)
+        draft = response.json()["draft"]
+        self.assertEqual(draft["id"], "draft_message_42")
+        self.assertEqual(draft["question"], "民事诉讼法的任务是什么")
+        self.assertTrue(draft["expect_retrieval"])
+        self.assertEqual(draft["min_sources"], 1)
+        self.assertEqual(
+            draft["expected_files"],
+            ["中华人民共和国民事诉讼法_20230901.pdf"],
+        )
+        self.assertEqual(
+            draft["draft_metadata"]["feedback"]["reason"],
+            "missing_answer",
+        )
+        get_context.assert_called_once_with(1, 42)
+
+    def test_export_message_eval_case_draft_returns_404_for_inaccessible_message(
+        self,
+    ) -> None:
+        """跨用户或不存在的助手消息不能导出 eval 草稿。"""
+        with patch(
+            "app.api.conversations.get_user_message_eval_draft_context",
+            return_value=None,
+        ):
+            response = self.client.get("/chat/messages/42/eval-case-draft")
+
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(response.json(), {"detail": "消息不存在"})
+
+    def test_export_message_eval_case_draft_requires_user_question(self) -> None:
+        """缺少对应用户问题时返回业务错误，避免生成不可复现草稿。"""
+        with patch(
+            "app.api.conversations.get_user_message_eval_draft_context",
+            return_value={
+                "message_id": 42,
+                "answer": "回答",
+                "sources": [],
+                "retrieval": {},
+                "conversation_id": uuid4(),
+                "conversation_title": "旧会话",
+                "knowledge_base_id": uuid4(),
+                "knowledge_base_name": "默认知识库",
+                "question": None,
+                "question_message_id": None,
+                "feedback_rating": None,
+                "feedback_reason": None,
+                "feedback_note": None,
+                "feedback_metadata": {},
+            },
+        ):
+            response = self.client.get("/chat/messages/42/eval-case-draft")
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json(), {"detail": "缺少可导出的用户问题"})
+
     def test_get_conversation_diagnostics_returns_rag_debug_summary(
         self,
     ) -> None:

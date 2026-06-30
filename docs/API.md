@@ -169,6 +169,7 @@ Authorization: Bearer <access_token>
 | `GET` | `/chat/conversations/{conversation_id}/diagnostics` | 会话 RAG 诊断。 |
 | `POST` | `/chat/messages/{message_id}/feedback` | 创建或更新助手消息质量反馈。 |
 | `POST` | `/chat/messages/{message_id}/sources/{source_index}/feedback` | 创建或更新单个引用来源反馈。 |
+| `GET` | `/chat/messages/{message_id}/eval-case-draft` | 导出真实问答对应的 RAG eval case 草稿。 |
 
 ### 消息质量反馈
 
@@ -215,6 +216,45 @@ Authorization: Bearer <access_token>
 | `note` | 可选，1000 字符以内的补充说明；当前前端先不展示备注输入。 |
 
 同一用户对同一消息的同一 source 重复提交时执行 upsert。历史消息接口会把当前用户的 source feedback 附加到 `messages[].sources[].feedback`，用于前端回显。
+
+### Eval Case 草稿
+
+`GET /chat/messages/{message_id}/eval-case-draft` 用于把真实 assistant message 导出为可人工整理的 RAG eval case 草稿。后端会读取同会话中该 assistant message 之前最近一条 user message 作为 `question`；跨用户、非助手消息或资源不存在返回 `404`，缺少可导出的用户问题时返回 `400`。
+
+响应体：
+
+```json
+{
+  "success": true,
+  "draft": {
+    "id": "draft_message_42",
+    "knowledge_base_name": "默认知识库",
+    "question": "民事诉讼法的任务是什么",
+    "retrieval_settings": {
+      "retrieval_mode": "auto",
+      "enable_query_router": true,
+      "enable_rerank": true
+    },
+    "expect_retrieval": true,
+    "min_sources": 1,
+    "expected_files": ["中华人民共和国民事诉讼法_20230901.pdf"],
+    "expected_keywords": [],
+    "expected_reason_keywords": [],
+    "expected_diagnostics": {},
+    "draft_metadata": {
+      "answer": "真实回答内容",
+      "feedback": {
+        "rating": "negative",
+        "reason": "missing_answer"
+      },
+      "retrieval": {},
+      "sources": []
+    }
+  }
+}
+```
+
+`draft` 外层字段尽量兼容 `docs/evals/rag_eval_cases.jsonl`，`draft_metadata` 仅作为人工审核上下文。前端当前以 JSON 文件下载，不自动写入正式 eval case。
 
 ## 用户模型设置
 

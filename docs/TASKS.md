@@ -89,7 +89,7 @@
 | `T-025` | `PLAN-20260629-02` | `P1` | `Done` | 引入 React Query 与 Zod 集中前端数据请求层 | 2026-06-29 | `986a9a3` |
 | `T-026` | `PLAN-20260630-01` | `P1` | `Done` | 增加聊天回答质量反馈闭环 | 2026-06-30 | `e027079` |
 | `T-027` | `PLAN-20260630-01` | `P1` | `Done` | 增强 sources 展示与引用有用性标记 | 2026-06-30 | `ce66821` |
-| `T-028` | `PLAN-20260630-01` | `P2` | `Todo` | 支持从真实问答沉淀 RAG eval case 草稿 | - | - |
+| `T-028` | `PLAN-20260630-01` | `P2` | `Done` | 支持从真实问答沉淀 RAG eval case 草稿 | 2026-06-30 | `待提交` |
 | `T-029` | `PLAN-20260630-01` | `P2` | `Todo` | 增加回答质量和检索表现看板雏形 | - | - |
 
 ## 新计划接入流程
@@ -596,7 +596,7 @@ scripts/rag_eval_gate.sh
 
 - 来源计划：`PLAN-20260629-01`
 - 优先级：`P2`
-- 状态：`Doing`
+- 状态：`Done`
 - 目标：把 RAG 性能优化从单次报告观察升级为可持续追踪，让性能回退在验收报告中显眼暴露。
 - 范围：扩展 eval summary/report，记录 settings、profile、retrieve、hybrid、rerank 的最近 N 次均值和变化，并加入建议阈值；不在报告中输出账号密码、API Key、JWT 或数据库连接串。
 - 验收标准：
@@ -843,7 +843,7 @@ npm run build
 
 - 来源计划：`PLAN-20260630-01`
 - 优先级：`P1`
-- 状态：`Todo`
+- 状态：`Doing`
 - 背景：当前 RAG 性能、检索 diagnostics、worker 和测试体系已经比较完整，但系统缺少真实用户对回答质量的结构化反馈，后续 prompt、retrieval、rerank 和 eval case 优化缺少稳定输入。
 - 目标：在每条 assistant message 下提供轻量反馈入口，并把用户反馈安全持久化，形成“回答 -> 反馈 -> 分析 -> 优化”的最小闭环。
 - 范围：
@@ -979,6 +979,14 @@ ON message_source_feedback (rating, created_at DESC);
   - 草稿包含可复现实验所需的最小上下文，但不包含敏感配置。
   - 生成的 JSON 能被后续脚本读取或容易转换为现有 eval case 格式。
   - 测试覆盖正常导出、跨用户隔离、缺少 retrieval/sources 的兼容路径。
+- 完成记录：
+  - 完成日期：2026-06-30
+  - 相关 commit：`待提交`
+  - 新增 `GET /chat/messages/{message_id}/eval-case-draft`，从当前用户 assistant message、上一条 user question、sources、retrieval diagnostics 和 message feedback 生成 eval case 草稿。
+  - 草稿顶层字段兼容 `docs/evals/rag_eval_cases.jsonl`，原始 answer、feedback、retrieval 和 sources 放入 `draft_metadata` 供人工审核。
+  - 前端在负反馈回答上展示“Eval 草稿”入口，点击后下载 JSON 文件，不自动写入正式 eval case。
+  - 已同步更新 `docs/API.md` 与 `docs/SCHEMAS.md`。
+  - 验证命令：`cd backend && conda run -n firstrag python -m unittest tests.test_conversations -v`；`cd backend && conda run -n firstrag python -m compileall app tests/test_conversations.py`；`cd frontend && npm run test -- chat-workspace/api.test.ts`。
 
 ## T-029 增加回答质量和检索表现看板雏形
 
