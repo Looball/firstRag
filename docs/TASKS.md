@@ -97,7 +97,7 @@
 | `T-032` | `PLAN-20260630-02` | `P1` | `Done` | 增加 GitHub Actions CI | 2026-06-30 | `da990bd` |
 | `T-033` | `PLAN-20260630-02` | `P2` | `Done` | 强化本地验收脚本为发布前检查入口 | 2026-06-30 | `4a03381` |
 | `T-034` | `PLAN-20260630-02` | `P2` | `Done` | 补充 README 截图和演示说明 | 2026-06-30 | `a0bccfa` |
-| `T-035` | `PLAN-20260630-02` | `P2` | `Todo` | 跑一次真实 RAG eval 与 indexing eval 基线 | - | - |
+| `T-035` | `PLAN-20260630-02` | `P2` | `Blocked` | 跑一次真实 RAG eval 与 indexing eval 基线 | - | 待补充 |
 
 ## 新计划接入流程
 
@@ -1190,7 +1190,7 @@ git status --short
 
 - 来源计划：`PLAN-20260630-02`
 - 优先级：`P2`
-- 状态：`Todo`
+- 状态：`Blocked`
 - 背景：前几批任务已经补强 RAG 性能、反馈闭环和质量看板，但工程化收口后需要重新记录一次真实链路质量与性能基线。
 - 目标：在迁移、compose 和 CI 补强后，运行真实 RAG eval 与 indexing eval，形成发布前可比较基线。
 - 范围：
@@ -1203,6 +1203,15 @@ git status --short
   - eval summary 能生成并展示最近运行趋势。
   - 若发现明显回归，新增后续任务或直接修复。
   - 报告不包含 API Key、JWT、数据库密码或用户私密文档内容。
+- 阻塞记录：
+  - 记录日期：2026-06-30
+  - 相关 commit：待补充
+  - 本次 preflight 未能运行真实 RAG eval 与 indexing eval：`http://127.0.0.1:8000/docs` 不可访问，且当前 shell 未设置 `FIRSTRAG_EVAL_USERNAME` / `FIRSTRAG_EVAL_PASSWORD`。
+  - 已运行 `conda run -n firstrag python scripts/eval_summary.py`，本地历史摘要生成成功：RAG 历史 25 次，Indexing 历史 2 次。
+  - 最近 RAG 历史记录：2026-06-30T08:57:03，10/10 通过，通过率 1.00，平均引用 2.20，平均首 token 3715.19ms，平均耗时 5.96s，门禁通过。
+  - 最近 Indexing 历史记录：2026-06-28T08:40:37，通过，job 状态 `succeeded`，聊天耗时 3.51s，引用数 1，清理关联完成。
+  - 解除阻塞条件：启动后端服务、完成数据库迁移、启动 vector index worker，并在当前 shell 设置 eval 测试账号密码；账号还需要可用的 LLM provider / API Key。
+  - 解除后建议运行：`FIRSTRAG_EVAL_USERNAME=... FIRSTRAG_EVAL_PASSWORD=... scripts/acceptance_check.sh`，或分别运行 `scripts/rag_eval_gate.sh` 与 `conda run -n firstrag python scripts/eval_indexing.py --base-url http://127.0.0.1:8000`。
 - 建议验证命令：
 
 ```bash
