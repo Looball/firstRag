@@ -754,7 +754,7 @@ npm run build
   - `docs/RAG_WORKFLOW.md` 与 `docs/BACKEND.md` 已同步记录 RAG service 新边界。
   - `conda run -n firstrag python -m unittest tests.test_rag_service tests.test_retrieval_resilience -v`、`conda run -n firstrag python -m unittest discover tests -v`、`conda run -n firstrag python -m compileall app tests` 已通过。
   - `scripts/acceptance_check.sh --skip-real-eval` 已通过后端 107 个 unittest、前端 lint、Vitest 32 个用例和 Next build。
-  - 真实 RAG eval 需要 `FIRSTRAG_EVAL_USERNAME` 和 `FIRSTRAG_EVAL_PASSWORD`，本次未运行。
+  - 真实 RAG eval 已通过：10/10 PASS，平均 sources 2.20，平均首 token 3715.19ms，平均总耗时 5.96s；报告 `docs/evals/latest_rag_eval_report.md`，历史记录 `docs/evals/runs/20260630_085703.json`。
 - 建议验证命令：
 
 ```bash
