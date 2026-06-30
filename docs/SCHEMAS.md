@@ -153,6 +153,18 @@
 
 额外的 `draft_metadata` 用于人工审核，包含原始 answer、feedback、retrieval diagnostics 和 sources，不作为正式 eval 断言字段。
 
+## 质量看板结构
+
+`GET /chat/quality-dashboard` 返回当前用户范围内的聚合数据：
+
+- `window_days`：统计窗口天数。
+- `has_feedback`：窗口内是否存在 message 或 source feedback。
+- `message_feedback`：回答级反馈总数、正负反馈数、负反馈率和原因分布。
+- `source_feedback`：引用级反馈总数、有用/无关数、无关率和无关来源排行。
+- `retrieval`：窗口内 completed assistant message 数、平均 sources 数和平均首 token 等待。
+
+统计接口必须通过 `conversations.user_id` 约束当前用户，不能跨用户聚合。
+
 ## 向量化任务状态
 
 `vector_index_jobs.status` 当前使用：

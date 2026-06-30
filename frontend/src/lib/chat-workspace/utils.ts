@@ -21,6 +21,7 @@ import type {
   MessageDiagnostic,
   MessageSourceFeedback,
   MessageSourceFeedbackRating,
+  QualityDashboard,
   RetrievalDiagnostics,
   RetrievalMode,
   RetrievalState,
@@ -683,6 +684,82 @@ export function getConversationDiagnostics(value: unknown) {
           (diagnostic): diagnostic is MessageDiagnostic => diagnostic !== null
         )
     : [];
+}
+
+
+function toCountList(
+  values: unknown,
+  labelField: string,
+): Array<{ label: string; count: number }> {
+  if (!Array.isArray(values)) {
+    return [];
+  }
+
+  return values
+    .map((value) => {
+      if (typeof value !== "object" || value === null) {
+        return null;
+      }
+
+      const item = value as Record<string, unknown>;
+      const label = getStringField(item, [labelField]);
+      const count = getNumberField(item, "count");
+
+      return label ? { label, count } : null;
+    })
+    .filter((item): item is { label: string; count: number } => item !== null);
+}
+
+
+export function toQualityDashboard(value: unknown): QualityDashboard | null {
+  if (typeof value !== "object" || value === null) {
+    return null;
+  }
+
+  const data = value as Record<string, unknown>;
+  const messageFeedback = getRecordField(data, "message_feedback") || {};
+  const sourceFeedback = getRecordField(data, "source_feedback") || {};
+  const retrieval = getRecordField(data, "retrieval") || {};
+
+  return {
+    windowDays: getNumberField(data, "window_days") || 7,
+    hasFeedback: Boolean(data.has_feedback),
+    messageFeedback: {
+      total: getNumberField(messageFeedback, "total"),
+      positive: getNumberField(messageFeedback, "positive"),
+      negative: getNumberField(messageFeedback, "negative"),
+      negativeRate: getNullableNumberField(messageFeedback, ["negative_rate"]),
+      reasonDistribution: toCountList(
+        messageFeedback.reason_distribution,
+        "reason",
+      ).map((item) => ({
+        reason: item.label,
+        count: item.count,
+      })),
+    },
+    sourceFeedback: {
+      total: getNumberField(sourceFeedback, "total"),
+      useful: getNumberField(sourceFeedback, "useful"),
+      irrelevant: getNumberField(sourceFeedback, "irrelevant"),
+      irrelevantRate: getNullableNumberField(sourceFeedback, [
+        "irrelevant_rate",
+      ]),
+      topIrrelevantFiles: toCountList(
+        sourceFeedback.top_irrelevant_files,
+        "file_name",
+      ).map((item) => ({
+        fileName: item.label,
+        count: item.count,
+      })),
+    },
+    retrieval: {
+      assistantMessages: getNumberField(retrieval, "assistant_messages"),
+      averageSources: getNullableNumberField(retrieval, ["average_sources"]),
+      averageFirstTokenMs: getNullableNumberField(retrieval, [
+        "average_first_token_ms",
+      ]),
+    },
+  };
 }
 
 

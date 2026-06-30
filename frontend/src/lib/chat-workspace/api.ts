@@ -22,6 +22,7 @@ import type {
   MessageSourceFeedback,
   MessageSourceFeedbackRating,
   MessageSourceFeedbackResponse,
+  QualityDashboard,
   RetrievalSettingsResponse,
   UploadKnowledgeFilesResponse,
   VectorIndexHealthResponse,
@@ -41,6 +42,7 @@ import {
   toMessageFeedback,
   toMessageSourceFeedback,
   toMessages,
+  toQualityDashboard,
   toRetrievalSettings,
 } from "./utils";
 
@@ -369,6 +371,21 @@ export async function exportEvalCaseDraft(messageId: string) {
   }
 
   return data.draft as Record<string, unknown>;
+}
+
+export async function loadQualityDashboard(days = 7) {
+  const data = await authenticatedJson<unknown>(
+    `/api/chat/quality-dashboard?days=${encodeURIComponent(String(days))}`,
+    { method: "GET" },
+    { fallbackMessage: "加载质量看板失败，请稍后再试。" },
+  );
+  const dashboard = toQualityDashboard(data);
+
+  if (!dashboard) {
+    throw new Error("质量看板响应格式异常。");
+  }
+
+  return dashboard satisfies QualityDashboard;
 }
 
 export async function listKnowledgeBasesAndSessions() {

@@ -362,6 +362,36 @@ export type EvalCaseDraftResponse = {
   message?: string;
 };
 
+export type QualityDashboard = {
+  windowDays: number;
+  hasFeedback: boolean;
+  messageFeedback: {
+    total: number;
+    positive: number;
+    negative: number;
+    negativeRate: number | null;
+    reasonDistribution: Array<{
+      reason: string;
+      count: number;
+    }>;
+  };
+  sourceFeedback: {
+    total: number;
+    useful: number;
+    irrelevant: number;
+    irrelevantRate: number | null;
+    topIrrelevantFiles: Array<{
+      fileName: string;
+      count: number;
+    }>;
+  };
+  retrieval: {
+    assistantMessages: number;
+    averageSources: number | null;
+    averageFirstTokenMs: number | null;
+  };
+};
+
 export type ListKnowledgeBasesResponse = {
   knowledge_bases?: unknown;
   detail?: string;

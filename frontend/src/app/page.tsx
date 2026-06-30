@@ -44,6 +44,7 @@ import type {
   MessageFeedbackRating,
   MessageDiagnostic,
   MessageSourceFeedbackRating,
+  QualityDashboard,
   RetrievalMode,
   RetrievalState,
   VectorIndexJob,
@@ -64,6 +65,30 @@ const MESSAGE_FEEDBACK_REASON_OPTIONS: Array<{
   { value: "format_issue", label: "格式不好" },
   { value: "other", label: "其他" },
 ];
+
+function formatPercent(value: number | null) {
+  return typeof value === "number" && Number.isFinite(value)
+    ? `${Math.round(value * 100)}%`
+    : "—";
+}
+
+function formatMetricNumber(value: number | null, digits = 1) {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return "—";
+  }
+
+  return value.toFixed(digits);
+}
+
+function formatMetricMs(value: number | null) {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return "—";
+  }
+
+  return value >= 1000
+    ? `${(value / 1000).toFixed(2)}s`
+    : `${value.toFixed(0)}ms`;
+}
 
 function renderInlineMarkdown(
   text: string,
@@ -444,6 +469,12 @@ export default function Home() {
   const [evalDraftErrors, setEvalDraftErrors] = useState<Record<string, string>>(
     {},
   );
+  const [isQualityDashboardOpen, setIsQualityDashboardOpen] = useState(false);
+  const [qualityDashboard, setQualityDashboard] =
+    useState<QualityDashboard | null>(null);
+  const [isLoadingQualityDashboard, setIsLoadingQualityDashboard] =
+    useState(false);
+  const [qualityDashboardError, setQualityDashboardError] = useState("");
 
   const bottomRef = useRef<HTMLDivElement | null>(null);
   const messagesContainerRef = useRef<HTMLDivElement | null>(null);
@@ -1683,6 +1714,45 @@ export default function Home() {
     }
   }
 
+  async function handleToggleQualityDashboard() {
+    const shouldOpen = !isQualityDashboardOpen;
+
+    setIsQualityDashboardOpen(shouldOpen);
+    if (!shouldOpen || qualityDashboard || isLoadingQualityDashboard) {
+      return;
+    }
+
+    setIsLoadingQualityDashboard(true);
+    setQualityDashboardError("");
+
+    try {
+      const dashboard = await chatApi.loadQualityDashboard(7);
+      setQualityDashboard(dashboard);
+    } catch (error) {
+      setQualityDashboardError(
+        error instanceof Error ? error.message : "加载质量看板失败，请稍后再试。",
+      );
+    } finally {
+      setIsLoadingQualityDashboard(false);
+    }
+  }
+
+  async function handleRefreshQualityDashboard() {
+    setIsLoadingQualityDashboard(true);
+    setQualityDashboardError("");
+
+    try {
+      const dashboard = await chatApi.loadQualityDashboard(7);
+      setQualityDashboard(dashboard);
+    } catch (error) {
+      setQualityDashboardError(
+        error instanceof Error ? error.message : "加载质量看板失败，请稍后再试。",
+      );
+    } finally {
+      setIsLoadingQualityDashboard(false);
+    }
+  }
+
   async function loadConversationDiagnostics(
     conversationId: string,
     options: { silent?: boolean } = {}
@@ -2054,6 +2124,144 @@ export default function Home() {
             >
               退出
             </button>
+          </div>
+
+          <div className="border-b border-[#c7d1cd] py-4">
+            <div className="flex items-center justify-between gap-3">
+              <p className="font-utility text-[10px] font-semibold uppercase text-[#72807b]">
+                Quality
+              </p>
+              <button
+                type="button"
+                onClick={() => {
+                  void handleToggleQualityDashboard();
+                }}
+                className="text-xs font-semibold text-[#176b62] underline decoration-[#d5a83b] decoration-2 underline-offset-4"
+              >
+                {isQualityDashboardOpen ? "收起" : "质量看板"}
+              </button>
+            </div>
+
+            {isQualityDashboardOpen && (
+              <div className="mt-3 border border-[#d5ded9] bg-[#f8faf8] p-3 text-xs text-[#46514e]">
+                <div className="flex items-center justify-between gap-2">
+                  <p className="font-utility text-[10px] font-semibold uppercase text-[#64716d]">
+                    最近 {qualityDashboard?.windowDays ?? 7} 天
+                  </p>
+                  <button
+                    type="button"
+                    disabled={isLoadingQualityDashboard}
+                    onClick={() => {
+                      void handleRefreshQualityDashboard();
+                    }}
+                    className="font-utility text-[10px] font-semibold uppercase text-[#176b62] disabled:opacity-60"
+                  >
+                    {isLoadingQualityDashboard ? "加载中" : "刷新"}
+                  </button>
+                </div>
+
+                {qualityDashboardError && (
+                  <p className="mt-3 text-[#9b3c29]">{qualityDashboardError}</p>
+                )}
+
+                {!qualityDashboardError &&
+                  !isLoadingQualityDashboard &&
+                  !qualityDashboard?.hasFeedback && (
+                    <p className="mt-3 leading-5 text-[#64716d]">
+                      还没有回答或引用反馈。这里不会把空数据当成质量良好。
+                    </p>
+                  )}
+
+                {qualityDashboard && qualityDashboard.hasFeedback && (
+                  <div className="mt-3 grid gap-3">
+                    <div className="grid grid-cols-3 gap-2">
+                      <div>
+                        <p className="text-[10px] text-[#72807b]">反馈</p>
+                        <p className="font-display text-lg font-semibold text-[#17201f]">
+                          {qualityDashboard.messageFeedback.total}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-[10px] text-[#72807b]">负反馈</p>
+                        <p className="font-display text-lg font-semibold text-[#9b3c29]">
+                          {formatPercent(
+                            qualityDashboard.messageFeedback.negativeRate,
+                          )}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-[10px] text-[#72807b]">引用无关</p>
+                        <p className="font-display text-lg font-semibold text-[#9b3c29]">
+                          {formatPercent(
+                            qualityDashboard.sourceFeedback.irrelevantRate,
+                          )}
+                        </p>
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2 border-t border-[#d5ded9] pt-3">
+                      <div>
+                        <p className="text-[10px] text-[#72807b]">平均引用</p>
+                        <p className="font-semibold text-[#17201f]">
+                          {formatMetricNumber(
+                            qualityDashboard.retrieval.averageSources,
+                          )}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-[10px] text-[#72807b]">首 token</p>
+                        <p className="font-semibold text-[#17201f]">
+                          {formatMetricMs(
+                            qualityDashboard.retrieval.averageFirstTokenMs,
+                          )}
+                        </p>
+                      </div>
+                    </div>
+                    {qualityDashboard.messageFeedback.reasonDistribution.length >
+                      0 && (
+                      <div className="border-t border-[#d5ded9] pt-3">
+                        <p className="font-utility text-[10px] font-semibold uppercase text-[#64716d]">
+                          负反馈原因
+                        </p>
+                        <div className="mt-2 space-y-1">
+                          {qualityDashboard.messageFeedback.reasonDistribution.map(
+                            (item) => (
+                              <p
+                                key={item.reason}
+                                className="flex justify-between gap-3"
+                              >
+                                <span className="truncate">{item.reason}</span>
+                                <span>{item.count}</span>
+                              </p>
+                            ),
+                          )}
+                        </div>
+                      </div>
+                    )}
+                    {qualityDashboard.sourceFeedback.topIrrelevantFiles.length >
+                      0 && (
+                      <div className="border-t border-[#d5ded9] pt-3">
+                        <p className="font-utility text-[10px] font-semibold uppercase text-[#64716d]">
+                          无关引用来源
+                        </p>
+                        <div className="mt-2 space-y-1">
+                          {qualityDashboard.sourceFeedback.topIrrelevantFiles.map(
+                            (item) => (
+                              <p
+                                key={item.fileName}
+                                className="flex justify-between gap-3"
+                              >
+                                <span className="truncate">{item.fileName}</span>
+                                <span>{item.count}</span>
+                              </p>
+                            ),
+                          )}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
 
           <div className="border-b border-[#c7d1cd] py-4">

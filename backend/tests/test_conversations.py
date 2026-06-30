@@ -413,6 +413,93 @@ class CreateConversationTests(unittest.TestCase):
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.json(), {"detail": "缺少可导出的用户问题"})
 
+    def test_quality_dashboard_returns_user_scoped_metrics(self) -> None:
+        """质量看板应汇总当前用户的反馈和检索表现。"""
+        with patch(
+            "app.api.conversations.get_quality_feedback_summary",
+            return_value={
+                "total_feedback": 4,
+                "positive_feedback": 1,
+                "negative_feedback": 3,
+            },
+        ) as feedback_summary, patch(
+            "app.api.conversations.get_quality_feedback_reasons",
+            return_value=[
+                {"reason": "missing_answer", "count": 2},
+                {"reason": "irrelevant_sources", "count": 1},
+            ],
+        ), patch(
+            "app.api.conversations.get_quality_source_summary",
+            return_value={
+                "total_source_feedback": 5,
+                "useful_source_feedback": 2,
+                "irrelevant_source_feedback": 3,
+            },
+        ), patch(
+            "app.api.conversations.get_quality_irrelevant_source_files",
+            return_value=[
+                {"file_name": "民事诉讼法.pdf", "count": 2},
+            ],
+        ), patch(
+            "app.api.conversations.get_quality_retrieval_summary",
+            return_value={
+                "assistant_messages": 8,
+                "average_sources": 2.5,
+                "average_first_token_ms": 1234.5,
+            },
+        ):
+            response = self.client.get("/chat/quality-dashboard?days=7")
+
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertTrue(data["has_feedback"])
+        self.assertEqual(data["window_days"], 7)
+        self.assertEqual(data["message_feedback"]["total"], 4)
+        self.assertEqual(data["message_feedback"]["negative_rate"], 0.75)
+        self.assertEqual(data["source_feedback"]["irrelevant_rate"], 0.6)
+        self.assertEqual(data["retrieval"]["average_sources"], 2.5)
+        self.assertEqual(data["retrieval"]["average_first_token_ms"], 1234.5)
+        feedback_summary.assert_called_once_with(1, 7)
+
+    def test_quality_dashboard_returns_empty_state(self) -> None:
+        """没有反馈时看板应明确返回空状态。"""
+        with patch(
+            "app.api.conversations.get_quality_feedback_summary",
+            return_value={
+                "total_feedback": 0,
+                "positive_feedback": 0,
+                "negative_feedback": 0,
+            },
+        ), patch(
+            "app.api.conversations.get_quality_feedback_reasons",
+            return_value=[],
+        ), patch(
+            "app.api.conversations.get_quality_source_summary",
+            return_value={
+                "total_source_feedback": 0,
+                "useful_source_feedback": 0,
+                "irrelevant_source_feedback": 0,
+            },
+        ), patch(
+            "app.api.conversations.get_quality_irrelevant_source_files",
+            return_value=[],
+        ), patch(
+            "app.api.conversations.get_quality_retrieval_summary",
+            return_value={
+                "assistant_messages": 0,
+                "average_sources": None,
+                "average_first_token_ms": None,
+            },
+        ):
+            response = self.client.get("/chat/quality-dashboard?days=0")
+
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertFalse(data["has_feedback"])
+        self.assertEqual(data["window_days"], 1)
+        self.assertIsNone(data["message_feedback"]["negative_rate"])
+        self.assertIsNone(data["source_feedback"]["irrelevant_rate"])
+
     def test_get_conversation_diagnostics_returns_rag_debug_summary(
         self,
     ) -> None:

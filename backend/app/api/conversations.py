@@ -14,6 +14,11 @@ from app.repositories.conversation_repository import (
 from app.repositories.knowledge_base_repository import knowledge_base_exists
 from app.repositories.message_feedback_repository import (
     find_message_source,
+    get_quality_feedback_reasons,
+    get_quality_feedback_summary,
+    get_quality_irrelevant_source_files,
+    get_quality_retrieval_summary,
+    get_quality_source_summary,
     get_user_message_eval_draft_context,
     get_user_assistant_message,
     upsert_message_feedback,
@@ -95,6 +100,25 @@ def coerce_optional_int(value: object) -> int | None:
         return int(value)
 
     return None
+
+
+def coerce_float(value: object) -> float | None:
+    """把数据库 numeric 结果转换为 JSON 友好的 float。"""
+    if value is None:
+        return None
+
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def ratio(numerator: int, denominator: int) -> float | None:
+    """计算占比，分母为 0 时返回 None。"""
+    if denominator <= 0:
+        return None
+
+    return numerator / denominator
 
 
 def serialize_message_feedback(row: dict) -> dict | None:
@@ -216,6 +240,77 @@ def attach_source_feedbacks(row: dict) -> list[dict]:
             source["feedback"] = feedback
 
     return sources
+
+
+@router.get("/quality-dashboard")
+def get_quality_dashboard(
+    days: int = 7,
+    user_id: int = Depends(get_current_user_id),
+):
+    """读取当前用户的回答质量和检索表现看板摘要。"""
+    normalized_days = min(max(days, 1), 90)
+    feedback_summary = get_quality_feedback_summary(user_id, normalized_days) or {}
+    reason_rows = get_quality_feedback_reasons(user_id, normalized_days)
+    source_summary = get_quality_source_summary(user_id, normalized_days) or {}
+    irrelevant_files = get_quality_irrelevant_source_files(
+        user_id,
+        normalized_days,
+    )
+    retrieval_summary = get_quality_retrieval_summary(user_id, normalized_days) or {}
+
+    total_feedback = int(feedback_summary.get("total_feedback") or 0)
+    positive_feedback = int(feedback_summary.get("positive_feedback") or 0)
+    negative_feedback = int(feedback_summary.get("negative_feedback") or 0)
+    total_source_feedback = int(source_summary.get("total_source_feedback") or 0)
+    irrelevant_source_feedback = int(
+        source_summary.get("irrelevant_source_feedback") or 0,
+    )
+
+    return {
+        "success": True,
+        "window_days": normalized_days,
+        "has_feedback": total_feedback > 0 or total_source_feedback > 0,
+        "message_feedback": {
+            "total": total_feedback,
+            "positive": positive_feedback,
+            "negative": negative_feedback,
+            "negative_rate": ratio(negative_feedback, total_feedback),
+            "reason_distribution": [
+                {
+                    "reason": row["reason"],
+                    "count": row["count"],
+                }
+                for row in reason_rows
+            ],
+        },
+        "source_feedback": {
+            "total": total_source_feedback,
+            "useful": int(source_summary.get("useful_source_feedback") or 0),
+            "irrelevant": irrelevant_source_feedback,
+            "irrelevant_rate": ratio(
+                irrelevant_source_feedback,
+                total_source_feedback,
+            ),
+            "top_irrelevant_files": [
+                {
+                    "file_name": row["file_name"],
+                    "count": row["count"],
+                }
+                for row in irrelevant_files
+            ],
+        },
+        "retrieval": {
+            "assistant_messages": int(
+                retrieval_summary.get("assistant_messages") or 0,
+            ),
+            "average_sources": coerce_float(
+                retrieval_summary.get("average_sources"),
+            ),
+            "average_first_token_ms": coerce_float(
+                retrieval_summary.get("average_first_token_ms"),
+            ),
+        },
+    }
 
 
 def serialize_message_diagnostic(row: dict) -> dict:

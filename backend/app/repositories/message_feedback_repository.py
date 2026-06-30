@@ -1,6 +1,6 @@
 from psycopg.types.json import Jsonb
 
-from app.db.executor import Row, fetch_one
+from app.db.executor import Row, fetch_all, fetch_one
 
 
 def get_user_assistant_message(
@@ -196,4 +196,148 @@ def get_user_message_eval_draft_context(
         LIMIT 1;
         """,
         (user_id, message_id, user_id, user_id),
+    )
+
+
+def get_quality_feedback_summary(
+    user_id: int,
+    days: int = 7,
+) -> Row | None:
+    """统计当前用户最近一段时间的消息反馈总览。"""
+    return fetch_one(
+        """
+        SELECT
+            COUNT(*)::integer AS total_feedback,
+            COUNT(*) FILTER (WHERE mf.rating = 'positive')::integer
+                AS positive_feedback,
+            COUNT(*) FILTER (WHERE mf.rating = 'negative')::integer
+                AS negative_feedback
+        FROM message_feedback AS mf
+        JOIN messages AS m
+          ON m.id = mf.message_id
+        JOIN conversations AS c
+          ON c.id = m.conversation_id
+        WHERE mf.user_id = %s
+          AND c.user_id = %s
+          AND c.deleted_at IS NULL
+          AND mf.created_at >= now() - (%s * interval '1 day');
+        """,
+        (user_id, user_id, days),
+    )
+
+
+def get_quality_feedback_reasons(
+    user_id: int,
+    days: int = 7,
+) -> list[Row]:
+    """统计当前用户负反馈原因分布。"""
+    return fetch_all(
+        """
+        SELECT
+            COALESCE(mf.reason, 'other') AS reason,
+            COUNT(*)::integer AS count
+        FROM message_feedback AS mf
+        JOIN messages AS m
+          ON m.id = mf.message_id
+        JOIN conversations AS c
+          ON c.id = m.conversation_id
+        WHERE mf.user_id = %s
+          AND c.user_id = %s
+          AND c.deleted_at IS NULL
+          AND mf.rating = 'negative'
+          AND mf.created_at >= now() - (%s * interval '1 day')
+        GROUP BY COALESCE(mf.reason, 'other')
+        ORDER BY count DESC, reason ASC;
+        """,
+        (user_id, user_id, days),
+    )
+
+
+def get_quality_source_summary(
+    user_id: int,
+    days: int = 7,
+) -> Row | None:
+    """统计当前用户最近一段时间的 source 反馈总览。"""
+    return fetch_one(
+        """
+        SELECT
+            COUNT(*)::integer AS total_source_feedback,
+            COUNT(*) FILTER (WHERE msf.rating = 'useful')::integer
+                AS useful_source_feedback,
+            COUNT(*) FILTER (WHERE msf.rating = 'irrelevant')::integer
+                AS irrelevant_source_feedback
+        FROM message_source_feedback AS msf
+        JOIN messages AS m
+          ON m.id = msf.message_id
+        JOIN conversations AS c
+          ON c.id = m.conversation_id
+        WHERE msf.user_id = %s
+          AND c.user_id = %s
+          AND c.deleted_at IS NULL
+          AND msf.created_at >= now() - (%s * interval '1 day');
+        """,
+        (user_id, user_id, days),
+    )
+
+
+def get_quality_irrelevant_source_files(
+    user_id: int,
+    days: int = 7,
+    limit: int = 5,
+) -> list[Row]:
+    """统计当前用户被标记无关最多的来源文件。"""
+    return fetch_all(
+        """
+        SELECT
+            COALESCE(
+                NULLIF(msf.metadata->>'file_name', ''),
+                msf.knowledge_file_id::text,
+                '未知来源'
+            ) AS file_name,
+            COUNT(*)::integer AS count
+        FROM message_source_feedback AS msf
+        JOIN messages AS m
+          ON m.id = msf.message_id
+        JOIN conversations AS c
+          ON c.id = m.conversation_id
+        WHERE msf.user_id = %s
+          AND c.user_id = %s
+          AND c.deleted_at IS NULL
+          AND msf.rating = 'irrelevant'
+          AND msf.created_at >= now() - (%s * interval '1 day')
+        GROUP BY file_name
+        ORDER BY count DESC, file_name ASC
+        LIMIT %s;
+        """,
+        (user_id, user_id, days, limit),
+    )
+
+
+def get_quality_retrieval_summary(
+    user_id: int,
+    days: int = 7,
+) -> Row | None:
+    """统计当前用户最近助手消息的检索表现。"""
+    return fetch_one(
+        """
+        SELECT
+            COUNT(*)::integer AS assistant_messages,
+            AVG(jsonb_array_length(COALESCE(m.sources, '[]'::jsonb)))
+                AS average_sources,
+            AVG(
+                NULLIF(
+                    m.retrieval #>> '{diagnostics,timing,first_answer_token_ms}',
+                    ''
+                )::numeric
+            ) AS average_first_token_ms
+        FROM messages AS m
+        JOIN conversations AS c
+          ON c.id = m.conversation_id
+        WHERE c.user_id = %s
+          AND c.deleted_at IS NULL
+          AND m.role = 'assistant'
+          AND m.status = 'completed'
+          AND m.created_at >= now() - (%s * interval '1 day');
+        """,
+        (user_id, days),
     )

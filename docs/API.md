@@ -167,6 +167,7 @@ Authorization: Bearer <access_token>
 | `DELETE` | `/chat/knowledge-bases/{knowledge_base_id}/conversations/{conversation_id}` | 软删除会话。 |
 | `GET` | `/chat/conversations/{conversation_id}/messages` | 会话消息列表。 |
 | `GET` | `/chat/conversations/{conversation_id}/diagnostics` | 会话 RAG 诊断。 |
+| `GET` | `/chat/quality-dashboard` | 当前用户回答质量和检索表现看板摘要。 |
 | `POST` | `/chat/messages/{message_id}/feedback` | 创建或更新助手消息质量反馈。 |
 | `POST` | `/chat/messages/{message_id}/sources/{source_index}/feedback` | 创建或更新单个引用来源反馈。 |
 | `GET` | `/chat/messages/{message_id}/eval-case-draft` | 导出真实问答对应的 RAG eval case 草稿。 |
@@ -255,6 +256,45 @@ Authorization: Bearer <access_token>
 ```
 
 `draft` 外层字段尽量兼容 `docs/evals/rag_eval_cases.jsonl`，`draft_metadata` 仅作为人工审核上下文。前端当前以 JSON 文件下载，不自动写入正式 eval case。
+
+### 质量看板
+
+`GET /chat/quality-dashboard?days=7` 返回当前用户最近一段时间的回答质量和检索表现摘要。`days` 支持 1 到 90，超出范围会被后端归一化。
+
+响应体：
+
+```json
+{
+  "success": true,
+  "window_days": 7,
+  "has_feedback": true,
+  "message_feedback": {
+    "total": 4,
+    "positive": 1,
+    "negative": 3,
+    "negative_rate": 0.75,
+    "reason_distribution": [
+      {"reason": "missing_answer", "count": 2}
+    ]
+  },
+  "source_feedback": {
+    "total": 5,
+    "useful": 2,
+    "irrelevant": 3,
+    "irrelevant_rate": 0.6,
+    "top_irrelevant_files": [
+      {"file_name": "民事诉讼法.pdf", "count": 2}
+    ]
+  },
+  "retrieval": {
+    "assistant_messages": 8,
+    "average_sources": 2.5,
+    "average_first_token_ms": 1234.5
+  }
+}
+```
+
+没有反馈时 `has_feedback=false`，比例字段返回 `null`，前端应展示空状态而不是将空数据解读为质量良好。
 
 ## 用户模型设置
 

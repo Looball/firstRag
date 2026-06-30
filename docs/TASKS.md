@@ -56,7 +56,7 @@
 | `PLAN-20260628-05` | 2026-06-28 | `Done` | 修正 knowledge profile cache diagnostics 在真实 RAG eval 报告中缺失的问题。 | `T-013` |
 | `PLAN-20260629-01` | 2026-06-29 | `Doing` | RAG 检索性能二阶段优化，继续降低首 token 前等待时间，优先处理 settings 读取、混合检索和重复查询开销。 | `T-014` - `T-018` |
 | `PLAN-20260629-02` | 2026-06-29 | `Done` | 基于 `code-review-skill` 仓库级审查，整理安全边界、可维护性和测试补强的后续修改计划。 | `T-019` - `T-025` |
-| `PLAN-20260630-01` | 2026-06-30 | `Doing` | 建立 RAG 回答质量反馈闭环，把真实用户反馈沉淀为后续 eval 和检索优化依据。 | `T-026` - `T-029` |
+| `PLAN-20260630-01` | 2026-06-30 | `Done` | 建立 RAG 回答质量反馈闭环，把真实用户反馈沉淀为后续 eval 和检索优化依据。 | `T-026` - `T-029` |
 
 ## 任务总览
 
@@ -90,7 +90,7 @@
 | `T-026` | `PLAN-20260630-01` | `P1` | `Done` | 增加聊天回答质量反馈闭环 | 2026-06-30 | `e027079` |
 | `T-027` | `PLAN-20260630-01` | `P1` | `Done` | 增强 sources 展示与引用有用性标记 | 2026-06-30 | `ce66821` |
 | `T-028` | `PLAN-20260630-01` | `P2` | `Done` | 支持从真实问答沉淀 RAG eval case 草稿 | 2026-06-30 | `d523917` |
-| `T-029` | `PLAN-20260630-01` | `P2` | `Todo` | 增加回答质量和检索表现看板雏形 | - | - |
+| `T-029` | `PLAN-20260630-01` | `P2` | `Done` | 增加回答质量和检索表现看板雏形 | 2026-06-30 | `待提交` |
 
 ## 新计划接入流程
 
@@ -843,7 +843,7 @@ npm run build
 
 - 来源计划：`PLAN-20260630-01`
 - 优先级：`P1`
-- 状态：`Doing`
+- 状态：`Done`
 - 背景：当前 RAG 性能、检索 diagnostics、worker 和测试体系已经比较完整，但系统缺少真实用户对回答质量的结构化反馈，后续 prompt、retrieval、rerank 和 eval case 优化缺少稳定输入。
 - 目标：在每条 assistant message 下提供轻量反馈入口，并把用户反馈安全持久化，形成“回答 -> 反馈 -> 分析 -> 优化”的最小闭环。
 - 范围：
@@ -909,7 +909,7 @@ ON message_feedback (rating, reason, created_at DESC);
 
 - 来源计划：`PLAN-20260630-01`
 - 优先级：`P1`
-- 状态：`Todo`
+- 状态：`Doing`
 - 背景：当前回答已返回 sources 和 retrieval diagnostics，但用户只能被动查看引用，无法标记“哪些引用真的有用”。这会限制后续分析检索失败原因和 rerank 调参。
 - 目标：让用户能对回答中的单个 source 标记有用/无关，并在前端更清楚地展示来源文件、chunk、score 和 retrieval 来源。
 - 范围：
@@ -986,7 +986,7 @@ ON message_source_feedback (rating, created_at DESC);
   - 草稿顶层字段兼容 `docs/evals/rag_eval_cases.jsonl`，原始 answer、feedback、retrieval 和 sources 放入 `draft_metadata` 供人工审核。
   - 前端在负反馈回答上展示“Eval 草稿”入口，点击后下载 JSON 文件，不自动写入正式 eval case。
   - 已同步更新 `docs/API.md` 与 `docs/SCHEMAS.md`。
-  - 验证命令：`cd backend && conda run -n firstrag python -m unittest tests.test_conversations -v`；`cd backend && conda run -n firstrag python -m compileall app tests/test_conversations.py`；`cd frontend && npm run test -- chat-workspace/api.test.ts`。
+  - 验证命令：`cd backend && conda run -n firstrag python -m unittest tests.test_conversations -v`；`cd backend && conda run -n firstrag python -m compileall app tests/test_conversations.py`；`cd backend && conda run -n firstrag python -m unittest discover tests -v`；`cd frontend && npm run test -- chat-workspace/api.test.ts`；`cd frontend && npm run test`；`cd frontend && npm run lint`；`cd frontend && npm run build`。
 
 ## T-029 增加回答质量和检索表现看板雏形
 
@@ -1005,6 +1005,13 @@ ON message_source_feedback (rating, created_at DESC);
   - 空数据状态清晰，不把无反馈误导为质量良好。
   - 后端测试覆盖聚合口径、用户隔离和空数据路径。
   - 前端测试覆盖数据加载、空状态和错误状态。
+- 完成记录：
+  - 完成日期：2026-06-30
+  - 相关 commit：`待提交`
+  - 新增 `GET /chat/quality-dashboard`，按当前用户聚合最近窗口内的 message feedback、source feedback、负反馈原因、source 无关率、平均 sources 和平均首 token 等指标。
+  - 前端左侧栏新增“质量看板”入口，支持空状态、刷新、负反馈原因分布和无关引用来源排行。
+  - 已同步更新 `docs/API.md` 与 `docs/SCHEMAS.md`。
+  - 验证命令：`cd backend && conda run -n firstrag python -m unittest tests.test_conversations -v`；`cd backend && conda run -n firstrag python -m compileall app tests/test_conversations.py`；`cd frontend && npm run test -- chat-workspace/api.test.ts`。
 
 ## 更新规则
 

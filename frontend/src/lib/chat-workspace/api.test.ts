@@ -10,6 +10,7 @@ import {
   listAllKnowledgeFiles,
   listConversationMessages,
   listKnowledgeBasesAndSessions,
+  loadQualityDashboard,
   loadVectorIndexHealth,
   postChatMessage,
   submitMessageFeedback,
@@ -327,6 +328,74 @@ describe("chat workspace api", () => {
       "/api/chat/messages/42/eval-case-draft",
       { method: "GET" },
       { fallbackMessage: "导出 eval case 草稿失败，请稍后再试。" },
+    );
+  });
+
+  it("normalizes quality dashboard payloads", async () => {
+    authenticatedJsonMock.mockResolvedValueOnce({
+      success: true,
+      window_days: 7,
+      has_feedback: true,
+      message_feedback: {
+        total: 4,
+        positive: 1,
+        negative: 3,
+        negative_rate: 0.75,
+        reason_distribution: [
+          { reason: "missing_answer", count: 2 },
+        ],
+      },
+      source_feedback: {
+        total: 5,
+        useful: 2,
+        irrelevant: 3,
+        irrelevant_rate: 0.6,
+        top_irrelevant_files: [
+          { file_name: "民事诉讼法.pdf", count: 2 },
+        ],
+      },
+      retrieval: {
+        assistant_messages: 8,
+        average_sources: 2.5,
+        average_first_token_ms: 1234.5,
+      },
+    });
+
+    await expect(loadQualityDashboard(7)).resolves.toEqual({
+      windowDays: 7,
+      hasFeedback: true,
+      messageFeedback: {
+        total: 4,
+        positive: 1,
+        negative: 3,
+        negativeRate: 0.75,
+        reasonDistribution: [{ reason: "missing_answer", count: 2 }],
+      },
+      sourceFeedback: {
+        total: 5,
+        useful: 2,
+        irrelevant: 3,
+        irrelevantRate: 0.6,
+        topIrrelevantFiles: [{ fileName: "民事诉讼法.pdf", count: 2 }],
+      },
+      retrieval: {
+        assistantMessages: 8,
+        averageSources: 2.5,
+        averageFirstTokenMs: 1234.5,
+      },
+    });
+    expect(authenticatedJsonMock).toHaveBeenCalledWith(
+      "/api/chat/quality-dashboard?days=7",
+      { method: "GET" },
+      { fallbackMessage: "加载质量看板失败，请稍后再试。" },
+    );
+  });
+
+  it("rejects malformed quality dashboard payloads", async () => {
+    authenticatedJsonMock.mockResolvedValueOnce(null);
+
+    await expect(loadQualityDashboard()).rejects.toThrow(
+      "质量看板响应格式异常。",
     );
   });
 });
