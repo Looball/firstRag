@@ -98,7 +98,7 @@
 | `T-033` | `PLAN-20260630-02` | `P2` | `Done` | 强化本地验收脚本为发布前检查入口 | 2026-06-30 | `4a03381` |
 | `T-034` | `PLAN-20260630-02` | `P2` | `Done` | 补充 README 截图和演示说明 | 2026-06-30 | `a0bccfa` |
 | `T-035` | `PLAN-20260630-02` | `P2` | `Done` | 跑一次真实 RAG eval 与 indexing eval 基线 | 2026-06-30 | `ee845e3` |
-| `T-036` | `PLAN-20260630-02` | `P2` | `Done` | 调查 RAG settings 阶段耗时超阈值 | 2026-06-30 | 待补充 |
+| `T-036` | `PLAN-20260630-02` | `P2` | `Done` | 调查 RAG settings 阶段耗时超阈值 | 2026-06-30 | `72f2780` |
 
 ## 新计划接入流程
 
@@ -1248,7 +1248,7 @@ conda run -n firstrag python scripts/eval_summary.py
   - 重新生成 eval summary 后，文档记录结论。
 - 完成记录：
   - 完成日期：2026-06-30
-  - 相关 commit：待补充
+  - 相关 commit：`72f2780`
   - 结论：`retrieval_settings_ms` 来自 `backend/app/services/rag/streaming.py` 的 RAG stage chunk 间隔计时，表示 LCEL streaming 外层 settings-wait；`retrieval_settings_load_total_ms`、`retrieval_settings_query_ms` 和 `retrieval_settings_normalize_ms` 来自 `backend/app/services/rag/retrieval_pipeline.py` 的真实 settings 读取、缓存命中检查和 normalize 子阶段。
   - 最新真实历史记录中 `settings-wait=1716.02ms`，但 `settings-load=6.40ms`、`settings-query=6.37ms`、`settings-normalize=0.01ms`，因此没有发现数据库 settings 读取或缓存层的真实性能回退。
   - `scripts/eval_rag.py` 已把建议性能门槛从旧 `settings` 外层间隔改为 `settings-load`，报告中保留旧字段但改名为 `settings-wait`。
