@@ -25,6 +25,27 @@
 从 `001_xxx.sql` 开始新增增量 migration，不再把本地数据库完整导出文件直接覆盖
 为新的基线。
 
+## PostgreSQL 字段摘要
+
+以下字段摘要与 `backend/app/db/sql/000_initial_schema.sql` 保持一致，用于快速理解
+表结构；字段类型、默认值和约束以 SQL 文件为准。
+
+| 表 | 主要字段 |
+| --- | --- |
+| `users` | `id`, `username`, `password_hash`, `created_at` |
+| `knowledge_bases` | `id`, `user_id`, `name`, `is_default`, `created_at`, `updated_at`, `deleted_at` |
+| `knowledge_files` | `id`, `user_id`, `original_name`, `storage_path`, `mime_type`, `size_bytes`, `file_hash`, `status`, `error_message`, `created_at`, `updated_at`, `deleted_at`, `index_version` |
+| `knowledge_base_files` | `knowledge_base_id`, `knowledge_file_id`, `created_at` |
+| `conversations` | `id`, `user_id`, `title`, `created_at`, `updated_at`, `deleted_at`, `knowledge_base_id` |
+| `messages` | `id`, `conversation_id`, `role`, `content`, `created_at`, `status`, `error_message`, `completed_at`, `sources`, `retrieval` |
+| `knowledge_file_chunks` | `chunk_id`, `user_id`, `knowledge_file_id`, `chunk_index`, `content`, `metadata`, `created_at`, `updated_at`, `index_version` |
+| `vector_index_jobs` | `id`, `user_id`, `knowledge_file_id`, `knowledge_base_id`, `status`, `priority`, `attempts`, `max_attempts`, `locked_by`, `locked_at`, `started_at`, `finished_at`, `error_message`, `result`, `created_at`, `updated_at`, `available_at`, `heartbeat_at`, `index_version` |
+| `user_llm_settings` | `user_id`, `credential_mode`, `provider`, `model`, `base_url`, `api_key_ciphertext`, `encryption_key_version`, `temperature`, `max_tokens`, `timeout_seconds`, `max_retries`, `created_at`, `updated_at`, `api_key_hint` |
+| `user_llm_provider_credentials` | `user_id`, `provider`, `api_key_ciphertext`, `api_key_hint`, `encryption_key_version`, `created_at`, `updated_at` |
+| `knowledge_base_retrieval_settings` | `knowledge_base_id`, `user_id`, `retrieval_mode`, `enable_query_router`, `enable_rerank`, `top_k`, `vector_top_k`, `fulltext_top_k`, `rrf_k`, `rerank_score_threshold`, `created_at`, `updated_at` |
+| `message_feedback` | `id`, `user_id`, `message_id`, `rating`, `reason`, `note`, `metadata`, `created_at`, `updated_at` |
+| `message_source_feedback` | `id`, `user_id`, `message_id`, `source_index`, `knowledge_file_id`, `chunk_index`, `rating`, `note`, `metadata`, `created_at`, `updated_at` |
+
 ## Pydantic 请求模型
 
 | 模型 | 字段 | 用途 |
