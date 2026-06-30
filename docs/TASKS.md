@@ -88,7 +88,7 @@
 | `T-024` | `PLAN-20260629-02` | `P2` | `Done` | 建立权限、上传和流式代理的回归测试矩阵 | 2026-06-29 | `49e0ba7` |
 | `T-025` | `PLAN-20260629-02` | `P1` | `Done` | 引入 React Query 与 Zod 集中前端数据请求层 | 2026-06-29 | `986a9a3` |
 | `T-026` | `PLAN-20260630-01` | `P1` | `Done` | 增加聊天回答质量反馈闭环 | 2026-06-30 | `e027079` |
-| `T-027` | `PLAN-20260630-01` | `P1` | `Todo` | 增强 sources 展示与引用有用性标记 | - | - |
+| `T-027` | `PLAN-20260630-01` | `P1` | `Done` | 增强 sources 展示与引用有用性标记 | 2026-06-30 | `待提交` |
 | `T-028` | `PLAN-20260630-01` | `P2` | `Todo` | 支持从真实问答沉淀 RAG eval case 草稿 | - | - |
 | `T-029` | `PLAN-20260630-01` | `P2` | `Todo` | 增加回答质量和检索表现看板雏形 | - | - |
 
@@ -109,7 +109,7 @@
 
 - 来源计划：`PLAN-YYYYMMDD-NN`
 - 优先级：`P1`
-- 状态：`Doing`
+- 状态：`Done`
 - 目标：
 - 范围：
 - 验收标准：
@@ -596,7 +596,7 @@ scripts/rag_eval_gate.sh
 
 - 来源计划：`PLAN-20260629-01`
 - 优先级：`P2`
-- 状态：`Todo`
+- 状态：`Doing`
 - 目标：把 RAG 性能优化从单次报告观察升级为可持续追踪，让性能回退在验收报告中显眼暴露。
 - 范围：扩展 eval summary/report，记录 settings、profile、retrieve、hybrid、rerank 的最近 N 次均值和变化，并加入建议阈值；不在报告中输出账号密码、API Key、JWT 或数据库连接串。
 - 验收标准：
@@ -953,6 +953,14 @@ ON message_source_feedback (rating, created_at DESC);
   - source feedback 支持重复提交更新，不产生重复记录。
   - sources 展示不遮挡聊天正文，移动端可折叠。
   - 单测覆盖 source index 越界、跨用户隔离、文件已删除或 source 缺少 file id 的兼容路径。
+- 完成记录：
+  - 完成日期：2026-06-30
+  - 相关 commit：`待提交`
+  - 新增 `POST /chat/messages/{message_id}/sources/{source_index}/feedback`，提交前校验当前用户可访问的 assistant message，并校验 source index 存在于当前 `messages.sources`。
+  - 历史消息接口会把当前用户的 source feedback 附加到 `sources[].feedback`，前端刷新后可回显“引用有用 / 引用无关”状态。
+  - 前端 sources 卡片补充展示 retrieval source、Vector、Fulltext、Rerank、RRF 等分数，并新增单个 source 有用性标记按钮。
+  - 已同步更新 `docs/API.md` 与 `docs/SCHEMAS.md`。
+  - 验证命令：`cd backend && conda run -n firstrag python -m unittest tests.test_conversations -v`；`cd backend && conda run -n firstrag python -m compileall app tests/test_conversations.py`；`cd backend && conda run -n firstrag python -m unittest discover tests -v`；`cd frontend && npm run test -- chat-workspace/api.test.ts`；`cd frontend && npm run test`；`cd frontend && npm run lint`；`cd frontend && npm run build`。
 
 ## T-028 支持从真实问答沉淀 RAG eval case 草稿
 

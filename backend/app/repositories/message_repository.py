@@ -101,17 +101,37 @@ def get_user_conversation_messages(
             mf.note AS feedback_note,
             mf.metadata AS feedback_metadata,
             mf.created_at AS feedback_created_at,
-            mf.updated_at AS feedback_updated_at
+            mf.updated_at AS feedback_updated_at,
+            COALESCE(msf.source_feedbacks, '[]'::jsonb) AS source_feedbacks
         FROM messages AS m
         JOIN conversations AS c
           ON c.id = m.conversation_id
         LEFT JOIN message_feedback AS mf
           ON mf.message_id = m.id
          AND mf.user_id = %s
+        LEFT JOIN LATERAL (
+            SELECT jsonb_agg(
+                jsonb_build_object(
+                    'id', source_feedback.id::text,
+                    'source_index', source_feedback.source_index,
+                    'knowledge_file_id', source_feedback.knowledge_file_id::text,
+                    'chunk_index', source_feedback.chunk_index,
+                    'rating', source_feedback.rating,
+                    'note', source_feedback.note,
+                    'metadata', source_feedback.metadata,
+                    'created_at', source_feedback.created_at,
+                    'updated_at', source_feedback.updated_at
+                )
+                ORDER BY source_feedback.source_index
+            ) AS source_feedbacks
+            FROM message_source_feedback AS source_feedback
+            WHERE source_feedback.message_id = m.id
+              AND source_feedback.user_id = %s
+        ) AS msf ON TRUE
         WHERE c.id = %s
           AND c.user_id = %s
           AND c.deleted_at IS NULL
         ORDER BY m.created_at ASC, m.id ASC;
         """,
-        (user_id, conversation_id, user_id),
+        (user_id, user_id, conversation_id, user_id),
     )

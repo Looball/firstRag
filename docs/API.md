@@ -168,6 +168,7 @@ Authorization: Bearer <access_token>
 | `GET` | `/chat/conversations/{conversation_id}/messages` | 会话消息列表。 |
 | `GET` | `/chat/conversations/{conversation_id}/diagnostics` | 会话 RAG 诊断。 |
 | `POST` | `/chat/messages/{message_id}/feedback` | 创建或更新助手消息质量反馈。 |
+| `POST` | `/chat/messages/{message_id}/sources/{source_index}/feedback` | 创建或更新单个引用来源反馈。 |
 
 ### 消息质量反馈
 
@@ -192,6 +193,28 @@ Authorization: Bearer <access_token>
 | `note` | 可选，1000 字符以内的补充说明。 |
 
 同一用户对同一消息重复提交时执行 upsert。`GET /chat/conversations/{conversation_id}/messages` 会在消息对象中返回当前用户的 `feedback` 字段，用于前端回显。
+
+### 引用来源反馈
+
+`POST /chat/messages/{message_id}/sources/{source_index}/feedback` 用于标记单个 source 是否有用。后端会校验 message 属于当前用户、message 是 assistant 消息，并且 `source_index` 存在于当前 `messages.sources` 数组中；不存在或无权访问时返回 `404`。
+
+请求体：
+
+```json
+{
+  "rating": "useful",
+  "note": null
+}
+```
+
+字段说明：
+
+| 字段 | 说明 |
+| --- | --- |
+| `rating` | 必填，`useful` 或 `irrelevant`。 |
+| `note` | 可选，1000 字符以内的补充说明；当前前端先不展示备注输入。 |
+
+同一用户对同一消息的同一 source 重复提交时执行 upsert。历史消息接口会把当前用户的 source feedback 附加到 `messages[].sources[].feedback`，用于前端回显。
 
 ## 用户模型设置
 

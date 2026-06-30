@@ -31,3 +31,10 @@ class MessageFeedbackRequest(BaseModel):
         "other",
     ] | None = None
     note: str | None = Field(default=None, max_length=1000)
+
+
+class MessageSourceFeedbackRequest(BaseModel):
+    """消息引用来源反馈请求。"""
+
+    rating: Literal["useful", "irrelevant"]
+    note: str | None = Field(default=None, max_length=1000)

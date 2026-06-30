@@ -13,13 +13,16 @@ from app.repositories.conversation_repository import (
 )
 from app.repositories.knowledge_base_repository import knowledge_base_exists
 from app.repositories.message_feedback_repository import (
+    find_message_source,
     get_user_assistant_message,
     upsert_message_feedback,
+    upsert_message_source_feedback,
 )
 from app.repositories.message_repository import get_user_conversation_messages
 from app.schemas.conversation import (
     CreateConversationRequest,
     MessageFeedbackRequest,
+    MessageSourceFeedbackRequest,
     RenameConversationRequest,
 )
 
@@ -71,6 +74,28 @@ def serialize_source_preview(source: dict) -> dict:
     }
 
 
+def coerce_optional_uuid(value: object) -> str | None:
+    """把可选 UUID 字符串规范化；旧数据非法时返回 None。"""
+    if not isinstance(value, str):
+        return None
+
+    try:
+        return str(UUID(value))
+    except ValueError:
+        return None
+
+
+def coerce_optional_int(value: object) -> int | None:
+    """把可选整数值规范化；非法值返回 None。"""
+    if isinstance(value, int):
+        return value
+
+    if isinstance(value, str) and value.strip().isdigit():
+        return int(value)
+
+    return None
+
+
 def serialize_message_feedback(row: dict) -> dict | None:
     """序列化当前用户对消息的质量反馈。"""
     if not row.get("feedback_id"):
@@ -85,6 +110,40 @@ def serialize_message_feedback(row: dict) -> dict | None:
         "created_at": row["feedback_created_at"],
         "updated_at": row["feedback_updated_at"],
     }
+
+
+def serialize_source_feedback(feedback: dict) -> dict:
+    """序列化当前用户对引用来源的反馈。"""
+    return {
+        "id": str(feedback["id"]),
+        "source_index": feedback["source_index"],
+        "knowledge_file_id": feedback.get("knowledge_file_id"),
+        "chunk_index": feedback.get("chunk_index"),
+        "rating": feedback["rating"],
+        "note": feedback.get("note"),
+        "metadata": feedback.get("metadata") or {},
+        "created_at": feedback.get("created_at"),
+        "updated_at": feedback.get("updated_at"),
+    }
+
+
+def attach_source_feedbacks(row: dict) -> list[dict]:
+    """把当前用户的 source feedback 附加到对应 sources 上。"""
+    sources = [dict(source) for source in row.get("sources") or []]
+    feedbacks = row.get("source_feedbacks") or []
+    feedbacks_by_index = {
+        feedback["source_index"]: serialize_source_feedback(feedback)
+        for feedback in feedbacks
+        if feedback.get("source_index") is not None
+    }
+
+    for position, source in enumerate(sources):
+        source_index = source.get("index", position)
+        feedback = feedbacks_by_index.get(source_index)
+        if feedback:
+            source["feedback"] = feedback
+
+    return sources
 
 
 def serialize_message_diagnostic(row: dict) -> dict:
@@ -210,13 +269,59 @@ def get_messages(
                 "content": row["content"],
                 "status": row["status"],
                 "error_message": row["error_message"],
-                "sources": row["sources"] or [],
+                "sources": attach_source_feedbacks(row),
                 "retrieval": serialize_message_retrieval(row),
                 "feedback": serialize_message_feedback(row),
                 "created_at": row["created_at"],
             }
             for row in rows
         ],
+    }
+
+
+@router.post("/messages/{message_id}/sources/{source_index}/feedback")
+def submit_message_source_feedback(
+    message_id: int,
+    source_index: int,
+    req: MessageSourceFeedbackRequest,
+    user_id: int = Depends(get_current_user_id),
+):
+    """提交或更新当前用户对助手消息单个引用来源的反馈。"""
+    message = get_user_assistant_message(user_id, message_id)
+    if message is None:
+        raise HTTPException(status_code=404, detail="消息不存在")
+
+    source_match = find_message_source(message.get("sources") or [], source_index)
+    if source_match is None:
+        raise HTTPException(status_code=404, detail="引用来源不存在")
+
+    _, source = source_match
+    persisted_source_index = coerce_optional_int(
+        source.get("index"),
+    )
+    if persisted_source_index is None:
+        persisted_source_index = source_index
+    feedback = upsert_message_source_feedback(
+        user_id=user_id,
+        message_id=message_id,
+        source_index=persisted_source_index,
+        knowledge_file_id=coerce_optional_uuid(
+            source.get("file_id") or source.get("knowledge_file_id"),
+        ),
+        chunk_index=coerce_optional_int(source.get("chunk_index")),
+        rating=req.rating,
+        note=req.note.strip() if req.note else None,
+        metadata={
+            "file_name": source.get("file_name"),
+            "retrieval_sources": source.get("retrieval_sources") or [],
+        },
+    )
+    if feedback is None:
+        raise HTTPException(status_code=500, detail="保存引用反馈失败")
+
+    return {
+        "success": True,
+        "feedback": serialize_source_feedback(feedback),
     }
 
 

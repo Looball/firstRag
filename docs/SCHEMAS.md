@@ -15,6 +15,7 @@
 | `conversations` | 会话，属于某个知识库。 |
 | `messages` | 会话消息，保存 role、content、status、sources、retrieval。 |
 | `message_feedback` | 用户对 assistant message 的回答质量反馈，使用 `user_id + message_id` 唯一约束，不使用外键。 |
+| `message_source_feedback` | 用户对 assistant message 单个引用来源的有用性反馈，使用 `user_id + message_id + source_index` 唯一约束，不使用外键。 |
 | `vector_index_jobs` | 向量化任务队列，支持租约、重试、取消和并发 worker。 |
 | `user_llm_settings` | 当前用户生效模型设置。 |
 | `user_llm_provider_credentials` | 按厂商保存的加密 API Key。 |
@@ -31,6 +32,7 @@
 | `CreateConversationRequest` | `title` | 新建会话。 |
 | `RenameConversationRequest` | `title` | 重命名会话。 |
 | `MessageFeedbackRequest` | `rating`, `reason`, `note` | 创建或更新助手消息质量反馈。 |
+| `MessageSourceFeedbackRequest` | `rating`, `note` | 创建或更新助手消息引用来源反馈。 |
 | `CreateKnowledgeBaseRequest` | `name` | 新建知识库，1 到 50 字符。 |
 | `UpdateRetrievalSettingsRequest` | `retrieval_mode`, `enable_query_router`, `enable_rerank`, `top_k`, `vector_top_k`, `fulltext_top_k`, `rrf_k`, `rerank_score_threshold` | 更新知识库检索策略。 |
 | `UpdateUserLLMSettingsRequest` | `credential_mode`, `provider`, `model`, `base_url`, `api_key`, `temperature`, `max_tokens`, `timeout_seconds`, `max_retries` | 更新或测试用户模型设置。 |
@@ -109,6 +111,27 @@
   "note": "没有回答核心问题",
   "metadata": {
     "status": "completed"
+  }
+}
+```
+
+`message_source_feedback.rating` 当前使用：
+
+- `useful`
+- `irrelevant`
+
+历史消息接口会把当前用户对引用来源的反馈附加到 `messages[].sources[].feedback`：
+
+```json
+{
+  "id": "11",
+  "source_index": 1,
+  "knowledge_file_id": null,
+  "chunk_index": 2,
+  "rating": "useful",
+  "note": null,
+  "metadata": {
+    "file_name": "民事诉讼法.pdf"
   }
 }
 ```

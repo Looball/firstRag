@@ -41,6 +41,18 @@ export type ChatSource = {
   rerankScore?: number;
   rrfScore?: number;
   retrievalSources?: string[];
+  feedback?: MessageSourceFeedback | null;
+};
+
+export type MessageSourceFeedbackRating = "useful" | "irrelevant";
+
+export type MessageSourceFeedback = {
+  id?: string;
+  sourceIndex: number;
+  knowledgeFileId?: string | null;
+  chunkIndex?: number | null;
+  rating: MessageSourceFeedbackRating;
+  note?: string | null;
 };
 
 export type RetrievalState = {
@@ -340,6 +352,8 @@ export type MessageFeedbackResponse = {
   error?: string;
   message?: string;
 };
+
+export type MessageSourceFeedbackResponse = MessageFeedbackResponse;
 
 export type ListKnowledgeBasesResponse = {
   knowledge_bases?: unknown;

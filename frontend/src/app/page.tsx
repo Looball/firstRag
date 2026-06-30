@@ -43,6 +43,7 @@ import type {
   MessageFeedbackReason,
   MessageFeedbackRating,
   MessageDiagnostic,
+  MessageSourceFeedbackRating,
   RetrievalMode,
   RetrievalState,
   VectorIndexJob,
@@ -431,6 +432,12 @@ export default function Home() {
     Record<string, boolean>
   >({});
   const [feedbackErrors, setFeedbackErrors] = useState<Record<string, string>>({});
+  const [submittingSourceFeedback, setSubmittingSourceFeedback] = useState<
+    Record<string, boolean>
+  >({});
+  const [sourceFeedbackErrors, setSourceFeedbackErrors] = useState<
+    Record<string, string>
+  >({});
 
   const bottomRef = useRef<HTMLDivElement | null>(null);
   const messagesContainerRef = useRef<HTMLDivElement | null>(null);
@@ -1539,6 +1546,85 @@ export default function Home() {
     }
   }
 
+  async function handleSubmitSourceFeedback({
+    sessionId,
+    messageId,
+    sourceKey,
+    sourceIndex,
+    rating,
+  }: {
+    sessionId: string;
+    messageId?: string;
+    sourceKey: string;
+    sourceIndex: number;
+    rating: MessageSourceFeedbackRating;
+  }) {
+    if (!messageId) {
+      setSourceFeedbackErrors((prev) => ({
+        ...prev,
+        [sourceKey]: "这条回答还没有保存完成，稍后再标记引用。",
+      }));
+      return;
+    }
+
+    setSubmittingSourceFeedback((prev) => ({
+      ...prev,
+      [sourceKey]: true,
+    }));
+    setSourceFeedbackErrors((prev) => ({
+      ...prev,
+      [sourceKey]: "",
+    }));
+
+    try {
+      const feedback = await chatApi.submitMessageSourceFeedback(
+        messageId,
+        sourceIndex,
+        { rating },
+      );
+
+      setSessions((prev) =>
+        prev.map((session) =>
+          session.id === sessionId
+            ? {
+                ...session,
+                messages: session.messages.map((message) =>
+                  message.id === messageId
+                    ? {
+                        ...message,
+                        sources: message.sources?.map((source, position) => {
+                          const currentSourceIndex = source.index ?? position;
+
+                          return currentSourceIndex === sourceIndex
+                            ? {
+                                ...source,
+                                feedback,
+                              }
+                            : source;
+                        }),
+                      }
+                    : message
+                ),
+              }
+            : session
+        )
+      );
+    } catch (error) {
+      setSourceFeedbackErrors((prev) => ({
+        ...prev,
+        [sourceKey]:
+          error instanceof Error
+            ? error.message
+            : "保存引用反馈失败，请稍后再试。",
+      }));
+    } finally {
+      setSubmittingSourceFeedback((prev) => ({
+        ...prev,
+        [sourceKey]: false,
+      }));
+    }
+  }
+
   async function loadConversationDiagnostics(
     conversationId: string,
     options: { silent?: boolean } = {}
@@ -2286,67 +2372,136 @@ export default function Home() {
                             </p>
                           </div>
                           <div className="mt-2 space-y-2">
-                            {message.sources.map((source, sourceIndex) => (
-                              <div
-                                key={`${messageKey}-source-${
-                                  source.index ?? sourceIndex
-                                }`}
-                                className="border border-[#d5ded9] bg-[#fcfdfb] px-3 py-2 text-xs text-[#46514e]"
-                              >
-                                <div className="flex items-start justify-between gap-3">
-                                  <p className="min-w-0 truncate font-semibold text-[#17201f]">
-                                    {source.title}
-                                  </p>
-                                  <div className="font-utility flex shrink-0 flex-wrap justify-end gap-2 text-[10px] text-[#72807b]">
-                                    {source.chunkIndex !== undefined && (
-                                      <span>
-                                        文件片段 #{source.chunkIndex}
-                                      </span>
-                                    )}
-                                    {source.vectorScore !== undefined && (
-                                      <span>
-                                        向量距离{" "}
-                                        {source.vectorScore.toFixed(4)}
-                                      </span>
-                                    )}
-                                    {source.fulltextScore !== undefined && (
-                                      <span>
-                                        文本分{" "}
-                                        {source.fulltextScore.toFixed(4)}
-                                      </span>
-                                    )}
-                                    {source.rerankScore !== undefined && (
-                                      <span>
-                                        相关性{" "}
-                                        {source.rerankScore.toFixed(4)}
-                                      </span>
-                                    )}
-                                    {source.metadata && (
-                                      <span>{source.metadata}</span>
+                            {message.sources.map((source, sourceIndex) => {
+                              const currentSourceIndex =
+                                source.index ?? sourceIndex;
+                              const sourceKey = `${messageKey}-source-${currentSourceIndex}`;
+                              const isSourceFeedbackSubmitting = Boolean(
+                                submittingSourceFeedback[sourceKey]
+                              );
+                              const sourceFeedbackError =
+                                sourceFeedbackErrors[sourceKey] || "";
+
+                              return (
+                                <div
+                                  key={sourceKey}
+                                  className="border border-[#d5ded9] bg-[#fcfdfb] px-3 py-2 text-xs text-[#46514e]"
+                                >
+                                  <div className="flex items-start justify-between gap-3">
+                                    <p className="min-w-0 truncate font-semibold text-[#17201f]">
+                                      {source.title}
+                                    </p>
+                                    <div className="font-utility flex shrink-0 flex-wrap justify-end gap-2 text-[10px] text-[#72807b]">
+                                      {source.chunkIndex !== undefined && (
+                                        <span>
+                                          Chunk #{source.chunkIndex}
+                                        </span>
+                                      )}
+                                      {source.retrievalSources &&
+                                        source.retrievalSources.length > 0 && (
+                                          <span>
+                                            {source.retrievalSources.join(" / ")}
+                                          </span>
+                                        )}
+                                      {source.vectorScore !== undefined && (
+                                        <span>
+                                          Vector {source.vectorScore.toFixed(4)}
+                                        </span>
+                                      )}
+                                      {source.fulltextScore !== undefined && (
+                                        <span>
+                                          Fulltext{" "}
+                                          {source.fulltextScore.toFixed(4)}
+                                        </span>
+                                      )}
+                                      {source.rerankScore !== undefined && (
+                                        <span>
+                                          Rerank {source.rerankScore.toFixed(4)}
+                                        </span>
+                                      )}
+                                      {source.rrfScore !== undefined && (
+                                        <span>
+                                          RRF {source.rrfScore.toFixed(4)}
+                                        </span>
+                                      )}
+                                      {source.metadata && (
+                                        <span>{source.metadata}</span>
+                                      )}
+                                    </div>
+                                  </div>
+                                  {source.content && (
+                                    <p className="mt-1 max-h-10 overflow-hidden leading-5 text-[#64716d]">
+                                      {source.content}
+                                    </p>
+                                  )}
+                                  {((source.fileName &&
+                                    source.fileName !== source.title) ||
+                                    source.fileType ||
+                                    source.fileId) && (
+                                    <p className="mt-1 truncate text-[11px] text-[#72807b]">
+                                      {[
+                                        source.fileName !== source.title
+                                          ? source.fileName
+                                          : "",
+                                        source.fileType,
+                                        source.fileId,
+                                      ]
+                                        .filter(Boolean)
+                                        .join(" · ")}
+                                    </p>
+                                  )}
+                                  <div className="mt-2 flex flex-wrap items-center justify-between gap-2 border-t border-[#e2e8e5] pt-2">
+                                    <div className="flex flex-wrap items-center gap-2">
+                                      <button
+                                        type="button"
+                                        disabled={isSourceFeedbackSubmitting}
+                                        onClick={() =>
+                                          handleSubmitSourceFeedback({
+                                            sessionId: currentSession.id,
+                                            messageId: message.id,
+                                            sourceKey,
+                                            sourceIndex: currentSourceIndex,
+                                            rating: "useful",
+                                          })
+                                        }
+                                        className={`font-utility border px-2 py-1 text-[10px] font-semibold uppercase transition ${
+                                          source.feedback?.rating === "useful"
+                                            ? "border-[#176b62] bg-[#dcebe6] text-[#176b62]"
+                                            : "border-[#cbd5d1] text-[#64716d] hover:border-[#176b62] hover:text-[#176b62]"
+                                        }`}
+                                      >
+                                        引用有用
+                                      </button>
+                                      <button
+                                        type="button"
+                                        disabled={isSourceFeedbackSubmitting}
+                                        onClick={() =>
+                                          handleSubmitSourceFeedback({
+                                            sessionId: currentSession.id,
+                                            messageId: message.id,
+                                            sourceKey,
+                                            sourceIndex: currentSourceIndex,
+                                            rating: "irrelevant",
+                                          })
+                                        }
+                                        className={`font-utility border px-2 py-1 text-[10px] font-semibold uppercase transition ${
+                                          source.feedback?.rating === "irrelevant"
+                                            ? "border-[#e36b4f] bg-[#fff1ed] text-[#9b3c29]"
+                                            : "border-[#cbd5d1] text-[#64716d] hover:border-[#e36b4f] hover:text-[#9b3c29]"
+                                        }`}
+                                      >
+                                        引用无关
+                                      </button>
+                                    </div>
+                                    {sourceFeedbackError && (
+                                      <p className="text-[11px] text-[#9b3c29]">
+                                        {sourceFeedbackError}
+                                      </p>
                                     )}
                                   </div>
                                 </div>
-                                {source.content && (
-                                  <p className="mt-1 max-h-10 overflow-hidden leading-5 text-[#64716d]">
-                                    {source.content}
-                                  </p>
-                                )}
-                                {((source.fileName &&
-                                  source.fileName !== source.title) ||
-                                  source.fileType) && (
-                                  <p className="mt-1 truncate text-[11px] text-[#72807b]">
-                                    {[
-                                      source.fileName !== source.title
-                                        ? source.fileName
-                                        : "",
-                                      source.fileType,
-                                    ]
-                                      .filter(Boolean)
-                                      .join(" · ")}
-                                  </p>
-                                )}
-                              </div>
-                            ))}
+                              );
+                            })}
                           </div>
                         </div>
                       )}

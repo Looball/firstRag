@@ -18,6 +18,9 @@ import type {
   MessageFeedbackResponse,
   MessageFeedbackRating,
   MessageDiagnostic,
+  MessageSourceFeedback,
+  MessageSourceFeedbackRating,
+  MessageSourceFeedbackResponse,
   RetrievalSettingsResponse,
   UploadKnowledgeFilesResponse,
   VectorIndexHealthResponse,
@@ -35,6 +38,7 @@ import {
   toKnowledgeBase,
   toKnowledgeFile,
   toMessageFeedback,
+  toMessageSourceFeedback,
   toMessages,
   toRetrievalSettings,
 } from "./utils";
@@ -319,6 +323,37 @@ export async function submitMessageFeedback(
   }
 
   return parsedFeedback satisfies MessageFeedback;
+}
+
+export async function submitMessageSourceFeedback(
+  messageId: string,
+  sourceIndex: number,
+  feedback: {
+    rating: MessageSourceFeedbackRating;
+    note?: string | null;
+  },
+) {
+  const data = await authenticatedJson<MessageSourceFeedbackResponse>(
+    `/api/chat/messages/${encodeURIComponent(
+      messageId,
+    )}/sources/${encodeURIComponent(String(sourceIndex))}/feedback`,
+    {
+      method: "POST",
+      headers: jsonHeaders(),
+      body: JSON.stringify({
+        rating: feedback.rating,
+        note: feedback.note || null,
+      }),
+    },
+    { fallbackMessage: "保存引用反馈失败，请稍后再试。" },
+  );
+  const parsedFeedback = toMessageSourceFeedback(data.feedback);
+
+  if (!parsedFeedback) {
+    throw new Error("引用反馈响应格式异常。");
+  }
+
+  return parsedFeedback satisfies MessageSourceFeedback;
 }
 
 export async function listKnowledgeBasesAndSessions() {

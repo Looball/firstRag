@@ -109,6 +109,19 @@ class CreateConversationTests(unittest.TestCase):
                     "feedback_metadata": {"status": "completed"},
                     "feedback_created_at": "2026-06-25T00:00:02+08:00",
                     "feedback_updated_at": "2026-06-25T00:00:02+08:00",
+                    "source_feedbacks": [
+                        {
+                            "id": "11",
+                            "source_index": 1,
+                            "knowledge_file_id": None,
+                            "chunk_index": 2,
+                            "rating": "useful",
+                            "note": None,
+                            "metadata": {},
+                            "created_at": "2026-06-25T00:00:03+08:00",
+                            "updated_at": "2026-06-25T00:00:03+08:00",
+                        }
+                    ],
                     "created_at": "2026-06-25T00:00:00+08:00",
                 }
             ],
@@ -118,7 +131,10 @@ class CreateConversationTests(unittest.TestCase):
             )
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json()["messages"][0]["sources"], sources)
+        self.assertEqual(
+            response.json()["messages"][0]["sources"][0]["feedback"]["rating"],
+            "useful",
+        )
         self.assertEqual(
             response.json()["messages"][0]["retrieval"],
             retrieval,
@@ -233,6 +249,78 @@ class CreateConversationTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 422)
         get_message.assert_not_called()
+
+    def test_submit_message_source_feedback_upserts_existing_source(self) -> None:
+        """用户可以标记自己助手消息中的真实引用来源。"""
+        with patch(
+            "app.api.conversations.get_user_assistant_message",
+            return_value={
+                "id": 42,
+                "role": "assistant",
+                "status": "completed",
+                "conversation_id": uuid4(),
+                "sources": [
+                    {
+                        "index": 1,
+                        "file_id": str(uuid4()),
+                        "file_name": "民事诉讼法.pdf",
+                        "chunk_index": 2,
+                        "retrieval_sources": ["vector", "fulltext"],
+                    }
+                ],
+            },
+        ) as get_message, patch(
+            "app.api.conversations.upsert_message_source_feedback",
+            return_value={
+                "id": 11,
+                "user_id": 1,
+                "message_id": 42,
+                "source_index": 1,
+                "knowledge_file_id": None,
+                "chunk_index": 2,
+                "rating": "irrelevant",
+                "note": None,
+                "metadata": {"file_name": "民事诉讼法.pdf"},
+                "created_at": "2026-06-25T00:00:02+08:00",
+                "updated_at": "2026-06-25T00:00:03+08:00",
+            },
+        ) as upsert_feedback:
+            response = self.client.post(
+                "/chat/messages/42/sources/1/feedback",
+                json={"rating": "irrelevant"},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json()["success"])
+        self.assertEqual(response.json()["feedback"]["rating"], "irrelevant")
+        get_message.assert_called_once_with(1, 42)
+        self.assertEqual(upsert_feedback.call_args.kwargs["source_index"], 1)
+        self.assertEqual(upsert_feedback.call_args.kwargs["chunk_index"], 2)
+
+    def test_submit_message_source_feedback_returns_404_for_missing_source(
+        self,
+    ) -> None:
+        """source index 不存在时不能写入伪造引用反馈。"""
+        with patch(
+            "app.api.conversations.get_user_assistant_message",
+            return_value={
+                "id": 42,
+                "role": "assistant",
+                "status": "completed",
+                "conversation_id": uuid4(),
+                "sources": [{"index": 1, "file_name": "民事诉讼法.pdf"}],
+            },
+        ), patch(
+            "app.api.conversations.upsert_message_source_feedback",
+        ) as upsert_feedback:
+            response = self.client.post(
+                "/chat/messages/42/sources/5/feedback",
+                json={"rating": "useful"},
+            )
+
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(response.json(), {"detail": "引用来源不存在"})
+        upsert_feedback.assert_not_called()
 
     def test_get_conversation_diagnostics_returns_rag_debug_summary(
         self,

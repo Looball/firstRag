@@ -19,6 +19,8 @@ import type {
   MessageFeedbackRating,
   MessageFeedbackReason,
   MessageDiagnostic,
+  MessageSourceFeedback,
+  MessageSourceFeedbackRating,
   RetrievalDiagnostics,
   RetrievalMode,
   RetrievalState,
@@ -130,6 +132,11 @@ const MESSAGE_FEEDBACK_REASONS = new Set<MessageFeedbackReason>([
   "other",
 ]);
 
+const MESSAGE_SOURCE_FEEDBACK_RATINGS = new Set<MessageSourceFeedbackRating>([
+  "useful",
+  "irrelevant",
+]);
+
 export function toMessageFeedback(value: unknown): MessageFeedback | null {
   if (typeof value !== "object" || value === null) {
     return null;
@@ -157,6 +164,39 @@ export function toMessageFeedback(value: unknown): MessageFeedback | null {
         ? (reason as MessageFeedbackReason)
         : null,
     note: typeof note === "string" ? note : null,
+  };
+}
+
+
+export function toMessageSourceFeedback(
+  value: unknown,
+): MessageSourceFeedback | null {
+  if (typeof value !== "object" || value === null) {
+    return null;
+  }
+
+  const candidate = value as Record<string, unknown>;
+  const rating = candidate.rating;
+  const sourceIndex = getOptionalNumberField(candidate, ["source_index"]);
+
+  if (
+    typeof rating !== "string" ||
+    !MESSAGE_SOURCE_FEEDBACK_RATINGS.has(rating as MessageSourceFeedbackRating) ||
+    sourceIndex === undefined
+  ) {
+    return null;
+  }
+
+  return {
+    ...(typeof candidate.id === "string" ? { id: candidate.id } : {}),
+    sourceIndex,
+    knowledgeFileId:
+      typeof candidate.knowledge_file_id === "string"
+        ? candidate.knowledge_file_id
+        : null,
+    chunkIndex: getOptionalNumberField(candidate, ["chunk_index"]) ?? null,
+    rating: rating as MessageSourceFeedbackRating,
+    note: typeof candidate.note === "string" ? candidate.note : null,
   };
 }
 
@@ -752,6 +792,7 @@ export function toChatSource(value: unknown, index: number): ChatSource | null {
       ? getStringField(metadataRecord, ["file_type", "type"])
       : "");
   const retrievalSources = getStringArrayField(source, "retrieval_sources");
+  const feedback = toMessageSourceFeedback(source.feedback);
   const title =
     getStringField(source, [
       "title",
@@ -852,6 +893,7 @@ export function toChatSource(value: unknown, index: number): ChatSource | null {
     ...(rerankScore !== undefined ? { rerankScore } : {}),
     ...(rrfScore !== undefined ? { rrfScore } : {}),
     ...(retrievalSources.length > 0 ? { retrievalSources } : {}),
+    ...(feedback ? { feedback } : {}),
   };
 }
 

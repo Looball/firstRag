@@ -12,6 +12,7 @@ import {
   loadVectorIndexHealth,
   postChatMessage,
   submitMessageFeedback,
+  submitMessageSourceFeedback,
 } from "./api";
 
 vi.mock("@/lib/frontend-api", () => ({
@@ -189,6 +190,19 @@ describe("chat workspace api", () => {
             reason: "missing_answer",
             note: "没有回答核心问题",
           },
+          sources: [
+            {
+              index: 1,
+              file_name: "民事诉讼法.pdf",
+              content: "片段",
+              feedback: {
+                id: "11",
+                source_index: 1,
+                rating: "useful",
+                note: null,
+              },
+            },
+          ],
         },
       ],
     });
@@ -202,6 +216,19 @@ describe("chat workspace api", () => {
           reason: "missing_answer",
           note: "没有回答核心问题",
         },
+        sources: [
+          expect.objectContaining({
+            index: 1,
+            feedback: {
+              id: "11",
+              sourceIndex: 1,
+              knowledgeFileId: null,
+              chunkIndex: null,
+              rating: "useful",
+              note: null,
+            },
+          }),
+        ],
       }),
     ]);
   });
@@ -240,6 +267,42 @@ describe("chat workspace api", () => {
         }),
       },
       { fallbackMessage: "保存反馈失败，请稍后再试。" },
+    );
+  });
+
+  it("submits source feedback through the workspace API", async () => {
+    authenticatedJsonMock.mockResolvedValueOnce({
+      feedback: {
+        id: "11",
+        source_index: 1,
+        rating: "irrelevant",
+        note: null,
+      },
+    });
+
+    await expect(
+      submitMessageSourceFeedback("42", 1, {
+        rating: "irrelevant",
+      }),
+    ).resolves.toEqual({
+      id: "11",
+      sourceIndex: 1,
+      knowledgeFileId: null,
+      chunkIndex: null,
+      rating: "irrelevant",
+      note: null,
+    });
+    expect(authenticatedJsonMock).toHaveBeenCalledWith(
+      "/api/chat/messages/42/sources/1/feedback",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          rating: "irrelevant",
+          note: null,
+        }),
+      },
+      { fallbackMessage: "保存引用反馈失败，请稍后再试。" },
     );
   });
 });
