@@ -89,7 +89,7 @@
 | `T-025` | `PLAN-20260629-02` | `P1` | `Done` | 引入 React Query 与 Zod 集中前端数据请求层 | 2026-06-29 | `986a9a3` |
 | `T-026` | `PLAN-20260630-01` | `P1` | `Done` | 增加聊天回答质量反馈闭环 | 2026-06-30 | `e027079` |
 | `T-027` | `PLAN-20260630-01` | `P1` | `Done` | 增强 sources 展示与引用有用性标记 | 2026-06-30 | `ce66821` |
-| `T-028` | `PLAN-20260630-01` | `P2` | `Done` | 支持从真实问答沉淀 RAG eval case 草稿 | 2026-06-30 | `待提交` |
+| `T-028` | `PLAN-20260630-01` | `P2` | `Done` | 支持从真实问答沉淀 RAG eval case 草稿 | 2026-06-30 | `d523917` |
 | `T-029` | `PLAN-20260630-01` | `P2` | `Todo` | 增加回答质量和检索表现看板雏形 | - | - |
 
 ## 新计划接入流程
@@ -981,7 +981,7 @@ ON message_source_feedback (rating, created_at DESC);
   - 测试覆盖正常导出、跨用户隔离、缺少 retrieval/sources 的兼容路径。
 - 完成记录：
   - 完成日期：2026-06-30
-  - 相关 commit：`待提交`
+  - 相关 commit：`d523917`
   - 新增 `GET /chat/messages/{message_id}/eval-case-draft`，从当前用户 assistant message、上一条 user question、sources、retrieval diagnostics 和 message feedback 生成 eval case 草稿。
   - 草稿顶层字段兼容 `docs/evals/rag_eval_cases.jsonl`，原始 answer、feedback、retrieval 和 sources 放入 `draft_metadata` 供人工审核。
   - 前端在负反馈回答上展示“Eval 草稿”入口，点击后下载 JSON 文件，不自动写入正式 eval case。
