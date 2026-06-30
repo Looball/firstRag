@@ -57,6 +57,7 @@
 | `PLAN-20260629-01` | 2026-06-29 | `Doing` | RAG 检索性能二阶段优化，继续降低首 token 前等待时间，优先处理 settings 读取、混合检索和重复查询开销。 | `T-014` - `T-018` |
 | `PLAN-20260629-02` | 2026-06-29 | `Done` | 基于 `code-review-skill` 仓库级审查，整理安全边界、可维护性和测试补强的后续修改计划。 | `T-019` - `T-025` |
 | `PLAN-20260630-01` | 2026-06-30 | `Done` | 建立 RAG 回答质量反馈闭环，把真实用户反馈沉淀为后续 eval 和检索优化依据。 | `T-026` - `T-029` |
+| `PLAN-20260630-02` | 2026-06-30 | `Doing` | 补强工程化交付闭环，优先解决数据库迁移、Docker Compose 初始化、CI 和发布前验收可运行性。 | `T-030` - `T-035` |
 
 ## 任务总览
 
@@ -91,6 +92,12 @@
 | `T-027` | `PLAN-20260630-01` | `P1` | `Done` | 增强 sources 展示与引用有用性标记 | 2026-06-30 | `ce66821` |
 | `T-028` | `PLAN-20260630-01` | `P2` | `Done` | 支持从真实问答沉淀 RAG eval case 草稿 | 2026-06-30 | `d523917` |
 | `T-029` | `PLAN-20260630-01` | `P2` | `Done` | 增加回答质量和检索表现看板雏形 | 2026-06-30 | `aa70530` |
+| `T-030` | `PLAN-20260630-02` | `P1` | `Todo` | 增加数据库迁移执行脚本 | - | - |
+| `T-031` | `PLAN-20260630-02` | `P1` | `Todo` | 接入 Docker Compose 初始化流程 | - | - |
+| `T-032` | `PLAN-20260630-02` | `P1` | `Todo` | 增加 GitHub Actions CI | - | - |
+| `T-033` | `PLAN-20260630-02` | `P2` | `Todo` | 强化本地验收脚本为发布前检查入口 | - | - |
+| `T-034` | `PLAN-20260630-02` | `P2` | `Todo` | 补充 README 截图和演示说明 | - | - |
+| `T-035` | `PLAN-20260630-02` | `P2` | `Todo` | 跑一次真实 RAG eval 与 indexing eval 基线 | - | - |
 
 ## 新计划接入流程
 
@@ -1012,6 +1019,152 @@ ON message_source_feedback (rating, created_at DESC);
   - 前端左侧栏新增“质量看板”入口，支持空状态、刷新、负反馈原因分布和无关引用来源排行。
   - 已同步更新 `docs/API.md` 与 `docs/SCHEMAS.md`。
   - 验证命令：`cd backend && conda run -n firstrag python -m unittest tests.test_conversations -v`；`cd backend && conda run -n firstrag python -m compileall app tests/test_conversations.py`；`cd frontend && npm run test -- chat-workspace/api.test.ts`。
+
+## T-030 增加数据库迁移执行脚本
+
+- 来源计划：`PLAN-20260630-02`
+- 优先级：`P1`
+- 状态：`Todo`
+- 背景：当前 `backend/app/db/sql/` 已维护基础建表 SQL 和增量 migration，但新数据库首次运行仍依赖人工按顺序执行 SQL，Docker Compose 和新环境验收存在不确定性。
+- 目标：提供一个可重复运行的数据库迁移入口，支持从空库初始化完整表结构，并能跳过已经应用的 migration。
+- 范围：
+  - 新增 `scripts/migrate_db.py` 或等价脚本，默认读取仓库根目录 `.env` 中的 `DATABASE_URL`，同时支持通过环境变量覆盖。
+  - 建立轻量 `schema_migrations` 记录表，记录 migration 文件名、checksum、执行时间和执行状态。
+  - 按文件编号顺序执行 `backend/app/db/sql/*.sql`，包含 `000_由数据库导出的建表语句.sql` 与后续增量 SQL。
+  - 迁移失败时停止执行后续 SQL，输出安全、可读的错误信息，不打印数据库密码、API Key、JWT 或完整 `.env` 内容。
+  - 提供 dry-run 或 list 模式，便于查看待执行 migration。
+- 验收标准：
+  - 空数据库可以通过脚本初始化完整业务表结构。
+  - 重复运行脚本不会重复执行已应用 migration。
+  - migration 文件内容变化时能检测 checksum 不一致并阻止静默跳过。
+  - 测试覆盖 migration 排序、跳过已执行项、checksum mismatch 和失败停止场景。
+  - 文档说明本地和 compose 环境下的执行方式。
+- 建议验证命令：
+
+```bash
+conda run -n firstrag python scripts/migrate_db.py --dry-run
+conda run -n firstrag python -m pytest backend/tests
+```
+
+## T-031 接入 Docker Compose 初始化流程
+
+- 来源计划：`PLAN-20260630-02`
+- 优先级：`P1`
+- 状态：`Todo`
+- 背景：当前 `docs/DEPLOYMENT.md` 明确说明 compose 不会自动创建业务基础表，新环境需要人工初始化数据库，影响项目可交付性。
+- 目标：让 Docker Compose 新环境具备清晰、低摩擦的数据库初始化路径，减少首次启动失败。
+- 范围：
+  - 基于 `T-030` 的迁移脚本，为 compose 提供一键执行迁移的命令或独立 migration service。
+  - 明确 `COMPOSE_DATABASE_URL`、`DATABASE_URL` 与 compose 内 `postgres` service 的关系。
+  - 必要时调整 backend Dockerfile，确保容器内包含迁移入口和所需 SQL 文件。
+  - 更新 `docker-compose.yml`、`deploy/docker/` 或文档中的启动顺序，避免 backend 在数据库未初始化时产生误导性错误。
+  - 保持宿主机本地开发流程兼容，不强制所有用户使用 Docker。
+- 验收标准：
+  - 新 compose 数据卷场景下，可以按文档完成数据库初始化、后端启动、前端访问和 worker 启动。
+  - 重复执行初始化命令不会破坏已有数据。
+  - `docs/DEPLOYMENT.md` 不再停留在“当前 compose 不会自动创建业务基础表”的未解决描述，而是给出明确流程。
+  - 不把数据库密码、JWT、API Key 等敏感值写入日志或提交到仓库。
+- 建议验证命令：
+
+```bash
+docker compose config --quiet
+COMPOSE_DATABASE_URL=postgresql://firstrag:firstrag-password@postgres:5432/first_rag docker compose run --rm backend python /app/scripts/migrate_db.py --dry-run
+```
+
+## T-032 增加 GitHub Actions CI
+
+- 来源计划：`PLAN-20260630-02`
+- 优先级：`P1`
+- 状态：`Todo`
+- 背景：本地已经有 `scripts/acceptance_check.sh` 和前后端测试命令，但仓库缺少自动 CI，协作时容易漏跑检查。
+- 目标：为 pull request 和主分支 push 增加基础 CI，覆盖后端语法/单测、前端 lint/test/build 和文档/脚本可执行性检查。
+- 范围：
+  - 新增 `.github/workflows/ci.yml`。
+  - 后端 job 使用 Python 环境安装 `backend/requirements.txt`，运行 `python -m compileall app` 与测试集。
+  - 前端 job 使用 Node 环境安装依赖，运行 `npm run lint`、`npm run test`、`npm run build`。
+  - 如果真实 RAG eval 依赖外部 API Key，则默认不在 CI 中执行，只保留手动 workflow 或文档说明。
+  - 缓存 pip/npm 依赖，控制 CI 耗时。
+- 验收标准：
+  - PR 和 main push 会触发 CI。
+  - CI 不依赖本地 `.env`、外部 LLM API Key 或真实数据库服务即可完成静态检查。
+  - 失败日志能明确定位后端、前端或构建阶段。
+  - README 或文档补充 CI 覆盖范围说明。
+- 建议验证命令：
+
+```bash
+scripts/acceptance_check.sh --skip-real-eval
+```
+
+## T-033 强化本地验收脚本为发布前检查入口
+
+- 来源计划：`PLAN-20260630-02`
+- 优先级：`P2`
+- 状态：`Todo`
+- 背景：`scripts/acceptance_check.sh` 已覆盖静态验收和可选真实 eval，但随着迁移脚本、CI 和反馈看板增加，需要把本地验收入口继续整理得更适合发布前使用。
+- 目标：让开发者可以用一个入口完成发布前核心检查，并能按场景跳过外部依赖或耗时阶段。
+- 范围：
+  - 在 `acceptance_check.sh` 中接入 migration dry-run、后端 compileall、后端测试、前端 lint/test/build 和可选 eval。
+  - 保留 `--skip-real-eval`、`--skip-frontend-tests`、`--skip-frontend-build` 等轻量开关，必要时增加 `--skip-migration-check`。
+  - 汇总每个阶段的开始、成功和失败提示，降低排错成本。
+  - 不在脚本中打印 `.env` 内容或敏感环境变量。
+- 验收标准：
+  - 默认静态验收路径能在无外部 API Key 的环境下运行。
+  - 发布前完整路径可以显式开启真实 RAG eval 和 indexing eval。
+  - 某一阶段失败时脚本返回非零退出码，并保留足够清晰的阶段名称。
+  - `docs/DEPLOYMENT.md` 或 `docs/README.md` 更新本地验收说明。
+- 建议验证命令：
+
+```bash
+scripts/acceptance_check.sh --skip-real-eval
+scripts/acceptance_check.sh --help
+```
+
+## T-034 补充 README 截图和演示说明
+
+- 来源计划：`PLAN-20260630-02`
+- 优先级：`P2`
+- 状态：`Todo`
+- 背景：README 当前“项目截图”仍标注暂未提供，外部读者难以快速理解聊天工作台、知识库管理、模型设置和质量看板的实际体验。
+- 目标：补齐项目可展示材料，让 README 能清楚呈现 FirstRAG 的核心界面和推荐试用路径。
+- 范围：
+  - 准备聊天工作台、知识库文件管理、模型设置、任务队列和质量看板的截图。
+  - 在 README 中补充截图、功能说明和最短试用路径。
+  - 如截图包含本地数据，需避免展示真实 API Key、JWT、数据库密码、私人文档内容或敏感用户信息。
+  - 必要时新增 `docs/assets/` 或等价目录管理图片资源。
+- 验收标准：
+  - README 首屏之后能看到至少一张真实产品截图或明确的界面预览。
+  - 截图与当前 UI 一致，不展示未实现功能。
+  - 文档说明如何启动最小演示链路，包括后端、前端和 worker。
+  - 图片资源命名清晰，体积可控，不影响仓库可维护性。
+- 建议验证命令：
+
+```bash
+git status --short
+```
+
+## T-035 跑一次真实 RAG eval 与 indexing eval 基线
+
+- 来源计划：`PLAN-20260630-02`
+- 优先级：`P2`
+- 状态：`Todo`
+- 背景：前几批任务已经补强 RAG 性能、反馈闭环和质量看板，但工程化收口后需要重新记录一次真实链路质量与性能基线。
+- 目标：在迁移、compose 和 CI 补强后，运行真实 RAG eval 与 indexing eval，形成发布前可比较基线。
+- 范围：
+  - 使用现有 `scripts/eval_rag.py`、`scripts/eval_indexing.py` 和 `scripts/eval_summary.py`。
+  - 记录通过率、平均耗时、首 token、平均 sources、缓存命中、检索阶段耗时和 indexing 成功情况。
+  - 若真实 API Key 或外部服务不可用，记录阻塞原因，不伪造结果。
+  - 更新 `docs/evals/latest_summary.md` 或相关报告生成流程，不提交包含敏感信息的运行输出。
+- 验收标准：
+  - 至少完成一次真实 RAG eval 和一次 indexing eval，或明确记录外部依赖阻塞原因。
+  - eval summary 能生成并展示最近运行趋势。
+  - 若发现明显回归，新增后续任务或直接修复。
+  - 报告不包含 API Key、JWT、数据库密码或用户私密文档内容。
+- 建议验证命令：
+
+```bash
+scripts/acceptance_check.sh
+conda run -n firstrag python scripts/eval_summary.py
+```
 
 ## 更新规则
 
