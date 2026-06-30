@@ -57,7 +57,7 @@
 | `PLAN-20260629-01` | 2026-06-29 | `Doing` | RAG 检索性能二阶段优化，继续降低首 token 前等待时间，优先处理 settings 读取、混合检索和重复查询开销。 | `T-014` - `T-018` |
 | `PLAN-20260629-02` | 2026-06-29 | `Done` | 基于 `code-review-skill` 仓库级审查，整理安全边界、可维护性和测试补强的后续修改计划。 | `T-019` - `T-025` |
 | `PLAN-20260630-01` | 2026-06-30 | `Done` | 建立 RAG 回答质量反馈闭环，把真实用户反馈沉淀为后续 eval 和检索优化依据。 | `T-026` - `T-029` |
-| `PLAN-20260630-02` | 2026-06-30 | `Doing` | 补强工程化交付闭环，优先解决数据库迁移、Docker Compose 初始化、CI 和发布前验收可运行性。 | `T-030` - `T-035` |
+| `PLAN-20260630-02` | 2026-06-30 | `Doing` | 补强工程化交付闭环，优先解决数据库迁移、Docker Compose 初始化、CI 和发布前验收可运行性。 | `T-030` - `T-036` |
 
 ## 任务总览
 
@@ -97,7 +97,8 @@
 | `T-032` | `PLAN-20260630-02` | `P1` | `Done` | 增加 GitHub Actions CI | 2026-06-30 | `da990bd` |
 | `T-033` | `PLAN-20260630-02` | `P2` | `Done` | 强化本地验收脚本为发布前检查入口 | 2026-06-30 | `4a03381` |
 | `T-034` | `PLAN-20260630-02` | `P2` | `Done` | 补充 README 截图和演示说明 | 2026-06-30 | `a0bccfa` |
-| `T-035` | `PLAN-20260630-02` | `P2` | `Blocked` | 跑一次真实 RAG eval 与 indexing eval 基线 | - | `13eb1ff` |
+| `T-035` | `PLAN-20260630-02` | `P2` | `Done` | 跑一次真实 RAG eval 与 indexing eval 基线 | 2026-06-30 | 待补充 |
+| `T-036` | `PLAN-20260630-02` | `P2` | `Todo` | 调查 RAG settings 阶段耗时超阈值 | - | - |
 
 ## 新计划接入流程
 
@@ -1190,7 +1191,7 @@ git status --short
 
 - 来源计划：`PLAN-20260630-02`
 - 优先级：`P2`
-- 状态：`Blocked`
+- 状态：`Done`
 - 背景：前几批任务已经补强 RAG 性能、反馈闭环和质量看板，但工程化收口后需要重新记录一次真实链路质量与性能基线。
 - 目标：在迁移、compose 和 CI 补强后，运行真实 RAG eval 与 indexing eval，形成发布前可比较基线。
 - 范围：
@@ -1212,11 +1213,44 @@ git status --short
   - 最近 Indexing 历史记录：2026-06-28T08:40:37，通过，job 状态 `succeeded`，聊天耗时 3.51s，引用数 1，清理关联完成。
   - 解除阻塞条件：启动后端服务、完成数据库迁移、启动 vector index worker，并在当前 shell 设置 eval 测试账号密码；账号还需要可用的 LLM provider / API Key。
   - 解除后建议运行：`FIRSTRAG_EVAL_USERNAME=... FIRSTRAG_EVAL_PASSWORD=... scripts/acceptance_check.sh`，或分别运行 `scripts/rag_eval_gate.sh` 与 `conda run -n firstrag python scripts/eval_indexing.py --base-url http://127.0.0.1:8000`。
+- 完成记录：
+  - 完成日期：2026-06-30
+  - 相关 commit：待补充
+  - 真实 RAG eval gate 已完成：10/10 case 通过，通过率 1.00，平均引用 2.20，平均首 token 3613.84ms，平均耗时 6.50s，平均 token 951.00，质量门禁全部 PASS。
+  - RAG 阶段耗时：settings 1716.02ms，profile 0.62ms，router 249.03ms，retrieve 1498.01ms，hybrid 1685.39ms，rerank 1475.41ms；knowledge profile 缓存命中 8/8，retrieval settings 缓存命中 2/9。
+  - 真实 indexing eval 已完成：临时 Markdown 上传成功，auto index job `succeeded`，文件状态 `indexed`，聊天检索命中临时文件，聊天耗时 7.20s，展示引用 1，清理关联完成。
+  - 已运行 `conda run -n firstrag python scripts/eval_summary.py`，本地趋势摘要刷新为 RAG 历史 26 次、Indexing 历史 3 次。
+  - `docs/evals/README.md` 已更新为 2026-06-30 真实链路 eval 基线；latest report 和 runs JSON 仍由 `.gitignore` 忽略，不提交原始运行输出。
+  - 趋势摘要显示 `settings` 阶段最新均值 1716.02ms，超过 1000ms 建议阈值，已新增 `T-036` 跟进调查。
 - 建议验证命令：
 
 ```bash
 scripts/acceptance_check.sh
 conda run -n firstrag python scripts/eval_summary.py
+```
+
+## T-036 调查 RAG settings 阶段耗时超阈值
+
+- 来源计划：`PLAN-20260630-02`
+- 优先级：`P2`
+- 状态：`Todo`
+- 背景：T-035 的 2026-06-30 真实 RAG eval 质量门禁通过，但趋势摘要显示 `settings` 阶段最新均值 1716.02ms，高于 1000ms 建议阈值；报告中的 settings load/query 子阶段只有个位数毫秒，需要确认指标口径或真实耗时来源。
+- 目标：判断 `settings` 阶段超阈值是 instrumentation 口径问题、阶段归因问题、数据库/缓存波动，还是实际性能回退，并给出修复或阈值调整建议。
+- 范围：
+  - 对比 `scripts/eval_rag.py`、`backend/app/services/rag_service.py` 和 retrieval settings cache diagnostics 的耗时字段来源。
+  - 抽查 latest RAG history JSON 中 settings、settings_load、settings_query、settings_normalize 与 retrieval settings cache hit 字段。
+  - 必要时补充更细粒度指标或修正 summary/report 字段命名。
+  - 不改动 RAG 行为，除非定位到明确 bug。
+- 验收标准：
+  - 能解释 settings 1716.02ms 与 load/query 子阶段个位数毫秒之间的差异。
+  - 若是指标口径问题，报告字段命名或计算逻辑已修正并有测试覆盖。
+  - 若是实际性能问题，新增优化任务或完成对应修复。
+  - 重新生成 eval summary 后，文档记录结论。
+- 建议验证命令：
+
+```bash
+conda run -n firstrag python scripts/eval_summary.py
+cd backend && conda run -n firstrag python -m unittest tests.test_eval_rag_script tests.test_eval_summary_script -v
 ```
 
 ## 更新规则
