@@ -97,7 +97,7 @@
 | `T-032` | `PLAN-20260630-02` | `P1` | `Done` | 增加 GitHub Actions CI | 2026-06-30 | `da990bd` |
 | `T-033` | `PLAN-20260630-02` | `P2` | `Done` | 强化本地验收脚本为发布前检查入口 | 2026-06-30 | `4a03381` |
 | `T-034` | `PLAN-20260630-02` | `P2` | `Done` | 补充 README 截图和演示说明 | 2026-06-30 | `a0bccfa` |
-| `T-035` | `PLAN-20260630-02` | `P2` | `Done` | 跑一次真实 RAG eval 与 indexing eval 基线 | 2026-06-30 | 待补充 |
+| `T-035` | `PLAN-20260630-02` | `P2` | `Done` | 跑一次真实 RAG eval 与 indexing eval 基线 | 2026-06-30 | `ee845e3` |
 | `T-036` | `PLAN-20260630-02` | `P2` | `Todo` | 调查 RAG settings 阶段耗时超阈值 | - | - |
 
 ## 新计划接入流程
@@ -1215,7 +1215,7 @@ git status --short
   - 解除后建议运行：`FIRSTRAG_EVAL_USERNAME=... FIRSTRAG_EVAL_PASSWORD=... scripts/acceptance_check.sh`，或分别运行 `scripts/rag_eval_gate.sh` 与 `conda run -n firstrag python scripts/eval_indexing.py --base-url http://127.0.0.1:8000`。
 - 完成记录：
   - 完成日期：2026-06-30
-  - 相关 commit：待补充
+  - 相关 commit：`ee845e3`
   - 真实 RAG eval gate 已完成：10/10 case 通过，通过率 1.00，平均引用 2.20，平均首 token 3613.84ms，平均耗时 6.50s，平均 token 951.00，质量门禁全部 PASS。
   - RAG 阶段耗时：settings 1716.02ms，profile 0.62ms，router 249.03ms，retrieve 1498.01ms，hybrid 1685.39ms，rerank 1475.41ms；knowledge profile 缓存命中 8/8，retrieval settings 缓存命中 2/9。
   - 真实 indexing eval 已完成：临时 Markdown 上传成功，auto index job `succeeded`，文件状态 `indexed`，聊天检索命中临时文件，聊天耗时 7.20s，展示引用 1，清理关联完成。
