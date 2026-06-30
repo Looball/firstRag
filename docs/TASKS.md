@@ -92,8 +92,8 @@
 | `T-027` | `PLAN-20260630-01` | `P1` | `Done` | 增强 sources 展示与引用有用性标记 | 2026-06-30 | `ce66821` |
 | `T-028` | `PLAN-20260630-01` | `P2` | `Done` | 支持从真实问答沉淀 RAG eval case 草稿 | 2026-06-30 | `d523917` |
 | `T-029` | `PLAN-20260630-01` | `P2` | `Done` | 增加回答质量和检索表现看板雏形 | 2026-06-30 | `aa70530` |
-| `T-030` | `PLAN-20260630-02` | `P1` | `Done` | 增加数据库迁移执行脚本 | 2026-06-30 | 待补充 |
-| `T-031` | `PLAN-20260630-02` | `P1` | `Done` | 接入 Docker Compose 初始化流程 | 2026-06-30 | 待补充 |
+| `T-030` | `PLAN-20260630-02` | `P1` | `Done` | 增加数据库迁移执行脚本 | 2026-06-30 | `5d22e59` |
+| `T-031` | `PLAN-20260630-02` | `P1` | `Done` | 接入 Docker Compose 初始化流程 | 2026-06-30 | `5d22e59` |
 | `T-032` | `PLAN-20260630-02` | `P1` | `Todo` | 增加 GitHub Actions CI | - | - |
 | `T-033` | `PLAN-20260630-02` | `P2` | `Todo` | 强化本地验收脚本为发布前检查入口 | - | - |
 | `T-034` | `PLAN-20260630-02` | `P2` | `Todo` | 补充 README 截图和演示说明 | - | - |
@@ -1044,7 +1044,7 @@ ON message_source_feedback (rating, created_at DESC);
   - 2026-06-30：完成 SQL rebaseline，新增 `000_initial_schema.sql` 和 SQL 目录维护说明；历史增量 SQL 已合并进当前基线，后续结构变化从 `001_xxx.sql` 开始。
 - 完成记录：
   - 完成日期：2026-06-30
-  - 相关 commit：待补充
+  - 相关 commit：`5d22e59`
   - 新增 `scripts/migrate_db.py`，支持 `--list`、`--dry-run`、按编号执行 migration、自动维护 `schema_migrations` 和 checksum 校验。
   - 新增 `backend/tests/test_migrate_db_script.py`，覆盖 migration 排序、跳过已执行项、checksum mismatch 和失败停止场景。
   - 已同步更新 `README.md`、`docs/DEPLOYMENT.md`、`docs/SCHEMAS.md` 和 `backend/app/db/sql/README.md`。
@@ -1078,7 +1078,7 @@ conda run -n firstrag python -m unittest discover tests -v
   - 不把数据库密码、JWT、API Key 等敏感值写入日志或提交到仓库。
 - 完成记录：
   - 完成日期：2026-06-30
-  - 相关 commit：待补充
+  - 相关 commit：`5d22e59`
   - `docker-compose.yml` 新增 `migrate` service，复用 backend 镜像执行 `/app/scripts/migrate_db.py`。
   - backend 和 worker 会等待 `postgres` 健康检查通过、`migrate` 成功退出后再启动。
   - backend Dockerfile 已复制 `scripts/migrate_db.py` 到容器内，迁移脚本可访问 `/app/backend/app/db/sql/` 中的 SQL 文件。
