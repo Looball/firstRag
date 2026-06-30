@@ -47,7 +47,13 @@ python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 | 文件 | 主要职责 |
 | --- | --- |
 | `chat_service.py` | SSE 事件、消息持久化、回答落库。 |
-| `rag_service.py` | LCEL 链构建、检索决策和回答链编排。 |
+| `rag_service.py` | RAG 兼容门面，继续导出历史 public function。 |
+| `rag/chain_builder.py` | LCEL 链构建、Router chain 和 QA chain。 |
+| `rag/retrieval_decision.py` | 检索设置规范化、Router 结果解析和最终检索决策。 |
+| `rag/retrieval_pipeline.py` | retrieval settings、知识库画像、文件范围和 hybrid retrieval 编排。 |
+| `rag/reference_serializer.py` | prompt context 格式化和 Sources 序列化。 |
+| `rag/diagnostics.py` | RAG timing、retrieval settings diagnostics 和 LLM usage 合并。 |
+| `rag/streaming.py` | LCEL stream chunk 到 SSE 事件的转换。 |
 | `llm_service.py` | OpenAI 兼容模型厂商预设、用户/平台配置解析。 |
 | `file_service.py` | 上传文件大小限制、SHA-256、落盘路径。 |
 | `documents/document_service.py` | 文档加载、切分、向量库构建。 |
@@ -65,4 +71,3 @@ python -m app.workers.vector_index_worker
 ```
 
 worker 从 `vector_index_jobs` 领取任务，解析文件、切分文本、写 Chroma、写 PostgreSQL chunk，并更新任务状态。
-

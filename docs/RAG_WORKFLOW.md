@@ -28,7 +28,7 @@
 2. 后端校验会话属于当前用户和知识库。
 3. 问候类本地可回答内容直接走本地响应，避免额外模型调用。
 4. 普通问题加载历史消息，构建 RAG 链。
-5. `rag_service` 读取当前知识库的 retrieval settings，判断是否需要检索，并可改写多轮问题。
+5. `rag_service` 兼容入口委托 `app/services/rag/` 内部模块读取 retrieval settings、判断是否需要检索，并可改写多轮问题。
 6. 召回候选片段：
    - Chroma 向量检索和 PostgreSQL 全文检索并行粗召回。
    - RRF 融合多路结果。
@@ -48,6 +48,22 @@
 - `rerank_score_threshold`：控制低相关片段是否进入上下文和 Sources。
 
 ## 检索诊断
+
+## RAG Service 模块边界
+
+`backend/app/services/rag_service.py` 保留为兼容门面，继续导出历史 public function。实际职责拆分到
+`backend/app/services/rag/`：
+
+| 模块 | 职责 |
+| --- | --- |
+| `chain_builder.py` | 创建 LCEL 问答链、Router chain 和 QA chain。 |
+| `retrieval_decision.py` | 规范化 retrieval settings、解析 Router JSON、执行确定性覆盖规则并生成最终检索决策。 |
+| `retrieval_pipeline.py` | 读取 retrieval settings、构建知识库画像、查询已索引文件 ID、执行 hybrid retrieval，并把 diagnostics 写回文档 metadata。 |
+| `reference_serializer.py` | 过滤低相关片段，格式化 prompt context，并序列化前端 Sources。 |
+| `diagnostics.py` | 管理 retrieval settings 子阶段 diagnostics、RAG timing 合并和 LLM token usage 解析。 |
+| `streaming.py` | 将 LCEL stream chunk 转换为 SSE 事件，包括 retrieval、sources、llm_usage 和 answer。 |
+
+拆分后 SSE 字段名、`messages.sources`、`messages.retrieval` 和现有导入入口保持兼容。
 
 助手消息会保存：
 

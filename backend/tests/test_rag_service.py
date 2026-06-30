@@ -232,10 +232,10 @@ class RagReferenceFilteringTests(unittest.TestCase):
         }
 
         with unittest.mock.patch(
-            "app.services.rag_service.get_retrieval_diagnostics",
+            "app.services.rag.streaming.get_retrieval_diagnostics",
             return_value=diagnostics,
         ), unittest.mock.patch(
-            "app.services.rag_service.get_knowledge_profile_cache_diagnostics",
+            "app.services.rag.diagnostics.get_knowledge_profile_cache_diagnostics",
             return_value={"knowledge_profile_cache_hit": True},
         ):
             events = list(stream_rag_response(
@@ -297,7 +297,7 @@ class RagReferenceFilteringTests(unittest.TestCase):
         ])
 
         with unittest.mock.patch(
-            "app.services.rag_service.get_retrieval_diagnostics",
+            "app.services.rag.streaming.get_retrieval_diagnostics",
             return_value=None,
         ):
             events = list(stream_rag_response(
@@ -330,7 +330,7 @@ class RagReferenceFilteringTests(unittest.TestCase):
         ])
 
         with unittest.mock.patch(
-            "app.services.rag_service.get_retrieval_diagnostics",
+            "app.services.rag.streaming.get_retrieval_diagnostics",
             return_value=None,
         ):
             events = list(stream_rag_response(
@@ -632,13 +632,13 @@ class RagQueryRouterTests(unittest.TestCase):
         }
 
         with unittest.mock.patch(
-            "app.services.rag_service.get_knowledge_base_file_ids",
+            "app.services.rag.retrieval_pipeline.get_knowledge_base_file_ids",
             return_value=["file-1"],
         ), unittest.mock.patch(
-            "app.services.rag_service.get_hybrid_documents",
+            "app.services.rag.retrieval_pipeline.get_hybrid_documents",
             return_value=[doc],
         ) as hybrid_mock, unittest.mock.patch(
-            "app.services.rag_service.get_retrieval_diagnostics",
+            "app.services.rag.retrieval_pipeline.get_retrieval_diagnostics",
             return_value={"vector_count": 1},
         ):
             docs = retrieve_documents({
@@ -670,7 +670,7 @@ class RagQueryRouterTests(unittest.TestCase):
         knowledge_base_id = uuid4()
         invalidate_retrieval_settings_cache(1, knowledge_base_id)
         with unittest.mock.patch(
-            "app.services.rag_service.get_knowledge_base_retrieval_settings",
+            "app.services.rag.retrieval_pipeline.get_knowledge_base_retrieval_settings",
             return_value={"top_k": 3},
         ) as settings_mock:
             settings = load_retrieval_settings({
@@ -717,7 +717,7 @@ class RagQueryRouterTests(unittest.TestCase):
         invalidate_knowledge_base_context(1, knowledge_base_id)
         invalidate_retrieval_settings_cache(1, knowledge_base_id)
         with unittest.mock.patch(
-            "app.services.rag_service.get_knowledge_base_retrieval_settings",
+            "app.services.rag.retrieval_pipeline.get_knowledge_base_retrieval_settings",
             return_value={"top_k": 5},
         ):
             settings = load_retrieval_settings({
@@ -726,7 +726,7 @@ class RagQueryRouterTests(unittest.TestCase):
             })
 
         with unittest.mock.patch(
-            "app.services.rag_service.get_knowledge_base_files",
+            "app.services.rag.retrieval_pipeline.get_knowledge_base_files",
             return_value=[
                 {
                     "id": indexed_file_id,
@@ -736,10 +736,10 @@ class RagQueryRouterTests(unittest.TestCase):
                 },
             ],
         ), unittest.mock.patch(
-            "app.services.rag_service.get_hybrid_documents",
+            "app.services.rag.retrieval_pipeline.get_hybrid_documents",
             return_value=[doc],
         ), unittest.mock.patch(
-            "app.services.rag_service.get_retrieval_diagnostics",
+            "app.services.rag.retrieval_pipeline.get_retrieval_diagnostics",
             return_value={"vector_count": 1},
         ):
             docs = retrieve_documents({
@@ -769,7 +769,7 @@ class RagQueryRouterTests(unittest.TestCase):
         pending_file_id = uuid4()
         invalidate_knowledge_base_context(1, knowledge_base_id)
         with unittest.mock.patch(
-            "app.services.rag_service.get_knowledge_base_files",
+            "app.services.rag.retrieval_pipeline.get_knowledge_base_files",
             return_value=[
                 {
                     "id": indexed_file_id,
@@ -806,7 +806,7 @@ class RagQueryRouterTests(unittest.TestCase):
         invalidate_knowledge_base_context(1, knowledge_base_id)
 
         with unittest.mock.patch(
-            "app.services.rag_service.get_knowledge_base_files",
+            "app.services.rag.retrieval_pipeline.get_knowledge_base_files",
             return_value=[
                 {
                     "id": indexed_file_id,
@@ -849,7 +849,7 @@ class RagQueryRouterTests(unittest.TestCase):
         ])
 
         with unittest.mock.patch(
-            "app.services.rag_service.get_effective_chat_model_config",
+            "app.services.rag.chain_builder.get_effective_chat_model_config",
             return_value=EffectiveChatModelConfig(
                 settings=ChatModelSettings(
                     provider="deepseek",
@@ -864,13 +864,13 @@ class RagQueryRouterTests(unittest.TestCase):
                 credential_mode="platform",
             ),
         ), unittest.mock.patch(
-            "app.services.rag_service.create_openai_compatible_chat_model",
+            "app.services.rag.chain_builder.create_openai_compatible_chat_model",
             return_value=model,
         ), unittest.mock.patch(
-            "app.services.rag_service.get_knowledge_base_files",
+            "app.services.rag.retrieval_pipeline.get_knowledge_base_files",
             return_value=[],
         ), unittest.mock.patch(
-            "app.services.rag_service.get_knowledge_base_retrieval_settings",
+            "app.services.rag.retrieval_pipeline.get_knowledge_base_retrieval_settings",
             return_value=None,
         ):
             chain = get_chain(user_id=1)
