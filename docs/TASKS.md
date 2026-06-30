@@ -56,6 +56,7 @@
 | `PLAN-20260628-05` | 2026-06-28 | `Done` | 修正 knowledge profile cache diagnostics 在真实 RAG eval 报告中缺失的问题。 | `T-013` |
 | `PLAN-20260629-01` | 2026-06-29 | `Doing` | RAG 检索性能二阶段优化，继续降低首 token 前等待时间，优先处理 settings 读取、混合检索和重复查询开销。 | `T-014` - `T-018` |
 | `PLAN-20260629-02` | 2026-06-29 | `Done` | 基于 `code-review-skill` 仓库级审查，整理安全边界、可维护性和测试补强的后续修改计划。 | `T-019` - `T-025` |
+| `PLAN-20260630-01` | 2026-06-30 | `Todo` | 建立 RAG 回答质量反馈闭环，把真实用户反馈沉淀为后续 eval 和检索优化依据。 | `T-026` - `T-029` |
 
 ## 任务总览
 
@@ -86,6 +87,10 @@
 | `T-023` | `PLAN-20260629-02` | `P2` | `Done` | 拆分 RAG service 的路由、诊断和引用序列化职责 | 2026-06-30 | `36ad4ee` |
 | `T-024` | `PLAN-20260629-02` | `P2` | `Done` | 建立权限、上传和流式代理的回归测试矩阵 | 2026-06-29 | `49e0ba7` |
 | `T-025` | `PLAN-20260629-02` | `P1` | `Done` | 引入 React Query 与 Zod 集中前端数据请求层 | 2026-06-29 | `986a9a3` |
+| `T-026` | `PLAN-20260630-01` | `P1` | `Todo` | 增加聊天回答质量反馈闭环 | - | - |
+| `T-027` | `PLAN-20260630-01` | `P1` | `Todo` | 增强 sources 展示与引用有用性标记 | - | - |
+| `T-028` | `PLAN-20260630-01` | `P2` | `Todo` | 支持从真实问答沉淀 RAG eval case 草稿 | - | - |
+| `T-029` | `PLAN-20260630-01` | `P2` | `Todo` | 增加回答质量和检索表现看板雏形 | - | - |
 
 ## 新计划接入流程
 
@@ -833,6 +838,151 @@ npm run test
 npm run lint
 npm run build
 ```
+
+## T-026 增加聊天回答质量反馈闭环
+
+- 来源计划：`PLAN-20260630-01`
+- 优先级：`P1`
+- 状态：`Todo`
+- 背景：当前 RAG 性能、检索 diagnostics、worker 和测试体系已经比较完整，但系统缺少真实用户对回答质量的结构化反馈，后续 prompt、retrieval、rerank 和 eval case 优化缺少稳定输入。
+- 目标：在每条 assistant message 下提供轻量反馈入口，并把用户反馈安全持久化，形成“回答 -> 反馈 -> 分析 -> 优化”的最小闭环。
+- 范围：
+  - 新增 `message_feedback` 表或等价结构，记录 `user_id`、`message_id`、评分、原因、备注和必要上下文。
+  - 后端新增创建/更新/查询反馈 API；route 层必须校验 message 所属 conversation 和 user 权限。
+  - 前端在 assistant message 下增加赞/踩入口；踩时允许选择原因并填写简短备注。
+  - 反馈内容不得包含 API Key、JWT、数据库连接串等敏感信息；后端日志只记录安全摘要。
+- 建表 SQL 草案：
+
+```sql
+CREATE EXTENSION IF NOT EXISTS pgcrypto;
+
+CREATE TABLE IF NOT EXISTS message_feedback (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    message_id UUID NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+    rating TEXT NOT NULL,
+    reason TEXT,
+    note TEXT,
+    metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT message_feedback_rating_check
+        CHECK (rating IN ('positive', 'negative')),
+    CONSTRAINT message_feedback_reason_check
+        CHECK (
+            reason IS NULL OR reason IN (
+                'irrelevant_sources',
+                'missing_answer',
+                'hallucination',
+                'outdated_or_wrong',
+                'too_slow',
+                'format_issue',
+                'other'
+            )
+        )
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_message_feedback_user_message
+ON message_feedback (user_id, message_id);
+
+CREATE INDEX IF NOT EXISTS idx_message_feedback_user_created
+ON message_feedback (user_id, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_message_feedback_rating_reason
+ON message_feedback (rating, reason, created_at DESC);
+```
+
+- 验收标准：
+  - 用户只能给自己会话中的 assistant message 反馈，跨用户 message 返回 `404` 或安全错误。
+  - 同一用户对同一 message 重复反馈时执行 upsert，不产生多条重复记录。
+  - 前端刷新会话后能恢复已提交的反馈状态。
+  - 后端测试覆盖正反馈、负反馈、原因校验、跨用户隔离和重复提交更新。
+  - 前端测试覆盖按钮状态、提交失败回滚或提示、已反馈状态回显。
+
+## T-027 增强 sources 展示与引用有用性标记
+
+- 来源计划：`PLAN-20260630-01`
+- 优先级：`P1`
+- 状态：`Todo`
+- 背景：当前回答已返回 sources 和 retrieval diagnostics，但用户只能被动查看引用，无法标记“哪些引用真的有用”。这会限制后续分析检索失败原因和 rerank 调参。
+- 目标：让用户能对回答中的单个 source 标记有用/无关，并在前端更清楚地展示来源文件、chunk、score 和 retrieval 来源。
+- 范围：
+  - 新增 `message_source_feedback` 表或等价结构，记录 source index、文件、chunk、评分和备注。
+  - 后端 API 校验 source index 必须存在于 `messages.sources` 当前数组内，避免伪造不存在的引用。
+  - 前端 source 面板展示文件名、chunk index、召回通道、rerank score 等关键信息；每个 source 提供有用/无关标记。
+  - 保持现有 SSE sources 协议兼容，不改变 `messages.sources` 已保存结构。
+- 建表 SQL 草案：
+
+```sql
+CREATE EXTENSION IF NOT EXISTS pgcrypto;
+
+CREATE TABLE IF NOT EXISTS message_source_feedback (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    message_id UUID NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+    source_index INTEGER NOT NULL,
+    knowledge_file_id UUID REFERENCES knowledge_files(id) ON DELETE SET NULL,
+    chunk_index INTEGER,
+    rating TEXT NOT NULL,
+    note TEXT,
+    metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT message_source_feedback_rating_check
+        CHECK (rating IN ('useful', 'irrelevant'))
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_message_source_feedback_unique_source
+ON message_source_feedback (user_id, message_id, source_index);
+
+CREATE INDEX IF NOT EXISTS idx_message_source_feedback_file_created
+ON message_source_feedback (knowledge_file_id, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_message_source_feedback_rating_created
+ON message_source_feedback (rating, created_at DESC);
+```
+
+- 验收标准：
+  - 用户只能标记自己 message 中真实存在的 source。
+  - source feedback 支持重复提交更新，不产生重复记录。
+  - sources 展示不遮挡聊天正文，移动端可折叠。
+  - 单测覆盖 source index 越界、跨用户隔离、文件已删除或 source 缺少 file id 的兼容路径。
+
+## T-028 支持从真实问答沉淀 RAG eval case 草稿
+
+- 来源计划：`PLAN-20260630-01`
+- 优先级：`P2`
+- 状态：`Todo`
+- 背景：当前 eval 体系已经可以持续追踪性能和回答结果，但 eval case 主要依赖人工维护。真实差评问题如果不能低成本进入 eval，会反复出现同类退化。
+- 目标：支持把一次真实问答和反馈转成 eval case 草稿，作为后续人工审核、补充 expected keywords 和批量评估的输入。
+- 范围：
+  - 后端提供“导出 eval case 草稿”能力，输入 message id，输出 question、answer、sources、retrieval diagnostics、feedback reason 和建议 expected keywords 占位。
+  - 草稿默认写入 `docs/evals/cases/drafts/` 或以 JSON 下载，避免自动污染正式 eval case。
+  - 前端仅在开发/管理入口展示“加入 eval 草稿”操作，普通用户默认不可见。
+  - 不导出敏感凭据、完整 JWT、API Key 或后端内部连接信息。
+- 验收标准：
+  - 差评回答可一键生成 eval case 草稿。
+  - 草稿包含可复现实验所需的最小上下文，但不包含敏感配置。
+  - 生成的 JSON 能被后续脚本读取或容易转换为现有 eval case 格式。
+  - 测试覆盖正常导出、跨用户隔离、缺少 retrieval/sources 的兼容路径。
+
+## T-029 增加回答质量和检索表现看板雏形
+
+- 来源计划：`PLAN-20260630-01`
+- 优先级：`P2`
+- 状态：`Todo`
+- 背景：反馈数据落库后，需要一个轻量入口帮助判断当前最该优化的是检索、引用质量、回答生成、性能还是前端展示。
+- 目标：提供面向开发和运维的质量看板雏形，汇总最近反馈和检索表现，不追求复杂 BI。
+- 范围：
+  - 后端新增按用户或知识库聚合的反馈统计接口。
+  - 指标包括正/负反馈数、负反馈原因分布、source 无关率、平均首 token、平均 sources、失败知识库/文件排行。
+  - 前端增加轻量质量面板，可从工作台或开发入口进入。
+  - 统计接口必须遵守 user_id 隔离，禁止跨用户聚合泄露。
+- 验收标准：
+  - 看板能展示最近 7 天或最近 N 条反馈的核心指标。
+  - 空数据状态清晰，不把无反馈误导为质量良好。
+  - 后端测试覆盖聚合口径、用户隔离和空数据路径。
+  - 前端测试覆盖数据加载、空状态和错误状态。
 
 ## 更新规则
 
