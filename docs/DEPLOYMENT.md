@@ -128,6 +128,19 @@ scripts/acceptance_check.sh
 - 修改 eval 脚本、case 或质量门禁。
 - 修改用户模型配置或 API Key 加密链路。
 
+## GitHub Actions CI
+
+仓库在 `.github/workflows/ci.yml` 中维护基础 CI，默认在 pull request、`main`
+分支 push 和手动触发时运行。
+
+CI 覆盖：
+
+- 后端：安装 `backend/requirements.txt`、`python -m compileall app`、`python -m unittest discover tests -v`、`python scripts/migrate_db.py --list` 和 `docker compose config --quiet`。
+- 前端：`npm ci`、`npm run lint`、`npm run test` 和 `npm run build`。
+
+默认 CI 不运行真实 RAG eval 和 indexing eval，因为它们需要后端服务、真实账号、
+外部模型 API Key 和可用数据库。发布前仍按本地验收流程显式运行真实评估。
+
 ## Docker Compose
 
 仓库根目录提供本地 compose 方案：

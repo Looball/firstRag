@@ -94,7 +94,7 @@
 | `T-029` | `PLAN-20260630-01` | `P2` | `Done` | 增加回答质量和检索表现看板雏形 | 2026-06-30 | `aa70530` |
 | `T-030` | `PLAN-20260630-02` | `P1` | `Done` | 增加数据库迁移执行脚本 | 2026-06-30 | `5d22e59` |
 | `T-031` | `PLAN-20260630-02` | `P1` | `Done` | 接入 Docker Compose 初始化流程 | 2026-06-30 | `5d22e59` |
-| `T-032` | `PLAN-20260630-02` | `P1` | `Todo` | 增加 GitHub Actions CI | - | - |
+| `T-032` | `PLAN-20260630-02` | `P1` | `Done` | 增加 GitHub Actions CI | 2026-06-30 | 待补充 |
 | `T-033` | `PLAN-20260630-02` | `P2` | `Todo` | 强化本地验收脚本为发布前检查入口 | - | - |
 | `T-034` | `PLAN-20260630-02` | `P2` | `Todo` | 补充 README 截图和演示说明 | - | - |
 | `T-035` | `PLAN-20260630-02` | `P2` | `Todo` | 跑一次真实 RAG eval 与 indexing eval 基线 | - | - |
@@ -1095,7 +1095,7 @@ docker compose run --rm migrate python /app/scripts/migrate_db.py --dry-run
 
 - 来源计划：`PLAN-20260630-02`
 - 优先级：`P1`
-- 状态：`Todo`
+- 状态：`Done`
 - 背景：本地已经有 `scripts/acceptance_check.sh` 和前后端测试命令，但仓库缺少自动 CI，协作时容易漏跑检查。
 - 目标：为 pull request 和主分支 push 增加基础 CI，覆盖后端语法/单测、前端 lint/test/build 和文档/脚本可执行性检查。
 - 范围：
@@ -1109,6 +1109,15 @@ docker compose run --rm migrate python /app/scripts/migrate_db.py --dry-run
   - CI 不依赖本地 `.env`、外部 LLM API Key 或真实数据库服务即可完成静态检查。
   - 失败日志能明确定位后端、前端或构建阶段。
   - README 或文档补充 CI 覆盖范围说明。
+- 完成记录：
+  - 完成日期：2026-06-30
+  - 相关 commit：待补充
+  - 新增 `.github/workflows/ci.yml`，在 pull request、`main` push 和手动触发时运行。
+  - 后端 job 安装 `backend/requirements.txt`，运行 `compileall`、`unittest`、migration 文件列表检查和 Docker Compose 配置检查。
+  - 前端 job 使用 Node.js 22 和 `npm ci`，运行 lint、Vitest 和 Next build。
+  - 默认 CI 不运行真实 RAG eval 或 indexing eval，避免依赖真实账号、模型 API Key、数据库和后端服务。
+  - 已同步更新 `README.md` 与 `docs/DEPLOYMENT.md`。
+  - 验证命令：`ruby -e 'require "yaml"; YAML.load_file(".github/workflows/ci.yml"); puts "workflow yaml ok"'`；`docker compose config --quiet`；`conda run -n firstrag python -m unittest backend.tests.test_migrate_db_script -v`；`scripts/acceptance_check.sh --skip-real-eval` 已通过 backend、frontend lint 和 frontend test，frontend build 在沙箱中因 Turbopack 端口绑定限制失败；`cd frontend && npm run build` 提升权限后通过。
 - 建议验证命令：
 
 ```bash
