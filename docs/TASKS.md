@@ -55,7 +55,7 @@
 | `PLAN-20260628-04` | 2026-06-28 | `Done` | 补强 RAG eval 性能观测，让后续检索优化有稳定报告依据。 | `T-012` |
 | `PLAN-20260628-05` | 2026-06-28 | `Done` | 修正 knowledge profile cache diagnostics 在真实 RAG eval 报告中缺失的问题。 | `T-013` |
 | `PLAN-20260629-01` | 2026-06-29 | `Doing` | RAG 检索性能二阶段优化，继续降低首 token 前等待时间，优先处理 settings 读取、混合检索和重复查询开销。 | `T-014` - `T-018` |
-| `PLAN-20260629-02` | 2026-06-29 | `Doing` | 基于 `code-review-skill` 仓库级审查，整理安全边界、可维护性和测试补强的后续修改计划。 | `T-019` - `T-025` |
+| `PLAN-20260629-02` | 2026-06-29 | `Done` | 基于 `code-review-skill` 仓库级审查，整理安全边界、可维护性和测试补强的后续修改计划。 | `T-019` - `T-025` |
 
 ## 任务总览
 
@@ -83,7 +83,7 @@
 | `T-020` | `PLAN-20260629-02` | `P1` | `Done` | 收紧知识文件上传类型与解析失败反馈 | 2026-06-29 | `fd64b6d` |
 | `T-021` | `PLAN-20260629-02` | `P1` | `Done` | 抽取前端 API proxy 共享 helper | 2026-06-29 | `fd64b6d` |
 | `T-022` | `PLAN-20260629-02` | `P1` | `Done` | 继续拆分聊天工作台请求与流式状态逻辑 | 2026-06-29 | `017526b`, `cab5f9f` |
-| `T-023` | `PLAN-20260629-02` | `P2` | `Todo` | 拆分 RAG service 的路由、诊断和引用序列化职责 |  |  |
+| `T-023` | `PLAN-20260629-02` | `P2` | `Done` | 拆分 RAG service 的路由、诊断和引用序列化职责 | 2026-06-30 | `36ad4ee` |
 | `T-024` | `PLAN-20260629-02` | `P2` | `Done` | 建立权限、上传和流式代理的回归测试矩阵 | 2026-06-29 | `49e0ba7` |
 | `T-025` | `PLAN-20260629-02` | `P1` | `Done` | 引入 React Query 与 Zod 集中前端数据请求层 | 2026-06-29 | `986a9a3` |
 
@@ -737,7 +737,7 @@ npm run build
 
 - 来源计划：`PLAN-20260629-02`
 - 优先级：`P2`
-- 状态：`Todo`
+- 状态：`Done`
 - 审查依据：`backend/app/services/rag_service.py` 约 1106 行，同时承担 LLM 配置、Query Router、knowledge profile、retrieval settings diagnostics、retrieval 执行、引用序列化和 LCEL chain 组装。
 - 目标：保持 RAG 行为不变的前提下降低单文件复杂度，让后续检索策略、diagnostics 和 prompt 调整更容易局部验证。
 - 范围：按职责拆出 `retrieval_decision`、`rag_diagnostics`、`reference_serializer`、`chain_builder` 等模块或同等边界；保留现有 public function 兼容入口；不改变 SSE 协议和 eval 指标字段。
@@ -746,6 +746,15 @@ npm run build
   - diagnostics 字段名称、sources 序列化结构和 message 持久化行为保持兼容。
   - 拆分后模块之间只传基础类型或明确的 dataclass/TypedDict，减少 ContextVar 泄漏风险。
   - 文档同步说明 RAG service 新边界。
+- 完成记录：
+  - 完成日期：2026-06-30
+  - 相关 commit：`36ad4ee`
+  - `backend/app/services/rag_service.py` 已收敛为兼容门面，从 1106 行降至约 67 行。
+  - 新增 `backend/app/services/rag/` 内部模块：`chain_builder.py`、`retrieval_decision.py`、`retrieval_pipeline.py`、`reference_serializer.py`、`diagnostics.py`、`streaming.py` 和 `types.py`。
+  - `docs/RAG_WORKFLOW.md` 与 `docs/BACKEND.md` 已同步记录 RAG service 新边界。
+  - `conda run -n firstrag python -m unittest tests.test_rag_service tests.test_retrieval_resilience -v`、`conda run -n firstrag python -m unittest discover tests -v`、`conda run -n firstrag python -m compileall app tests` 已通过。
+  - `scripts/acceptance_check.sh --skip-real-eval` 已通过后端 107 个 unittest、前端 lint、Vitest 32 个用例和 Next build。
+  - 真实 RAG eval 需要 `FIRSTRAG_EVAL_USERNAME` 和 `FIRSTRAG_EVAL_PASSWORD`，本次未运行。
 - 建议验证命令：
 
 ```bash
