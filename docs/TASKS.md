@@ -96,7 +96,7 @@
 | `T-031` | `PLAN-20260630-02` | `P1` | `Done` | 接入 Docker Compose 初始化流程 | 2026-06-30 | `5d22e59` |
 | `T-032` | `PLAN-20260630-02` | `P1` | `Done` | 增加 GitHub Actions CI | 2026-06-30 | `da990bd` |
 | `T-033` | `PLAN-20260630-02` | `P2` | `Done` | 强化本地验收脚本为发布前检查入口 | 2026-06-30 | `4a03381` |
-| `T-034` | `PLAN-20260630-02` | `P2` | `Todo` | 补充 README 截图和演示说明 | - | - |
+| `T-034` | `PLAN-20260630-02` | `P2` | `Done` | 补充 README 截图和演示说明 | 2026-06-30 | 待补充 |
 | `T-035` | `PLAN-20260630-02` | `P2` | `Todo` | 跑一次真实 RAG eval 与 indexing eval 基线 | - | - |
 
 ## 新计划接入流程
@@ -1160,7 +1160,7 @@ scripts/acceptance_check.sh --help
 
 - 来源计划：`PLAN-20260630-02`
 - 优先级：`P2`
-- 状态：`Todo`
+- 状态：`Done`
 - 背景：README 当前“项目截图”仍标注暂未提供，外部读者难以快速理解聊天工作台、知识库管理、模型设置和质量看板的实际体验。
 - 目标：补齐项目可展示材料，让 README 能清楚呈现 FirstRAG 的核心界面和推荐试用路径。
 - 范围：
@@ -1173,6 +1173,13 @@ scripts/acceptance_check.sh --help
   - 截图与当前 UI 一致，不展示未实现功能。
   - 文档说明如何启动最小演示链路，包括后端、前端和 worker。
   - 图片资源命名清晰，体积可控，不影响仓库可维护性。
+- 完成记录：
+  - 完成日期：2026-06-30
+  - 相关 commit：待补充
+  - 新增 `docs/assets/firstrag-workspace-dashboard.png`、`docs/assets/firstrag-files-queue.png`、`docs/assets/firstrag-model-settings.png`，使用当前前端 UI 与脱敏演示数据生成。
+  - README “项目截图”已覆盖聊天工作台、质量看板、知识库文件管理、任务队列和模型设置。
+  - README 新增“最短演示路径”，说明数据库迁移、后端、前端和 vector index worker 的本地启动顺序，以及注册、模型设置、上传文件、向量化、提问和反馈看板的试用流程。
+  - 已确认截图不包含真实 API Key、JWT、数据库密码或私人文档内容。
 - 建议验证命令：
 
 ```bash
