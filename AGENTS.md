@@ -128,8 +128,10 @@ FirstRAG/
 ## 7. Database Rules
 
 - PostgreSQL 存储关系型数据，Chroma 存储向量数据。
-- 数据库迁移 SQL 位于 `backend/app/db/sql/`，按编号递增命名，例如 `011_xxx.sql`。
-- 新增表、字段、索引或约束必须新增 migration SQL，不直接假定数据库已手动修改。
+- 数据库 SQL 位于 `backend/app/db/sql/`。
+- `000_initial_schema.sql` 是当前空库初始化基线；后续新增表、字段、索引或约束从 `001_xxx.sql` 开始新增 migration SQL，不直接假定数据库已手动修改。
+- migration 文件按三位编号递增命名，例如 `001_create_message_tags.sql`。
+- 不提交本地数据库导出的 `ALTER TABLE ... OWNER TO ...` 这类绑定个人角色的语句。
 - SQL 参数使用 `%s` 占位符，禁止拼接用户输入。
 - 涉及用户数据的查询必须带 `user_id` 条件。
 - 软删除表查询必须过滤 `deleted_at IS NULL`。

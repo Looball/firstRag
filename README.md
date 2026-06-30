@@ -91,7 +91,7 @@ python -m app.workers.vector_index_worker
 docker compose up --build
 ```
 
-compose 会挂载 `uploads/`、`vector_db/` 和 `models/`，并默认让后端与 worker 连接 compose 内的 `postgres` 服务。首次使用新数据库时，仍需按项目数据库初始化流程准备基础表。更多细节见 `docs/DEPLOYMENT.md`。
+compose 会挂载 `uploads/`、`vector_db/` 和 `models/`，并默认让后端与 worker 连接 compose 内的 `postgres` 服务。首次使用新数据库时，先执行 `backend/app/db/sql/000_initial_schema.sql` 初始化完整 schema。更多细节见 `docs/DEPLOYMENT.md`。
 
 ## 项目结构
 

@@ -20,7 +20,10 @@
 | `user_llm_settings` | 当前用户生效模型设置。 |
 | `user_llm_provider_credentials` | 按厂商保存的加密 API Key。 |
 
-迁移 SQL 位于 `backend/app/db/sql/`。
+数据库 SQL 位于 `backend/app/db/sql/`。当前项目尚未进入生产环境，已整理为
+`000_initial_schema.sql` 作为空库初始化基线；后续新增表、字段、索引或约束时，
+从 `001_xxx.sql` 开始新增增量 migration，不再把本地数据库完整导出文件直接覆盖
+为新的基线。
 
 ## Pydantic 请求模型
 

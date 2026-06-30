@@ -34,7 +34,7 @@ conda activate firstrag
 python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
-后端默认读取仓库根目录 `.env`。如果本地数据库为空，请先按当前项目的数据库初始化/迁移流程准备基础表和 `backend/app/db/sql/` 中的增量 SQL。
+后端默认读取仓库根目录 `.env`。如果本地数据库为空，请先执行 `backend/app/db/sql/000_initial_schema.sql` 初始化当前完整 schema；后续数据库结构变化会从 `001_xxx.sql` 开始追加增量 migration。
 
 ### 2. 启动前端
 
@@ -151,7 +151,7 @@ docker compose logs -f backend worker
 docker compose down
 ```
 
-当前 compose 不会自动创建业务基础表。新数据库首次运行前，需要按项目现有数据库初始化流程准备 `users`、`knowledge_bases`、`messages` 等基础表，并应用 `backend/app/db/sql/` 中的增量 SQL。后续如果补齐迁移执行脚本，应把该脚本接入 compose 或文档启动流程。
+当前 compose 不会自动创建业务基础表。新数据库首次运行前，需要执行 `backend/app/db/sql/000_initial_schema.sql` 初始化 `users`、`knowledge_bases`、`messages` 等业务表；后续如果补齐迁移执行脚本，应把该脚本接入 compose 或文档启动流程。
 
 ## 端口约定
 

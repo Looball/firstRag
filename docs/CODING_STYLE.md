@@ -27,7 +27,9 @@
 
 ## 数据库
 
-- 新表和结构变更放入 `backend/app/db/sql/`，按编号递增。
+- `backend/app/db/sql/000_initial_schema.sql` 是当前空库初始化基线。
+- 新表和结构变更从 `001_xxx.sql` 开始放入 `backend/app/db/sql/`，按编号递增。
+- 不在增量 migration 中写入本地数据库导出的 `ALTER TABLE ... OWNER TO ...` 语句。
 - 多表关联查询必须包含 `user_id` 隔离。
 - 长流程任务使用状态字段和幂等保护，避免旧任务覆盖新结果。
 
@@ -44,4 +46,3 @@ python -m compileall app
 ```
 
 依赖缺失时要如实说明，不伪造测试结果。
-

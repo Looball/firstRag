@@ -92,7 +92,7 @@
 | `T-027` | `PLAN-20260630-01` | `P1` | `Done` | 增强 sources 展示与引用有用性标记 | 2026-06-30 | `ce66821` |
 | `T-028` | `PLAN-20260630-01` | `P2` | `Done` | 支持从真实问答沉淀 RAG eval case 草稿 | 2026-06-30 | `d523917` |
 | `T-029` | `PLAN-20260630-01` | `P2` | `Done` | 增加回答质量和检索表现看板雏形 | 2026-06-30 | `aa70530` |
-| `T-030` | `PLAN-20260630-02` | `P1` | `Todo` | 增加数据库迁移执行脚本 | - | - |
+| `T-030` | `PLAN-20260630-02` | `P1` | `Doing` | 增加数据库迁移执行脚本 | - | - |
 | `T-031` | `PLAN-20260630-02` | `P1` | `Todo` | 接入 Docker Compose 初始化流程 | - | - |
 | `T-032` | `PLAN-20260630-02` | `P1` | `Todo` | 增加 GitHub Actions CI | - | - |
 | `T-033` | `PLAN-20260630-02` | `P2` | `Todo` | 强化本地验收脚本为发布前检查入口 | - | - |
@@ -1024,13 +1024,14 @@ ON message_source_feedback (rating, created_at DESC);
 
 - 来源计划：`PLAN-20260630-02`
 - 优先级：`P1`
-- 状态：`Todo`
+- 状态：`Doing`
 - 背景：当前 `backend/app/db/sql/` 已维护基础建表 SQL 和增量 migration，但新数据库首次运行仍依赖人工按顺序执行 SQL，Docker Compose 和新环境验收存在不确定性。
 - 目标：提供一个可重复运行的数据库迁移入口，支持从空库初始化完整表结构，并能跳过已经应用的 migration。
 - 范围：
+  - 已在项目进入生产环境前完成一次 rebaseline，将当前完整结构整理为 `000_initial_schema.sql`。
   - 新增 `scripts/migrate_db.py` 或等价脚本，默认读取仓库根目录 `.env` 中的 `DATABASE_URL`，同时支持通过环境变量覆盖。
   - 建立轻量 `schema_migrations` 记录表，记录 migration 文件名、checksum、执行时间和执行状态。
-  - 按文件编号顺序执行 `backend/app/db/sql/*.sql`，包含 `000_由数据库导出的建表语句.sql` 与后续增量 SQL。
+  - 按文件编号顺序执行 `backend/app/db/sql/*.sql`，包含 `000_initial_schema.sql` 与后续增量 SQL。
   - 迁移失败时停止执行后续 SQL，输出安全、可读的错误信息，不打印数据库密码、API Key、JWT 或完整 `.env` 内容。
   - 提供 dry-run 或 list 模式，便于查看待执行 migration。
 - 验收标准：
@@ -1039,6 +1040,8 @@ ON message_source_feedback (rating, created_at DESC);
   - migration 文件内容变化时能检测 checksum 不一致并阻止静默跳过。
   - 测试覆盖 migration 排序、跳过已执行项、checksum mismatch 和失败停止场景。
   - 文档说明本地和 compose 环境下的执行方式。
+- 进展记录：
+  - 2026-06-30：完成 SQL rebaseline，新增 `000_initial_schema.sql` 和 SQL 目录维护说明；历史增量 SQL 已合并进当前基线，后续结构变化从 `001_xxx.sql` 开始。
 - 建议验证命令：
 
 ```bash

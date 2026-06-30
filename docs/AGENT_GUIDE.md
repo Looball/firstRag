@@ -39,3 +39,9 @@
 
 新增架构、接口、数据结构或流程变更时，同步更新 `docs/` 对应文档。专项细节可以放到 `docs/backend/`，顶层文档保持导航清晰。
 
+## 数据库约定
+
+- `backend/app/db/sql/000_initial_schema.sql` 是当前空库初始化基线。
+- 后续新增表、字段、索引或约束时，从 `001_xxx.sql` 开始新增增量 migration。
+- migration 文件名使用三位递增编号和英文描述，例如 `001_create_message_tags.sql`。
+- 不提交本地数据库导出的 `ALTER TABLE ... OWNER TO ...` 这类绑定个人角色的语句。
