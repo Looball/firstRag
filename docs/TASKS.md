@@ -94,7 +94,7 @@
 | `T-029` | `PLAN-20260630-01` | `P2` | `Done` | 增加回答质量和检索表现看板雏形 | 2026-06-30 | `aa70530` |
 | `T-030` | `PLAN-20260630-02` | `P1` | `Done` | 增加数据库迁移执行脚本 | 2026-06-30 | `5d22e59` |
 | `T-031` | `PLAN-20260630-02` | `P1` | `Done` | 接入 Docker Compose 初始化流程 | 2026-06-30 | `5d22e59` |
-| `T-032` | `PLAN-20260630-02` | `P1` | `Done` | 增加 GitHub Actions CI | 2026-06-30 | 待补充 |
+| `T-032` | `PLAN-20260630-02` | `P1` | `Done` | 增加 GitHub Actions CI | 2026-06-30 | `da990bd` |
 | `T-033` | `PLAN-20260630-02` | `P2` | `Todo` | 强化本地验收脚本为发布前检查入口 | - | - |
 | `T-034` | `PLAN-20260630-02` | `P2` | `Todo` | 补充 README 截图和演示说明 | - | - |
 | `T-035` | `PLAN-20260630-02` | `P2` | `Todo` | 跑一次真实 RAG eval 与 indexing eval 基线 | - | - |
@@ -1111,7 +1111,7 @@ docker compose run --rm migrate python /app/scripts/migrate_db.py --dry-run
   - README 或文档补充 CI 覆盖范围说明。
 - 完成记录：
   - 完成日期：2026-06-30
-  - 相关 commit：待补充
+  - 相关 commit：`da990bd`
   - 新增 `.github/workflows/ci.yml`，在 pull request、`main` push 和手动触发时运行。
   - 后端 job 安装 `backend/requirements.txt`，运行 `compileall`、`unittest`、migration 文件列表检查和 Docker Compose 配置检查。
   - 前端 job 使用 Node.js 22 和 `npm ci`，运行 lint、Vitest 和 Next build。
