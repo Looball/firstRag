@@ -88,7 +88,7 @@
 | `T-024` | `PLAN-20260629-02` | `P2` | `Done` | 建立权限、上传和流式代理的回归测试矩阵 | 2026-06-29 | `49e0ba7` |
 | `T-025` | `PLAN-20260629-02` | `P1` | `Done` | 引入 React Query 与 Zod 集中前端数据请求层 | 2026-06-29 | `986a9a3` |
 | `T-026` | `PLAN-20260630-01` | `P1` | `Done` | 增加聊天回答质量反馈闭环 | 2026-06-30 | `e027079` |
-| `T-027` | `PLAN-20260630-01` | `P1` | `Done` | 增强 sources 展示与引用有用性标记 | 2026-06-30 | `待提交` |
+| `T-027` | `PLAN-20260630-01` | `P1` | `Done` | 增强 sources 展示与引用有用性标记 | 2026-06-30 | `ce66821` |
 | `T-028` | `PLAN-20260630-01` | `P2` | `Todo` | 支持从真实问答沉淀 RAG eval case 草稿 | - | - |
 | `T-029` | `PLAN-20260630-01` | `P2` | `Todo` | 增加回答质量和检索表现看板雏形 | - | - |
 
@@ -955,7 +955,7 @@ ON message_source_feedback (rating, created_at DESC);
   - 单测覆盖 source index 越界、跨用户隔离、文件已删除或 source 缺少 file id 的兼容路径。
 - 完成记录：
   - 完成日期：2026-06-30
-  - 相关 commit：`待提交`
+  - 相关 commit：`ce66821`
   - 新增 `POST /chat/messages/{message_id}/sources/{source_index}/feedback`，提交前校验当前用户可访问的 assistant message，并校验 source index 存在于当前 `messages.sources`。
   - 历史消息接口会把当前用户的 source feedback 附加到 `sources[].feedback`，前端刷新后可回显“引用有用 / 引用无关”状态。
   - 前端 sources 卡片补充展示 retrieval source、Vector、Fulltext、Rerank、RRF 等分数，并新增单个 source 有用性标记按钮。
