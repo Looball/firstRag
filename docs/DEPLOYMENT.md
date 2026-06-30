@@ -102,6 +102,11 @@ python -m app.workers.vector_index_worker
 scripts/acceptance_check.sh --skip-real-eval
 ```
 
+静态验收默认会运行 migration 文件检查、后端 compileall、后端 unittest、前端
+lint、前端单测和前端 build。如果当前环境配置了 `DATABASE_URL` 或
+`COMPOSE_DATABASE_URL`，脚本会额外执行 migration dry-run；如果没有数据库连接，
+则只检查本地 migration 文件列表并提示跳过 dry-run。
+
 完整验收命令：
 
 ```bash
@@ -127,6 +132,17 @@ scripts/acceptance_check.sh
 - 修改文件上传、向量化、worker、failure recovery。
 - 修改 eval 脚本、case 或质量门禁。
 - 修改用户模型配置或 API Key 加密链路。
+
+常用跳过开关：
+
+| 开关 | 说明 |
+| --- | --- |
+| `--skip-migration-check` | 跳过 migration 文件检查和可选 dry-run。 |
+| `--skip-frontend-tests` | 跳过前端 Vitest。 |
+| `--skip-frontend-build` | 跳过 Next build。 |
+| `FIRSTRAG_SKIP_BACKEND_COMPILE=1` | 跳过后端 compileall。 |
+| `FIRSTRAG_SKIP_BACKEND_TESTS=1` | 跳过后端 unittest。 |
+| `FIRSTRAG_REQUIRE_MIGRATION_DRY_RUN=1` | 没有数据库连接时让 migration dry-run 阶段失败。 |
 
 ## GitHub Actions CI
 
