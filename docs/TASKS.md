@@ -101,7 +101,7 @@
 | `T-035` | `PLAN-20260630-02` | `P2` | `Done` | 跑一次真实 RAG eval 与 indexing eval 基线 | 2026-06-30 | `ee845e3` |
 | `T-036` | `PLAN-20260630-02` | `P2` | `Done` | 调查 RAG settings 阶段耗时超阈值 | 2026-06-30 | `72f2780` |
 | `T-037` | `PLAN-20260701-01` | `P1` | `Done` | 文档与任务台账状态收口 | 2026-07-01 | `f3ab533` |
-| `T-038` | `PLAN-20260701-01` | `P1` | `Todo` | 继续拆分前端聊天工作台 hooks | - | - |
+| `T-038` | `PLAN-20260701-01` | `P1` | `Done` | 继续拆分前端聊天工作台 hooks | 2026-07-01 | `e984977` |
 | `T-039` | `PLAN-20260701-01` | `P1` | `Todo` | 跑一轮发布前真实链路验收 | - | - |
 | `T-040` | `PLAN-20260701-01` | `P2` | `Todo` | 明确 License 与公开发布说明 | - | - |
 | `T-041` | `PLAN-20260701-01` | `P2` | `Todo` | 梳理在线演示环境方案 | - | - |
@@ -1304,7 +1304,7 @@ git status --short
 
 - 来源计划：`PLAN-20260701-01`
 - 优先级：`P1`
-- 状态：`Todo`
+- 状态：`Done`
 - 背景：`frontend/src/app/page.tsx` 已完成多轮组件和请求层拆分，但仍保留大量页面级 `useState`、`useEffect`、轮询和反馈状态，后续改会话、文件管理、质量看板时审查成本仍偏高。
 - 目标：在保持现有 UI 和接口协议不变的前提下，把工作台状态编排继续拆到可测试 hook 和纯函数中。
 - 范围：
@@ -1325,6 +1325,14 @@ npm run test
 npm run lint
 npm run build
 ```
+- 完成记录：
+  - 完成日期：2026-07-01
+  - 相关 commit：`e984977`
+  - 新增 `frontend/src/lib/chat-workspace/use-knowledge-files.ts`，集中管理知识库文件、可复用文件、向量化任务队列、worker health 查询、上传、关联、解除关联、删除向量和轮询刷新逻辑。
+  - `frontend/src/app/page.tsx` 从 3373 行降至 2898 行，文件管理和向量化状态从页面级状态容器中移出。
+  - 新增 `frontend/src/lib/chat-workspace/use-knowledge-files.test.ts`，覆盖文件合并、知识库文件关联替换和向量化队列合并 helper。
+  - 验证命令：`cd frontend && npm run test -- use-knowledge-files.test.ts`；`cd frontend && npm run test`；`cd frontend && npm run lint`；`cd frontend && npm run build`。
+  - 备注：`npm run build` 在沙箱内仍会触发 Turbopack 创建进程/绑定端口权限错误；已按权限流程在非沙箱环境重跑并通过。
 
 ## T-039 跑一轮发布前真实链路验收
 
