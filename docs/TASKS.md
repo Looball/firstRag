@@ -103,7 +103,7 @@
 | `T-037` | `PLAN-20260701-01` | `P1` | `Done` | 文档与任务台账状态收口 | 2026-07-01 | `f3ab533` |
 | `T-038` | `PLAN-20260701-01` | `P1` | `Done` | 继续拆分前端聊天工作台 hooks | 2026-07-01 | `e984977` |
 | `T-039` | `PLAN-20260701-01` | `P1` | `Done` | 跑一轮发布前真实链路验收 | 2026-07-01 | `23e32e5` |
-| `T-040` | `PLAN-20260701-01` | `P2` | `Todo` | 明确 License 与公开发布说明 | - | - |
+| `T-040` | `PLAN-20260701-01` | `P2` | `Done` | 明确 License 与公开发布说明 | 2026-07-01 | `c885659` |
 | `T-041` | `PLAN-20260701-01` | `P2` | `Todo` | 梳理在线演示环境方案 | - | - |
 
 ## 新计划接入流程
@@ -1374,7 +1374,7 @@ conda run -n firstrag python scripts/eval_summary.py
 
 - 来源计划：`PLAN-20260701-01`
 - 优先级：`P2`
-- 状态：`Todo`
+- 状态：`Done`
 - 背景：`README.md` 目前仍写着 License 暂未声明；如果仓库要公开展示、部署在线 demo 或接受协作，需要明确授权边界。
 - 目标：根据项目用途选择合适的 License，并在 README 和必要文档中说明公开发布边界。
 - 范围：
@@ -1391,6 +1391,13 @@ conda run -n firstrag python scripts/eval_summary.py
 ```bash
 git status --short
 ```
+- 完成记录：
+  - 完成日期：2026-07-01
+  - 相关 commit：`c885659`
+  - 根目录新增 `LICENSE`，当前授权边界明确为 all rights reserved / 暂不开放开源授权。
+  - `README.md` 的 License 段落已替换为“暂不开放开源授权”说明，并链接到 `LICENSE`，不再保留“待补充”占位文案。
+  - 本次未引入新的运行时依赖；授权声明为限制性公开说明，不与现有第三方依赖许可证形成明显冲突。
+  - 验证命令：`rg -n "License|授权|待补充|暂未声明|All rights reserved" README.md LICENSE docs/TASKS.md`；`git diff --check -- README.md LICENSE docs/TASKS.md`；`git status --short`。
 
 ## T-041 梳理在线演示环境方案
 
