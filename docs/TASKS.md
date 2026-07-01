@@ -58,6 +58,7 @@
 | `PLAN-20260629-02` | 2026-06-29 | `Done` | 基于 `code-review-skill` 仓库级审查，整理安全边界、可维护性和测试补强的后续修改计划。 | `T-019` - `T-025` |
 | `PLAN-20260630-01` | 2026-06-30 | `Done` | 建立 RAG 回答质量反馈闭环，把真实用户反馈沉淀为后续 eval 和检索优化依据。 | `T-026` - `T-029` |
 | `PLAN-20260630-02` | 2026-06-30 | `Done` | 补强工程化交付闭环，优先解决数据库迁移、Docker Compose 初始化、CI 和发布前验收可运行性。 | `T-030` - `T-036` |
+| `PLAN-20260701-01` | 2026-07-01 | `Todo` | 发布前收口专项，优先修正文档台账状态、继续降低前端工作台复杂度，并刷新真实链路验收基线。 | `T-037` - `T-041` |
 
 ## 任务总览
 
@@ -99,6 +100,11 @@
 | `T-034` | `PLAN-20260630-02` | `P2` | `Done` | 补充 README 截图和演示说明 | 2026-06-30 | `a0bccfa` |
 | `T-035` | `PLAN-20260630-02` | `P2` | `Done` | 跑一次真实 RAG eval 与 indexing eval 基线 | 2026-06-30 | `ee845e3` |
 | `T-036` | `PLAN-20260630-02` | `P2` | `Done` | 调查 RAG settings 阶段耗时超阈值 | 2026-06-30 | `72f2780` |
+| `T-037` | `PLAN-20260701-01` | `P1` | `Todo` | 文档与任务台账状态收口 | - | - |
+| `T-038` | `PLAN-20260701-01` | `P1` | `Todo` | 继续拆分前端聊天工作台 hooks | - | - |
+| `T-039` | `PLAN-20260701-01` | `P1` | `Todo` | 跑一轮发布前真实链路验收 | - | - |
+| `T-040` | `PLAN-20260701-01` | `P2` | `Todo` | 明确 License 与公开发布说明 | - | - |
+| `T-041` | `PLAN-20260701-01` | `P2` | `Todo` | 梳理在线演示环境方案 | - | - |
 
 ## 新计划接入流程
 
@@ -1260,6 +1266,126 @@ conda run -n firstrag python scripts/eval_summary.py
 ```bash
 conda run -n firstrag python scripts/eval_summary.py
 cd backend && conda run -n firstrag python -m unittest tests.test_eval_rag_script tests.test_eval_summary_script -v
+```
+
+## T-037 文档与任务台账状态收口
+
+- 来源计划：`PLAN-20260701-01`
+- 优先级：`P1`
+- 状态：`Todo`
+- 背景：当前核心实现、CI、迁移和 eval 工具链已经比较完整，但部分文档状态和真实进展不一致，容易影响后续排期判断。
+- 目标：让 README、任务台账和专题文档准确反映当前项目状态，进入下一轮开发前先把信息源收齐。
+- 范围：
+  - 修正 `docs/TASKS.md` 中计划批次和任务详情的状态不一致，例如 `PLAN-20260629-01`、`T-029`。
+  - 对齐 `README.md` Roadmap 与已完成的 RAG eval、批量评估脚本、CI 和演示说明。
+  - 整理 `backend/README.md` 的早期 demo 说明，避免和当前全栈架构说明冲突。
+  - 检查 `docs/README.md`、`docs/DEPLOYMENT.md`、`docs/evals/README.md` 是否仍有过期描述。
+- 验收标准：
+  - `docs/TASKS.md` 中已完成任务和计划批次状态一致。
+  - README Roadmap 不再把已实现能力标为未完成。
+  - 后端旧 demo 文档明确其历史定位，读者不会误以为它是当前主入口。
+  - 文档不声明尚未实现的能力，也不包含 API Key、JWT、数据库密码等敏感信息。
+- 建议验证命令：
+
+```bash
+rg -n "Todo|Doing|Blocked|待补充|暂未|未实现" README.md docs backend/README.md
+git status --short
+```
+
+## T-038 继续拆分前端聊天工作台 hooks
+
+- 来源计划：`PLAN-20260701-01`
+- 优先级：`P1`
+- 状态：`Todo`
+- 背景：`frontend/src/app/page.tsx` 已完成多轮组件和请求层拆分，但仍保留大量页面级 `useState`、`useEffect`、轮询和反馈状态，后续改会话、文件管理、质量看板时审查成本仍偏高。
+- 目标：在保持现有 UI 和接口协议不变的前提下，把工作台状态编排继续拆到可测试 hook 和纯函数中。
+- 范围：
+  - 优先抽取 `useConversations`、`useKnowledgeFiles`、`useVectorJobs`、`useFeedback`、`useQualityDashboard` 或同等边界。
+  - 保留 `frontend/src/lib/chat-workspace/api.ts` 的集中请求入口，不重新引入页面内直接 `fetch`。
+  - 轮询、卸载清理、SSE 消息合并和反馈提交失败路径需要保持现有行为。
+  - 不在本任务中做大规模视觉改版。
+- 验收标准：
+  - `frontend/src/app/page.tsx` 行数和状态分支明显下降，顶层页面更接近布局和编排职责。
+  - 新增 hook 或工具函数有针对性单元测试覆盖。
+  - `npm run test`、`npm run lint`、`npm run build` 通过。
+  - 主要聊天、文件上传、向量化、feedback、quality dashboard 和 diagnostics 行为保持兼容。
+- 建议验证命令：
+
+```bash
+cd frontend
+npm run test
+npm run lint
+npm run build
+```
+
+## T-039 跑一轮发布前真实链路验收
+
+- 来源计划：`PLAN-20260701-01`
+- 优先级：`P1`
+- 状态：`Todo`
+- 背景：最近一次真实 RAG eval 和 indexing eval 基线记录在 2026-06-30；发布、演示或大改前需要刷新真实链路结果，而不仅依赖静态测试。
+- 目标：启动真实 backend、frontend、vector index worker 和数据库后，跑完整发布前验收并记录结果。
+- 范围：
+  - 运行 `scripts/acceptance_check.sh` 的完整路径，包含 migration check、后端检查、前端检查、RAG eval gate 和 indexing eval。
+  - 若外部 API Key、账号、数据库或 worker 不可用，记录明确阻塞原因，不伪造结果。
+  - 重新生成 eval summary，并把不含敏感信息的摘要同步到 `docs/evals/README.md` 或任务完成记录。
+- 验收标准：
+  - 静态检查全部通过。
+  - 真实 RAG eval gate 通过，或记录可复现的阻塞条件。
+  - 真实 indexing eval 通过，或记录可复现的阻塞条件。
+  - 运行输出和文档不包含 API Key、JWT、数据库密码或私人文档内容。
+- 建议验证命令：
+
+```bash
+FIRSTRAG_EVAL_USERNAME=你的用户名 \
+FIRSTRAG_EVAL_PASSWORD=你的密码 \
+scripts/acceptance_check.sh
+
+conda run -n firstrag python scripts/eval_summary.py
+```
+
+## T-040 明确 License 与公开发布说明
+
+- 来源计划：`PLAN-20260701-01`
+- 优先级：`P2`
+- 状态：`Todo`
+- 背景：`README.md` 目前仍写着 License 暂未声明；如果仓库要公开展示、部署在线 demo 或接受协作，需要明确授权边界。
+- 目标：根据项目用途选择合适的 License，并在 README 和必要文档中说明公开发布边界。
+- 范围：
+  - 由项目所有者确认 License 类型，例如 MIT、Apache-2.0、GPL 系列或暂不授权。
+  - 新增或更新 `LICENSE` 文件。
+  - 更新 `README.md` 的 License 段落。
+  - 如暂不公开授权，需要在 README 中写清楚当前状态，避免误导外部使用者。
+- 验收标准：
+  - 仓库根目录存在清晰的 License 声明或明确的暂不授权说明。
+  - README 不再停留在“待补充”。
+  - 不引入与依赖许可证明显冲突的声明。
+- 建议验证命令：
+
+```bash
+git status --short
+```
+
+## T-041 梳理在线演示环境方案
+
+- 来源计划：`PLAN-20260701-01`
+- 优先级：`P2`
+- 状态：`Todo`
+- 背景：README Roadmap 仍保留“发布在线演示环境”未完成项；当前 Docker Compose、迁移和 CI 已具备基础，但在线 demo 还需要明确资源、账号和安全边界。
+- 目标：形成可执行的在线演示环境方案，必要时完成最小可用部署。
+- 范围：
+  - 选择部署目标，例如云服务器、Render、Railway、Fly.io、Vercel + 独立 backend 或自托管 Docker Compose。
+  - 明确 PostgreSQL、uploads、vector_db、models 和日志的持久化策略。
+  - 明确演示账号、用户上传限制、API Key 策略、速率限制和清理策略。
+  - 更新 `docs/DEPLOYMENT.md` 和 README Roadmap。
+- 验收标准：
+  - 有明确的在线 demo 拓扑、配置清单和启动步骤。
+  - 不在仓库中提交真实 API Key、JWT、数据库密码或 SSH 私钥。
+  - 若完成部署，README 提供可访问地址和演示限制说明；若未部署，文档说明剩余阻塞项。
+- 建议验证命令：
+
+```bash
+docker compose config --quiet
 ```
 
 ## 更新规则
