@@ -3,6 +3,22 @@ from uuid import UUID
 from app.db.executor import Row, execute, fetch_all, fetch_one
 
 
+def get_user_file_quota_usage(user_id: int) -> Row:
+    """查询当前用户未删除知识文件的数量和容量占用。"""
+    row = fetch_one(
+        """
+        SELECT
+            COUNT(*)::int AS file_count,
+            COALESCE(SUM(size_bytes), 0)::bigint AS total_size_bytes
+        FROM knowledge_files
+        WHERE user_id = %s
+          AND deleted_at IS NULL;
+        """,
+        (user_id,),
+    )
+    return row or {"file_count": 0, "total_size_bytes": 0}
+
+
 def get_file_by_hash(user_id: int, file_hash: str) -> Row | None:
     """查询用户是否已经上传过相同内容的文件。"""
     return fetch_one(

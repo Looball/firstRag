@@ -6,6 +6,7 @@ from uuid import uuid4
 
 from fastapi.testclient import TestClient
 
+from app.core.rate_limit import reset_rate_limits
 from app.core.security import get_current_user_id
 from app.main import app
 
@@ -15,6 +16,7 @@ class ChatSettingsTests(unittest.TestCase):
 
     def setUp(self) -> None:
         """为每个测试注入固定的认证用户。"""
+        reset_rate_limits()
         app.dependency_overrides[get_current_user_id] = lambda: 1
         self.client = TestClient(app)
 
@@ -22,6 +24,7 @@ class ChatSettingsTests(unittest.TestCase):
         """清理依赖覆盖，避免影响其他路由测试。"""
         app.dependency_overrides.clear()
         self.client.close()
+        reset_rate_limits()
 
     def test_invalid_model_settings_does_not_save_messages(self) -> None:
         """用户模型配置无效时应返回 400，且不创建用户或助手消息。"""
@@ -169,6 +172,58 @@ class ChatSettingsTests(unittest.TestCase):
         self.assertIn('"need_retrieval": true', response.text)
         get_chain.assert_called_once_with(1)
         stream_answer.assert_called_once()
+
+    def test_chat_is_rate_limited_before_database_access(self) -> None:
+        """高频聊天请求应在会话查询前返回 429。"""
+        assistant_message_id = uuid4()
+        with patch(
+            "app.api.chat.CHAT_RATE_LIMIT_MAX_REQUESTS",
+            1,
+        ), patch(
+            "app.api.chat.API_RATE_LIMIT_WINDOW_SECONDS",
+            60,
+        ), patch(
+            "app.api.chat.conversation_exists",
+            return_value=True,
+        ) as conversation_exists, patch(
+            "app.api.chat.conversation_belongs_base",
+            return_value=True,
+        ), patch(
+            "app.api.chat.get_knowledge_base_retrieval_settings",
+            return_value=None,
+        ), patch(
+            "app.api.chat.save_message",
+            side_effect=[
+                {"id": uuid4()},
+                {"id": assistant_message_id},
+            ],
+        ), patch(
+            "app.services.chat_service.finish_assistant_message",
+        ):
+            first = self.client.post(
+                "/chat",
+                json={
+                    "conversation_id": str(uuid4()),
+                    "knowledge_base_id": str(uuid4()),
+                    "message": "你好",
+                },
+            )
+            second = self.client.post(
+                "/chat",
+                json={
+                    "conversation_id": str(uuid4()),
+                    "knowledge_base_id": str(uuid4()),
+                    "message": "你好",
+                },
+            )
+
+        self.assertEqual(first.status_code, 200)
+        self.assertEqual(second.status_code, 429)
+        self.assertEqual(
+            second.json(),
+            {"detail": "聊天请求过于频繁，请稍后再试。"},
+        )
+        conversation_exists.assert_called_once()
 
 
 if __name__ == "__main__":

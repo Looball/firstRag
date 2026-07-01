@@ -8,6 +8,8 @@ Authorization: Bearer <access_token>
 
 成功响应约定为 `{"success": true, ...}`。资源不存在或不属于当前用户时返回 `404`。
 
+请求超过后端进程内限流时返回 `429`，并携带 `Retry-After` 响应头。登录失败、聊天、上传、向量化提交和模型测试的阈值由 `.env` 中的 `LOGIN_FAILURE_RATE_LIMIT_*`、`*_RATE_LIMIT_MAX_REQUESTS` 和 `API_RATE_LIMIT_WINDOW_SECONDS` 配置控制。
+
 ## 认证
 
 | 方法 | 路径 | 说明 |
@@ -21,6 +23,14 @@ Authorization: Bearer <access_token>
 {
   "username": "alice",
   "password": "password"
+}
+```
+
+登录失败达到配置阈值后会返回：
+
+```json
+{
+  "detail": "登录失败次数过多，请稍后再试。"
 }
 ```
 
@@ -77,6 +87,16 @@ Authorization: Bearer <access_token>
 
 上传入口当前支持 `.pdf`、`.docx`、`.md`、`.txt`。不支持的扩展名或明显不匹配的 MIME 类型会返回 `400`，不会创建无效文件记录或向量化任务。
 
+上传同时受单文件大小、用户文件数量和用户总容量配额限制：
+
+| 配置 | 说明 |
+| --- | --- |
+| `MAX_UPLOAD_FILE_SIZE_BYTES` | 单个文件大小上限。 |
+| `USER_UPLOAD_MAX_FILES` | 当前用户未删除文件数量上限，`0` 表示关闭。 |
+| `USER_UPLOAD_MAX_BYTES` | 当前用户未删除文件总容量上限，`0` 表示关闭。 |
+
+超过单文件或用户配额时返回 `413`，`detail` 会说明当前占用、上限或建议删除不需要的文件后重试。同一用户重复上传相同内容时会复用已有文件，不重复计入全局文件数量和容量。
+
 ## 向量化
 
 | 方法 | 路径 | 说明 |
@@ -86,6 +106,8 @@ Authorization: Bearer <access_token>
 | `GET` | `/chat/vector-index-jobs/health` | 当前用户任务队列健康状态。 |
 | `GET` | `/chat/vector-index-jobs/{job_id}` | 查询任务状态。 |
 | `DELETE` | `/chat/knowledge-files/{knowledge_file_id}/vectors` | 删除单文件向量化存储。 |
+
+`POST /chat/knowledge-base/{knowledge_base_id}/vectors` 受 `VECTOR_INDEX_MAX_BATCH_FILES` 限制，超过单次批量提交上限时返回 `413`，避免一次性提交过多 vector index job。
 
 `GET /chat/vector-index-jobs/health` 会返回队列总览和 worker 提示，供前端判断任务是否可能卡住：
 

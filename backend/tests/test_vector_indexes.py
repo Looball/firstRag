@@ -7,6 +7,7 @@ from uuid import uuid4
 
 from fastapi.testclient import TestClient
 
+from app.core.rate_limit import reset_rate_limits
 from app.core.security import get_current_user_id
 from app.main import app
 
@@ -16,6 +17,7 @@ class VectorIndexJobHealthTests(unittest.TestCase):
 
     def setUp(self) -> None:
         """为每个测试注入固定认证用户。"""
+        reset_rate_limits()
         app.dependency_overrides[get_current_user_id] = lambda: 1
         self.client = TestClient(app)
 
@@ -23,6 +25,7 @@ class VectorIndexJobHealthTests(unittest.TestCase):
         """清理依赖覆盖，避免影响其他测试。"""
         app.dependency_overrides.clear()
         self.client.close()
+        reset_rate_limits()
 
     def test_get_vector_index_jobs_health_returns_queue_summary(self) -> None:
         """健康检查接口应返回队列统计和 worker 状态。"""
@@ -125,6 +128,66 @@ class VectorIndexJobHealthTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 404)
         self.assertEqual(response.json(), {"detail": "文件不存在"})
+        enqueue.assert_not_called()
+
+    def test_index_file_vectors_is_rate_limited(self) -> None:
+        """单文件向量化提交高频调用应返回 429。"""
+        file_id = uuid4()
+        file_record = {
+            "id": file_id,
+            "user_id": 1,
+            "original_name": "demo.md",
+            "status": "pending",
+            "index_version": 0,
+        }
+        with patch(
+            "app.api.vector_indexes.VECTOR_INDEX_RATE_LIMIT_MAX_REQUESTS",
+            1,
+        ), patch(
+            "app.api.vector_indexes.API_RATE_LIMIT_WINDOW_SECONDS",
+            60,
+        ), patch(
+            "app.api.vector_indexes.get_user_knowledge_file",
+            return_value=file_record,
+        ), patch(
+            "app.api.vector_indexes.enqueue_file_vector_index",
+            return_value={"id": str(uuid4()), "message": "queued"},
+        ) as enqueue:
+            first = self.client.post(f"/chat/knowledge-files/{file_id}/vectors")
+            second = self.client.post(f"/chat/knowledge-files/{file_id}/vectors")
+
+        self.assertEqual(first.status_code, 200)
+        self.assertEqual(second.status_code, 429)
+        self.assertEqual(
+            second.json(),
+            {"detail": "向量化提交过于频繁，请稍后再试。"},
+        )
+        enqueue.assert_called_once()
+
+    def test_index_knowledge_base_vectors_rejects_batch_quota(self) -> None:
+        """知识库批量向量化超过单次文件上限时应给出配额提示。"""
+        knowledge_base_id = uuid4()
+        with patch(
+            "app.api.vector_indexes.VECTOR_INDEX_MAX_BATCH_FILES",
+            1,
+        ), patch(
+            "app.api.vector_indexes.knowledge_base_exists",
+            return_value=True,
+        ), patch(
+            "app.api.vector_indexes.get_knowledge_base_files_for_indexing",
+            return_value=[
+                {"id": uuid4(), "user_id": 1, "status": "pending"},
+                {"id": uuid4(), "user_id": 1, "status": "pending"},
+            ],
+        ), patch(
+            "app.api.vector_indexes.enqueue_file_vector_index",
+        ) as enqueue:
+            response = self.client.post(
+                f"/chat/knowledge-base/{knowledge_base_id}/vectors",
+            )
+
+        self.assertEqual(response.status_code, 413)
+        self.assertIn("单次向量化提交文件数量超过上限", response.json()["detail"])
         enqueue.assert_not_called()
 
     def test_delete_file_vectors_returns_404_for_inaccessible_file(self) -> None:

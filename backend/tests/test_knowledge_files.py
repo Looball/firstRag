@@ -6,6 +6,7 @@ from uuid import uuid4
 
 from fastapi.testclient import TestClient
 
+from app.core.rate_limit import reset_rate_limits
 from app.core.security import get_current_user_id
 from app.main import app
 from app.services.file_service import FileTooLargeError
@@ -16,13 +17,21 @@ class KnowledgeFileListTests(unittest.TestCase):
 
     def setUp(self) -> None:
         """为每个测试注入固定认证用户。"""
+        reset_rate_limits()
         app.dependency_overrides[get_current_user_id] = lambda: 1
+        self.quota_usage_patcher = patch(
+            "app.api.knowledge_files.get_user_file_quota_usage",
+            return_value={"file_count": 0, "total_size_bytes": 0},
+        )
+        self.get_user_file_quota_usage = self.quota_usage_patcher.start()
         self.client = TestClient(app)
 
     def tearDown(self) -> None:
         """清理依赖覆盖，避免影响其他路由。"""
+        self.quota_usage_patcher.stop()
         app.dependency_overrides.clear()
         self.client.close()
+        reset_rate_limits()
 
     def test_get_knowledge_base_files_returns_latest_index_job(self) -> None:
         """知识库文件列表应返回每个文件最近一次向量化任务。"""
@@ -343,6 +352,145 @@ class KnowledgeFileListTests(unittest.TestCase):
         self.assertEqual(response.status_code, 413)
         self.assertEqual(response.json(), {"detail": "文件超过 200MB 限制"})
         create_file.assert_not_called()
+
+    def test_upload_rejects_when_file_count_quota_exceeded(self) -> None:
+        """新增文件超过用户文件数量配额时应返回清晰提示。"""
+        knowledge_base_id = uuid4()
+        self.get_user_file_quota_usage.return_value = {
+            "file_count": 2,
+            "total_size_bytes": 1024,
+        }
+        with patch(
+            "app.api.knowledge_files.USER_UPLOAD_MAX_FILES",
+            2,
+        ), patch(
+            "app.api.knowledge_files.knowledge_base_exists",
+            return_value=True,
+        ), patch(
+            "app.api.knowledge_files.calculate_file_hash",
+            return_value=("new-hash", 7),
+        ), patch(
+            "app.api.knowledge_files.get_file_by_hash",
+            return_value=None,
+        ), patch(
+            "app.api.knowledge_files.create_file_with_relation",
+        ) as create_file:
+            response = self.client.post(
+                f"/chat/knowledge-base/{knowledge_base_id}/files",
+                files={
+                    "files": (
+                        "notes.md",
+                        b"# title",
+                        "text/markdown",
+                    )
+                },
+            )
+
+        self.assertEqual(response.status_code, 413)
+        self.assertIn("上传文件数量已达上限", response.json()["detail"])
+        create_file.assert_not_called()
+
+    def test_upload_rejects_when_storage_quota_exceeded(self) -> None:
+        """新增文件超过用户容量配额时应返回 413。"""
+        knowledge_base_id = uuid4()
+        self.get_user_file_quota_usage.return_value = {
+            "file_count": 1,
+            "total_size_bytes": 90,
+        }
+        with patch(
+            "app.api.knowledge_files.USER_UPLOAD_MAX_FILES",
+            10,
+        ), patch(
+            "app.api.knowledge_files.USER_UPLOAD_MAX_BYTES",
+            100,
+        ), patch(
+            "app.api.knowledge_files.knowledge_base_exists",
+            return_value=True,
+        ), patch(
+            "app.api.knowledge_files.calculate_file_hash",
+            return_value=("new-hash", 20),
+        ), patch(
+            "app.api.knowledge_files.get_file_by_hash",
+            return_value=None,
+        ), patch(
+            "app.api.knowledge_files.create_file_with_relation",
+        ) as create_file:
+            response = self.client.post(
+                f"/chat/knowledge-base/{knowledge_base_id}/files",
+                files={
+                    "files": (
+                        "notes.md",
+                        b"# title",
+                        "text/markdown",
+                    )
+                },
+            )
+
+        self.assertEqual(response.status_code, 413)
+        self.assertIn("上传容量配额不足", response.json()["detail"])
+        create_file.assert_not_called()
+
+    def test_upload_is_rate_limited_before_file_hashing(self) -> None:
+        """上传接口高频调用应在读取文件内容前返回 429。"""
+        knowledge_base_id = uuid4()
+        file_id = uuid4()
+        existing_file = {
+            "id": file_id,
+            "original_name": "notes.md",
+            "mime_type": "text/markdown",
+            "size_bytes": 7,
+            "status": "pending",
+            "index_version": 0,
+            "created_at": "2026-06-29T00:00:00+08:00",
+            "updated_at": "2026-06-29T00:00:00+08:00",
+        }
+        with patch(
+            "app.api.knowledge_files.UPLOAD_RATE_LIMIT_MAX_REQUESTS",
+            1,
+        ), patch(
+            "app.api.knowledge_files.API_RATE_LIMIT_WINDOW_SECONDS",
+            60,
+        ), patch(
+            "app.api.knowledge_files.knowledge_base_exists",
+            return_value=True,
+        ), patch(
+            "app.api.knowledge_files.calculate_file_hash",
+            return_value=("hash", 7),
+        ) as calculate_file_hash, patch(
+            "app.api.knowledge_files.get_file_by_hash",
+            return_value=existing_file,
+        ), patch(
+            "app.api.knowledge_files.add_existing_file_relation",
+            return_value=True,
+        ):
+            first = self.client.post(
+                f"/chat/knowledge-base/{knowledge_base_id}/files",
+                files={
+                    "files": (
+                        "notes.md",
+                        b"# title",
+                        "text/markdown",
+                    )
+                },
+            )
+            second = self.client.post(
+                f"/chat/knowledge-base/{knowledge_base_id}/files",
+                files={
+                    "files": (
+                        "notes.md",
+                        b"# title",
+                        "text/markdown",
+                    )
+                },
+            )
+
+        self.assertEqual(first.status_code, 200)
+        self.assertEqual(second.status_code, 429)
+        self.assertEqual(
+            second.json(),
+            {"detail": "上传请求过于频繁，请稍后再试。"},
+        )
+        calculate_file_hash.assert_called_once()
 
     def test_upload_allows_supported_markdown_file(self) -> None:
         """支持类型仍应走原有复用和关联流程。"""

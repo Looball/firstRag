@@ -382,6 +382,9 @@ MODELS_DIR=/srv/firstrag/models
 | `ZAI_EMD_API` | embedding Key 只放在服务器 `.env` 或 secret store。 |
 | `ALLOW_USER_CUSTOM_LLM_BASE_URL` | 公开 demo 保持 `false`，避免用户通过自定义模型地址访问服务器内网。 |
 | `MAX_UPLOAD_FILE_SIZE_BYTES` | 公开 demo 建议调低到 10-20 MB，并与反向代理 body size 一致。 |
+| `USER_UPLOAD_MAX_FILES` / `USER_UPLOAD_MAX_BYTES` | 设置用户级文件数量和总容量上限；公开 demo 建议保守配置。 |
+| `LOGIN_FAILURE_RATE_LIMIT_*` / `*_RATE_LIMIT_MAX_REQUESTS` | 后端进程内限流阈值；多实例部署还要叠加网关或 WAF。 |
+| `VECTOR_INDEX_MAX_BATCH_FILES` | 单次知识库批量向量化可提交的最大文件数。 |
 | `FRONTEND_PORT` / `BACKEND_PORT` / `POSTGRES_PORT` | 建议设为 `127.0.0.1:3000`、`127.0.0.1:8000`、`127.0.0.1:5432`，由反向代理暴露 HTTPS。 |
 
 公开 demo 推荐额外设置：
@@ -391,6 +394,16 @@ FRONTEND_PORT=127.0.0.1:3000
 BACKEND_PORT=127.0.0.1:8000
 POSTGRES_PORT=127.0.0.1:5432
 MAX_UPLOAD_FILE_SIZE_BYTES=20971520
+USER_UPLOAD_MAX_FILES=100
+USER_UPLOAD_MAX_BYTES=1073741824
+VECTOR_INDEX_MAX_BATCH_FILES=50
+LOGIN_FAILURE_RATE_LIMIT_MAX_ATTEMPTS=5
+LOGIN_FAILURE_RATE_LIMIT_WINDOW_SECONDS=300
+API_RATE_LIMIT_WINDOW_SECONDS=60
+CHAT_RATE_LIMIT_MAX_REQUESTS=30
+UPLOAD_RATE_LIMIT_MAX_REQUESTS=10
+VECTOR_INDEX_RATE_LIMIT_MAX_REQUESTS=20
+MODEL_TEST_RATE_LIMIT_MAX_REQUESTS=10
 ALLOW_USER_CUSTOM_LLM_BASE_URL=false
 UPLOADS_DIR=/srv/firstrag/uploads
 VECTOR_DB_DIR=/srv/firstrag/vector_db
@@ -402,7 +415,7 @@ MODELS_DIR=/srv/firstrag/models
 - 终止 TLS，强制 HTTP 跳转 HTTPS。
 - 将域名请求转发到 `http://127.0.0.1:3000`。
 - 上传 body size 不大于 `MAX_UPLOAD_FILE_SIZE_BYTES`。
-- 对登录、注册、上传、聊天和模型设置接口做 IP 级限流。
+- 后端已提供进程内限流；反向代理仍建议对登录、注册、上传、聊天和模型设置接口做 IP 级限流，覆盖多进程、多实例和恶意突发流量。
 - 对 SSE streaming 关闭响应缓冲，避免聊天 token 被代理层攒批返回。
 
 ### 演示账号和安全边界
@@ -411,7 +424,7 @@ MODELS_DIR=/srv/firstrag/models
 - 当前应用仍开放注册接口，公开 demo 上线前需要在反向代理层临时加访问控制、Basic Auth、IP allowlist 或实现后端注册开关。
 - 不要求访客输入自己的真实 API Key；如果需要测试用户 Key 模式，必须提示只在可信 demo 环境使用，且前端不会持久化完整 Key。
 - 上传文件只用于演示，不接收私人、商业或敏感文档。公开 demo 应在页面说明上传数据会被定期清理。
-- 后端当前没有通用 rate limit middleware；公网访问必须先由反向代理、WAF 或网关承担限流。
+- 进程内限流状态不会跨多实例共享；公网访问仍应由反向代理、WAF 或 API 网关承担全局限流。
 
 ### 数据清理策略
 

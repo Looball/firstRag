@@ -1,7 +1,22 @@
 from uuid import UUID, uuid4
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi import (
+    APIRouter,
+    Depends,
+    File,
+    Form,
+    HTTPException,
+    Request,
+    UploadFile,
+)
 
+from app.core.config import (
+    API_RATE_LIMIT_WINDOW_SECONDS,
+    UPLOAD_RATE_LIMIT_MAX_REQUESTS,
+    USER_UPLOAD_MAX_BYTES,
+    USER_UPLOAD_MAX_FILES,
+)
+from app.core.rate_limit import build_rate_limit_identifier, enforce_rate_limit
 from app.core.security import get_current_user_id
 from app.db.executor import Row
 from app.repositories.knowledge_base_repository import (
@@ -11,6 +26,7 @@ from app.repositories.knowledge_base_repository import (
 from app.repositories.knowledge_file_repository import (
     create_file_with_relation,
     get_file_by_hash,
+    get_user_file_quota_usage,
     get_user_knowledge_files,
 )
 from app.repositories.vector_index_job_repository import (
@@ -35,6 +51,49 @@ from app.services.knowledge_profile_cache import (
 
 
 router = APIRouter(prefix="/chat", tags=["knowledge-files"])
+
+
+def format_quota_size(size_bytes: int) -> str:
+    """将容量字节数格式化为用户可读文本。"""
+    if size_bytes < 1024:
+        return f"{size_bytes} B"
+    if size_bytes < 1024 * 1024:
+        return f"{size_bytes / 1024:.1f} KB"
+    if size_bytes < 1024 * 1024 * 1024:
+        return f"{size_bytes / (1024 * 1024):.1f} MB"
+    return f"{size_bytes / (1024 * 1024 * 1024):.1f} GB"
+
+
+def ensure_upload_quota_available(
+    current_file_count: int,
+    current_total_size_bytes: int,
+    next_file_size_bytes: int,
+) -> None:
+    """检查新增文件是否会超过用户文件数量或容量配额。"""
+    next_file_count = current_file_count + 1
+    next_total_size_bytes = current_total_size_bytes + next_file_size_bytes
+
+    if USER_UPLOAD_MAX_FILES > 0 and next_file_count > USER_UPLOAD_MAX_FILES:
+        raise HTTPException(
+            status_code=413,
+            detail=(
+                "上传文件数量已达上限："
+                f"当前 {current_file_count} 个 / 上限 {USER_UPLOAD_MAX_FILES} 个。"
+                "请删除不需要的文件后再上传。"
+            ),
+        )
+
+    if USER_UPLOAD_MAX_BYTES > 0 and next_total_size_bytes > USER_UPLOAD_MAX_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail=(
+                "上传容量配额不足："
+                f"当前 {format_quota_size(current_total_size_bytes)}，"
+                f"本次文件 {format_quota_size(next_file_size_bytes)}，"
+                f"上限 {format_quota_size(USER_UPLOAD_MAX_BYTES)}。"
+                "请删除不需要的文件后再上传。"
+            ),
+        )
 
 
 def serialize_knowledge_file(
@@ -78,6 +137,7 @@ def enqueue_uploaded_file_index(
 # 向知识库上传文件
 @router.post("/knowledge-base/{knowledge_base_id}/files")
 async def upload_knowledge_files(
+    request: Request,
     knowledge_base_id: UUID,
     files: list[UploadFile] = File(...),
     description: str = Form(""),
@@ -93,6 +153,17 @@ async def upload_knowledge_files(
     if not knowledge_base_exists(knowledge_base_id, user_id):
         raise HTTPException(status_code=404, detail="知识库不存在")
 
+    enforce_rate_limit(
+        "upload",
+        build_rate_limit_identifier(request, "user", user_id),
+        UPLOAD_RATE_LIMIT_MAX_REQUESTS,
+        API_RATE_LIMIT_WINDOW_SECONDS,
+        "上传请求过于频繁，请稍后再试。",
+    )
+
+    quota_usage = get_user_file_quota_usage(user_id)
+    current_file_count = int(quota_usage["file_count"] or 0)
+    current_total_size_bytes = int(quota_usage["total_size_bytes"] or 0)
     uploaded_files = []
 
     # 使用循环处理多个文件
@@ -144,6 +215,16 @@ async def upload_knowledge_files(
             await file.close()
             continue
 
+        try:
+            ensure_upload_quota_available(
+                current_file_count,
+                current_total_size_bytes,
+                size_bytes,
+            )
+        except HTTPException:
+            await file.close()
+            raise
+
         # 为文件生成UUID
         file_id = uuid4()
 
@@ -182,6 +263,8 @@ async def upload_knowledge_files(
             if file_record is None:
                 raise RuntimeError("文件记录创建失败")
 
+            current_file_count += 1
+            current_total_size_bytes += size_bytes
             invalidate_knowledge_base_context(user_id, knowledge_base_id)
 
             index_job = None

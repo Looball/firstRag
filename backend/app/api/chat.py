@@ -1,8 +1,14 @@
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
+from app.core.config import (
+    API_RATE_LIMIT_WINDOW_SECONDS,
+    CHAT_RATE_LIMIT_MAX_REQUESTS,
+)
+from app.core.rate_limit import build_rate_limit_identifier, enforce_rate_limit
+from app.core.sensitive_data import sanitize_sensitive_text
 from app.core.security import get_current_user_id
 from app.repositories.conversation_repository import (
     conversation_belongs_base,
@@ -59,12 +65,21 @@ def should_use_local_chat_response(
 # 请求聊天接口
 @router.post("/chat")
 def chat(
+    request: Request,
     req: ChatRequest,
     user_id: int = Depends(get_current_user_id),
 ) -> StreamingResponse:
     # 取出请求体中的数据并检查消息内容
     if not req.message.strip():
         raise HTTPException(status_code=400, detail="message不能为空")
+
+    enforce_rate_limit(
+        "chat",
+        build_rate_limit_identifier(request, "user", user_id),
+        CHAT_RATE_LIMIT_MAX_REQUESTS,
+        API_RATE_LIMIT_WINDOW_SECONDS,
+        "聊天请求过于频繁，请稍后再试。",
+    )
 
     # 检查会话存在且属于当前用户
     if not conversation_exists(user_id, req.conversation_id):
@@ -110,7 +125,7 @@ def chat(
     except ValueError as exc:
         raise HTTPException(
             status_code=400,
-            detail=f"模型配置无效：{exc}",
+            detail=f"模型配置无效：{sanitize_sensitive_text(str(exc))}",
         ) from exc
 
     # 创建链成功后再持久化本轮消息，避免配置错误留下孤立用户消息。

@@ -5,6 +5,7 @@ from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
+from app.core.rate_limit import reset_rate_limits
 from app.core.security import get_current_user_id
 from app.main import app
 
@@ -14,6 +15,7 @@ class UserLLMSettingsApiTests(unittest.TestCase):
 
     def setUp(self) -> None:
         """为每个测试注入固定的认证用户。"""
+        reset_rate_limits()
         app.dependency_overrides[get_current_user_id] = lambda: 1
         self.client = TestClient(app)
 
@@ -21,6 +23,7 @@ class UserLLMSettingsApiTests(unittest.TestCase):
         """清理依赖覆盖，避免影响其他路由测试。"""
         app.dependency_overrides.clear()
         self.client.close()
+        reset_rate_limits()
 
     def test_get_settings_returns_sanitized_settings(self) -> None:
         """读取设置接口只能返回已脱敏的模型配置。"""
@@ -107,6 +110,59 @@ class UserLLMSettingsApiTests(unittest.TestCase):
             ["deepseek-v4-flash"],
         )
         test_settings.assert_called_once_with(1, {})
+
+    def test_test_settings_is_rate_limited(self) -> None:
+        """模型测试接口高频调用应返回 429 并停止访问 provider。"""
+        with patch(
+            "app.api.user_settings.MODEL_TEST_RATE_LIMIT_MAX_REQUESTS",
+            1,
+        ), patch(
+            "app.api.user_settings.API_RATE_LIMIT_WINDOW_SECONDS",
+            60,
+        ), patch(
+            "app.api.user_settings.check_user_llm_settings",
+            return_value={
+                "message": "模型连接测试成功",
+                "models": [],
+                "model_list_available": False,
+                "api_key_saved": False,
+            },
+        ) as test_settings:
+            first = self.client.post("/user/settings/test")
+            second = self.client.post("/user/settings/test")
+
+        self.assertEqual(first.status_code, 200)
+        self.assertEqual(second.status_code, 429)
+        self.assertEqual(
+            second.json(),
+            {"detail": "模型配置测试过于频繁，请稍后再试。"},
+        )
+        self.assertIn("retry-after", second.headers)
+        test_settings.assert_called_once()
+
+    def test_test_settings_redacts_submitted_api_key_in_error(self) -> None:
+        """模型测试错误不应回显用户本次提交的 API Key。"""
+        submitted_api_key = "test-user-key-value"
+        with patch(
+            "app.api.user_settings.check_user_llm_settings",
+            side_effect=ValueError(
+                f"provider rejected api_key={submitted_api_key}",
+            ),
+        ):
+            response = self.client.post(
+                "/user/settings/test",
+                json={
+                    "credential_mode": "user",
+                    "provider": "deepseek",
+                    "model": "deepseek-chat",
+                    "api_key": submitted_api_key,
+                },
+            )
+
+        self.assertEqual(response.status_code, 400)
+        detail = response.json()["detail"]
+        self.assertNotIn(submitted_api_key, detail)
+        self.assertIn("[已脱敏]", detail)
 
 
 if __name__ == "__main__":

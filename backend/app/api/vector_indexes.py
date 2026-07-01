@@ -1,8 +1,14 @@
 import logging
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 
+from app.core.config import (
+    API_RATE_LIMIT_WINDOW_SECONDS,
+    VECTOR_INDEX_MAX_BATCH_FILES,
+    VECTOR_INDEX_RATE_LIMIT_MAX_REQUESTS,
+)
+from app.core.rate_limit import build_rate_limit_identifier, enforce_rate_limit
 from app.core.security import get_current_user_id
 from app.db.locks import file_index_lock
 from app.repositories.knowledge_base_repository import knowledge_base_exists
@@ -35,6 +41,7 @@ logger = logging.getLogger(__name__)
 
 @router.post("/knowledge-files/{knowledge_file_id}/vectors")
 def index_knowledge_file_vectors(
+    request: Request,
     knowledge_file_id: UUID,
     user_id: int = Depends(get_current_user_id),
 ):
@@ -42,6 +49,14 @@ def index_knowledge_file_vectors(
     file_record = get_user_knowledge_file(user_id, knowledge_file_id)
     if file_record is None:
         raise HTTPException(status_code=404, detail="文件不存在")
+
+    enforce_rate_limit(
+        "vector-index",
+        build_rate_limit_identifier(request, "user", user_id),
+        VECTOR_INDEX_RATE_LIMIT_MAX_REQUESTS,
+        API_RATE_LIMIT_WINDOW_SECONDS,
+        "向量化提交过于频繁，请稍后再试。",
+    )
 
     job = enqueue_file_vector_index(
         file_record=file_record,
@@ -57,6 +72,7 @@ def index_knowledge_file_vectors(
 
 @router.post("/knowledge-base/{knowledge_base_id}/vectors")
 def index_knowledge_base_vectors(
+    request: Request,
     knowledge_base_id: UUID,
     user_id: int = Depends(get_current_user_id),
 ):
@@ -75,6 +91,27 @@ def index_knowledge_base_vectors(
             "jobs": [],
             "message": "知识库中没有可向量化的文件",
         }
+
+    if (
+        VECTOR_INDEX_MAX_BATCH_FILES > 0
+        and len(file_records) > VECTOR_INDEX_MAX_BATCH_FILES
+    ):
+        raise HTTPException(
+            status_code=413,
+            detail=(
+                "单次向量化提交文件数量超过上限："
+                f"当前 {len(file_records)} 个 / 上限 {VECTOR_INDEX_MAX_BATCH_FILES} 个。"
+                "请分批处理或联系管理员调整配额。"
+            ),
+        )
+
+    enforce_rate_limit(
+        "vector-index",
+        build_rate_limit_identifier(request, "user", user_id),
+        VECTOR_INDEX_RATE_LIMIT_MAX_REQUESTS,
+        API_RATE_LIMIT_WINDOW_SECONDS,
+        "向量化提交过于频繁，请稍后再试。",
+    )
 
     jobs = []
     for file_record in file_records:

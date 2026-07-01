@@ -14,12 +14,60 @@ def resolve_project_path(value: str | os.PathLike[str], default: Path) -> Path:
     return path if path.is_absolute() else PROJECT_ROOT / path
 
 
+def read_int_env(name: str, default: int) -> int:
+    """读取整数环境变量，非法值回退到默认配置。"""
+    try:
+        return int(os.environ.get(name, str(default)))
+    except ValueError:
+        return default
+
+
 # 设置文件存储路径
 UPLOAD_ROOT = PROJECT_ROOT / "uploads"
 
 # 设置上传文件大小限制，默认 200MB，与前端限制保持一致
-MAX_UPLOAD_FILE_SIZE_BYTES = int(
-    os.environ.get("MAX_UPLOAD_FILE_SIZE_BYTES", str(200 * 1024 * 1024))
+MAX_UPLOAD_FILE_SIZE_BYTES = read_int_env(
+    "MAX_UPLOAD_FILE_SIZE_BYTES",
+    200 * 1024 * 1024,
+)
+USER_UPLOAD_MAX_FILES = read_int_env("USER_UPLOAD_MAX_FILES", 200)
+USER_UPLOAD_MAX_BYTES = read_int_env(
+    "USER_UPLOAD_MAX_BYTES",
+    2 * 1024 * 1024 * 1024,
+)
+VECTOR_INDEX_MAX_BATCH_FILES = read_int_env(
+    "VECTOR_INDEX_MAX_BATCH_FILES",
+    100,
+)
+
+# 进程内限流配置。单机部署直接生效，多实例公网部署仍建议叠加网关限流。
+LOGIN_FAILURE_RATE_LIMIT_MAX_ATTEMPTS = read_int_env(
+    "LOGIN_FAILURE_RATE_LIMIT_MAX_ATTEMPTS",
+    5,
+)
+LOGIN_FAILURE_RATE_LIMIT_WINDOW_SECONDS = read_int_env(
+    "LOGIN_FAILURE_RATE_LIMIT_WINDOW_SECONDS",
+    300,
+)
+API_RATE_LIMIT_WINDOW_SECONDS = read_int_env(
+    "API_RATE_LIMIT_WINDOW_SECONDS",
+    60,
+)
+CHAT_RATE_LIMIT_MAX_REQUESTS = read_int_env(
+    "CHAT_RATE_LIMIT_MAX_REQUESTS",
+    60,
+)
+UPLOAD_RATE_LIMIT_MAX_REQUESTS = read_int_env(
+    "UPLOAD_RATE_LIMIT_MAX_REQUESTS",
+    20,
+)
+VECTOR_INDEX_RATE_LIMIT_MAX_REQUESTS = read_int_env(
+    "VECTOR_INDEX_RATE_LIMIT_MAX_REQUESTS",
+    30,
+)
+MODEL_TEST_RATE_LIMIT_MAX_REQUESTS = read_int_env(
+    "MODEL_TEST_RATE_LIMIT_MAX_REQUESTS",
+    20,
 )
 
 # 设置Chroma向量库存储路径和集合名称

@@ -66,5 +66,5 @@ BACKEND_API_PREFIX=
 - 完整 API Key 只在用户输入后提交给后端。
 - 前端不得从后端读取完整 API Key。
 - 不把 API Key 写入 `localStorage`、`sessionStorage`、URL、日志或错误上报。
+- `localStorage` 仅保存登录态；设置页的 API Key 输入只保留在组件内存状态中，提交后立即清空。
 - 登录过期时清理本地认证状态并跳转登录页。
-
