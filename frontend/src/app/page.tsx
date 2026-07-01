@@ -57,6 +57,8 @@ const MESSAGE_FEEDBACK_REASON_OPTIONS: Array<{
   { value: "other", label: "其他" },
 ];
 
+const isDevelopmentEnvironment = process.env.NODE_ENV === "development";
+
 function formatPercent(value: number | null) {
   return typeof value === "number" && Number.isFinite(value)
     ? `${Math.round(value * 100)}%`
@@ -2118,6 +2120,7 @@ export default function Home() {
                 );
                 const evalDraftError = evalDraftErrors[messageKey] || "";
                 const canExportEvalDraft =
+                  isDevelopmentEnvironment &&
                   message.role === "assistant" &&
                   message.feedback?.rating === "negative";
 
@@ -2469,7 +2472,7 @@ export default function Home() {
                               {feedbackError}
                             </p>
                           )}
-                          {evalDraftError && (
+                          {isDevelopmentEnvironment && evalDraftError && (
                             <p className="mt-2 text-xs text-[#9b3c29]">
                               {evalDraftError}
                             </p>
