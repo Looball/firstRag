@@ -34,11 +34,14 @@ scripts/acceptance_check.sh
 
 该脚本会依次执行：
 
-1. 后端 `unittest discover`。
-2. 前端 `npm run lint`。
-3. 前端 `npm run build`。
-4. RAG eval gate。
-5. Indexing eval。
+1. migration 文件检查，存在数据库连接时额外执行 dry-run。
+2. 后端 `compileall`。
+3. 后端 `unittest discover`。
+4. 前端 `npm run lint`。
+5. 前端 `npm run test`。
+6. 前端 `npm run build`。
+7. RAG eval gate。
+8. Indexing eval。
 
 只做静态检查、不访问真实后端时可跳过真实 eval：
 
