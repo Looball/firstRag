@@ -100,7 +100,7 @@
 | `T-034` | `PLAN-20260630-02` | `P2` | `Done` | 补充 README 截图和演示说明 | 2026-06-30 | `a0bccfa` |
 | `T-035` | `PLAN-20260630-02` | `P2` | `Done` | 跑一次真实 RAG eval 与 indexing eval 基线 | 2026-06-30 | `ee845e3` |
 | `T-036` | `PLAN-20260630-02` | `P2` | `Done` | 调查 RAG settings 阶段耗时超阈值 | 2026-06-30 | `72f2780` |
-| `T-037` | `PLAN-20260701-01` | `P1` | `Doing` | 文档与任务台账状态收口 | - | - |
+| `T-037` | `PLAN-20260701-01` | `P1` | `Done` | 文档与任务台账状态收口 | 2026-07-01 | `f3ab533` |
 | `T-038` | `PLAN-20260701-01` | `P1` | `Todo` | 继续拆分前端聊天工作台 hooks | - | - |
 | `T-039` | `PLAN-20260701-01` | `P1` | `Todo` | 跑一轮发布前真实链路验收 | - | - |
 | `T-040` | `PLAN-20260701-01` | `P2` | `Todo` | 明确 License 与公开发布说明 | - | - |
@@ -1272,7 +1272,7 @@ cd backend && conda run -n firstrag python -m unittest tests.test_eval_rag_scrip
 
 - 来源计划：`PLAN-20260701-01`
 - 优先级：`P1`
-- 状态：`Doing`
+- 状态：`Done`
 - 背景：当前核心实现、CI、迁移和 eval 工具链已经比较完整，但部分文档状态和真实进展不一致，容易影响后续排期判断。
 - 目标：让 README、任务台账和专题文档准确反映当前项目状态，进入下一轮开发前先把信息源收齐。
 - 范围：
@@ -1291,6 +1291,14 @@ cd backend && conda run -n firstrag python -m unittest tests.test_eval_rag_scrip
 rg -n "Todo|Doing|Blocked|待补充|暂未|未实现" README.md docs backend/README.md
 git status --short
 ```
+- 完成记录：
+  - 完成日期：2026-07-01
+  - 相关 commit：`f3ab533`
+  - `PLAN-20260629-01` 已从 `Doing` 对齐为 `Done`；`T-029` 详情状态已从 `Todo` 对齐为 `Done`。
+  - README Roadmap 已把 RAG 评估集、批量评估脚本和历史趋势摘要标记为已完成。
+  - `backend/README.md` 已明确当前 FastAPI 后端主入口，并将原脚本说明定位为早期 demo。
+  - `docs/evals/README.md` 已同步 `scripts/acceptance_check.sh` 的当前检查步骤。
+  - 验证命令：`rg -n "Todo|Doing|Blocked|待补充|暂未|未实现" README.md docs backend/README.md`；`git diff --check -- README.md backend/README.md docs/TASKS.md docs/evals/README.md`。
 
 ## T-038 继续拆分前端聊天工作台 hooks
 
