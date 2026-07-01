@@ -425,6 +425,9 @@ export default function Home() {
   const [sourceFeedbackErrors, setSourceFeedbackErrors] = useState<
     Record<string, string>
   >({});
+  const [sourceFeedbackMessages, setSourceFeedbackMessages] = useState<
+    Record<string, string>
+  >({});
   const [exportingEvalDrafts, setExportingEvalDrafts] = useState<
     Record<string, boolean>
   >({});
@@ -1174,6 +1177,10 @@ export default function Home() {
       ...prev,
       [sourceKey]: "",
     }));
+    setSourceFeedbackMessages((prev) => ({
+      ...prev,
+      [sourceKey]: "正在保存引用反馈...",
+    }));
 
     try {
       const feedback = await chatApi.submitMessageSourceFeedback(
@@ -1208,7 +1215,31 @@ export default function Home() {
             : session
         )
       );
+      setSourceFeedbackMessages((prev) => ({
+        ...prev,
+        [sourceKey]:
+          rating === "useful" ? "已标记引用有用" : "已标记引用无关",
+      }));
+      window.setTimeout(() => {
+        setSourceFeedbackMessages((prev) => {
+          if (
+            prev[sourceKey] !== "已标记引用有用" &&
+            prev[sourceKey] !== "已标记引用无关"
+          ) {
+            return prev;
+          }
+
+          const next = { ...prev };
+          delete next[sourceKey];
+          return next;
+        });
+      }, 2000);
     } catch (error) {
+      setSourceFeedbackMessages((prev) => {
+        const next = { ...prev };
+        delete next[sourceKey];
+        return next;
+      });
       setSourceFeedbackErrors((prev) => ({
         ...prev,
         [sourceKey]:
@@ -2218,6 +2249,8 @@ export default function Home() {
                               );
                               const sourceFeedbackError =
                                 sourceFeedbackErrors[sourceKey] || "";
+                              const sourceFeedbackMessage =
+                                sourceFeedbackMessages[sourceKey] || "";
 
                               return (
                                 <div
@@ -2307,7 +2340,9 @@ export default function Home() {
                                             : "border-[#cbd5d1] text-[#64716d] hover:border-[#176b62] hover:text-[#176b62]"
                                         }`}
                                       >
-                                        引用有用
+                                        {isSourceFeedbackSubmitting
+                                          ? "保存中"
+                                          : "引用有用"}
                                       </button>
                                       <button
                                         type="button"
@@ -2327,7 +2362,9 @@ export default function Home() {
                                             : "border-[#cbd5d1] text-[#64716d] hover:border-[#e36b4f] hover:text-[#9b3c29]"
                                         }`}
                                       >
-                                        引用无关
+                                        {isSourceFeedbackSubmitting
+                                          ? "保存中"
+                                          : "引用无关"}
                                       </button>
                                     </div>
                                     {sourceFeedbackError && (
@@ -2335,6 +2372,12 @@ export default function Home() {
                                         {sourceFeedbackError}
                                       </p>
                                     )}
+                                    {!sourceFeedbackError &&
+                                      sourceFeedbackMessage && (
+                                        <p className="text-[11px] text-[#176b62]">
+                                          {sourceFeedbackMessage}
+                                        </p>
+                                      )}
                                   </div>
                                 </div>
                               );
