@@ -416,6 +416,9 @@ export default function Home() {
     Record<string, boolean>
   >({});
   const [feedbackErrors, setFeedbackErrors] = useState<Record<string, string>>({});
+  const [feedbackMessages, setFeedbackMessages] = useState<Record<string, string>>(
+    {}
+  );
   const [submittingSourceFeedback, setSubmittingSourceFeedback] = useState<
     Record<string, boolean>
   >({});
@@ -1072,6 +1075,10 @@ export default function Home() {
       ...prev,
       [messageKey]: "",
     }));
+    setFeedbackMessages((prev) => ({
+      ...prev,
+      [messageKey]: "正在保存反馈...",
+    }));
 
     try {
       const feedback = await chatApi.submitMessageFeedback(messageId, {
@@ -1100,7 +1107,31 @@ export default function Home() {
       setActiveFeedbackMessageKey((current) =>
         current === messageKey ? "" : current
       );
+      setFeedbackMessages((prev) => ({
+        ...prev,
+        [messageKey]:
+          rating === "positive" ? "已标记为有用" : "已记录问题反馈",
+      }));
+      window.setTimeout(() => {
+        setFeedbackMessages((prev) => {
+          if (
+            prev[messageKey] !== "已标记为有用" &&
+            prev[messageKey] !== "已记录问题反馈"
+          ) {
+            return prev;
+          }
+
+          const next = { ...prev };
+          delete next[messageKey];
+          return next;
+        });
+      }, 2000);
     } catch (error) {
+      setFeedbackMessages((prev) => {
+        const next = { ...prev };
+        delete next[messageKey];
+        return next;
+      });
       setFeedbackErrors((prev) => ({
         ...prev,
         [messageKey]:
@@ -2115,6 +2146,7 @@ export default function Home() {
                   submittingFeedback[messageKey]
                 );
                 const feedbackError = feedbackErrors[messageKey] || "";
+                const feedbackMessage = feedbackMessages[messageKey] || "";
                 const isExportingEvalDraft = Boolean(
                   exportingEvalDrafts[messageKey]
                 );
@@ -2343,7 +2375,7 @@ export default function Home() {
                                     : "border-[#cbd5d1] text-[#64716d] hover:border-[#176b62] hover:text-[#176b62]"
                                 }`}
                               >
-                                有用
+                                {isFeedbackSubmitting ? "保存中" : "有用"}
                               </button>
                               <button
                                 type="button"
@@ -2470,6 +2502,11 @@ export default function Home() {
                           {!isFeedbackPanelOpen && feedbackError && (
                             <p className="mt-2 text-xs text-[#9b3c29]">
                               {feedbackError}
+                            </p>
+                          )}
+                          {!feedbackError && feedbackMessage && (
+                            <p className="mt-2 text-xs text-[#176b62]">
+                              {feedbackMessage}
                             </p>
                           )}
                           {isDevelopmentEnvironment && evalDraftError && (
