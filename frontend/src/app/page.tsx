@@ -1,6 +1,5 @@
 "use client";
 
-import { useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { FileManagerDialog } from "@/components/chat-workspace/FileManagerDialog";
 import { MessageDiagnosticsPanel } from "@/components/chat-workspace/MessageDiagnosticsPanel";
@@ -25,20 +24,16 @@ import {
   DEFAULT_RETRIEVAL_SETTINGS,
 } from "@/lib/chat-workspace/constants";
 import * as chatApi from "@/lib/chat-workspace/api";
+import { useKnowledgeFiles } from "@/lib/chat-workspace/use-knowledge-files";
 import {
   buildSessionTitle,
-  getVectorStatus,
-  isVectorIndexJobDone,
-  wait,
 } from "@/lib/chat-workspace/utils";
 import { streamChatResponse } from "@/lib/chat-workspace/chat-stream";
 import type {
   ChatSession,
   ChatSource,
   KnowledgeBase,
-  KnowledgeBaseFile,
   KnowledgeBaseRetrievalSettings,
-  KnowledgeFile,
   Message,
   MessageFeedbackReason,
   MessageFeedbackRating,
@@ -47,11 +42,7 @@ import type {
   QualityDashboard,
   RetrievalMode,
   RetrievalState,
-  VectorIndexJob,
-  VectorIndexQueueItem,
 } from "@/lib/chat-workspace/types";
-
-const VECTOR_INDEX_HEALTH_QUERY_KEY = ["chat-workspace", "vector-index-health"] as const;
 
 const MESSAGE_FEEDBACK_REASON_OPTIONS: Array<{
   value: MessageFeedbackReason;
@@ -385,35 +376,6 @@ export default function Home() {
   const [isCreatingSession, setIsCreatingSession] = useState(false);
   const [isCreatingKnowledgeBase, setIsCreatingKnowledgeBase] =
     useState(false);
-  const [isUploadingKnowledgeFiles, setIsUploadingKnowledgeFiles] =
-    useState(false);
-  const [knowledgeFileUploadError, setKnowledgeFileUploadError] =
-    useState("");
-  const [detachingKnowledgeFileId, setDetachingKnowledgeFileId] =
-    useState("");
-  const [knowledgeFileDetachError, setKnowledgeFileDetachError] =
-    useState("");
-  const [attachingKnowledgeFileId, setAttachingKnowledgeFileId] =
-    useState("");
-  const [deletingVectorFileId, setDeletingVectorFileId] = useState("");
-  const [knowledgeFileAttachError, setKnowledgeFileAttachError] =
-    useState("");
-  const [isLoadingKnowledgeFiles, setIsLoadingKnowledgeFiles] =
-    useState(false);
-  const [knowledgeFileLoadError, setKnowledgeFileLoadError] = useState("");
-  const [isLoadingReusableFiles, setIsLoadingReusableFiles] =
-    useState(false);
-  const [reusableFileLoadError, setReusableFileLoadError] = useState("");
-  const [vectorIndexingFileIds, setVectorIndexingFileIds] = useState<
-    Record<string, boolean>
-  >({});
-  const [vectorIndexQueue, setVectorIndexQueue] = useState<
-    VectorIndexQueueItem[]
-  >([]);
-  const [isIndexingKnowledgeBase, setIsIndexingKnowledgeBase] =
-    useState(false);
-  const [vectorIndexMessage, setVectorIndexMessage] = useState("");
-  const [vectorIndexError, setVectorIndexError] = useState("");
   const [pageError, setPageError] = useState("");
   const [currentUsername, setCurrentUsername] = useState("");
   const [knowledgeBases, setKnowledgeBases] = useState<KnowledgeBase[]>([
@@ -427,10 +389,6 @@ export default function Home() {
   const [selectedKnowledgeBaseId, setSelectedKnowledgeBaseId] = useState(
     DEFAULT_KNOWLEDGE_BASE_ID
   );
-  const [knowledgeFiles, setKnowledgeFiles] = useState<KnowledgeFile[]>([]);
-  const [knowledgeBaseFiles, setKnowledgeBaseFiles] = useState<
-    KnowledgeBaseFile[]
-  >([]);
   const [
     retrievalSettingsByKnowledgeBaseId,
     setRetrievalSettingsByKnowledgeBaseId,
@@ -444,7 +402,6 @@ export default function Home() {
   const [retrievalSettingsError, setRetrievalSettingsError] = useState("");
   const [isKnowledgeBaseManagerOpen, setIsKnowledgeBaseManagerOpen] =
     useState(false);
-  const [isFileManagerOpen, setIsFileManagerOpen] = useState(false);
   const [newKnowledgeBaseName, setNewKnowledgeBaseName] = useState("");
   const [activeFeedbackMessageKey, setActiveFeedbackMessageKey] = useState("");
   const [feedbackReasonDrafts, setFeedbackReasonDrafts] = useState<
@@ -482,18 +439,6 @@ export default function Home() {
   const previousSessionIdRef = useRef("");
   const previousMessageCountRef = useRef(0);
   const previousLoadingRef = useRef(false);
-  const queryClient = useQueryClient();
-  const vectorIndexHealthQuery = useQuery({
-    queryKey: VECTOR_INDEX_HEALTH_QUERY_KEY,
-    queryFn: chatApi.loadVectorIndexHealth,
-    enabled: hasCheckedAuth,
-    staleTime: 5_000,
-  });
-  const vectorIndexHealth = vectorIndexHealthQuery.data ?? null;
-  const vectorIndexHealthError = vectorIndexHealthQuery.error
-    ? "任务状态暂不可用"
-    : "";
-  const isLoadingVectorIndexHealth = vectorIndexHealthQuery.isFetching;
 
   const visibleSessions = useMemo(
     () =>
@@ -527,155 +472,67 @@ export default function Home() {
       ) || knowledgeBases[0],
     [knowledgeBases, selectedKnowledgeBaseId],
   );
-  const selectedRetrievalSettings =
-    retrievalSettingsByKnowledgeBaseId[selectedKnowledgeBaseId] ||
-    DEFAULT_RETRIEVAL_SETTINGS;
-  const selectedKnowledgeFileIds = useMemo(
-    () =>
-      new Set(
-        knowledgeBaseFiles
-          .filter(
-            (association) =>
-              association.knowledgeBaseId === selectedKnowledgeBaseId,
-          )
-          .map((association) => association.knowledgeFileId),
-      ),
-    [knowledgeBaseFiles, selectedKnowledgeBaseId],
-  );
-  const selectedKnowledgeFiles = useMemo(
-    () => knowledgeFiles.filter((file) => selectedKnowledgeFileIds.has(file.id)),
-    [knowledgeFiles, selectedKnowledgeFileIds],
-  );
-  const reusableKnowledgeFiles = useMemo(
-    () => knowledgeFiles.filter((file) => !selectedKnowledgeFileIds.has(file.id)),
-    [knowledgeFiles, selectedKnowledgeFileIds],
-  );
-  const hasPollingIndexJobs = useMemo(
-    () => knowledgeFiles.some((file) => getVectorStatus(file).canPoll),
-    [knowledgeFiles],
-  );
-  const selectedKnowledgeBaseFileCount =
-    selectedKnowledgeFiles.length || selectedKnowledgeBase?.fileCount || 0;
-
-  const loadKnowledgeBaseFiles = useCallback(
-    async (knowledgeBaseId: string, options?: { showLoading?: boolean }) => {
-      if (!knowledgeBaseId || knowledgeBaseId === DEFAULT_KNOWLEDGE_BASE_ID) {
-        return;
-      }
-
-      const shouldShowLoading = options?.showLoading !== false;
-
-      if (shouldShowLoading) {
-        setIsLoadingKnowledgeFiles(true);
-      }
-
-      setKnowledgeFileLoadError("");
-
-      try {
-        const loadedFiles = await chatApi.listKnowledgeBaseFiles(knowledgeBaseId);
-        const loadedFileIds = new Set(loadedFiles.map((file) => file.id));
-
-        setKnowledgeFiles((prev) => {
-          const previousFilesById = new Map(
-            prev.map((file) => [file.id, file])
-          );
-          const mergedLoadedFiles = loadedFiles.map((file) => ({
-            ...file,
-            usageCount:
-              file.usageCount ??
-              previousFilesById.get(file.id)?.usageCount ??
-              null,
-          }));
-
-          return [
-            ...mergedLoadedFiles,
-            ...prev.filter((file) => !loadedFileIds.has(file.id)),
-          ];
-        });
-        setKnowledgeBaseFiles((prev) => [
-          ...prev.filter(
-            (association) =>
-              association.knowledgeBaseId !== knowledgeBaseId
-          ),
-          ...loadedFiles.map((file) => ({
-            knowledgeBaseId,
-            knowledgeFileId: file.id,
-          })),
-        ]);
-        setKnowledgeBases((prev) =>
-          prev.map((knowledgeBase) =>
-            knowledgeBase.id === knowledgeBaseId
-              ? {
-                  ...knowledgeBase,
-                  fileCount: loadedFiles.length,
-                }
-              : knowledgeBase
-          )
-        );
-      } catch (error) {
-        setKnowledgeFileLoadError(
-          error instanceof Error
-            ? error.message
-            : "读取知识库文件失败，请稍后再试。"
-        );
-      } finally {
-        if (shouldShowLoading) {
-          setIsLoadingKnowledgeFiles(false);
-        }
-      }
+  const updateKnowledgeBaseFileCount = useCallback(
+    (knowledgeBaseId: string, fileCount: number) => {
+      setKnowledgeBases((prev) =>
+        prev.map((knowledgeBase) =>
+          knowledgeBase.id === knowledgeBaseId
+            ? {
+                ...knowledgeBase,
+                fileCount,
+              }
+            : knowledgeBase
+        )
+      );
     },
     []
   );
-
-  const loadAllKnowledgeFiles = useCallback(async (options?: { showLoading?: boolean }) => {
-    const shouldShowLoading = options?.showLoading !== false;
-
-    if (shouldShowLoading) {
-      setIsLoadingReusableFiles(true);
-    }
-
-    setReusableFileLoadError("");
-
-    try {
-      setKnowledgeFiles(await chatApi.listAllKnowledgeFiles());
-    } catch (error) {
-      setReusableFileLoadError(
-        error instanceof Error
-          ? error.message
-          : "读取用户文件列表失败，请稍后再试。"
-      );
-    } finally {
-      if (shouldShowLoading) {
-        setIsLoadingReusableFiles(false);
-      }
-    }
-  }, []);
-
-  const loadVectorIndexHealth = useCallback(
-    async (options?: { showLoading?: boolean }) => {
-      void options;
-
-      try {
-        await queryClient.fetchQuery({
-          queryKey: VECTOR_INDEX_HEALTH_QUERY_KEY,
-          queryFn: chatApi.loadVectorIndexHealth,
-          staleTime: 0,
-        });
-      } catch {
-        // Health is advisory; the panel renders the query error state.
-      }
-    },
-    [queryClient]
-  );
-
-  async function handleOpenFileManager() {
-    setIsFileManagerOpen(true);
-    await Promise.all([
-      loadKnowledgeBaseFiles(selectedKnowledgeBaseId),
-      loadAllKnowledgeFiles(),
-      loadVectorIndexHealth(),
-    ]);
-  }
+  const {
+    attachingKnowledgeFileId,
+    clearCompletedVectorIndexJobs,
+    deletingVectorFileId,
+    detachingKnowledgeFileId,
+    handleAttachKnowledgeFile,
+    handleDeleteKnowledgeFileVectors,
+    handleIndexKnowledgeBase,
+    handleIndexKnowledgeFile,
+    handleOpenFileManager,
+    handleRemoveKnowledgeFile,
+    handleSelectFiles,
+    isFileManagerOpen,
+    isIndexingKnowledgeBase,
+    isLoadingKnowledgeFiles,
+    isLoadingReusableFiles,
+    isLoadingVectorIndexHealth,
+    isUploadingKnowledgeFiles,
+    knowledgeBaseFiles,
+    knowledgeFileAttachError,
+    knowledgeFileDetachError,
+    knowledgeFileLoadError,
+    knowledgeFileUploadError,
+    loadVectorIndexHealth,
+    reusableFileLoadError,
+    reusableKnowledgeFiles,
+    selectedKnowledgeBaseFileCount,
+    selectedKnowledgeFiles,
+    setIsFileManagerOpen,
+    vectorIndexError,
+    vectorIndexHealth,
+    vectorIndexHealthError,
+    vectorIndexingFileIds,
+    vectorIndexMessage,
+    vectorIndexQueue,
+  } = useKnowledgeFiles({
+    hasCheckedAuth,
+    selectedKnowledgeBaseId,
+    selectedKnowledgeBaseName: selectedKnowledgeBase?.name || "当前知识库",
+    selectedKnowledgeBaseStoredFileCount: selectedKnowledgeBase?.fileCount || 0,
+    fileInputRef,
+    onKnowledgeBaseFileCountChange: updateKnowledgeBaseFileCount,
+  });
+  const selectedRetrievalSettings =
+    retrievalSettingsByKnowledgeBaseId[selectedKnowledgeBaseId] ||
+    DEFAULT_RETRIEVAL_SETTINGS;
 
   async function handleCreateKnowledgeBase() {
     const normalizedName = newKnowledgeBaseName.trim();
@@ -786,295 +643,6 @@ export default function Home() {
     }
   }
 
-  async function handleSelectFiles(files: FileList | null) {
-    if (
-      !files?.length ||
-      !selectedKnowledgeBaseId ||
-      isUploadingKnowledgeFiles
-    ) {
-      return;
-    }
-
-    const MAX_FILE_SIZE = 200 * 1024 * 1024;
-    const selectedFiles = Array.from(files);
-    const oversizedFiles = selectedFiles.filter(
-      (file) => file.size > MAX_FILE_SIZE
-    );
-
-    if (oversizedFiles.length > 0) {
-      const names = oversizedFiles
-        .map((file) => file.name)
-        .join("、");
-      setKnowledgeFileUploadError(
-        `以下文件超过 200MB 限制，请压缩后重新上传：${names}。`
-      );
-      return;
-    }
-
-    setIsUploadingKnowledgeFiles(true);
-    setKnowledgeFileUploadError("");
-    setIsFileManagerOpen(true);
-
-    try {
-      await chatApi.uploadKnowledgeFiles(selectedKnowledgeBaseId, selectedFiles);
-
-      await Promise.all([
-        loadKnowledgeBaseFiles(selectedKnowledgeBaseId),
-        loadAllKnowledgeFiles(),
-      ]);
-    } catch (error) {
-      setKnowledgeFileUploadError(
-        error instanceof Error
-          ? error.message
-          : "上传文件失败，请稍后再试。"
-      );
-    } finally {
-      setIsUploadingKnowledgeFiles(false);
-
-      if (fileInputRef.current) {
-        fileInputRef.current.value = "";
-      }
-    }
-  }
-
-  async function handleAttachKnowledgeFile(fileId: string) {
-    if (
-      !selectedKnowledgeBaseId ||
-      !fileId ||
-      attachingKnowledgeFileId
-    ) {
-      return;
-    }
-
-    setAttachingKnowledgeFileId(fileId);
-    setKnowledgeFileAttachError("");
-
-    try {
-      await chatApi.attachKnowledgeFile(selectedKnowledgeBaseId, fileId);
-
-      await Promise.all([
-        loadKnowledgeBaseFiles(selectedKnowledgeBaseId),
-        loadAllKnowledgeFiles(),
-      ]);
-    } catch (error) {
-      setKnowledgeFileAttachError(
-        error instanceof Error
-          ? error.message
-          : "添加文件关联失败，请稍后再试。"
-      );
-    } finally {
-      setAttachingKnowledgeFileId("");
-    }
-  }
-
-  async function handleRemoveKnowledgeFile(fileId: string) {
-    if (
-      !selectedKnowledgeBaseId ||
-      !fileId ||
-      detachingKnowledgeFileId
-    ) {
-      return;
-    }
-
-    setDetachingKnowledgeFileId(fileId);
-    setKnowledgeFileDetachError("");
-
-    try {
-      await chatApi.removeKnowledgeFile(selectedKnowledgeBaseId, fileId);
-
-      await Promise.all([
-        loadKnowledgeBaseFiles(selectedKnowledgeBaseId),
-        loadAllKnowledgeFiles(),
-      ]);
-    } catch (error) {
-      setKnowledgeFileDetachError(
-        error instanceof Error
-          ? error.message
-          : "解除文件关联失败，请稍后再试。"
-      );
-    } finally {
-      setDetachingKnowledgeFileId("");
-    }
-  }
-
-  async function loadVectorIndexJob(jobId: string) {
-    return chatApi.getVectorIndexJob(jobId);
-  }
-
-  function updateVectorIndexQueue(
-    jobs: VectorIndexJob[],
-    target: Pick<VectorIndexQueueItem, "targetName" | "targetType">
-  ) {
-    if (jobs.length === 0) {
-      return;
-    }
-
-    setVectorIndexQueue((prev) => {
-      const nextJobs = new Map<string, VectorIndexQueueItem>(
-        prev.map((job) => [job.id, job])
-      );
-
-      jobs.forEach((job) => {
-        const previousJob = nextJobs.get(job.id);
-
-        nextJobs.set(job.id, {
-          ...(previousJob || {}),
-          ...job,
-          targetName: previousJob?.targetName || target.targetName,
-          targetType: previousJob?.targetType || target.targetType,
-        });
-      });
-
-      return Array.from(nextJobs.values());
-    });
-  }
-
-  async function waitForVectorIndexJobs(
-    jobs: VectorIndexJob[],
-    onJobsUpdated?: (jobs: VectorIndexJob[]) => void
-  ) {
-    if (jobs.length === 0) {
-      return [];
-    }
-
-    let latestJobs = jobs;
-    onJobsUpdated?.(latestJobs);
-
-    for (let attempt = 0; attempt < 45; attempt += 1) {
-      if (latestJobs.every(isVectorIndexJobDone)) {
-        return latestJobs;
-      }
-
-      await wait(2000);
-
-      const nextJobs = await Promise.all(
-        latestJobs.map(async (job) => {
-          if (isVectorIndexJobDone(job)) {
-            return job;
-          }
-
-          return (await loadVectorIndexJob(job.id)) || job;
-        })
-      );
-
-      latestJobs = nextJobs;
-      onJobsUpdated?.(latestJobs);
-    }
-
-    return latestJobs;
-  }
-
-  async function refreshKnowledgeFiles(options?: { showLoading?: boolean }) {
-    await Promise.all([
-      loadKnowledgeBaseFiles(selectedKnowledgeBaseId, options),
-      loadAllKnowledgeFiles(options),
-    ]);
-  }
-
-  async function handleIndexKnowledgeFile(fileId: string) {
-    if (!fileId || vectorIndexingFileIds[fileId]) {
-      return;
-    }
-
-    const targetFile = knowledgeFiles.find((file) => file.id === fileId);
-    const target = {
-      targetName: targetFile?.name || "知识库文件",
-      targetType: "file" as const,
-    };
-    setVectorIndexingFileIds((prev) => ({ ...prev, [fileId]: true }));
-    setVectorIndexError("");
-    setVectorIndexMessage("");
-
-    try {
-      const jobs = await chatApi.indexKnowledgeFile(fileId);
-      updateVectorIndexQueue(jobs, target);
-
-      setVectorIndexMessage("文件向量化任务已提交。");
-      await refreshKnowledgeFiles();
-    } catch (error) {
-      setVectorIndexError(
-        error instanceof Error ? error.message : "文件向量化失败，请稍后再试。"
-      );
-    } finally {
-      setVectorIndexingFileIds((prev) => {
-        const next = { ...prev };
-        delete next[fileId];
-        return next;
-      });
-    }
-  }
-
-  async function handleDeleteKnowledgeFileVectors(fileId: string) {
-    if (!fileId || deletingVectorFileId) {
-      return;
-    }
-
-    setDeletingVectorFileId(fileId);
-    setVectorIndexError("");
-    setVectorIndexMessage("");
-
-    try {
-      await chatApi.deleteKnowledgeFileVectors(fileId);
-      setVectorIndexMessage("文件向量已删除，可重新向量化。");
-      await refreshKnowledgeFiles();
-    } catch (error) {
-      setVectorIndexError(
-        error instanceof Error
-          ? error.message
-          : "删除文件向量失败，请稍后再试。"
-      );
-    } finally {
-      setDeletingVectorFileId("");
-    }
-  }
-
-  async function handleIndexKnowledgeBase() {
-    if (
-      !selectedKnowledgeBaseId ||
-      selectedKnowledgeBaseId === DEFAULT_KNOWLEDGE_BASE_ID ||
-      isIndexingKnowledgeBase
-    ) {
-      return;
-    }
-
-    setIsIndexingKnowledgeBase(true);
-    setVectorIndexError("");
-    setVectorIndexMessage("");
-
-    try {
-      const target = {
-        targetName: selectedKnowledgeBase?.name || "当前知识库",
-        targetType: "knowledge-base" as const,
-      };
-      const jobs = await chatApi.indexKnowledgeBase(selectedKnowledgeBaseId);
-      updateVectorIndexQueue(jobs, target);
-
-      setVectorIndexMessage("知识库向量化任务已提交。");
-
-      const finishedJobs = await waitForVectorIndexJobs(
-        jobs,
-        (latestJobs) => updateVectorIndexQueue(latestJobs, target)
-      );
-      const failedJob = finishedJobs.find((job) => job.status === "failed");
-
-      if (failedJob) {
-        throw new Error(failedJob.errorMessage || "知识库向量化失败。");
-      }
-
-      if (finishedJobs.length > 0) {
-        setVectorIndexMessage("知识库向量化完成。");
-      }
-
-      await refreshKnowledgeFiles();
-    } catch (error) {
-      setVectorIndexError(
-        error instanceof Error ? error.message : "知识库向量化失败，请稍后再试。"
-      );
-    } finally {
-      setIsIndexingKnowledgeBase(false);
-    }
-  }
-
   async function createBackendSession(
     knowledgeBaseId: string,
     title = "新对话"
@@ -1139,18 +707,6 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
-    if (!hasCheckedAuth || !selectedKnowledgeBaseId) {
-      return;
-    }
-
-    void loadKnowledgeBaseFiles(selectedKnowledgeBaseId);
-  }, [
-    hasCheckedAuth,
-    loadKnowledgeBaseFiles,
-    selectedKnowledgeBaseId,
-  ]);
-
-  useEffect(() => {
     if (
       !hasCheckedAuth ||
       !isKnowledgeBaseManagerOpen ||
@@ -1164,33 +720,6 @@ export default function Home() {
   }, [
     hasCheckedAuth,
     isKnowledgeBaseManagerOpen,
-    selectedKnowledgeBaseId,
-  ]);
-
-  useEffect(() => {
-    if (!hasCheckedAuth || !hasPollingIndexJobs) {
-      return;
-    }
-
-    const intervalId = window.setInterval(() => {
-      void Promise.all([
-        loadKnowledgeBaseFiles(selectedKnowledgeBaseId, {
-          showLoading: false,
-        }),
-        loadAllKnowledgeFiles({ showLoading: false }),
-        loadVectorIndexHealth({ showLoading: false }),
-      ]);
-    }, 2500);
-
-    return () => {
-      window.clearInterval(intervalId);
-    };
-  }, [
-    hasCheckedAuth,
-    hasPollingIndexJobs,
-    loadAllKnowledgeFiles,
-    loadKnowledgeBaseFiles,
-    loadVectorIndexHealth,
     selectedKnowledgeBaseId,
   ]);
 
@@ -3340,11 +2869,7 @@ export default function Home() {
           onUploadClick={() => fileInputRef.current?.click()}
           onIndexKnowledgeBase={handleIndexKnowledgeBase}
           onRefreshVectorHealth={loadVectorIndexHealth}
-          onClearCompletedJobs={() => {
-            setVectorIndexQueue((prev) =>
-              prev.filter((job) => job.status !== "succeeded" && job.status !== "failed")
-            );
-          }}
+          onClearCompletedJobs={clearCompletedVectorIndexJobs}
           onIndexFile={handleIndexKnowledgeFile}
           onDeleteFileVectors={handleDeleteKnowledgeFileVectors}
           onRemoveFile={handleRemoveKnowledgeFile}
