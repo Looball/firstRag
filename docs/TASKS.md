@@ -106,7 +106,7 @@
 | `T-039` | `PLAN-20260701-01` | `P1` | `Done` | 跑一轮发布前真实链路验收 | 2026-07-01 | `23e32e5` |
 | `T-040` | `PLAN-20260701-01` | `P2` | `Done` | 明确 License 与公开发布说明 | 2026-07-01 | `c885659` |
 | `T-041` | `PLAN-20260701-01` | `P2` | `Done` | 梳理在线演示环境方案 | 2026-07-01 | `0474178` |
-| `T-042` | `PLAN-20260701-02` | `P0` | `Todo` | 建立生产部署安全与数据持久化方案 |  |  |
+| `T-042` | `PLAN-20260701-02` | `P0` | `Done` | 建立生产部署安全与数据持久化方案 | 2026-07-01 |  |
 | `T-043` | `PLAN-20260701-02` | `P1` | `Todo` | 强化文件上传、向量化任务和 worker 异常状态体验 |  |  |
 | `T-044` | `PLAN-20260701-02` | `P0` | `Todo` | 补齐认证、限流、配额和用户 API Key 风控 |  |  |
 | `T-045` | `PLAN-20260701-02` | `P1` | `Todo` | 建立统一日志、错误定位和基础监控指标 |  |  |
@@ -1441,7 +1441,7 @@ docker compose config --quiet
 
 - 来源计划：`PLAN-20260701-02`
 - 优先级：`P0`
-- 状态：`Todo`
+- 状态：`Done`
 - 背景：当前项目已具备 Docker Compose、migration、uploads、vector_db 和 Chroma 目录，但正式生产上线前需要明确密钥管理、备份、持久化和恢复策略，避免依赖人工操作或本机临时目录。
 - 目标：形成可执行的生产部署安全与数据持久化方案，并把关键检查项固化到启动或验收流程中。
 - 范围：
@@ -1462,6 +1462,14 @@ conda run -n firstrag python scripts/migrate_db.py --dry-run
 docker compose config --quiet
 rg -n "API_KEY|JWT|PASSWORD|SECRET|DATABASE_URL" README.md docs .env.example
 ```
+
+- 完成记录：
+  - 完成日期：2026-07-01
+  - 新增 `scripts/production_preflight.py` 与对应单元测试，生产上线前可检查 secret 占位值、端口绑定、持久化目录、Docker Compose 配置和 migration dry-run；脚本不输出真实 secret。
+  - `docker-compose.yml` 改为根据 `POSTGRES_DB` / `POSTGRES_USER` / `POSTGRES_PASSWORD` 构造内部连接串，避免修改数据库密码后 backend / worker 仍使用旧默认密码；同时支持 `UPLOADS_DIR`、`VECTOR_DB_DIR`、`MODELS_DIR` 和 Docker 日志轮转配置。
+  - `docs/DEPLOYMENT.md` 新增生产安全与数据持久化 runbook，覆盖 secret 管理、PostgreSQL 备份频率、恢复步骤、恢复验证、uploads / vector_db / models 持久化和迁移说明。
+  - `.env.example` 补充生产目录、日志轮转和 compose 数据库连接说明；`.gitignore` 忽略 `/backups/`，避免本地备份误提交。
+  - `README.md` Roadmap 已新增生产部署安全、备份恢复和持久化 preflight 完成项。
 
 ## T-043 强化文件上传、向量化任务和 worker 异常状态体验
 

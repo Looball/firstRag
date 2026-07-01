@@ -1,5 +1,11 @@
 name: firstrag
 
+x-default-logging: &default-logging
+  driver: "json-file"
+  options:
+    max-size: "${DOCKER_LOG_MAX_SIZE:-10m}"
+    max-file: "${DOCKER_LOG_MAX_FILE:-5}"
+
 services:
   postgres:
     image: postgres:16-alpine
@@ -12,6 +18,7 @@ services:
       - "${POSTGRES_PORT:-5432}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    logging: *default-logging
     healthcheck:
       test:
         [
@@ -31,15 +38,16 @@ services:
       - path: .env
         required: false
     environment:
-      DATABASE_URL: ${COMPOSE_DATABASE_URL:-postgresql://firstrag:firstrag-password@postgres:5432/first_rag}
+      DATABASE_URL: "${COMPOSE_DATABASE_URL:-postgresql://${POSTGRES_USER:-firstrag}:${POSTGRES_PASSWORD:-firstrag-password}@postgres:5432/${POSTGRES_DB:-first_rag}}"
       VECTOR_STORE_PATH: ${VECTOR_STORE_PATH:-/app/vector_db/chroma}
       RERANKER_MODEL_PATH: ${RERANKER_MODEL_PATH:-/app/models/rerankers/bge-reranker-base}
     ports:
       - "${BACKEND_PORT:-8000}:8000"
     volumes:
-      - ./uploads:/app/uploads
-      - ./vector_db:/app/vector_db
-      - ./models:/app/models:ro
+      - ${UPLOADS_DIR:-./uploads}:/app/uploads
+      - ${VECTOR_DB_DIR:-./vector_db}:/app/vector_db
+      - ${MODELS_DIR:-./models}:/app/models:ro
+    logging: *default-logging
     depends_on:
       postgres:
         condition: service_healthy
@@ -52,8 +60,9 @@ services:
       dockerfile: deploy/docker/backend.Dockerfile
     restart: "no"
     environment:
-      DATABASE_URL: ${COMPOSE_DATABASE_URL:-postgresql://firstrag:firstrag-password@postgres:5432/first_rag}
+      DATABASE_URL: "${COMPOSE_DATABASE_URL:-postgresql://${POSTGRES_USER:-firstrag}:${POSTGRES_PASSWORD:-firstrag-password}@postgres:5432/${POSTGRES_DB:-first_rag}}"
     command: ["python", "/app/scripts/migrate_db.py"]
+    logging: *default-logging
     depends_on:
       postgres:
         condition: service_healthy
@@ -67,14 +76,15 @@ services:
       - path: .env
         required: false
     environment:
-      DATABASE_URL: ${COMPOSE_DATABASE_URL:-postgresql://firstrag:firstrag-password@postgres:5432/first_rag}
+      DATABASE_URL: "${COMPOSE_DATABASE_URL:-postgresql://${POSTGRES_USER:-firstrag}:${POSTGRES_PASSWORD:-firstrag-password}@postgres:5432/${POSTGRES_DB:-first_rag}}"
       VECTOR_STORE_PATH: ${VECTOR_STORE_PATH:-/app/vector_db/chroma}
       RERANKER_MODEL_PATH: ${RERANKER_MODEL_PATH:-/app/models/rerankers/bge-reranker-base}
     command: ["python", "-m", "app.workers.vector_index_worker"]
     volumes:
-      - ./uploads:/app/uploads
-      - ./vector_db:/app/vector_db
-      - ./models:/app/models:ro
+      - ${UPLOADS_DIR:-./uploads}:/app/uploads
+      - ${VECTOR_DB_DIR:-./vector_db}:/app/vector_db
+      - ${MODELS_DIR:-./models}:/app/models:ro
+    logging: *default-logging
     depends_on:
       postgres:
         condition: service_healthy
@@ -91,6 +101,7 @@ services:
       BACKEND_API_PREFIX: ${BACKEND_API_PREFIX:-}
     ports:
       - "${FRONTEND_PORT:-3000}:3000"
+    logging: *default-logging
     depends_on:
       - backend
 

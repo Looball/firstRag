@@ -23,6 +23,8 @@ cp .env.example .env
 | `ZAI_EMD_API` | 智谱 embedding API Key。 |
 | `VECTOR_STORE_PATH` | Chroma 持久化路径；本地默认 `./vector_db/chroma`，compose 默认 `/app/vector_db/chroma`。 |
 | `RERANKER_MODEL_PATH` | 本地 reranker 模型路径；compose 会把 `./models` 只读挂载到 `/app/models`。 |
+| `UPLOADS_DIR` / `VECTOR_DB_DIR` / `MODELS_DIR` | Docker Compose 宿主机持久化目录；生产环境建议指向独立数据盘。 |
+| `DOCKER_LOG_MAX_SIZE` / `DOCKER_LOG_MAX_FILE` | Docker stdout/stderr 日志轮转参数。 |
 
 ## 本地启动
 
@@ -179,15 +181,16 @@ docker compose up --build
 
 | 宿主路径 | 容器路径 | 说明 |
 | --- | --- | --- |
-| `./uploads` | `/app/uploads` | 上传文件。 |
-| `./vector_db` | `/app/vector_db` | Chroma 持久化数据。 |
-| `./models` | `/app/models` | 本地 reranker 模型，只读挂载。 |
+| `${UPLOADS_DIR:-./uploads}` | `/app/uploads` | 上传文件。 |
+| `${VECTOR_DB_DIR:-./vector_db}` | `/app/vector_db` | Chroma 持久化数据。 |
+| `${MODELS_DIR:-./models}` | `/app/models` | 本地 reranker 模型，只读挂载。 |
 | `postgres_data` | `/var/lib/postgresql/data` | PostgreSQL 数据。 |
 
-compose 默认让后端和 worker 连接：
+compose 默认根据 `POSTGRES_DB` / `POSTGRES_USER` / `POSTGRES_PASSWORD` 生成后端、
+worker 和 migrate 使用的内部连接串：
 
 ```text
-postgresql://firstrag:firstrag-password@postgres:5432/first_rag
+postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
 ```
 
 compose 会在 `postgres` 健康检查通过后运行一次 `migrate` service。`backend` 和
@@ -195,10 +198,11 @@ compose 会在 `postgres` 健康检查通过后运行一次 `migrate` service。
 都使用同一份 compose 内部数据库连接配置：
 
 ```text
-DATABASE_URL=${COMPOSE_DATABASE_URL:-postgresql://firstrag:firstrag-password@postgres:5432/first_rag}
+DATABASE_URL=${COMPOSE_DATABASE_URL:-postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}}
 ```
 
-如需覆盖 compose 内数据库连接，使用 `COMPOSE_DATABASE_URL`，不要复用指向宿主机 `localhost` 的 `DATABASE_URL`：
+如需连接外部 PostgreSQL 或自定义 compose 内数据库连接，使用 `COMPOSE_DATABASE_URL`，
+不要复用指向宿主机 `localhost` 的 `DATABASE_URL`：
 
 ```bash
 COMPOSE_DATABASE_URL=postgresql://user:password@postgres:5432/first_rag \
@@ -218,6 +222,117 @@ docker compose down
 新数据库首次运行时，`migrate` 会自动应用 `000_initial_schema.sql` 并创建
 `schema_migrations` 记录表。重复启动 compose 时，已应用且 checksum 一致的
 migration 会被跳过，不会破坏已有数据。
+
+compose 已为所有服务配置 Docker `json-file` 日志轮转，默认 `10m * 5`。生产环境如接入集中日志，应继续保留脱敏规则：日志不得包含完整 API Key、JWT、数据库密码或用户上传原文。
+
+## 生产安全与数据持久化
+
+本节面向正式部署或公开 demo 的上线前检查。生产 `.env` 只保存在服务器或 secret store，不提交、不截图、不粘贴到 issue；仓库中只维护 `.env.example` 这类占位模板。
+
+### Secret 管理
+
+| 配置 | 生产要求 | 轮换影响 |
+| --- | --- | --- |
+| `POSTGRES_PASSWORD` | 使用非默认强密码，通过服务器 `.env`、CI/CD secret 或部署平台 secret 注入。 | 需要同步 PostgreSQL 用户密码；如设置了 `COMPOSE_DATABASE_URL`，也要同步更新连接串，并重启依赖服务。 |
+| `JWT_SECRET_KEY` | 使用至少 32 字符随机值，例如 `openssl rand -hex 32`。 | 轮换后已签发 token 全部失效，用户需要重新登录。 |
+| `USER_SETTINGS_ENCRYPTION_KEY` | 使用 Fernet key，和 `JWT_SECRET_KEY` 分离，例如 `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"`。 | 丢失或更换后无法解密已保存的用户 API Key，必须先清空或重新录入用户凭据。 |
+| `LLM_API_KEY` / `DEEPSEEK_API_KEY` | 默认 provider Key 只放在生产 secret 中；如果只允许用户自带 Key，也不能留下占位值覆盖回退逻辑。 | 轮换后重启 backend 和 worker；失败时聊天会返回 provider 配置错误。 |
+| `ZAI_EMD_API` | embedding Key 只放在生产 secret 中。 | 轮换后重启 backend 和 worker；失败时向量化会失败。 |
+| `ALLOW_USER_CUSTOM_LLM_BASE_URL` | 公开环境默认保持 `false`。 | 开启前必须先完成 SSRF 出口策略、域名 allowlist 或网络隔离。 |
+| `DATABASE_URL` | 仅用于宿主机 conda 方式运行或本地 migration dry-run；Docker Compose 内部连接由 compose 环境覆盖。 | 生产只用 compose 时可以删除该项，避免残留模板连接串。 |
+| `COMPOSE_DATABASE_URL` | 仅在外部数据库或特殊连接串时设置；否则让 compose 根据 `POSTGRES_*` 构造。 | 设置后必须和 PostgreSQL 实际用户、密码、库名保持一致。 |
+
+上线前执行生产 preflight。该脚本只输出变量名和检查结论，不输出真实 secret：
+
+```bash
+conda run -n firstrag python scripts/production_preflight.py --env-file .env --skip-migration-dry-run
+```
+
+当 PostgreSQL 已启动且允许临时运行 compose migrate 容器后，执行完整检查：
+
+```bash
+conda run -n firstrag python scripts/production_preflight.py --env-file .env --migration-method compose
+```
+
+如果使用宿主机 conda 环境直接访问数据库，也可以改用 local dry-run：
+
+```bash
+conda run -n firstrag python scripts/production_preflight.py --env-file .env --migration-method local
+```
+
+preflight 会拦截以下问题：
+
+- `POSTGRES_PASSWORD`、`JWT_SECRET_KEY`、`USER_SETTINGS_ENCRYPTION_KEY`、`LLM_API_KEY`、`ZAI_EMD_API` 仍是模板占位值或明显过短。
+- `USER_SETTINGS_ENCRYPTION_KEY` 不是 Fernet key，或与 `JWT_SECRET_KEY` 相同。
+- `DATABASE_URL` / `COMPOSE_DATABASE_URL` 仍含模板账号、密码或占位值。
+- `FRONTEND_PORT`、`BACKEND_PORT`、`POSTGRES_PORT` 未绑定到 `127.0.0.1` / `localhost`。
+- `UPLOADS_DIR`、`VECTOR_DB_DIR`、`MODELS_DIR` 缺失，或 reranker 模型目录不存在。
+- `docker compose config --quiet` 失败。
+- migration dry-run 失败。
+
+### PostgreSQL 备份与恢复
+
+生产环境至少保留以下备份节奏：
+
+| 类型 | 频率 | 保留周期 | 触发时机 |
+| --- | --- | --- | --- |
+| 逻辑备份 `pg_dump --format=custom` | 每日 1 次 | 最近 7 份每日备份、4 份周备份、3 份月备份 | 定时任务。 |
+| 发布前备份 | 每次部署前 | 至少保留到本次发布验证完成后 7 天 | 执行 migration 或升级镜像前。 |
+| 目录快照 | 每日或随云盘快照策略 | 与 PostgreSQL 备份周期一致 | 覆盖 `uploads/`、`vector_db/` 和必要模型文件。 |
+| 恢复演练 | 每月至少 1 次 | 保留演练记录 | 在 staging 或临时实例恢复最近一次备份。 |
+
+备份文件必须受控保存且不能提交到 Git；本仓库已忽略 `/backups/`，但生产备份更建议放到独立磁盘或对象存储，并开启加密和访问审计。
+
+示例备份命令：
+
+```bash
+mkdir -p backups/postgres
+docker compose exec -T postgres sh -c 'pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" --format=custom --no-owner' \
+  > "backups/postgres/firstrag-$(date +%Y%m%d%H%M%S).dump"
+```
+
+恢复前先停止会写入数据库的服务，并优先在 staging 演练：
+
+```bash
+docker compose stop frontend backend worker
+docker compose exec -T postgres sh -c 'pg_restore -U "$POSTGRES_USER" -d "$POSTGRES_DB" --clean --if-exists --no-owner' \
+  < backups/postgres/firstrag-YYYYMMDDHHMMSS.dump
+docker compose run --rm migrate python /app/scripts/migrate_db.py --dry-run
+docker compose up -d backend worker frontend
+```
+
+恢复验证：
+
+1. `docker compose run --rm migrate python /app/scripts/migrate_db.py --dry-run` 应显示所有已应用 migration 为 skipped，或只显示预期的 pending migration。
+2. 登录预置账号，确认知识库、文件 metadata、会话和历史消息存在。
+3. 打开文件管理，确认文件状态和 vector index job 状态可读。
+4. 对已索引知识库提问，确认回答能返回 sources。
+5. 检查 backend、worker、postgres 日志，不应出现数据库连接、Chroma 读取或文件缺失错误。
+
+### 文件、向量库和模型目录
+
+生产环境建议将数据目录放在独立数据盘，例如：
+
+```bash
+mkdir -p /srv/firstrag/uploads /srv/firstrag/vector_db /srv/firstrag/models /srv/firstrag/backups
+```
+
+`.env` 中设置：
+
+```bash
+UPLOADS_DIR=/srv/firstrag/uploads
+VECTOR_DB_DIR=/srv/firstrag/vector_db
+MODELS_DIR=/srv/firstrag/models
+```
+
+目录策略：
+
+- `uploads/` 是用户上传原文，必须和 PostgreSQL metadata 一起备份；恢复时路径结构要保持不变。
+- `vector_db/` 保存 Chroma 数据，建议随 `uploads/` 一起备份。理论上可通过重新 vector indexing 重建，但恢复成本高，公开环境优先保留备份。
+- `models/` 保存 reranker 模型，生产以只读方式挂载到 `/app/models`。模型文件可从制品仓库或模型源重建，但上线前必须确认 `models/rerankers/bge-reranker-base` 存在。
+- 日志当前走 Docker stdout/stderr，由 Docker 日志驱动持久化和轮转；接入集中日志前不要新增会写入 secret 或用户原文的应用文件日志。
+
+迁移数据盘或换机时，顺序为：停止写入服务、完成 PostgreSQL dump、同步 `uploads/` 和 `vector_db/`、同步或重新准备 `models/`、在新机器恢复数据库、运行 migration dry-run、启动服务并完成 smoke test。
 
 ## 在线演示环境方案
 
@@ -249,10 +364,10 @@ migration 会被跳过，不会破坏已有数据。
 | 云服务器 | 2 vCPU / 4 GB RAM 起步，推荐 4 vCPU / 8 GB RAM | RAG、PDF 解析和 reranker 会占用 CPU 与内存；演示并发不宜过高。 |
 | 系统盘 | 30 GB 起步，推荐独立数据盘或快照 | `uploads/`、`vector_db/`、PostgreSQL volume 和 `models/` 都会增长。 |
 | PostgreSQL | 使用 compose named volume `postgres_data` | 定期做卷快照或 `pg_dump`，避免误删演示数据。 |
-| 上传文件 | 继续挂载 `./uploads:/app/uploads` | 公开 demo 禁止上传私密文件，并需要清理策略。 |
-| Chroma 数据 | 继续挂载 `./vector_db:/app/vector_db` | 可从上传文件重建，但保留备份能减少恢复时间。 |
-| reranker 模型 | `./models:/app/models:ro` | 模型目录只读挂载；上线前确认模型文件已存在。 |
-| 日志 | 先使用 `docker compose logs`，后续接入集中日志 | 日志不得包含 API Key、JWT、数据库密码或用户上传原文。 |
+| 上传文件 | 通过 `UPLOADS_DIR` 挂载到 `/app/uploads` | 公开 demo 禁止上传私密文件，并需要清理策略。 |
+| Chroma 数据 | 通过 `VECTOR_DB_DIR` 挂载到 `/app/vector_db` | 可从上传文件重建，但保留备份能减少恢复时间。 |
+| reranker 模型 | 通过 `MODELS_DIR` 只读挂载到 `/app/models` | 模型目录只读挂载；上线前确认模型文件已存在。 |
+| 日志 | 使用 Docker `json-file` 轮转，后续接入集中日志 | 日志不得包含 API Key、JWT、数据库密码或用户上传原文。 |
 
 ### 配置清单
 
@@ -277,6 +392,9 @@ BACKEND_PORT=127.0.0.1:8000
 POSTGRES_PORT=127.0.0.1:5432
 MAX_UPLOAD_FILE_SIZE_BYTES=20971520
 ALLOW_USER_CUSTOM_LLM_BASE_URL=false
+UPLOADS_DIR=/srv/firstrag/uploads
+VECTOR_DB_DIR=/srv/firstrag/vector_db
+MODELS_DIR=/srv/firstrag/models
 ```
 
 反向代理要求：
@@ -310,13 +428,17 @@ ALLOW_USER_CUSTOM_LLM_BASE_URL=false
 
 1. 准备云服务器、域名和 TLS 方案，只开放 80/443 和受控 SSH。
 2. 在服务器拉取仓库，复制 `.env.example` 为 `.env`，填写非默认密钥和 provider Key。
-3. 准备 `models/rerankers/bge-reranker-base`，并确认 `uploads/`、`vector_db/` 可持久化。
-4. 运行 `docker compose config --quiet` 检查 Compose 配置。
-5. 运行 `docker compose up -d --build` 启动 PostgreSQL、migration、backend、frontend 和 worker。
-6. 运行 `docker compose logs -f migrate backend worker frontend`，确认 migration 成功、backend 和 worker 无启动错误。
-7. 配置反向代理到 `http://127.0.0.1:3000`，并设置 TLS、body size、SSE buffering 和限流。
-8. 创建演示账号，上传脱敏样例文件并完成一次向量化和聊天 smoke test。
-9. 在 README 中补充真实 demo URL、使用限制和数据清理说明后，才把 Roadmap 的“发布在线演示环境”标记为完成。
+3. 准备 `MODELS_DIR/rerankers/bge-reranker-base`，并确认 `UPLOADS_DIR`、`VECTOR_DB_DIR` 可持久化。
+4. 运行 `conda run -n firstrag python scripts/production_preflight.py --env-file .env --skip-migration-dry-run` 检查 secret、端口和目录。
+5. 运行 `docker compose config --quiet` 检查 Compose 配置。
+6. 运行 `docker compose build` 构建镜像。
+7. 运行 `docker compose up -d postgres` 启动 PostgreSQL。
+8. 运行 `conda run -n firstrag python scripts/production_preflight.py --env-file .env --migration-method compose` 检查 migration dry-run。
+9. 运行 `docker compose up -d` 启动 migration、backend、frontend 和 worker。
+10. 运行 `docker compose logs -f migrate backend worker frontend`，确认 migration 成功、backend 和 worker 无启动错误。
+11. 配置反向代理到 `http://127.0.0.1:3000`，并设置 TLS、body size、SSE buffering 和限流。
+12. 创建演示账号，上传脱敏样例文件并完成一次向量化和聊天 smoke test。
+13. 在 README 中补充真实 demo URL、使用限制和数据清理说明后，才把 Roadmap 的“发布在线演示环境”标记为完成。
 
 ### 当前阻塞项
 
