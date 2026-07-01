@@ -4,13 +4,13 @@
 
 ## 最近整体回归验收
 
-2026-06-30 已刷新一轮真实链路 eval 基线，覆盖 RAG 真实评测门禁、上传与向量化真实链路验收，以及 eval 历史趋势摘要。静态验收入口见 `scripts/acceptance_check.sh`。
+2026-07-01 已刷新一轮真实链路 eval 基线，覆盖 RAG 真实评测门禁、上传与向量化真实链路验收，以及 eval 历史趋势摘要。静态验收入口见 `scripts/acceptance_check.sh`。
 
 | 检查项 | 命令 | 结果 |
 | --- | --- | --- |
-| RAG eval gate | `FIRSTRAG_EVAL_USERNAME=你的用户名 FIRSTRAG_EVAL_PASSWORD=你的密码 scripts/rag_eval_gate.sh` | 通过，10/10 case 通过；平均引用 2.20，平均首 token 3613.84ms，平均耗时 6.50s，质量门禁全部 PASS。 |
-| Indexing eval | `FIRSTRAG_EVAL_USERNAME=你的用户名 FIRSTRAG_EVAL_PASSWORD=你的密码 conda run -n firstrag python scripts/eval_indexing.py --base-url http://127.0.0.1:8000` | 通过，上传、auto index、worker 完成、文件 indexed、聊天 Sources 命中新文件均通过；job `succeeded`，聊天耗时 7.20s，引用数 1。 |
-| Eval summary | `conda run -n firstrag python scripts/eval_summary.py` | 通过，RAG 历史 26 次、Indexing 历史 3 次；RAG 历史平均通过率 0.99，Indexing 历史通过率 1.00。 |
+| RAG eval gate | `FIRSTRAG_EVAL_USERNAME=你的用户名 FIRSTRAG_EVAL_PASSWORD=你的密码 scripts/rag_eval_gate.sh` | 通过，10/10 case 通过；平均引用 2.40，平均首 token 3439.74ms，平均耗时 5.98s，质量门禁全部 PASS。 |
+| Indexing eval | `FIRSTRAG_EVAL_USERNAME=你的用户名 FIRSTRAG_EVAL_PASSWORD=你的密码 conda run -n firstrag python scripts/eval_indexing.py --base-url http://127.0.0.1:8000` | 通过，上传、auto index、worker 完成、文件 indexed、聊天 Sources 命中新文件均通过；job `succeeded`，聊天耗时 6.86s，引用数 1。 |
+| Eval summary | `conda run -n firstrag python scripts/eval_summary.py` | 通过，RAG 历史 27 次、Indexing 历史 4 次；RAG 历史平均通过率 0.99，Indexing 历史通过率 1.00。 |
 
 本轮生成的最新报告：
 
@@ -18,7 +18,7 @@
 - `docs/evals/latest_indexing_eval_report.md`
 - `docs/evals/latest_summary.md`
 
-本轮 RAG 质量门禁通过。`T-036` 已确认旧趋势摘要中的 `settings=1716.02ms` 是 LCEL streaming 外层 settings-wait 间隔，不是检索设置读取耗时；真实 `settings-load` 最新均值为 6.40ms，低于 1000ms 建议阈值。报告和历史 JSON 默认被 `.gitignore` 忽略，提交时只记录不含敏感信息的摘要。
+本轮 RAG 质量门禁通过。`T-036` 已确认旧趋势摘要中的 `settings=1716.02ms` 是 LCEL streaming 外层 settings-wait 间隔，不是检索设置读取耗时；本轮真实 `settings-load` 最新均值为 7.52ms，低于 1000ms 建议阈值。报告和历史 JSON 默认被 `.gitignore` 忽略，提交时只记录不含敏感信息的摘要。
 
 该记录用于进入文档整理、提交、推送或 PR 前的 release readiness 检查。再次修改 RAG 检索、token usage、eval gate、indexing、worker health、vector failure recovery 或前端文件管理链路后，应重新运行上述验收。
 
