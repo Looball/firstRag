@@ -59,6 +59,7 @@
 | `PLAN-20260630-01` | 2026-06-30 | `Done` | 建立 RAG 回答质量反馈闭环，把真实用户反馈沉淀为后续 eval 和检索优化依据。 | `T-026` - `T-029` |
 | `PLAN-20260630-02` | 2026-06-30 | `Done` | 补强工程化交付闭环，优先解决数据库迁移、Docker Compose 初始化、CI 和发布前验收可运行性。 | `T-030` - `T-036` |
 | `PLAN-20260701-01` | 2026-07-01 | `Done` | 发布前收口专项，优先修正文档台账状态、继续降低前端工作台复杂度，并刷新真实链路验收基线。 | `T-037` - `T-041` |
+| `PLAN-20260701-02` | 2026-07-01 | `Todo` | 正式生产上线补强专项，补齐部署安全、稳定性、风控、可观测性、评测质量和产品化分层。 | `T-042` - `T-047` |
 
 ## 任务总览
 
@@ -105,6 +106,12 @@
 | `T-039` | `PLAN-20260701-01` | `P1` | `Done` | 跑一轮发布前真实链路验收 | 2026-07-01 | `23e32e5` |
 | `T-040` | `PLAN-20260701-01` | `P2` | `Done` | 明确 License 与公开发布说明 | 2026-07-01 | `c885659` |
 | `T-041` | `PLAN-20260701-01` | `P2` | `Done` | 梳理在线演示环境方案 | 2026-07-01 | `0474178` |
+| `T-042` | `PLAN-20260701-02` | `P0` | `Todo` | 建立生产部署安全与数据持久化方案 |  |  |
+| `T-043` | `PLAN-20260701-02` | `P1` | `Todo` | 强化文件上传、向量化任务和 worker 异常状态体验 |  |  |
+| `T-044` | `PLAN-20260701-02` | `P0` | `Todo` | 补齐认证、限流、配额和用户 API Key 风控 |  |  |
+| `T-045` | `PLAN-20260701-02` | `P1` | `Todo` | 建立统一日志、错误定位和基础监控指标 |  |  |
+| `T-046` | `PLAN-20260701-02` | `P1` | `Todo` | 准备真实问题集并固化上线前 RAG 质量门禁 |  |  |
+| `T-047` | `PLAN-20260701-02` | `P2` | `Todo` | 区分普通用户模式和高级/开发模式 |  |  |
 
 ## 新计划接入流程
 
@@ -1429,6 +1436,168 @@ docker compose config --quiet
   - `.env.example` 补充了公开 demo 的非敏感端口绑定和上传大小示例，没有提交真实 API Key、JWT、数据库密码或 SSH 私钥。
   - `PLAN-20260701-01` 已随 T-041 完成收口为 `Done`。
   - 验证命令：`docker compose config --quiet`；`env FRONTEND_PORT=127.0.0.1:3000 BACKEND_PORT=127.0.0.1:8000 POSTGRES_PORT=127.0.0.1:5432 docker compose config --quiet`；`git diff --check -- README.md docs/DEPLOYMENT.md .env.example docs/TASKS.md`；`git status --short`。
+
+## T-042 建立生产部署安全与数据持久化方案
+
+- 来源计划：`PLAN-20260701-02`
+- 优先级：`P0`
+- 状态：`Todo`
+- 背景：当前项目已具备 Docker Compose、migration、uploads、vector_db 和 Chroma 目录，但正式生产上线前需要明确密钥管理、备份、持久化和恢复策略，避免依赖人工操作或本机临时目录。
+- 目标：形成可执行的生产部署安全与数据持久化方案，并把关键检查项固化到启动或验收流程中。
+- 范围：
+  - 梳理生产 `.env`、JWT secret、数据库密码、LLM API Key、用户 API Key 加密密钥的管理方式。
+  - 明确 PostgreSQL 备份和恢复流程，包括备份频率、保留周期、恢复演练步骤。
+  - 明确 `uploads/`、`vector_db/`、Chroma 数据、模型缓存和日志目录的持久化挂载策略。
+  - 确认 migration 在生产启动流程中稳定执行，避免依赖手工 SQL。
+  - 更新 `docs/DEPLOYMENT.md`、`.env.example` 或必要的运维说明。
+- 验收标准：
+  - 生产部署文档明确哪些配置必须通过 secret / 环境变量注入，仓库不包含真实密钥。
+  - 有 PostgreSQL 备份、恢复和验证步骤。
+  - 有 uploads、vector_db、Chroma 数据目录的持久化和迁移说明。
+  - migration 可通过脚本或部署流程自动执行，失败时能停止后续服务启动。
+- 建议验证命令：
+
+```bash
+conda run -n firstrag python scripts/migrate_db.py --dry-run
+docker compose config --quiet
+rg -n "API_KEY|JWT|PASSWORD|SECRET|DATABASE_URL" README.md docs .env.example
+```
+
+## T-043 强化文件上传、向量化任务和 worker 异常状态体验
+
+- 来源计划：`PLAN-20260701-02`
+- 优先级：`P1`
+- 状态：`Todo`
+- 背景：当前已经有 vector worker health、任务队列和 failure recovery，但普通用户在文件过大、坏文件、空文档、重复文件、worker 未启动或 Chroma 异常时仍可能不知道下一步该做什么。
+- 目标：让上传和向量化链路在失败、卡住和可恢复场景下给出清晰状态、原因和操作建议。
+- 范围：
+  - 梳理文件上传失败、解析失败、空文档、重复文件、向量化失败、worker 未启动、任务卡住、Chroma 异常的前后端提示。
+  - 前端文件管理面板展示更明确的状态、失败原因、恢复动作和重试入口。
+  - 后端继续复用 failure type / hint，不把内部异常或敏感路径直接暴露给用户。
+  - 补充边界测试和必要的用户侧文案。
+- 验收标准：
+  - 常见上传和向量化失败场景均有用户可理解的提示。
+  - worker 未启动或任务长时间排队时，前端有明显提醒。
+  - 重试、删除向量、解除文件关联等操作路径清晰。
+  - 后端日志保留详细错误，前端不展示敏感路径、API Key、数据库信息。
+- 建议验证命令：
+
+```bash
+cd backend
+conda run -n firstrag python -m pytest tests/test_knowledge_files.py tests/test_vector_indexes.py tests/test_vector_index_failure_recovery.py
+
+cd ../frontend
+npm run test
+npm run lint
+```
+
+## T-044 补齐认证、限流、配额和用户 API Key 风控
+
+- 来源计划：`PLAN-20260701-02`
+- 优先级：`P0`
+- 状态：`Todo`
+- 背景：当前认证和用户模型设置已经可用，但正式公开环境还需要登录失败保护、API rate limit、上传配额和更严格的用户 API Key 安全边界。
+- 目标：降低暴力登录、接口滥用、大文件滥用和用户 API Key 泄露风险。
+- 范围：
+  - 梳理 JWT 过期、刷新或重新登录策略，确认前端跳转和后端 401 行为一致。
+  - 增加登录失败限流和关键 API rate limit 方案，优先覆盖登录、上传、chat、向量化提交、模型测试。
+  - 增加用户上传容量、文件数量或单文件大小配额策略。
+  - 复核用户自带 API Key 的存储、加密、日志和错误返回路径，确保不落浏览器持久化、不出现在日志或错误提示中。
+  - 补充安全回归测试。
+- 验收标准：
+  - 登录失败和高频请求有可配置限流。
+  - 上传和向量化入口有明确配额限制与用户提示。
+  - 用户 API Key 不写入 `localStorage`、`sessionStorage`、URL、日志或错误响应。
+  - 后端测试覆盖限流、配额和 API Key 脱敏路径。
+- 建议验证命令：
+
+```bash
+cd backend
+conda run -n firstrag python -m pytest tests/test_user_settings.py tests/test_chat_settings.py tests/test_knowledge_files.py
+
+cd ../frontend
+npm run test
+npm run lint
+```
+
+## T-045 建立统一日志、错误定位和基础监控指标
+
+- 来源计划：`PLAN-20260701-02`
+- 优先级：`P1`
+- 状态：`Todo`
+- 背景：当前 diagnostics 已能帮助定位 RAG 检索阶段，但生产运维还需要统一日志、错误归因和基础指标，知道失败发生在 LLM、embedding、Chroma、PostgreSQL、rerank、worker 还是前端代理。
+- 目标：建立最小可用可观测性，让线上错误能被定位、聚合和告警。
+- 范围：
+  - 统一后端结构化日志字段，例如 request_id、user_id、conversation_id、knowledge_base_id、message_id、job_id、阶段耗时和错误类型。
+  - 梳理 chat streaming、vector worker、embedding、Chroma、PostgreSQL、rerank、LLM provider 的错误分类。
+  - 增加基础监控指标方案：接口错误率、向量化队列长度、任务失败率、平均首 token 时间、模型调用失败率、worker 最近活动时间。
+  - 更新 deployment 文档，说明日志采集和最小监控面板建议。
+- 验收标准：
+  - 关键后端路径有统一日志字段，且不输出 API Key、JWT、数据库密码。
+  - 质量看板或运维文档能说明如何查看队列、失败率和首 token 时间。
+  - worker、chat、retrieval、LLM 调用失败能区分主要失败来源。
+  - 有针对日志脱敏或错误分类的回归测试或脚本检查。
+- 建议验证命令：
+
+```bash
+cd backend
+conda run -n firstrag python -m pytest tests/test_retrieval_resilience.py tests/test_vector_index_worker.py tests/test_conversations.py
+rg -n "api_key|Authorization|password|DATABASE_URL" backend/app
+```
+
+## T-046 准备真实问题集并固化上线前 RAG 质量门禁
+
+- 来源计划：`PLAN-20260701-02`
+- 优先级：`P1`
+- 状态：`Todo`
+- 背景：项目已有 eval case、feedback、diagnostics 和质量看板雏形；正式上线前需要用真实文档和真实问题固定质量基线，验证默认检索参数 `4/16/16/8` 的效果。
+- 目标：建立一批可复跑的真实问题集和上线前质量门禁，覆盖检索命中、source 相关性、回答引用充分性和不该检索时的跳过行为。
+- 范围：
+  - 整理真实文档和问题集，补充 `docs/evals/rag_eval_cases.jsonl` 或同等 eval 输入。
+  - 覆盖多轮追问、无答案、低相关、禁用/启用 rerank、禁用/启用 query router、不同检索参数组合。
+  - 固化 `4/16/16/8` 默认参数的真实链路效果，并和旧基线对比。
+  - 把用户反馈和 source feedback 中的 bad case 整理为可复跑 eval case。
+  - 更新 eval 报告和任务完成记录。
+- 验收标准：
+  - 有一批不含敏感信息、可复跑的真实问题集。
+  - 上线前验收能输出通过率、平均 sources、平均首 token、失败 case 摘要。
+  - 默认参数 `4/16/16/8` 的效果有记录，若效果不达标则给出回滚或调参建议。
+  - eval 报告不包含 API Key、JWT、数据库密码或私人文档敏感内容。
+- 建议验证命令：
+
+```bash
+FIRSTRAG_EVAL_USERNAME=你的用户名 \
+FIRSTRAG_EVAL_PASSWORD=你的密码 \
+scripts/acceptance_check.sh
+
+conda run -n firstrag python scripts/eval_summary.py
+```
+
+## T-047 区分普通用户模式和高级/开发模式
+
+- 来源计划：`PLAN-20260701-02`
+- 优先级：`P2`
+- 状态：`Todo`
+- 背景：当前前端同时承载普通聊天、诊断、反馈、质量看板、检索参数和 eval 草稿等能力；作为教学项目和研发工具很有价值，但普通用户正式使用时会显得复杂。
+- 目标：把普通用户工作流和高级/开发工具分层，降低主界面复杂度，同时保留教学和调试价值。
+- 范围：
+  - 定义普通模式：聊天、文件、知识库、基础模型设置、必要状态提示。
+  - 定义高级/开发模式：诊断、eval 草稿、检索参数、质量看板、source 反馈、详细 retrieval diagnostics。
+  - 通过环境变量、用户设置或本地开关控制高级功能显示。
+  - 更新前端文案和必要文档，避免普通用户直接看到过多研发术语。
+- 验收标准：
+  - 默认界面对普通用户更聚焦，研发功能不干扰主聊天流程。
+  - 高级/开发模式仍能访问诊断、eval、检索参数和质量分析。
+  - 不破坏现有教学项目所需的工程化观察入口。
+  - 前端 lint、单测和 build 通过。
+- 建议验证命令：
+
+```bash
+cd frontend
+npm run test
+npm run lint
+npm run build
+```
 
 ## 更新规则
 
