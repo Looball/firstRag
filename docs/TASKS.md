@@ -108,7 +108,7 @@
 | `T-041` | `PLAN-20260701-01` | `P2` | `Done` | 梳理在线演示环境方案 | 2026-07-01 | `0474178` |
 | `T-042` | `PLAN-20260701-02` | `P0` | `Done` | 建立生产部署安全与数据持久化方案 | 2026-07-01 | `1821713` |
 | `T-043` | `PLAN-20260701-02` | `P1` | `Done` | 强化文件上传、向量化任务和 worker 异常状态体验 | 2026-07-01 | `6b3b606` |
-| `T-044` | `PLAN-20260701-02` | `P0` | `Todo` | 补齐认证、限流、配额和用户 API Key 风控 |  |  |
+| `T-044` | `PLAN-20260701-02` | `P0` | `Done` | 补齐认证、限流、配额和用户 API Key 风控 | 2026-07-01 | `2a27a13` |
 | `T-045` | `PLAN-20260701-02` | `P1` | `Todo` | 建立统一日志、错误定位和基础监控指标 |  |  |
 | `T-046` | `PLAN-20260701-02` | `P1` | `Todo` | 准备真实问题集并固化上线前 RAG 质量门禁 |  |  |
 | `T-047` | `PLAN-20260701-02` | `P2` | `Todo` | 区分普通用户模式和高级/开发模式 |  |  |
@@ -1514,7 +1514,7 @@ npm run lint
 
 - 来源计划：`PLAN-20260701-02`
 - 优先级：`P0`
-- 状态：`Todo`
+- 状态：`Done`
 - 背景：当前认证和用户模型设置已经可用，但正式公开环境还需要登录失败保护、API rate limit、上传配额和更严格的用户 API Key 安全边界。
 - 目标：降低暴力登录、接口滥用、大文件滥用和用户 API Key 泄露风险。
 - 范围：
@@ -1538,6 +1538,16 @@ cd ../frontend
 npm run test
 npm run lint
 ```
+
+- 完成记录：
+  - 完成日期：2026-07-01
+  - 相关 commit：`2a27a13`
+  - 新增进程内 sliding-window rate limiter，覆盖登录失败、聊天、上传、向量化提交、模型连接测试和厂商模型列表请求；超限统一返回 `429` 和 `Retry-After`。
+  - 上传入口新增用户未删除文件数量与总容量配额，继续保留单文件大小限制；重复内容复用已有文件，不重复计入用户全局容量。
+  - 知识库批量向量化新增 `VECTOR_INDEX_MAX_BATCH_FILES` 单次提交上限，避免一次性提交过多 vector index job。
+  - 用户 API Key 错误响应新增脱敏工具，避免提交值、`api_key=...` 或 Bearer token 形态文本回显；前端文档确认 API Key 只保留在设置页内存状态，不进入浏览器持久化存储。
+  - `.env.example`、`docs/API.md`、`docs/DEPLOYMENT.md`、`docs/FRONTEND.md` 和用户设置协议文档已补充限流、配额和 API Key 安全边界。
+  - 验证命令：`cd backend && conda run -n firstrag python -m compileall app`；`cd backend && conda run -n firstrag python -m pytest tests`；`cd frontend && npm run test`；`cd frontend && npm run lint`。
 
 ## T-045 建立统一日志、错误定位和基础监控指标
 
