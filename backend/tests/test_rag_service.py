@@ -627,7 +627,7 @@ class RagQueryRouterTests(unittest.TestCase):
             "top_k": 3,
             "vector_top_k": 8,
             "fulltext_top_k": 9,
-            "rrf_k": 10,
+            "rrf_k": 8,
             "rerank_score_threshold": 0.5,
         }
 
@@ -659,7 +659,7 @@ class RagQueryRouterTests(unittest.TestCase):
         self.assertEqual(kwargs["k"], 3)
         self.assertEqual(kwargs["vector_k"], 8)
         self.assertEqual(kwargs["fulltext_k"], 9)
-        self.assertEqual(kwargs["rrf_k"], 10)
+        self.assertEqual(kwargs["rrf_k"], 8)
         self.assertFalse(kwargs["rerank"])
         self.assertEqual(doc.metadata["rerank_score_threshold"], 0.5)
 

@@ -44,7 +44,7 @@
 - `retrieval_mode`：`auto`、`always`、`never`。
 - `enable_query_router`：是否调用 Router LLM 判断本轮是否检索。
 - `enable_rerank`：是否启用 CrossEncoder rerank。
-- `top_k`、`vector_top_k`、`fulltext_top_k`、`rrf_k`：控制最终引用数、两路召回数和 RRF 候选池；默认 `rrf_k=10`，用于减少 CrossEncoder 候选数和首 token 前等待时间。
+- `top_k`、`vector_top_k`、`fulltext_top_k`、`rrf_k`：控制最终引用数、两路召回数和 RRF 候选池；默认分别为 `4`、`16`、`16`、`8`，用于减少 CrossEncoder 候选数和首 token 前等待时间。
 - `rerank_score_threshold`：控制低相关片段是否进入上下文和 Sources。
 
 ## 检索诊断

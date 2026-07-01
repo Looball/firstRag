@@ -32,10 +32,10 @@ class KnowledgeBaseRetrievalSettingsTests(unittest.TestCase):
                 "retrieval_mode": "auto",
                 "enable_query_router": True,
                 "enable_rerank": True,
-                "top_k": 5,
-                "vector_top_k": 20,
-                "fulltext_top_k": 20,
-                "rrf_k": 10,
+                "top_k": 4,
+                "vector_top_k": 16,
+                "fulltext_top_k": 16,
+                "rrf_k": 8,
                 "rerank_score_threshold": 0.0,
             },
         ):
@@ -45,7 +45,7 @@ class KnowledgeBaseRetrievalSettingsTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertTrue(response.json()["success"])
-        self.assertEqual(response.json()["settings"]["top_k"], 5)
+        self.assertEqual(response.json()["settings"]["top_k"], 4)
 
     def test_patch_retrieval_settings_merges_and_saves(self) -> None:
         """更新接口应合并默认值、当前值和本次 patch 后保存。"""
@@ -56,10 +56,10 @@ class KnowledgeBaseRetrievalSettingsTests(unittest.TestCase):
                 "retrieval_mode": "auto",
                 "enable_query_router": True,
                 "enable_rerank": True,
-                "top_k": 5,
-                "vector_top_k": 20,
-                "fulltext_top_k": 20,
-                "rrf_k": 10,
+                "top_k": 4,
+                "vector_top_k": 16,
+                "fulltext_top_k": 16,
+                "rrf_k": 8,
                 "rerank_score_threshold": 0.0,
             },
         ), patch(
@@ -69,9 +69,9 @@ class KnowledgeBaseRetrievalSettingsTests(unittest.TestCase):
                 "enable_query_router": True,
                 "enable_rerank": False,
                 "top_k": 3,
-                "vector_top_k": 20,
-                "fulltext_top_k": 20,
-                "rrf_k": 10,
+                "vector_top_k": 16,
+                "fulltext_top_k": 16,
+                "rrf_k": 8,
                 "rerank_score_threshold": 0.0,
             },
         ) as upsert_mock, patch(

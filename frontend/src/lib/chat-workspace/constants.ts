@@ -7,10 +7,10 @@ export const DEFAULT_RETRIEVAL_SETTINGS: KnowledgeBaseRetrievalSettings = {
   retrievalMode: "auto",
   enableQueryRouter: true,
   enableRerank: true,
-  topK: 5,
-  vectorTopK: 20,
-  fulltextTopK: 20,
-  rrfK: 10,
+  topK: 4,
+  vectorTopK: 16,
+  fulltextTopK: 16,
+  rrfK: 8,
   rerankScoreThreshold: 0,
 };
 export const LEGACY_INITIAL_MESSAGE =

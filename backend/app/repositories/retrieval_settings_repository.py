@@ -8,10 +8,10 @@ DEFAULT_RETRIEVAL_SETTINGS = {
     "retrieval_mode": "auto",
     "enable_query_router": True,
     "enable_rerank": True,
-    "top_k": 5,
-    "vector_top_k": 20,
-    "fulltext_top_k": 20,
-    "rrf_k": 10,
+    "top_k": 4,
+    "vector_top_k": 16,
+    "fulltext_top_k": 16,
+    "rrf_k": 8,
     "rerank_score_threshold": 0.0,
 }
 
@@ -45,10 +45,10 @@ def get_knowledge_base_retrieval_settings(
             COALESCE(s.retrieval_mode, 'auto') AS retrieval_mode,
             COALESCE(s.enable_query_router, TRUE) AS enable_query_router,
             COALESCE(s.enable_rerank, TRUE) AS enable_rerank,
-            COALESCE(s.top_k, 5) AS top_k,
-            COALESCE(s.vector_top_k, 20) AS vector_top_k,
-            COALESCE(s.fulltext_top_k, 20) AS fulltext_top_k,
-            COALESCE(s.rrf_k, 10) AS rrf_k,
+            COALESCE(s.top_k, 4) AS top_k,
+            COALESCE(s.vector_top_k, 16) AS vector_top_k,
+            COALESCE(s.fulltext_top_k, 16) AS fulltext_top_k,
+            COALESCE(s.rrf_k, 8) AS rrf_k,
             COALESCE(s.rerank_score_threshold, 0.000)
                 AS rerank_score_threshold
         FROM knowledge_bases AS kb
