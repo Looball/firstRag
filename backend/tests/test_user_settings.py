@@ -91,7 +91,7 @@ class UserLLMSettingsApiTests(unittest.TestCase):
     def test_test_settings_without_body_uses_saved_settings(self) -> None:
         """空请求体应测试已保存设置，而不是要求重复提交 API Key。"""
         with patch(
-            "app.api.user_settings.test_user_llm_settings",
+            "app.api.user_settings.check_user_llm_settings",
             return_value={
                 "message": "模型连接测试成功",
                 "models": ["deepseek-v4-flash"],

@@ -17,6 +17,13 @@ class CreateConversationRequest(BaseModel):
     title: str | None = "新会话"
 
 
+class LegacyCreateConversationRequest(BaseModel):
+    """旧版新建会话请求，允许省略知识库并回退到默认知识库。"""
+
+    knowledge_base_id: UUID | None = None
+    title: str | None = "新会话"
+
+
 class MessageFeedbackRequest(BaseModel):
     """消息质量反馈请求。"""
 

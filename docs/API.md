@@ -161,6 +161,10 @@ Authorization: Bearer <access_token>
 
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
+| `GET` | `/chat/conversations` | 当前用户所有知识库下的会话列表，兼容旧前端代理。 |
+| `POST` | `/chat/conversation` | 新建会话，兼容旧前端代理；可传 `knowledge_base_id`，省略时使用默认知识库。 |
+| `PATCH` | `/chat/conversation/{conversation_id}` | 按会话 ID 重命名，兼容旧前端代理。 |
+| `DELETE` | `/chat/conversation/{conversation_id}` | 按会话 ID 软删除，兼容旧前端代理。 |
 | `GET` | `/chat/knowledge-bases/{knowledge_base_id}/conversations` | 知识库会话列表。 |
 | `POST` | `/chat/knowledge-bases/{knowledge_base_id}/conversations` | 新建会话。 |
 | `PATCH` | `/chat/knowledge-bases/{knowledge_base_id}/conversations/{conversation_id}` | 重命名会话。 |

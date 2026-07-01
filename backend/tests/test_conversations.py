@@ -71,6 +71,111 @@ class CreateConversationTests(unittest.TestCase):
             "测试会话",
         )
 
+    def test_legacy_list_conversations_returns_user_conversations(self) -> None:
+        """旧版全量会话入口应返回当前用户可访问的会话列表。"""
+        conversation_id = uuid4()
+        with patch(
+            "app.api.conversations.get_user_conversations",
+            return_value=[
+                {
+                    "id": conversation_id,
+                    "knowledge_base_id": self.knowledge_base_id,
+                    "title": "旧入口会话",
+                    "created_at": "2026-07-01T12:00:00+08:00",
+                    "updated_at": "2026-07-01T12:00:00+08:00",
+                }
+            ],
+        ) as get_conversations:
+            response = self.client.get("/chat/conversations")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.json()["conversations"][0],
+            {
+                "id": str(conversation_id),
+                "knowledge_base_id": str(self.knowledge_base_id),
+                "title": "旧入口会话",
+                "created_at": "2026-07-01T12:00:00+08:00",
+                "updated_at": "2026-07-01T12:00:00+08:00",
+            },
+        )
+        get_conversations.assert_called_once_with(1)
+
+    def test_legacy_create_conversation_uses_default_knowledge_base(self) -> None:
+        """旧版创建入口未传知识库时应回退到当前用户默认知识库。"""
+        conversation_id = uuid4()
+        conversation = {
+            "id": conversation_id,
+            "knowledge_base_id": self.knowledge_base_id,
+            "title": "旧入口会话",
+            "created_at": "2026-07-01T12:00:00+08:00",
+            "updated_at": "2026-07-01T12:00:00+08:00",
+        }
+        with patch(
+            "app.api.conversations.get_default_knowledge_base_id",
+            return_value=self.knowledge_base_id,
+        ) as get_default_base, patch(
+            "app.api.conversations.knowledge_base_exists",
+            return_value=True,
+        ), patch(
+            "app.api.conversations.create_conversation_record",
+            return_value=conversation,
+        ) as create_record:
+            response = self.client.post(
+                "/chat/conversation",
+                json={"title": "旧入口会话"},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.json()["conversation"]["knowledge_base_id"],
+            str(self.knowledge_base_id),
+        )
+        get_default_base.assert_called_once_with(1)
+        create_record.assert_called_once_with(
+            1,
+            self.knowledge_base_id,
+            "旧入口会话",
+        )
+
+    def test_legacy_rename_conversation_requires_owned_conversation(self) -> None:
+        """旧版重命名入口仍应校验会话属于当前用户。"""
+        conversation_id = uuid4()
+        with patch(
+            "app.api.conversations.conversation_exists",
+            return_value=True,
+        ), patch(
+            "app.api.conversations.rename_conversation_record",
+            return_value={
+                "id": conversation_id,
+                "knowledge_base_id": self.knowledge_base_id,
+                "title": "新标题",
+                "created_at": "2026-07-01T12:00:00+08:00",
+                "updated_at": "2026-07-01T12:01:00+08:00",
+            },
+        ) as rename_record:
+            response = self.client.patch(
+                f"/chat/conversation/{conversation_id}",
+                json={"title": "新标题"},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["conversation"]["title"], "新标题")
+        rename_record.assert_called_once_with(conversation_id, 1, "新标题")
+
+    def test_legacy_delete_conversation_uses_soft_delete(self) -> None:
+        """旧版删除入口应复用软删除并限定当前用户。"""
+        conversation_id = uuid4()
+        with patch(
+            "app.api.conversations.soft_delete_conversation",
+            return_value={"id": conversation_id},
+        ) as soft_delete:
+            response = self.client.delete(f"/chat/conversation/{conversation_id}")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["conversation_id"], str(conversation_id))
+        soft_delete.assert_called_once_with(conversation_id, 1)
+
     def test_get_messages_returns_persisted_sources_and_retrieval(self) -> None:
         """历史消息接口应返回已持久化的引用来源和检索状态。"""
         conversation_id = uuid4()

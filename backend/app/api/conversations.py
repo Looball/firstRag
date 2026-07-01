@@ -8,10 +8,14 @@ from app.repositories.conversation_repository import (
     conversation_exists,
     create_conversation as create_conversation_record,
     get_knowledge_base_conversations,
+    get_user_conversations,
     rename_conversation as rename_conversation_record,
     soft_delete_conversation,
 )
-from app.repositories.knowledge_base_repository import knowledge_base_exists
+from app.repositories.knowledge_base_repository import (
+    get_default_knowledge_base_id,
+    knowledge_base_exists,
+)
 from app.repositories.message_feedback_repository import (
     find_message_source,
     get_quality_feedback_reasons,
@@ -27,6 +31,7 @@ from app.repositories.message_feedback_repository import (
 from app.repositories.message_repository import get_user_conversation_messages
 from app.schemas.conversation import (
     CreateConversationRequest,
+    LegacyCreateConversationRequest,
     MessageFeedbackRequest,
     MessageSourceFeedbackRequest,
     RenameConversationRequest,
@@ -77,6 +82,17 @@ def serialize_source_preview(source: dict) -> dict:
         "fulltext_score": source.get("fulltext_score"),
         "rrf_score": source.get("rrf_score"),
         "rerank_score": source.get("rerank_score"),
+    }
+
+
+def serialize_conversation(row: dict) -> dict:
+    """序列化会话记录为前端统一使用的响应结构。"""
+    return {
+        "id": str(row["id"]),
+        "knowledge_base_id": str(row["knowledge_base_id"]),
+        "title": row["title"],
+        "created_at": row.get("created_at"),
+        "updated_at": row.get("updated_at"),
     }
 
 
@@ -355,6 +371,19 @@ def serialize_message_diagnostic(row: dict) -> dict:
     }
 
 
+@router.get("/conversations")
+def get_all_conversations(user_id: int = Depends(get_current_user_id)):
+    """读取当前用户所有知识库下的会话，用于兼容旧前端代理。"""
+    rows = get_user_conversations(user_id)
+    return {
+        "success": True,
+        "conversations": [
+            serialize_conversation(row)
+            for row in rows
+        ],
+    }
+
+
 # 加载当前用户指定知识库下的会话
 @router.get("/knowledge-bases/{knowledge_base_id}/conversations")
 def get_conversations(
@@ -391,6 +420,37 @@ def get_conversations(
     }
 
 
+@router.post("/conversation")
+def create_conversation_legacy(
+    req: LegacyCreateConversationRequest | None = None,
+    user_id: int = Depends(get_current_user_id),
+):
+    """兼容旧前端代理创建会话，未传知识库时使用当前用户默认知识库。"""
+    knowledge_base_id = (
+        req.knowledge_base_id
+        if req is not None and req.knowledge_base_id is not None
+        else get_default_knowledge_base_id(user_id)
+    )
+    if knowledge_base_id is None:
+        raise HTTPException(status_code=404, detail="知识库不存在")
+    if not knowledge_base_exists(knowledge_base_id, user_id):
+        raise HTTPException(status_code=404, detail="知识库不存在")
+
+    conversation = create_conversation_record(
+        user_id,
+        knowledge_base_id,
+        req.title if req is not None else "新会话",
+    )
+    if conversation is None:
+        raise HTTPException(status_code=404, detail="知识库不存在")
+
+    return {
+        "success": True,
+        "message": "会话创建成功",
+        "conversation": serialize_conversation(conversation),
+    }
+
+
 @router.get("/conversations/{conversation_id}/diagnostics")
 def get_conversation_diagnostics(
     conversation_id: UUID,
@@ -413,6 +473,46 @@ def get_conversation_diagnostics(
             serialize_message_diagnostic(row)
             for row in assistant_rows
         ],
+    }
+
+
+@router.patch("/conversation/{conversation_id}")
+def rename_conversation_legacy(
+    conversation_id: UUID,
+    req: RenameConversationRequest,
+    user_id: int = Depends(get_current_user_id),
+):
+    """兼容旧前端代理按会话 ID 重命名会话。"""
+    if not conversation_exists(user_id, conversation_id):
+        raise HTTPException(status_code=404, detail="会话不存在")
+
+    conversation = rename_conversation_record(
+        conversation_id,
+        user_id,
+        req.title,
+    )
+    if conversation is None:
+        raise HTTPException(status_code=404, detail="会话不存在")
+
+    return {
+        "success": True,
+        "conversation": serialize_conversation(conversation),
+    }
+
+
+@router.delete("/conversation/{conversation_id}")
+def delete_conversation_legacy(
+    conversation_id: UUID,
+    user_id: int = Depends(get_current_user_id),
+):
+    """兼容旧前端代理按会话 ID 软删除会话。"""
+    conversation = soft_delete_conversation(conversation_id, user_id)
+    if conversation is None:
+        raise HTTPException(status_code=404, detail="会话不存在")
+
+    return {
+        "success": True,
+        "conversation_id": str(conversation_id),
     }
 
 

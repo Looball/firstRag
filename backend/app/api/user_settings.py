@@ -5,10 +5,10 @@ from fastapi import APIRouter, Depends, HTTPException
 from app.core.security import get_current_user_id
 from app.schemas.user_settings import UpdateUserLLMSettingsRequest
 from app.services.user_settings_service import (
+    check_user_llm_settings,
     get_saved_provider_models,
     get_serialized_user_llm_settings,
     get_serialized_user_llm_providers,
-    test_user_llm_settings,
     update_user_llm_settings,
 )
 
@@ -83,7 +83,7 @@ def test_user_settings(
 ):
     """测试已保存或临时提交的模型设置，不会保存临时配置。"""
     try:
-        test_result = test_user_llm_settings(
+        test_result = check_user_llm_settings(
             user_id,
             req.model_dump(exclude_unset=True) if req else {},
         )

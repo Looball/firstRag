@@ -500,7 +500,7 @@ def update_user_llm_settings(
     return get_serialized_user_llm_settings(user_id)
 
 
-def test_user_llm_settings(
+def check_user_llm_settings(
     user_id: int,
     updates: dict[str, Any],
 ) -> dict[str, Any]:

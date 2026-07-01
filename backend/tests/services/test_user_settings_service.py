@@ -7,10 +7,10 @@ from unittest.mock import MagicMock, patch
 from app.services.user_settings_service import (
     _merge_settings_record,
     _validate_user_base_url,
+    check_user_llm_settings,
     get_effective_chat_model_config,
     get_serialized_user_llm_settings,
     get_saved_provider_models,
-    test_user_llm_settings,
     update_user_llm_settings,
 )
 
@@ -300,7 +300,7 @@ class UserLLMSettingsServiceTests(unittest.TestCase):
         ), patch(
             "app.services.user_settings_service.create_openai_compatible_chat_model",
         ) as create_model:
-            result = test_user_llm_settings(
+            result = check_user_llm_settings(
                 1,
                 {
                     "credential_mode": "user",
@@ -340,7 +340,7 @@ class UserLLMSettingsServiceTests(unittest.TestCase):
         ), patch(
             "app.services.user_settings_service.create_openai_compatible_chat_model",
         ) as create_model:
-            result = test_user_llm_settings(
+            result = check_user_llm_settings(
                 1,
                 {
                     "credential_mode": "user",
@@ -371,7 +371,7 @@ class UserLLMSettingsServiceTests(unittest.TestCase):
             "app.services.user_settings_service.create_openai_compatible_chat_model",
             return_value=model,
         ):
-            result = test_user_llm_settings(1, {})
+            result = check_user_llm_settings(1, {})
 
         self.assertFalse(result["model_list_available"])
         self.assertEqual(result["models"], [])
@@ -401,7 +401,7 @@ class UserLLMSettingsServiceTests(unittest.TestCase):
             return_value=model,
         ):
             with self.assertRaisesRegex(RuntimeError, "model unavailable"):
-                test_user_llm_settings(
+                check_user_llm_settings(
                     1,
                     {
                         "credential_mode": "user",

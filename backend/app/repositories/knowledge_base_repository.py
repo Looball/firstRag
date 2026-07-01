@@ -67,6 +67,22 @@ def knowledge_base_exists(knowledge_base_id: UUID, user_id: int) -> bool:
     return row is not None
 
 
+def get_default_knowledge_base_id(user_id: int) -> UUID | None:
+    """查询当前用户默认知识库 ID；没有默认项时返回最早创建的可用知识库。"""
+    row = fetch_one(
+        """
+        SELECT id
+        FROM knowledge_bases
+        WHERE user_id = %s
+          AND deleted_at IS NULL
+        ORDER BY is_default DESC, created_at ASC
+        LIMIT 1;
+        """,
+        (user_id,),
+    )
+    return row["id"] if row is not None else None
+
+
 def get_knowledge_base_files(
     knowledge_base_id: UUID,
     user_id: int,
