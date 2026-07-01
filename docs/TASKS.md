@@ -102,7 +102,7 @@
 | `T-036` | `PLAN-20260630-02` | `P2` | `Done` | 调查 RAG settings 阶段耗时超阈值 | 2026-06-30 | `72f2780` |
 | `T-037` | `PLAN-20260701-01` | `P1` | `Done` | 文档与任务台账状态收口 | 2026-07-01 | `f3ab533` |
 | `T-038` | `PLAN-20260701-01` | `P1` | `Done` | 继续拆分前端聊天工作台 hooks | 2026-07-01 | `e984977` |
-| `T-039` | `PLAN-20260701-01` | `P1` | `Todo` | 跑一轮发布前真实链路验收 | - | - |
+| `T-039` | `PLAN-20260701-01` | `P1` | `Done` | 跑一轮发布前真实链路验收 | 2026-07-01 | `23e32e5` |
 | `T-040` | `PLAN-20260701-01` | `P2` | `Todo` | 明确 License 与公开发布说明 | - | - |
 | `T-041` | `PLAN-20260701-01` | `P2` | `Todo` | 梳理在线演示环境方案 | - | - |
 
@@ -1338,7 +1338,7 @@ npm run build
 
 - 来源计划：`PLAN-20260701-01`
 - 优先级：`P1`
-- 状态：`Todo`
+- 状态：`Done`
 - 背景：最近一次真实 RAG eval 和 indexing eval 基线记录在 2026-06-30；发布、演示或大改前需要刷新真实链路结果，而不仅依赖静态测试。
 - 目标：启动真实 backend、frontend、vector index worker 和数据库后，跑完整发布前验收并记录结果。
 - 范围：
@@ -1359,6 +1359,16 @@ scripts/acceptance_check.sh
 
 conda run -n firstrag python scripts/eval_summary.py
 ```
+- 完成记录：
+  - 完成日期：2026-07-01
+  - 相关 commit：`23e32e5`
+  - 前置检查：本机已有 backend `127.0.0.1:8000`、frontend `:3000`、PostgreSQL `127.0.0.1:5432` 监听；本轮账号凭据仅作为命令环境变量传入验收脚本，未写入文件或文档。
+  - `FIRSTRAG_EVAL_USERNAME=... FIRSTRAG_EVAL_PASSWORD=... scripts/acceptance_check.sh` 已完整通过：migration 文件检查、后端 compileall、后端 121 个 unittest、前端 lint、Vitest 41 个用例、Next build、RAG eval gate 和 indexing eval 均通过。
+  - migration check 因当前 shell 未设置 `DATABASE_URL` / `COMPOSE_DATABASE_URL`，只检查 migration 文件列表并跳过数据库 dry-run。
+  - RAG eval gate：10/10 case 通过，通过率 1.00，平均引用 2.40，平均首 token 3439.74ms，平均耗时 5.98s，质量门禁全部 PASS；历史记录 `docs/evals/runs/20260701_104535.json`。
+  - Indexing eval：上传、auto index、worker 完成、文件 indexed、聊天 Sources 命中新文件均通过；job `05e00833-fc27-4fe3-bcda-ca553ce350e6` 状态 `succeeded`，聊天耗时 6.86s，引用数 1；历史记录 `docs/evals/indexing_runs/20260701_104644.json`。
+  - 已运行 `conda run -n firstrag python scripts/eval_summary.py`，趋势摘要刷新为 RAG 历史 27 次、Indexing 历史 4 次；报告仍由 `.gitignore` 忽略。
+  - `docs/evals/README.md` 已更新 2026-07-01 真实链路 eval 基线摘要，不包含 API Key、JWT、数据库密码或账号密码。
 
 ## T-040 明确 License 与公开发布说明
 
