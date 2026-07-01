@@ -1,5 +1,6 @@
 """向量化任务接口的回归测试。"""
 
+import contextlib
 import unittest
 from unittest.mock import patch
 from uuid import uuid4
@@ -140,6 +141,38 @@ class VectorIndexJobHealthTests(unittest.TestCase):
         self.assertEqual(response.status_code, 404)
         self.assertEqual(response.json(), {"detail": "文件不存在"})
         cancel_jobs.assert_not_called()
+
+    def test_delete_file_vectors_returns_safe_error_when_cleanup_fails(self) -> None:
+        """删除向量失败时不应把底层异常细节返回给前端。"""
+        file_id = uuid4()
+        with patch(
+            "app.api.vector_indexes.get_user_knowledge_file",
+            return_value={
+                "id": file_id,
+                "index_version": 1,
+            },
+        ), patch(
+            "app.api.vector_indexes.cancel_active_vector_index_jobs",
+        ), patch(
+            "app.api.vector_indexes.file_index_lock",
+            return_value=contextlib.nullcontext(),
+        ), patch(
+            "app.api.vector_indexes.delete_file_vector_entries",
+            side_effect=RuntimeError(
+                "Chroma path /srv/firstrag/vector_db failed with api_key=secret",
+            ),
+        ), patch(
+            "app.api.vector_indexes.update_knowledge_file_status",
+        ), patch(
+            "app.api.vector_indexes.invalidate_file_knowledge_base_contexts",
+        ):
+            response = self.client.delete(f"/chat/knowledge-files/{file_id}/vectors")
+
+        self.assertEqual(response.status_code, 500)
+        self.assertEqual(
+            response.json(),
+            {"detail": "删除向量化存储失败，请稍后重试或检查向量库和数据库状态。"},
+        )
 
 
 if __name__ == "__main__":

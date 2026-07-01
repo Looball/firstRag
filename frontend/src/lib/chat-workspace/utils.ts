@@ -1270,6 +1270,8 @@ export function toKnowledgeFile(
     status,
     latestIndexJob,
     usageCount: Number.isFinite(usageCount) ? usageCount : null,
+    reused: knowledgeFile.reused === true,
+    alreadyInKnowledgeBase: knowledgeFile.already_in_knowledge_base === true,
   };
 }
 
@@ -1358,6 +1360,22 @@ export function getVectorFailureRecoveryActions(
 ) {
   const retryAction = canRetry ? ["重新向量化"] : [];
 
+  if (failureType === "unsupported_file_type") {
+    return [
+      "请改用 PDF、DOCX、Markdown 或 TXT 文件",
+      "替换文件后重新上传",
+      ...retryAction,
+    ];
+  }
+
+  if (failureType === "empty_document") {
+    return [
+      "确认文件不是空文件或纯扫描图片",
+      "转为可复制文本后重新上传",
+      ...retryAction,
+    ];
+  }
+
   if (failureType === "parse_error") {
     return [
       "确认文件可打开且内容可复制",
@@ -1376,7 +1394,7 @@ export function getVectorFailureRecoveryActions(
   if (failureType === "vector_store_error") {
     return [
       "确认 Chroma/vector_db 可写",
-      "删除旧向量后重新向量化",
+      "清理残留向量后重新向量化",
     ];
   }
 
@@ -1416,6 +1434,26 @@ export function getVectorFailureRecoveryActions(
 }
 
 
+function getVectorWorkerRecoveryActions(
+  status: LatestIndexJobStatus,
+  workerHint?: string | null,
+) {
+  if (!workerHint) {
+    return [];
+  }
+
+  if (status === "queued") {
+    return ["确认 vector index worker 已启动", "启动后刷新任务状态"];
+  }
+
+  if (status === "processing") {
+    return ["查看 worker 日志确认是否卡住", "必要时重启 worker 后重新向量化"];
+  }
+
+  return [];
+}
+
+
 export function getVectorStatus(file: KnowledgeFile): VectorStatus {
   const job = file.latestIndexJob;
 
@@ -1430,6 +1468,11 @@ export function getVectorStatus(file: KnowledgeFile): VectorStatus {
   }
 
   if (job.status === "queued") {
+    const recoveryActions = getVectorWorkerRecoveryActions(
+      job.status,
+      job.workerHint
+    );
+
     return {
       label: "排队中",
       type: "pending",
@@ -1437,10 +1480,16 @@ export function getVectorStatus(file: KnowledgeFile): VectorStatus {
       canDeleteVector: false,
       canPoll: true,
       ...(job.workerHint ? { workerHint: job.workerHint } : {}),
+      ...(recoveryActions.length > 0 ? { recoveryActions } : {}),
     };
   }
 
   if (job.status === "processing") {
+    const recoveryActions = getVectorWorkerRecoveryActions(
+      job.status,
+      job.workerHint
+    );
+
     return {
       label: "处理中",
       type: "processing",
@@ -1448,6 +1497,7 @@ export function getVectorStatus(file: KnowledgeFile): VectorStatus {
       canDeleteVector: false,
       canPoll: true,
       ...(job.workerHint ? { workerHint: job.workerHint } : {}),
+      ...(recoveryActions.length > 0 ? { recoveryActions } : {}),
     };
   }
 
@@ -1471,12 +1521,13 @@ export function getVectorStatus(file: KnowledgeFile): VectorStatus {
       label: "向量化失败",
       type: "failed",
       canVectorize: job.canRetry,
-      canDeleteVector: false,
+      canDeleteVector: true,
       canPoll: false,
       ...(job.errorMessage ? { errorMessage: job.errorMessage } : {}),
       ...(job.failureHint ? { failureHint: job.failureHint } : {}),
       ...(recoveryActions.length > 0 ? { recoveryActions } : {}),
       canRetry: job.canRetry,
+      deleteVectorLabel: "清理残留向量",
     };
   }
 
@@ -1817,9 +1868,13 @@ export function toVectorIndexJob(value: unknown): VectorIndexJob | null {
   const job = value as {
     id?: unknown;
     job_id?: unknown;
+    knowledge_file_id?: unknown;
     status?: unknown;
     error_message?: unknown;
+    failure_type?: unknown;
     failure_hint?: unknown;
+    worker_hint?: unknown;
+    can_retry?: unknown;
   };
   const id =
     typeof job.id === "string" && job.id.trim()
@@ -1840,14 +1895,29 @@ export function toVectorIndexJob(value: unknown): VectorIndexJob | null {
           job.status === "failed"
         ? job.status
         : "queued";
+  const failureType = getNullableStringField(job, ["failure_type"]);
+  const canRetry = status === "failed" && job.can_retry !== false;
+  const recoveryActions = getVectorFailureRecoveryActions(
+    failureType,
+    canRetry
+  );
 
   return {
     id,
+    knowledgeFileId:
+      typeof job.knowledge_file_id === "string" && job.knowledge_file_id.trim()
+        ? job.knowledge_file_id.trim()
+        : null,
     status,
     errorMessage:
       typeof job.error_message === "string" ? job.error_message : "",
+    failureType,
     failureHint:
       typeof job.failure_hint === "string" ? job.failure_hint.trim() : "",
+    workerHint:
+      typeof job.worker_hint === "string" ? job.worker_hint.trim() : "",
+    canRetry,
+    ...(recoveryActions.length > 0 ? { recoveryActions } : {}),
   };
 }
 

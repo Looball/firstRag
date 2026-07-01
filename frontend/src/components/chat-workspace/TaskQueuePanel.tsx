@@ -17,6 +17,8 @@ type TaskQueuePanelProps = {
   queue: VectorIndexQueueItem[];
   onRefreshHealth: () => void | Promise<void>;
   onClearCompletedJobs: () => void;
+  onRetryFile: (fileId: string) => void | Promise<void>;
+  onDeleteFileVectors: (fileId: string) => void | Promise<void>;
 };
 
 export function TaskQueuePanel({
@@ -26,6 +28,8 @@ export function TaskQueuePanel({
   queue,
   onRefreshHealth,
   onClearCompletedJobs,
+  onRetryFile,
+  onDeleteFileVectors,
 }: TaskQueuePanelProps) {
   const workerHealthDetails = getWorkerHealthDetails(health, healthError);
   const vectorQueueCount = health?.queue.total ?? queue.length;
@@ -138,18 +142,56 @@ export function TaskQueuePanel({
                       {job.failureHint}
                     </p>
                   )}
+                  {job.workerHint && (
+                    <p className="mt-1 text-xs font-semibold text-[#9b3c29]">
+                      {job.workerHint}
+                    </p>
+                  )}
+                  {job.recoveryActions && job.recoveryActions.length > 0 && (
+                    <ul className="mt-2 list-disc space-y-1 pl-4 text-xs text-[#7a5a12]">
+                      {job.recoveryActions.map((action) => (
+                        <li key={action}>{action}</li>
+                      ))}
+                    </ul>
+                  )}
                 </div>
-                <span
-                  className={`shrink-0 border px-2 py-1 text-xs font-semibold ${
-                    isFailed
-                      ? "border-[#e36b4f] bg-[#fff1ed] text-[#9b3c29]"
-                      : isSucceeded
-                        ? "border-[#176b62] bg-[#edf7f3] text-[#176b62]"
-                        : "border-[#d9aa2f] bg-[#fff7df] text-[#7a5a12]"
-                  }`}
-                >
-                  {getVectorIndexStatusText(job.status)}
-                </span>
+                <div className="flex shrink-0 flex-col items-end gap-2">
+                  <span
+                    className={`border px-2 py-1 text-xs font-semibold ${
+                      isFailed
+                        ? "border-[#e36b4f] bg-[#fff1ed] text-[#9b3c29]"
+                        : isSucceeded
+                          ? "border-[#176b62] bg-[#edf7f3] text-[#176b62]"
+                          : "border-[#d9aa2f] bg-[#fff7df] text-[#7a5a12]"
+                    }`}
+                  >
+                    {getVectorIndexStatusText(job.status)}
+                  </span>
+                  {isFailed && job.knowledgeFileId && (
+                    <div className="flex flex-col items-end gap-1">
+                      {job.canRetry !== false && (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            void onRetryFile(job.knowledgeFileId || "")
+                          }
+                          className="text-xs font-semibold text-[#176b62] underline decoration-[#176b62] underline-offset-4 transition hover:text-[#105149]"
+                        >
+                          重试
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() =>
+                          void onDeleteFileVectors(job.knowledgeFileId || "")
+                        }
+                        className="text-xs font-semibold text-[#9b3c29] underline decoration-[#d9aa2f] underline-offset-4 transition hover:text-[#6f2b1d]"
+                      >
+                        清理向量
+                      </button>
+                    </div>
+                  )}
+                </div>
               </div>
             );
           })}

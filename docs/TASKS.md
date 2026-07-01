@@ -107,7 +107,7 @@
 | `T-040` | `PLAN-20260701-01` | `P2` | `Done` | 明确 License 与公开发布说明 | 2026-07-01 | `c885659` |
 | `T-041` | `PLAN-20260701-01` | `P2` | `Done` | 梳理在线演示环境方案 | 2026-07-01 | `0474178` |
 | `T-042` | `PLAN-20260701-02` | `P0` | `Done` | 建立生产部署安全与数据持久化方案 | 2026-07-01 | `1821713` |
-| `T-043` | `PLAN-20260701-02` | `P1` | `Todo` | 强化文件上传、向量化任务和 worker 异常状态体验 |  |  |
+| `T-043` | `PLAN-20260701-02` | `P1` | `Done` | 强化文件上传、向量化任务和 worker 异常状态体验 | 2026-07-01 |  |
 | `T-044` | `PLAN-20260701-02` | `P0` | `Todo` | 补齐认证、限流、配额和用户 API Key 风控 |  |  |
 | `T-045` | `PLAN-20260701-02` | `P1` | `Todo` | 建立统一日志、错误定位和基础监控指标 |  |  |
 | `T-046` | `PLAN-20260701-02` | `P1` | `Todo` | 准备真实问题集并固化上线前 RAG 质量门禁 |  |  |
@@ -1476,7 +1476,7 @@ rg -n "API_KEY|JWT|PASSWORD|SECRET|DATABASE_URL" README.md docs .env.example
 
 - 来源计划：`PLAN-20260701-02`
 - 优先级：`P1`
-- 状态：`Todo`
+- 状态：`Done`
 - 背景：当前已经有 vector worker health、任务队列和 failure recovery，但普通用户在文件过大、坏文件、空文档、重复文件、worker 未启动或 Chroma 异常时仍可能不知道下一步该做什么。
 - 目标：让上传和向量化链路在失败、卡住和可恢复场景下给出清晰状态、原因和操作建议。
 - 范围：
@@ -1499,6 +1499,15 @@ cd ../frontend
 npm run test
 npm run lint
 ```
+
+- 完成记录：
+  - 完成日期：2026-07-01
+  - 后端向量化任务响应改为返回安全错误摘要，`failure_type` / `failure_hint` / `can_retry` 继续保留恢复协议，详细异常只保留在后端日志中，避免前端展示路径、API Key 或数据库连接信息。
+  - 删除向量失败时返回安全文案，并在后端日志记录完整异常，避免把 Chroma 路径或底层异常透传给用户。
+  - 前端文件管理弹窗补齐上传复用/重复关联提示、413/不支持类型的用户动作建议、empty document / unsupported file type 恢复动作、stale worker 单文件提示、失败任务重试入口和清理残留向量入口。
+  - 任务队列面板会继续刷新活跃任务状态，单文件向量化不再只停留在初始排队状态。
+  - `docs/API.md` 已说明 `error_message` 是安全摘要，前端应优先使用 `failure_type`、`failure_hint`、`worker_hint` 和 `can_retry` 展示恢复动作。
+  - 验证命令：`cd backend && conda run -n firstrag python -m compileall app tests/test_knowledge_files.py tests/test_vector_indexes.py tests/test_vector_index_failure_recovery.py`；`cd backend && conda run -n firstrag python -m pytest tests/test_knowledge_files.py tests/test_vector_indexes.py tests/test_vector_index_failure_recovery.py`；`cd frontend && npm run test`；`cd frontend && npm run lint`。
 
 ## T-044 补齐认证、限流、配额和用户 API Key 风控
 

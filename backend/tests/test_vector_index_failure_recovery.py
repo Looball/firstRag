@@ -10,6 +10,7 @@ if str(BACKEND_ROOT) not in sys.path:
     sys.path.insert(0, str(BACKEND_ROOT))
 
 from app.services.vectors.vector_index_queue_service import (
+    build_safe_vector_index_error_message,
     build_vector_index_failure_hint,
     classify_vector_index_failure,
     serialize_vector_index_job,
@@ -77,8 +78,27 @@ class VectorIndexFailureRecoveryTests(unittest.TestCase):
         })
 
         self.assertEqual(serialized["failure_type"], "chunk_write_error")
+        self.assertEqual(serialized["error_message"], "全文分块写入失败")
         self.assertIn("全文分块写入失败", serialized["failure_hint"])
         self.assertTrue(serialized["can_retry"])
+
+    def test_safe_error_message_does_not_expose_sensitive_detail(self) -> None:
+        """面向前端的错误摘要不应暴露路径、连接串或 API Key。"""
+        raw_error = (
+            "Embedding request failed at /srv/firstrag/vector_db "
+            "with api_key=sk-secret"
+        )
+
+        failure_type = classify_vector_index_failure(raw_error)
+        safe_message = build_safe_vector_index_error_message(
+            raw_error,
+            failure_type,
+        )
+
+        self.assertEqual(failure_type, "embedding_error")
+        self.assertEqual(safe_message, "Embedding 调用失败")
+        self.assertNotIn("/srv", safe_message or "")
+        self.assertNotIn("sk-secret", safe_message or "")
 
 
 if __name__ == "__main__":

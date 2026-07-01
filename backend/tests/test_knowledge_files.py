@@ -72,7 +72,7 @@ class KnowledgeFileListTests(unittest.TestCase):
         latest_job = response.json()["files"][0]["latest_index_job"]
         self.assertEqual(latest_job["id"], str(job_id))
         self.assertEqual(latest_job["status"], "failed")
-        self.assertEqual(latest_job["error_message"], "解析失败")
+        self.assertEqual(latest_job["error_message"], "文件解析失败")
         self.assertEqual(latest_job["failure_type"], "parse_error")
         self.assertEqual(
             latest_job["failure_hint"],

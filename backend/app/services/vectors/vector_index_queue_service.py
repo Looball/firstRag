@@ -161,6 +161,36 @@ def build_vector_index_failure_hint(failure_type: str | None) -> str | None:
     return None
 
 
+def build_safe_vector_index_error_message(
+    error_message: str | None,
+    failure_type: str | None,
+) -> str | None:
+    """生成可展示给用户的错误摘要，避免泄露内部路径或凭据。"""
+    if not error_message:
+        return None
+
+    if failure_type == "unsupported_file_type":
+        return "文件类型暂不支持"
+    if failure_type == "empty_document":
+        return "文件没有可入库文本"
+    if failure_type == "parse_error":
+        return "文件解析失败"
+    if failure_type == "embedding_error":
+        return "Embedding 调用失败"
+    if failure_type == "vector_store_error":
+        return "向量库写入失败"
+    if failure_type == "chunk_write_error":
+        return "全文分块写入失败"
+    if failure_type == "database_error":
+        return "数据库写入失败"
+    if failure_type == "task_timeout":
+        return "向量化任务超时"
+    if failure_type == "stale_job":
+        return "任务版本已过期"
+
+    return "向量化失败"
+
+
 def serialize_vector_index_job(job: Row | dict[str, Any]) -> dict[str, Any]:
     """将向量化任务记录转换为接口响应结构。"""
     if not job:
@@ -184,7 +214,10 @@ def serialize_vector_index_job(job: Row | dict[str, Any]) -> dict[str, Any]:
         "already_indexed": job.get("already_indexed", False),
         "skipped": job.get("skipped", False),
         "message": job.get("message"),
-        "error_message": job.get("error_message"),
+        "error_message": build_safe_vector_index_error_message(
+            job.get("error_message"),
+            failure_type,
+        ),
         "failure_type": failure_type,
         "failure_hint": build_vector_index_failure_hint(failure_type),
         "can_retry": job.get("status") == "failed",

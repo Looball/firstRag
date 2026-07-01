@@ -190,6 +190,8 @@ export type KnowledgeFile = {
   status: KnowledgeFileStatus;
   latestIndexJob: LatestIndexJob | null;
   usageCount: number | null;
+  reused?: boolean;
+  alreadyInKnowledgeBase?: boolean;
 };
 
 export type KnowledgeFileStatus =
@@ -251,6 +253,7 @@ export type VectorStatus = {
   failureHint?: string;
   recoveryActions?: string[];
   canRetry?: boolean;
+  deleteVectorLabel?: string;
 };
 
 export type VectorIndexHealthResponse = {
@@ -298,9 +301,14 @@ export type WorkerHealthDetails = {
 
 export type VectorIndexJob = {
   id: string;
+  knowledgeFileId?: string | null;
   status: VectorIndexJobStatus;
   errorMessage: string;
+  failureType?: string | null;
   failureHint: string;
+  workerHint?: string;
+  canRetry?: boolean;
+  recoveryActions?: string[];
 };
 
 export type VectorIndexQueueItem = VectorIndexJob & {
@@ -314,6 +322,8 @@ export type BackendKnowledgeFile = {
   size_bytes?: unknown;
   status?: unknown;
   usage_count?: unknown;
+  reused?: unknown;
+  already_in_knowledge_base?: unknown;
   latest_index_job?: unknown;
 };
 

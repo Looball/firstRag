@@ -135,12 +135,16 @@ Authorization: Bearer <access_token>
 ```json
 {
   "status": "failed",
-  "error_message": "解析失败",
+  "error_message": "文件解析失败",
   "failure_type": "parse_error",
   "failure_hint": "文件解析失败。请确认文件内容可读取，必要时转为 PDF、Markdown 或 TXT 后重新上传。",
   "can_retry": true
 }
 ```
+
+`error_message` 是面向用户的安全摘要，不返回本地路径、数据库连接串、API Key
+或底层异常全文；详细异常仅保留在后端日志中。前端应优先使用
+`failure_type`、`failure_hint`、`worker_hint` 和 `can_retry` 展示恢复动作。
 
 当前稳定的 `failure_type` 包括：
 

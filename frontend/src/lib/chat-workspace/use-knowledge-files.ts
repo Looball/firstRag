@@ -1,4 +1,5 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { FrontendApiError } from "@/lib/frontend-api";
 import {
   type RefObject,
   useCallback,
@@ -104,6 +105,44 @@ export function mergeVectorIndexQueueItems(
   return Array.from(nextJobs.values());
 }
 
+export function buildKnowledgeFileUploadMessage(files: KnowledgeFile[]) {
+  if (files.length === 0) {
+    return "文件上传已完成。";
+  }
+
+  const reusedCount = files.filter((file) => file.reused).length;
+  const alreadyLinkedCount = files.filter(
+    (file) => file.alreadyInKnowledgeBase,
+  ).length;
+  const messages = [`已处理 ${files.length} 个文件。`];
+
+  if (reusedCount > 0) {
+    messages.push(`${reusedCount} 个文件复用已有上传记录。`);
+  }
+
+  if (alreadyLinkedCount > 0) {
+    messages.push(`${alreadyLinkedCount} 个文件已在当前知识库中。`);
+  }
+
+  messages.push("需要检索前，请点击“向量化”或“向量化当前知识库”。");
+  return messages.join("");
+}
+
+export function buildKnowledgeFileUploadErrorMessage(error: unknown) {
+  const message =
+    error instanceof Error ? error.message : "上传文件失败，请稍后再试。";
+
+  if (error instanceof FrontendApiError && error.status === 413) {
+    return `${message}。请压缩文件、拆分文档，或联系管理员调整上传上限。`;
+  }
+
+  if (message.includes("不支持的文件类型")) {
+    return `${message}。当前支持 PDF、DOCX、Markdown 和 TXT 文件。`;
+  }
+
+  return message;
+}
+
 export function useKnowledgeFiles({
   hasCheckedAuth,
   selectedKnowledgeBaseId,
@@ -183,6 +222,10 @@ export function useKnowledgeFiles({
   const hasPollingIndexJobs = useMemo(
     () => knowledgeFiles.some((file) => getVectorStatus(file).canPoll),
     [knowledgeFiles],
+  );
+  const hasActiveVectorIndexQueueJobs = useMemo(
+    () => vectorIndexQueue.some((job) => !isVectorIndexJobDone(job)),
+    [vectorIndexQueue],
   );
   const selectedKnowledgeBaseFileCount =
     selectedKnowledgeFiles.length || selectedKnowledgeBaseStoredFileCount || 0;
@@ -326,6 +369,31 @@ export function useKnowledgeFiles({
     [],
   );
 
+  const refreshVectorIndexQueue = useCallback(async () => {
+    const activeJobs = vectorIndexQueue.filter(
+      (job) => !isVectorIndexJobDone(job),
+    );
+
+    if (activeJobs.length === 0) {
+      return;
+    }
+
+    const nextJobs = await Promise.all(
+      activeJobs.map(async (job) => {
+        return (await chatApi.getVectorIndexJob(job.id)) || job;
+      }),
+    );
+    const nextJobsById = new Map(nextJobs.map((job) => [job.id, job]));
+
+    setVectorIndexQueue((previousJobs) =>
+      previousJobs.map((job) => {
+        const nextJob = nextJobsById.get(job.id);
+
+        return nextJob ? { ...job, ...nextJob } : job;
+      }),
+    );
+  }, [vectorIndexQueue]);
+
   const handleOpenFileManager = useCallback(async () => {
     setIsFileManagerOpen(true);
     await Promise.all([
@@ -358,24 +426,27 @@ export function useKnowledgeFiles({
       if (oversizedFiles.length > 0) {
         const names = oversizedFiles.map((file) => file.name).join("、");
         setKnowledgeFileUploadError(
-          `以下文件超过 200MB 限制，请压缩后重新上传：${names}。`,
+          `以下文件超过 200MB 限制，请压缩或拆分后重新上传：${names}。`,
         );
         return;
       }
 
       setIsUploadingKnowledgeFiles(true);
       setKnowledgeFileUploadError("");
+      setVectorIndexError("");
+      setVectorIndexMessage("");
       setIsFileManagerOpen(true);
 
       try {
-        await chatApi.uploadKnowledgeFiles(selectedKnowledgeBaseId, selectedFiles);
-        await refreshKnowledgeFiles();
-      } catch (error) {
-        setKnowledgeFileUploadError(
-          error instanceof Error
-            ? error.message
-            : "上传文件失败，请稍后再试。",
+        const uploadedFiles = await chatApi.uploadKnowledgeFiles(
+          selectedKnowledgeBaseId,
+          selectedFiles,
         );
+
+        setVectorIndexMessage(buildKnowledgeFileUploadMessage(uploadedFiles));
+        await Promise.all([refreshKnowledgeFiles(), loadVectorIndexHealth()]);
+      } catch (error) {
+        setKnowledgeFileUploadError(buildKnowledgeFileUploadErrorMessage(error));
       } finally {
         setIsUploadingKnowledgeFiles(false);
 
@@ -387,6 +458,7 @@ export function useKnowledgeFiles({
     [
       fileInputRef,
       isUploadingKnowledgeFiles,
+      loadVectorIndexHealth,
       refreshKnowledgeFiles,
       selectedKnowledgeBaseId,
     ],
@@ -465,7 +537,7 @@ export function useKnowledgeFiles({
         updateVectorIndexQueue(jobs, target);
 
         setVectorIndexMessage("文件向量化任务已提交。");
-        await refreshKnowledgeFiles();
+        await Promise.all([refreshKnowledgeFiles(), loadVectorIndexHealth()]);
       } catch (error) {
         setVectorIndexError(
           error instanceof Error ? error.message : "文件向量化失败，请稍后再试。",
@@ -480,6 +552,7 @@ export function useKnowledgeFiles({
     },
     [
       knowledgeFiles,
+      loadVectorIndexHealth,
       refreshKnowledgeFiles,
       updateVectorIndexQueue,
       vectorIndexingFileIds,
@@ -499,7 +572,7 @@ export function useKnowledgeFiles({
       try {
         await chatApi.deleteKnowledgeFileVectors(fileId);
         setVectorIndexMessage("文件向量已删除，可重新向量化。");
-        await refreshKnowledgeFiles();
+        await Promise.all([refreshKnowledgeFiles(), loadVectorIndexHealth()]);
       } catch (error) {
         setVectorIndexError(
           error instanceof Error
@@ -510,7 +583,7 @@ export function useKnowledgeFiles({
         setDeletingVectorFileId("");
       }
     },
-    [deletingVectorFileId, refreshKnowledgeFiles],
+    [deletingVectorFileId, loadVectorIndexHealth, refreshKnowledgeFiles],
   );
 
   const handleIndexKnowledgeBase = useCallback(async () => {
@@ -549,7 +622,7 @@ export function useKnowledgeFiles({
         setVectorIndexMessage("知识库向量化完成。");
       }
 
-      await refreshKnowledgeFiles();
+      await Promise.all([refreshKnowledgeFiles(), loadVectorIndexHealth()]);
     } catch (error) {
       setVectorIndexError(
         error instanceof Error ? error.message : "知识库向量化失败，请稍后再试。",
@@ -559,6 +632,7 @@ export function useKnowledgeFiles({
     }
   }, [
     isIndexingKnowledgeBase,
+    loadVectorIndexHealth,
     refreshKnowledgeFiles,
     selectedKnowledgeBaseId,
     selectedKnowledgeBaseName,
@@ -607,6 +681,28 @@ export function useKnowledgeFiles({
     loadKnowledgeBaseFiles,
     loadVectorIndexHealth,
     selectedKnowledgeBaseId,
+  ]);
+
+  useEffect(() => {
+    if (!hasCheckedAuth || !hasActiveVectorIndexQueueJobs) {
+      return;
+    }
+
+    const intervalId = window.setInterval(() => {
+      void Promise.all([
+        refreshVectorIndexQueue(),
+        loadVectorIndexHealth(),
+      ]);
+    }, 2500);
+
+    return () => {
+      window.clearInterval(intervalId);
+    };
+  }, [
+    hasActiveVectorIndexQueueJobs,
+    hasCheckedAuth,
+    loadVectorIndexHealth,
+    refreshVectorIndexQueue,
   ]);
 
   return {

@@ -10,6 +10,7 @@ import {
   getWorkerHealthLabel,
   parseVectorIndexHealth,
   serializeRetrievalSettings,
+  toVectorIndexJob,
   toRetrievalSettings,
 } from "./utils";
 import type { KnowledgeFile } from "./types";
@@ -266,7 +267,7 @@ describe("chat workspace vector status parsing", () => {
       label: "向量化失败",
       type: "failed",
       canVectorize: true,
-      canDeleteVector: false,
+      canDeleteVector: true,
       canPoll: false,
       errorMessage: "解析失败",
       failureHint: "请确认文件内容可读取。",
@@ -276,13 +277,19 @@ describe("chat workspace vector status parsing", () => {
         "重新向量化",
       ],
       canRetry: true,
+      deleteVectorLabel: "清理残留向量",
     });
   });
 
   it("maps vector failure types to recovery actions", () => {
     expect(getVectorFailureRecoveryActions("vector_store_error", true)).toEqual([
       "确认 Chroma/vector_db 可写",
-      "删除旧向量后重新向量化",
+      "清理残留向量后重新向量化",
+    ]);
+    expect(getVectorFailureRecoveryActions("empty_document", true)).toEqual([
+      "确认文件不是空文件或纯扫描图片",
+      "转为可复制文本后重新上传",
+      "重新向量化",
     ]);
     expect(getVectorFailureRecoveryActions("chunk_write_error", true)).toEqual([
       "检查 PostgreSQL chunk 表和迁移状态",
@@ -292,6 +299,34 @@ describe("chat workspace vector status parsing", () => {
       "查看 worker 日志和文件大小",
       "必要时重启 worker 后重新向量化",
     ]);
+  });
+
+  it("parses queue jobs with retry metadata and recovery actions", () => {
+    expect(
+      toVectorIndexJob({
+        id: "job-1",
+        knowledge_file_id: "file-1",
+        status: "failed",
+        error_message: "向量库写入失败",
+        failure_type: "vector_store_error",
+        failure_hint: "确认 Chroma/vector_db 可用。",
+        worker_hint: "查看 worker 日志。",
+        can_retry: true,
+      }),
+    ).toEqual({
+      id: "job-1",
+      knowledgeFileId: "file-1",
+      status: "failed",
+      errorMessage: "向量库写入失败",
+      failureType: "vector_store_error",
+      failureHint: "确认 Chroma/vector_db 可用。",
+      workerHint: "查看 worker 日志。",
+      canRetry: true,
+      recoveryActions: [
+        "确认 Chroma/vector_db 可写",
+        "清理残留向量后重新向量化",
+      ],
+    });
   });
 });
 

@@ -155,7 +155,9 @@ function KnowledgeFileRow({
             }
             className="px-2 py-1 text-xs font-semibold text-[#9b3c29] transition hover:bg-[#fff1ed] disabled:cursor-not-allowed disabled:text-[#aab3b0]"
           >
-            {deletingVectorFileId === file.id ? "删除向量中..." : "删除向量"}
+            {deletingVectorFileId === file.id
+              ? "处理中..."
+              : vectorStatus.deleteVectorLabel || "删除向量"}
           </button>
         )}
         <button
@@ -394,6 +396,8 @@ export function FileManagerDialog({
             queue={vectorIndexQueue}
             onRefreshHealth={onRefreshVectorHealth}
             onClearCompletedJobs={onClearCompletedJobs}
+            onRetryFile={onIndexFile}
+            onDeleteFileVectors={onDeleteFileVectors}
           />
 
           <KnowledgeFileList

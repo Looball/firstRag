@@ -1,3 +1,4 @@
+import logging
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -29,6 +30,7 @@ from app.services.knowledge_profile_cache import (
 
 
 router = APIRouter(prefix="/chat", tags=["vector-indexes"])
+logger = logging.getLogger(__name__)
 
 
 @router.post("/knowledge-files/{knowledge_file_id}/vectors")
@@ -158,9 +160,14 @@ def delete_knowledge_file_vectors(
                 expected_index_version=file_record["index_version"],
             )
             invalidate_file_knowledge_base_contexts(user_id, knowledge_file_id)
+            logger.exception(
+                "删除向量化存储失败 user_id=%s file_id=%s",
+                user_id,
+                knowledge_file_id,
+            )
             raise HTTPException(
                 status_code=500,
-                detail=f"删除向量化存储失败: {exc}",
+                detail="删除向量化存储失败，请稍后重试或检查向量库和数据库状态。",
             ) from exc
 
     return {
