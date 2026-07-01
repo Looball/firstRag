@@ -2251,6 +2251,14 @@ export default function Home() {
                                 sourceFeedbackErrors[sourceKey] || "";
                               const sourceFeedbackMessage =
                                 sourceFeedbackMessages[sourceKey] || "";
+                              const sourceFeedbackRating =
+                                source.feedback?.rating;
+                              const sourceFeedbackLabel =
+                                sourceFeedbackRating === "useful"
+                                  ? "已标记：引用有用"
+                                  : sourceFeedbackRating === "irrelevant"
+                                    ? "已标记：引用无关"
+                                    : "";
 
                               return (
                                 <div
@@ -2321,52 +2329,57 @@ export default function Home() {
                                     </p>
                                   )}
                                   <div className="mt-2 flex flex-wrap items-center justify-between gap-2 border-t border-[#e2e8e5] pt-2">
-                                    <div className="flex flex-wrap items-center gap-2">
-                                      <button
-                                        type="button"
-                                        disabled={isSourceFeedbackSubmitting}
-                                        onClick={() =>
-                                          handleSubmitSourceFeedback({
-                                            sessionId: currentSession.id,
-                                            messageId: message.id,
-                                            sourceKey,
-                                            sourceIndex: currentSourceIndex,
-                                            rating: "useful",
-                                          })
-                                        }
-                                        className={`font-utility border px-2 py-1 text-[10px] font-semibold uppercase transition ${
-                                          source.feedback?.rating === "useful"
-                                            ? "border-[#176b62] bg-[#dcebe6] text-[#176b62]"
-                                            : "border-[#cbd5d1] text-[#64716d] hover:border-[#176b62] hover:text-[#176b62]"
+                                    {sourceFeedbackRating &&
+                                    !isSourceFeedbackSubmitting ? (
+                                      <p
+                                        className={`font-utility text-[10px] font-semibold uppercase ${
+                                          sourceFeedbackRating === "useful"
+                                            ? "text-[#176b62]"
+                                            : "text-[#9b3c29]"
                                         }`}
                                       >
-                                        {isSourceFeedbackSubmitting
-                                          ? "保存中"
-                                          : "引用有用"}
-                                      </button>
-                                      <button
-                                        type="button"
-                                        disabled={isSourceFeedbackSubmitting}
-                                        onClick={() =>
-                                          handleSubmitSourceFeedback({
-                                            sessionId: currentSession.id,
-                                            messageId: message.id,
-                                            sourceKey,
-                                            sourceIndex: currentSourceIndex,
-                                            rating: "irrelevant",
-                                          })
-                                        }
-                                        className={`font-utility border px-2 py-1 text-[10px] font-semibold uppercase transition ${
-                                          source.feedback?.rating === "irrelevant"
-                                            ? "border-[#e36b4f] bg-[#fff1ed] text-[#9b3c29]"
-                                            : "border-[#cbd5d1] text-[#64716d] hover:border-[#e36b4f] hover:text-[#9b3c29]"
-                                        }`}
-                                      >
-                                        {isSourceFeedbackSubmitting
-                                          ? "保存中"
-                                          : "引用无关"}
-                                      </button>
-                                    </div>
+                                        {sourceFeedbackLabel}
+                                      </p>
+                                    ) : (
+                                      <div className="flex flex-wrap items-center gap-2">
+                                        <button
+                                          type="button"
+                                          disabled={isSourceFeedbackSubmitting}
+                                          onClick={() =>
+                                            handleSubmitSourceFeedback({
+                                              sessionId: currentSession.id,
+                                              messageId: message.id,
+                                              sourceKey,
+                                              sourceIndex: currentSourceIndex,
+                                              rating: "useful",
+                                            })
+                                          }
+                                          className="font-utility border border-[#cbd5d1] px-2 py-1 text-[10px] font-semibold uppercase text-[#64716d] transition hover:border-[#176b62] hover:text-[#176b62] disabled:cursor-not-allowed disabled:opacity-60"
+                                        >
+                                          {isSourceFeedbackSubmitting
+                                            ? "保存中"
+                                            : "引用有用"}
+                                        </button>
+                                        <button
+                                          type="button"
+                                          disabled={isSourceFeedbackSubmitting}
+                                          onClick={() =>
+                                            handleSubmitSourceFeedback({
+                                              sessionId: currentSession.id,
+                                              messageId: message.id,
+                                              sourceKey,
+                                              sourceIndex: currentSourceIndex,
+                                              rating: "irrelevant",
+                                            })
+                                          }
+                                          className="font-utility border border-[#cbd5d1] px-2 py-1 text-[10px] font-semibold uppercase text-[#64716d] transition hover:border-[#e36b4f] hover:text-[#9b3c29] disabled:cursor-not-allowed disabled:opacity-60"
+                                        >
+                                          {isSourceFeedbackSubmitting
+                                            ? "保存中"
+                                            : "引用无关"}
+                                        </button>
+                                      </div>
+                                    )}
                                     {sourceFeedbackError && (
                                       <p className="text-[11px] text-[#9b3c29]">
                                         {sourceFeedbackError}
