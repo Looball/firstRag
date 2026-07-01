@@ -2178,6 +2178,13 @@ export default function Home() {
                 );
                 const feedbackError = feedbackErrors[messageKey] || "";
                 const feedbackMessage = feedbackMessages[messageKey] || "";
+                const messageFeedbackRating = message.feedback?.rating;
+                const messageFeedbackLabel =
+                  messageFeedbackRating === "positive"
+                    ? "已标记：有用"
+                    : messageFeedbackRating === "negative"
+                      ? "已标记：有问题"
+                      : "";
                 const isExportingEvalDraft = Boolean(
                   exportingEvalDrafts[messageKey]
                 );
@@ -2413,43 +2420,48 @@ export default function Home() {
                       {message.role === "assistant" && message.content && (
                         <div className="mt-4 border-t border-[#d6dedb] pt-3">
                           <div className="flex flex-wrap items-center justify-between gap-3">
-                            <div className="flex flex-wrap items-center gap-2">
-                              <button
-                                type="button"
-                                disabled={isFeedbackSubmitting}
-                                onClick={() =>
-                                  handleSubmitMessageFeedback({
-                                    sessionId: currentSession.id,
-                                    messageKey,
-                                    messageId: message.id,
-                                    rating: "positive",
-                                  })
-                                }
-                                className={`font-utility border px-2 py-1 text-[10px] font-semibold uppercase transition ${
-                                  message.feedback?.rating === "positive"
-                                    ? "border-[#176b62] bg-[#dcebe6] text-[#176b62]"
-                                    : "border-[#cbd5d1] text-[#64716d] hover:border-[#176b62] hover:text-[#176b62]"
+                            {messageFeedbackRating &&
+                            !isFeedbackSubmitting ? (
+                              <p
+                                className={`font-utility text-[10px] font-semibold uppercase ${
+                                  messageFeedbackRating === "positive"
+                                    ? "text-[#176b62]"
+                                    : "text-[#9b3c29]"
                                 }`}
                               >
-                                {isFeedbackSubmitting ? "保存中" : "有用"}
-                              </button>
-                              <button
-                                type="button"
-                                disabled={isFeedbackSubmitting}
-                                onClick={() =>
-                                  setActiveFeedbackMessageKey((current) =>
-                                    current === messageKey ? "" : messageKey
-                                  )
-                                }
-                                className={`font-utility border px-2 py-1 text-[10px] font-semibold uppercase transition ${
-                                  message.feedback?.rating === "negative"
-                                    ? "border-[#e36b4f] bg-[#fff1ed] text-[#9b3c29]"
-                                    : "border-[#cbd5d1] text-[#64716d] hover:border-[#e36b4f] hover:text-[#9b3c29]"
-                                }`}
-                              >
-                                有问题
-                              </button>
-                            </div>
+                                {messageFeedbackLabel}
+                              </p>
+                            ) : (
+                              <div className="flex flex-wrap items-center gap-2">
+                                <button
+                                  type="button"
+                                  disabled={isFeedbackSubmitting}
+                                  onClick={() =>
+                                    handleSubmitMessageFeedback({
+                                      sessionId: currentSession.id,
+                                      messageKey,
+                                      messageId: message.id,
+                                      rating: "positive",
+                                    })
+                                  }
+                                  className="font-utility border border-[#cbd5d1] px-2 py-1 text-[10px] font-semibold uppercase text-[#64716d] transition hover:border-[#176b62] hover:text-[#176b62] disabled:cursor-not-allowed disabled:opacity-60"
+                                >
+                                  {isFeedbackSubmitting ? "保存中" : "有用"}
+                                </button>
+                                <button
+                                  type="button"
+                                  disabled={isFeedbackSubmitting}
+                                  onClick={() =>
+                                    setActiveFeedbackMessageKey((current) =>
+                                      current === messageKey ? "" : messageKey
+                                    )
+                                  }
+                                  className="font-utility border border-[#cbd5d1] px-2 py-1 text-[10px] font-semibold uppercase text-[#64716d] transition hover:border-[#e36b4f] hover:text-[#9b3c29] disabled:cursor-not-allowed disabled:opacity-60"
+                                >
+                                  有问题
+                                </button>
+                              </div>
+                            )}
                             <div className="flex flex-wrap items-center gap-3">
                               {canExportEvalDraft && (
                                 <button
@@ -2560,7 +2572,9 @@ export default function Home() {
                               {feedbackError}
                             </p>
                           )}
-                          {!feedbackError && feedbackMessage && (
+                          {!feedbackError &&
+                            feedbackMessage &&
+                            !messageFeedbackRating && (
                             <p className="mt-2 text-xs text-[#176b62]">
                               {feedbackMessage}
                             </p>
