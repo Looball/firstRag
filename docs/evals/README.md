@@ -4,13 +4,15 @@
 
 ## 最近整体回归验收
 
-2026-07-01 已刷新一轮真实链路 eval 基线，覆盖 RAG 真实评测门禁、上传与向量化真实链路验收，以及 eval 历史趋势摘要。静态验收入口见 `scripts/acceptance_check.sh`。
+2026-07-02 已刷新一轮真实链路 eval 基线，覆盖 RAG 真实评测门禁、上传与向量化真实链路验收，以及 eval 历史趋势摘要。静态验收入口见 `scripts/acceptance_check.sh`。
+
+`T-046` 已将 RAG 上线前评测集扩展为 14 条非敏感可复跑 case，并把默认检索参数 `top_k/vector_top_k/fulltext_top_k/rrf_k = 4/16/16/8` 写入主基线 case 的 `retrieval_settings` 和 diagnostics 断言。2026-07-01 的旧 10 条 case 基线仅作为历史对照。
 
 | 检查项 | 命令 | 结果 |
 | --- | --- | --- |
-| RAG eval gate | `FIRSTRAG_EVAL_USERNAME=你的用户名 FIRSTRAG_EVAL_PASSWORD=你的密码 scripts/rag_eval_gate.sh` | 通过，10/10 case 通过；平均引用 2.40，平均首 token 3439.74ms，平均耗时 5.98s，质量门禁全部 PASS。 |
-| Indexing eval | `FIRSTRAG_EVAL_USERNAME=你的用户名 FIRSTRAG_EVAL_PASSWORD=你的密码 conda run -n firstrag python scripts/eval_indexing.py --base-url http://127.0.0.1:8000` | 通过，上传、auto index、worker 完成、文件 indexed、聊天 Sources 命中新文件均通过；job `succeeded`，聊天耗时 6.86s，引用数 1。 |
-| Eval summary | `conda run -n firstrag python scripts/eval_summary.py` | 通过，RAG 历史 27 次、Indexing 历史 4 次；RAG 历史平均通过率 0.99，Indexing 历史通过率 1.00。 |
+| RAG eval gate | `FIRSTRAG_EVAL_USERNAME=你的用户名 FIRSTRAG_EVAL_PASSWORD=你的密码 scripts/rag_eval_gate.sh` | 通过，14/14 case 通过；平均引用 2.00，平均首 token 2701.22ms，平均耗时 5.90s，失败 case 为 0，质量门禁全部 PASS。 |
+| Indexing eval | `FIRSTRAG_EVAL_USERNAME=你的用户名 FIRSTRAG_EVAL_PASSWORD=你的密码 conda run -n firstrag python scripts/eval_indexing.py --base-url http://127.0.0.1:8000` | 通过，上传、auto index、worker 完成、文件 indexed、聊天 Sources 命中新文件均通过；job `succeeded`，聊天耗时 9.25s，引用数 1。 |
+| Eval summary | `conda run -n firstrag python scripts/eval_summary.py` | 通过，RAG 历史 30 次、Indexing 历史 5 次；RAG 历史平均通过率 0.98，Indexing 历史通过率 1.00。 |
 
 本轮生成的最新报告：
 
@@ -18,7 +20,7 @@
 - `docs/evals/latest_indexing_eval_report.md`
 - `docs/evals/latest_summary.md`
 
-本轮 RAG 质量门禁通过。`T-036` 已确认旧趋势摘要中的 `settings=1716.02ms` 是 LCEL streaming 外层 settings-wait 间隔，不是检索设置读取耗时；本轮真实 `settings-load` 最新均值为 7.52ms，低于 1000ms 建议阈值。报告和历史 JSON 默认被 `.gitignore` 忽略，提交时只记录不含敏感信息的摘要。
+本轮 RAG 质量门禁通过。`T-036` 已确认旧趋势摘要中的 `settings=1716.02ms` 是 LCEL streaming 外层 settings-wait 间隔，不是检索设置读取耗时；本轮真实 `settings-load` 最新均值为 7.13ms，低于 1000ms 建议阈值。报告和历史 JSON 默认被 `.gitignore` 忽略，提交时只记录不含敏感信息的摘要。
 
 该记录用于进入文档整理、提交、推送或 PR 前的 release readiness 检查。再次修改 RAG 检索、token usage、eval gate、indexing、worker health、vector failure recovery 或前端文件管理链路后，应重新运行上述验收。
 
@@ -108,13 +110,13 @@ conda run -n firstrag python scripts/eval_rag.py \
 
 当前内置评测集覆盖：
 
-- 基础法律文档检索。
-- RAG 核心概念和 RRF 检索策略。
-- 问候自动跳过检索和强制检索。
-- 多轮追问。
-- 低相关问题在 `retrieval_mode=never` 下跳过检索。
-- 禁用 rerank。
-- 禁用 query router。
+- 默认 `4/16/16/8` 基线：法律文档、RAG 核心概念、RRF 检索策略、source 相关性。
+- 多轮追问：同一临时会话中先问“什么是诉讼法”，再追问“它的任务是什么”。
+- 无答案和低相关：`retrieval_mode=never` 跳过检索，以及低相关问题在强制检索下观察 source 行为。
+- rerank 开关：默认开启 rerank，并覆盖 `enable_rerank=false` 的回归 case。
+- query router 开关：默认开启 query router，并覆盖 `enable_query_router=false` 的确定性检索路径。
+- 参数组合：默认 `4/16/16/8`、小候选池 `3/8/8/4`、旧对照 `4/16/16/10`。
+- 用户反馈种子：把 message/source feedback 中常见的 source 相关性 bad case 整理为非敏感可复跑问题。
 
 历史文件默认被 `.gitignore` 忽略，只保留在本地。再次运行评测时，最新报告会自动对比上一轮历史记录。
 
@@ -152,6 +154,8 @@ conda run -n firstrag python scripts/eval_rag.py \
 | `--max-average-first-token-ms` | 最高平均首 token 等待时间。优先使用 `first_answer_token_ms`，缺失时使用 `pre_answer_total_ms` 近似。 |
 | `--max-average-elapsed-seconds` | 最高平均端到端 case 耗时。 |
 
+脚本标准输出会直接打印通过率、平均 sources、平均首 token 等待和失败 case 摘要；Markdown 报告还会展示评测集覆盖表、失败 case 表、质量门禁表、性能观察项和逐 case 检查项。
+
 ## 一键回归门禁
 
 项目提供了推荐门槛的一键脚本：
@@ -171,6 +175,37 @@ scripts/rag_eval_gate.sh
 | `FIRSTRAG_EVAL_MAX_AVERAGE_FIRST_TOKEN_MS` | `10000` | 平均首 token 等待不超过 10 秒。 |
 | `FIRSTRAG_EVAL_MAX_AVERAGE_ELAPSED_SECONDS` | `30` | 平均单 case 总耗时不超过 30 秒。 |
 
+## 上线前基线口径
+
+`T-046` 后，`docs/evals/rag_eval_cases.jsonl` 是上线前 RAG 质量门禁的默认输入。主基线 case 明确写入：
+
+```json
+{
+  "top_k": 4,
+  "vector_top_k": 16,
+  "fulltext_top_k": 16,
+  "rrf_k": 8
+}
+```
+
+评测报告应重点关注：
+
+- `pass_rate` 是否达到 `1.0`。
+- `average_sources` 是否不低于 `1`。
+- `average_first_token_ms` 是否不超过 `10000`。
+- 失败 case 是否集中在某个 `category` 或 `coverage`，例如 `source_feedback_bad_case`、`low_relevance` 或 `parameter_variant`。
+- `rrf_legacy_k10_comparison` 与默认 `rrf_definition` 的 sources、耗时和失败检查差异。
+
+如果默认 `4/16/16/8` 低于目标，建议按顺序处理：
+
+1. 先查看报告中的“失败 Case 摘要”和逐 case diagnostics，确认是召回、rerank、query router 还是答案关键词断言失败。
+2. 对 source 相关性失败，优先比较 `rrf_legacy_k10_comparison` 和 `rrf_small_pool_variant`，再决定是否把 `rrf_k` 或两路召回数上调。
+3. 对首 token 超时，优先检查 `rerank_ms`、`retrieve_documents_ms`、`retrieval_total_ms`，必要时临时关闭 rerank 或降低候选池验证瓶颈。
+4. 如果默认组整体退化且 legacy 对照更稳，可短期回滚到 `4/16/16/10`，但需要在任务记录中说明 source 质量和耗时权衡。
+5. 刷新真实基线后运行 `conda run -n firstrag python scripts/eval_summary.py`，确认趋势报告没有异常漂移。
+
+报告、历史 JSON 和 case 文件只允许记录非敏感问题、文件名、diagnostics 摘要和脱敏 answer preview；不要写入 API Key、JWT、数据库密码、私有文档原文或完整用户凭据。
+
 常用覆盖项：
 
 ```bash
@@ -188,6 +223,9 @@ scripts/rag_eval_gate.sh
 | 字段 | 说明 |
 | --- | --- |
 | `id` | 评测用例唯一标识。 |
+| `category` | 可选。case 分类，用于报告聚合，例如 `default_baseline`、`no_answer`、`parameter_variant`。 |
+| `coverage` | 可选。覆盖标签列表，用于说明该 case 覆盖的风险点或参数组合。 |
+| `source` | 可选。case 来源，例如 `real_question_seed`、`feedback_seed`、`tuning_comparison_seed`。 |
 | `knowledge_base_name` | 要使用的知识库名称，找不到时会使用默认知识库。 |
 | `question` | 用户问题。 |
 | `pre_questions` | 可选。同一临时会话中先发送的预热问题，用于覆盖多轮追问。 |

@@ -8,6 +8,7 @@ import json
 import os
 import sys
 import time
+from collections import Counter
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -545,6 +546,63 @@ def average_or_none(values: list[float]) -> float | None:
     return sum(values) / len(values)
 
 
+def normalize_string_list(value: Any) -> list[str]:
+    """把 case 元数据中的单值或列表规范成字符串列表。"""
+    if value is None:
+        return []
+    if isinstance(value, str):
+        normalized = [value.strip()]
+    elif isinstance(value, (list, tuple, set)):
+        normalized = [str(item).strip() for item in value]
+    else:
+        normalized = [str(value).strip()]
+    return [item for item in normalized if item]
+
+
+def get_case_metadata(case: dict[str, Any]) -> dict[str, Any]:
+    """提取用于报告聚合的 case 分类、覆盖项和来源。"""
+    coverage = normalize_string_list(case.get("coverage") or case.get("tags"))
+    return {
+        "category": str(case.get("category") or "未分类"),
+        "coverage": coverage or ["未标注"],
+        "source": str(case.get("source") or "manual"),
+    }
+
+
+def sorted_counter_dict(counter: Counter[str]) -> dict[str, int]:
+    """将 Counter 转成按 key 排序的普通 dict，便于稳定落盘。"""
+    return {
+        key: counter[key]
+        for key in sorted(counter)
+    }
+
+
+def failed_check_names(result: dict[str, Any]) -> list[str]:
+    """返回单条结果中未通过的检查项名称。"""
+    return [
+        str(check["name"])
+        for check in result.get("checks", [])
+        if not check.get("passed")
+    ]
+
+
+def build_failed_case_summaries(results: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """构建失败 case 的短摘要，供命令行和 Markdown 报告复用。"""
+    summaries: list[dict[str, Any]] = []
+    for result in results:
+        if result["passed"]:
+            continue
+        case = result["case"]
+        metadata = get_case_metadata(case)
+        summaries.append({
+            "id": str(case.get("id") or "unknown"),
+            "category": metadata["category"],
+            "question": str(case.get("question") or ""),
+            "failed_checks": failed_check_names(result),
+        })
+    return summaries
+
+
 def compact_diagnostics(retrieval: dict[str, Any]) -> dict[str, Any]:
     """提取报告中最常用的检索诊断字段。"""
     diagnostics = retrieval.get("diagnostics") or {}
@@ -632,7 +690,20 @@ def build_summary(results: list[dict[str, Any]]) -> dict[str, Any]:
     cache_observed_count = 0
     settings_cache_hit_count = 0
     settings_cache_observed_count = 0
+    category_counts: Counter[str] = Counter()
+    coverage_counts: Counter[str] = Counter()
+    source_counts: Counter[str] = Counter()
+    failed_case_ids: list[str] = []
     for result in results:
+        case = result["case"]
+        metadata = get_case_metadata(case)
+        category_counts[metadata["category"]] += 1
+        source_counts[metadata["source"]] += 1
+        for coverage in metadata["coverage"]:
+            coverage_counts[coverage] += 1
+        if not result["passed"]:
+            failed_case_ids.append(str(case.get("id") or "unknown"))
+
         diagnostics = compact_diagnostics(result["chat_result"].retrieval)
         timing = diagnostics["timing"]
         first_token_ms = numeric_value(timing.get("first_answer_token_ms"))
@@ -723,6 +794,10 @@ def build_summary(results: list[dict[str, Any]]) -> dict[str, Any]:
             else None
         ),
         "average_total_tokens": average_or_none(total_token_values),
+        "case_categories": sorted_counter_dict(category_counts),
+        "case_coverage": sorted_counter_dict(coverage_counts),
+        "case_sources": sorted_counter_dict(source_counts),
+        "failed_case_ids": failed_case_ids,
     }
 
 
@@ -819,8 +894,12 @@ def serialize_result(result: dict[str, Any]) -> dict[str, Any]:
     """序列化单条评测结果用于历史 JSON。"""
     case = result["case"]
     chat_result = result["chat_result"]
+    metadata = get_case_metadata(case)
     return {
         "id": case["id"],
+        "category": metadata["category"],
+        "coverage": metadata["coverage"],
+        "source": metadata["source"],
         "question": case["question"],
         "passed": result["passed"],
         "elapsed_seconds": chat_result.elapsed_seconds,
@@ -845,7 +924,7 @@ def build_run_record(
     """构建可落盘的评测历史记录。"""
     quality_gate_checks = quality_gate_checks or []
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "generated_at": generated_at.isoformat(timespec="seconds"),
         "base_url": base_url,
         "cases_path": str(cases_path),
@@ -905,6 +984,11 @@ def format_delta(current: Any, previous: Any, precision: int = 2) -> str:
     delta = current - previous
     sign = "+" if delta > 0 else ""
     return f"{sign}{delta:.{precision}f}"
+
+
+def markdown_cell(value: Any) -> str:
+    """转义 Markdown 表格单元格中的换行和竖线。"""
+    return str(value).replace("\n", " ").replace("|", "\\|")
 
 
 def append_history_comparison(
@@ -968,6 +1052,65 @@ def append_history_comparison(
     lines.append("")
 
 
+def append_case_coverage_summary(
+    lines: list[str],
+    summary: dict[str, Any],
+) -> None:
+    """向 Markdown 报告追加评测集分类和覆盖范围摘要。"""
+    lines.extend([
+        "## 评测集覆盖",
+        "",
+        "| 类型 | 项 | 数量 |",
+        "| --- | --- | ---: |",
+    ])
+    groups = [
+        ("case_categories", "分类"),
+        ("case_coverage", "覆盖项"),
+        ("case_sources", "来源"),
+    ]
+    for key, label in groups:
+        values = summary.get(key) or {}
+        for item, count in values.items():
+            lines.append(
+                f"| {label} | {markdown_cell(item)} | {count} |",
+            )
+    lines.append("")
+
+
+def append_failed_case_summary(
+    lines: list[str],
+    results: list[dict[str, Any]],
+) -> None:
+    """向 Markdown 报告追加失败 case 摘要。"""
+    failed_cases = build_failed_case_summaries(results)
+    lines.extend([
+        "## 失败 Case 摘要",
+        "",
+    ])
+    if not failed_cases:
+        lines.extend([
+            "本轮无失败 case。",
+            "",
+        ])
+        return
+
+    lines.extend([
+        "| Case | 分类 | 问题 | 失败检查 |",
+        "| --- | --- | --- | --- |",
+    ])
+    for failed_case in failed_cases:
+        failed_checks = ", ".join(failed_case["failed_checks"]) or "未记录"
+        lines.append(
+            "| {case_id} | {category} | {question} | {checks} |".format(
+                case_id=markdown_cell(failed_case["id"]),
+                category=markdown_cell(failed_case["category"]),
+                question=markdown_cell(failed_case["question"][:120]),
+                checks=markdown_cell(failed_checks),
+            ),
+        )
+    lines.append("")
+
+
 def write_report(
     results: list[dict[str, Any]],
     report_path: Path,
@@ -1024,11 +1167,16 @@ def write_report(
             rate=format_number(summary["retrieval_settings_cache_hit_rate"]),
         ),
         f"- 平均 token：{format_number(summary['average_total_tokens'])}",
+        "- 失败 case：{failed_cases}".format(
+            failed_cases=", ".join(summary["failed_case_ids"]) or "无",
+        ),
         f"- 质量门禁：{'通过' if quality_gate_passed else '未通过'}",
         f"- 历史 JSON：{history_path or '未生成'}",
         "",
     ]
     append_history_comparison(lines, summary, previous_run)
+    append_case_coverage_summary(lines, summary)
+    append_failed_case_summary(lines, results)
     if quality_gate_checks:
         lines.extend([
             "## 质量门禁",
@@ -1071,19 +1219,21 @@ def write_report(
     lines.append("")
 
     lines.extend([
-        "| Case | 结果 | 耗时 | 是否检索 | 引用数 | 命中文件 |",
-        "| --- | --- | ---: | --- | ---: | --- |",
+        "| Case | 分类 | 结果 | 耗时 | 是否检索 | 引用数 | 命中文件 |",
+        "| --- | --- | --- | ---: | --- | ---: | --- |",
     ])
 
     for result in results:
         case = result["case"]
+        metadata = get_case_metadata(case)
         chat_result = result["chat_result"]
         retrieval = chat_result.retrieval
         diagnostics = compact_diagnostics(retrieval)
         file_names = source_file_names(chat_result.sources)
         lines.append(
-            "| {case_id} | {status} | {elapsed:.2f}s | {need} | {source_count} | {files} |".format(
+            "| {case_id} | {category} | {status} | {elapsed:.2f}s | {need} | {source_count} | {files} |".format(
                 case_id=case["id"],
+                category=metadata["category"],
                 status="✅" if result["passed"] else "❌",
                 elapsed=chat_result.elapsed_seconds,
                 need=format_bool(diagnostics["need_retrieval"]),
@@ -1128,12 +1278,16 @@ def write_report(
 
     for result in results:
         case = result["case"]
+        metadata = get_case_metadata(case)
         chat_result = result["chat_result"]
         diagnostics = compact_diagnostics(chat_result.retrieval)
         lines.extend([
             "",
             f"## {case['id']}",
             "",
+            f"- 分类：{metadata['category']}",
+            f"- 覆盖项：{', '.join(metadata['coverage'])}",
+            f"- 来源：{metadata['source']}",
             f"- 问题：{case['question']}",
             f"- 结果：{'通过' if result['passed'] else '未通过'}",
             f"- 耗时：{chat_result.elapsed_seconds:.2f}s",
@@ -1343,7 +1497,33 @@ def main() -> int:
         quality_gate_checks=quality_gate_checks,
     )
     passed_count = sum(1 for result in results if result["passed"])
-    print(f"RAG eval passed {passed_count}/{len(results)}")
+    print(
+        "RAG eval passed {passed}/{total} "
+        "(pass_rate={pass_rate}, average_sources={average_sources}, "
+        "average_first_token_ms={average_first_token_ms})".format(
+            passed=passed_count,
+            total=len(results),
+            pass_rate=format_number(summary["pass_rate"]),
+            average_sources=format_number(summary["average_sources"]),
+            average_first_token_ms=format_number(
+                summary["average_first_token_ms"],
+            ),
+        ),
+    )
+    failed_cases = build_failed_case_summaries(results)
+    if failed_cases:
+        print("Failed cases:")
+        for failed_case in failed_cases:
+            failed_checks = ", ".join(failed_case["failed_checks"]) or "unknown"
+            print(
+                "- {case_id} [{category}]: {checks}".format(
+                    case_id=failed_case["id"],
+                    category=failed_case["category"],
+                    checks=failed_checks,
+                ),
+            )
+    else:
+        print("Failed cases: none")
     if quality_gate_checks:
         print("Quality gate:")
         for check in quality_gate_checks:

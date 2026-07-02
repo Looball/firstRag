@@ -19,10 +19,16 @@ class EvalRagQualityGateTests(unittest.TestCase):
         self,
         *,
         passed: bool = True,
+        case_id: str = "case-id",
+        question: str = "测试问题",
+        category: str | None = None,
+        coverage: list[str] | None = None,
+        source: str | None = None,
         source_count: int = 1,
         timing: dict | None = None,
         total_tokens: int | None = None,
         diagnostics: dict | None = None,
+        checks: list[dict] | None = None,
     ) -> dict:
         """构建最小可用的 eval result。"""
         retrieval = {
@@ -36,11 +42,19 @@ class EvalRagQualityGateTests(unittest.TestCase):
         if total_tokens is not None:
             retrieval["diagnostics"]["llm"]["total_tokens"] = total_tokens
 
+        case = {
+            "id": case_id,
+            "question": question,
+        }
+        if category is not None:
+            case["category"] = category
+        if coverage is not None:
+            case["coverage"] = coverage
+        if source is not None:
+            case["source"] = source
+
         return {
-            "case": {
-                "id": "case-id",
-                "question": "测试问题",
-            },
+            "case": case,
             "passed": passed,
             "chat_result": eval_rag.ChatResult(
                 answer="answer",
@@ -49,7 +63,7 @@ class EvalRagQualityGateTests(unittest.TestCase):
                 message_id="message-id",
                 elapsed_seconds=1.5,
             ),
-            "checks": [],
+            "checks": checks or [],
         }
 
     def test_build_summary_uses_pre_answer_as_first_token_fallback(self):
@@ -108,6 +122,53 @@ class EvalRagQualityGateTests(unittest.TestCase):
         self.assertEqual(summary["retrieval_settings_cache_observed_count"], 2)
         self.assertEqual(summary["retrieval_settings_cache_hit_rate"], 0.5)
         self.assertEqual(summary["average_total_tokens"], 200)
+        self.assertEqual(summary["case_categories"], {"未分类": 2})
+        self.assertEqual(summary["case_coverage"], {"未标注": 2})
+        self.assertEqual(summary["case_sources"], {"manual": 2})
+        self.assertEqual(summary["failed_case_ids"], [])
+
+    def test_build_summary_tracks_case_coverage_and_failed_ids(self):
+        """summary 应汇总 case 分类、覆盖项、来源和失败 case id。"""
+        results = [
+            self.build_result(
+                category="default_baseline",
+                coverage=["default_4_16_16_8", "rerank_on"],
+                source="real_question_seed",
+            ),
+            self.build_result(
+                passed=False,
+                case_id="source-feedback-case",
+                category="source_feedback_bad_case",
+                coverage=["default_4_16_16_8", "source_feedback"],
+                source="feedback_seed",
+            ),
+        ]
+
+        summary = eval_rag.build_summary(results)
+
+        self.assertEqual(
+            summary["case_categories"],
+            {
+                "default_baseline": 1,
+                "source_feedback_bad_case": 1,
+            },
+        )
+        self.assertEqual(
+            summary["case_coverage"],
+            {
+                "default_4_16_16_8": 2,
+                "rerank_on": 1,
+                "source_feedback": 1,
+            },
+        )
+        self.assertEqual(
+            summary["case_sources"],
+            {
+                "feedback_seed": 1,
+                "real_question_seed": 1,
+            },
+        )
+        self.assertEqual(summary["failed_case_ids"], ["source-feedback-case"])
 
     def test_quality_gate_checks_thresholds(self):
         """质量门禁应按命令行阈值生成通过和失败结果。"""
@@ -239,6 +300,46 @@ class EvalRagQualityGateTests(unittest.TestCase):
         self.assertIn("retrieval settings 缓存命中：1/1", report)
         self.assertIn("知识库画像缓存：hit=是，indexed_files=2，total_files=3", report)
         self.assertIn("检索设置缓存：hit=是，source=cache", report)
+        self.assertIn("## 评测集覆盖", report)
+        self.assertIn("## 失败 Case 摘要", report)
+        self.assertIn("本轮无失败 case。", report)
+
+    def test_write_report_includes_failed_case_summary(self):
+        """Markdown 报告应在顶部展示失败 case 摘要。"""
+        result = self.build_result(
+            passed=False,
+            case_id="bad-source-case",
+            question="RRF 和 rerank 分别解决什么排序问题？",
+            category="source_feedback_bad_case",
+            coverage=["source_feedback", "default_4_16_16_8"],
+            source="feedback_seed",
+            checks=[
+                {
+                    "name": "expected_files",
+                    "passed": False,
+                    "expected": ["RAG检索策略全面解析.md"],
+                    "actual": ["无关文件.md"],
+                },
+            ],
+        )
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            report_path = Path(temp_dir) / "report.md"
+            eval_rag.write_report(
+                [result],
+                report_path=report_path,
+                generated_at=datetime(2026, 7, 2, 12, 0, 0),
+            )
+            report = report_path.read_text(encoding="utf-8")
+
+        self.assertIn("- 失败 case：bad-source-case", report)
+        self.assertIn("## 失败 Case 摘要", report)
+        self.assertIn(
+            "| bad-source-case | source_feedback_bad_case | RRF 和 rerank 分别解决什么排序问题？ | expected_files |",
+            report,
+        )
+        self.assertIn("| 分类 | source_feedback_bad_case | 1 |", report)
+        self.assertIn("| 来源 | feedback_seed | 1 |", report)
 
 
 if __name__ == "__main__":
