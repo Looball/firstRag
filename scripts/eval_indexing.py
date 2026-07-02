@@ -469,6 +469,11 @@ def compact_diagnostics(retrieval: dict[str, Any]) -> dict[str, Any]:
             retrieval.get("vector_degraded")
             or diagnostics.get("vector_degraded")
         ),
+        "vector_errors": (
+            retrieval.get("vector_errors")
+            or diagnostics.get("vector_errors")
+            or []
+        ),
         "timing": diagnostics.get("timing") or {},
         "llm": diagnostics.get("llm") or {},
         "reason": retrieval.get("reason"),
@@ -489,6 +494,19 @@ def evaluate_result(
         str(source.get("file_name") or "")
         for source in chat_result.sources
     ]
+    uploaded_file_sources = [
+        source
+        for source in chat_result.sources
+        if str(source.get("file_name") or "") == expected_filename
+    ]
+    uploaded_file_source_channels = [
+        source.get("retrieval_sources") or []
+        for source in uploaded_file_sources
+    ]
+    uploaded_file_has_vector_source = any(
+        "vector" in channels
+        for channels in uploaded_file_source_channels
+    )
     answer = chat_result.answer
     diagnostics = compact_diagnostics(chat_result.retrieval)
     return [
@@ -527,6 +545,21 @@ def evaluate_result(
             "passed": expected_filename in source_names,
             "expected": expected_filename,
             "actual": source_names,
+        },
+        {
+            "name": "chat_vector_not_degraded",
+            "passed": diagnostics["vector_degraded"] is not True,
+            "expected": False,
+            "actual": {
+                "vector_degraded": diagnostics["vector_degraded"],
+                "vector_errors": diagnostics["vector_errors"],
+            },
+        },
+        {
+            "name": "uploaded_file_source_uses_vector",
+            "passed": uploaded_file_has_vector_source,
+            "expected": "vector",
+            "actual": uploaded_file_source_channels,
         },
         {
             "name": "answer_contains_eval_keyword",
@@ -648,6 +681,7 @@ def write_report(
         f"- 展示引用：{len(chat['sources'])}",
         f"- 检索通道：{diagnostics['retrieval_sources'] or '—'}",
         f"- 向量降级：{diagnostics['vector_degraded']}",
+        f"- 向量错误：{diagnostics['vector_errors'] or '—'}",
         f"- LLM：provider={diagnostics['llm'].get('provider', '—')}，model={diagnostics['llm'].get('model', '—')}，tokens={diagnostics['llm'].get('total_tokens') or '—'}",
         f"- 判断原因：{diagnostics['reason'] or '—'}",
         "",

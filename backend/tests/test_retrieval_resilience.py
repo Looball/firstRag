@@ -46,6 +46,45 @@ class FakeVectorStore:
         ]
 
 
+class FakeFallbackVectorStore:
+    """模拟单文件过滤失败但用户级过滤可命中的 Chroma 向量库。"""
+
+    def similarity_search_by_vector_with_relevance_scores(
+        self,
+        embedding: list[float],
+        k: int,
+        filter: dict,
+    ) -> list[tuple[Document, float]]:
+        """单文件过滤抛错，用户级过滤返回待后过滤候选。"""
+        if "$and" in filter:
+            raise RuntimeError("Error finding id")
+
+        return [
+            (
+                Document(
+                    page_content="目标文件向量候选",
+                    metadata={
+                        "user_id": "6",
+                        "file_id": "target-file",
+                        "chunk_index": 1,
+                    },
+                ),
+                0.1,
+            ),
+            (
+                Document(
+                    page_content="其它文件向量候选",
+                    metadata={
+                        "user_id": "6",
+                        "file_id": "other-file",
+                        "chunk_index": 1,
+                    },
+                ),
+                0.2,
+            ),
+        ]
+
+
 class FakeReranker:
     """模拟 CrossEncoder reranker，避免单元测试加载真实模型。"""
 
@@ -102,6 +141,29 @@ class RetrievalResilienceTests(unittest.TestCase):
 
         self.assertEqual(len(docs), 1)
         self.assertEqual(docs[0].metadata["file_id"], "good-file")
+        self.assertEqual(docs[0].metadata["retrieval_source"], "vector")
+
+    def test_vector_search_retries_user_scope_after_file_filter_failure(
+        self,
+    ) -> None:
+        """单文件过滤触发 Chroma HNSW 错误时，应退回用户级检索后过滤。"""
+        with unittest.mock.patch(
+            "app.services.retrieval.hybrid_retriever.ZhipuAIEmbeddings",
+        ) as embedding_cls, unittest.mock.patch(
+            "app.services.retrieval.hybrid_retriever.get_vector_store",
+            return_value=FakeFallbackVectorStore(),
+        ):
+            embedding_cls.return_value.embed_query.return_value = [0.1, 0.2]
+
+            docs = get_vector_documents(
+                query="索引验收标识是什么",
+                user_id=6,
+                file_ids=["target-file"],
+                k=5,
+            )
+
+        self.assertEqual(len(docs), 1)
+        self.assertEqual(docs[0].metadata["file_id"], "target-file")
         self.assertEqual(docs[0].metadata["retrieval_source"], "vector")
 
     def test_hybrid_retrieval_skips_rerank_when_candidates_fit_top_k(

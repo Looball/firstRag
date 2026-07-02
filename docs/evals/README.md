@@ -11,8 +11,8 @@
 | 检查项 | 命令 | 结果 |
 | --- | --- | --- |
 | RAG eval gate | `FIRSTRAG_EVAL_USERNAME=你的用户名 FIRSTRAG_EVAL_PASSWORD=你的密码 scripts/rag_eval_gate.sh` | 通过，14/14 case 通过；平均引用 2.00，平均首 token 2701.22ms，平均耗时 5.90s，失败 case 为 0，质量门禁全部 PASS。 |
-| Indexing eval | `FIRSTRAG_EVAL_USERNAME=你的用户名 FIRSTRAG_EVAL_PASSWORD=你的密码 conda run -n firstrag python scripts/eval_indexing.py --base-url http://127.0.0.1:8000` | 通过，上传、auto index、worker 完成、文件 indexed、聊天 Sources 命中新文件均通过；job `succeeded`，聊天耗时 9.25s，引用数 1。 |
-| Eval summary | `conda run -n firstrag python scripts/eval_summary.py` | 通过，RAG 历史 30 次、Indexing 历史 5 次；RAG 历史平均通过率 0.98，Indexing 历史通过率 1.00。 |
+| Indexing eval | `FIRSTRAG_EVAL_USERNAME=你的用户名 FIRSTRAG_EVAL_PASSWORD=你的密码 conda run -n firstrag python scripts/eval_indexing.py --base-url http://127.0.0.1:8000` | 通过，上传、auto index、worker 完成、文件 indexed、聊天 Sources 命中新文件且包含 vector 通道；job `succeeded`，聊天耗时 12.01s，引用数 1，向量降级为否。 |
+| Eval summary | `conda run -n firstrag python scripts/eval_summary.py` | 通过，RAG 历史 30 次、Indexing 历史 6 次；RAG 历史平均通过率 0.98，Indexing 历史通过率 1.00。 |
 
 本轮生成的最新报告：
 
@@ -255,7 +255,8 @@ scripts/rag_eval_gate.sh
   -> 等待 worker 完成
   -> 确认文件状态为 indexed
   -> 发起聊天
-  -> 确认 Sources 命中刚上传的临时文件
+  -> 确认 Sources 命中刚上传的临时文件，且该 source 包含 vector 通道
+  -> 确认本轮聊天没有 vector_degraded 或 vector_errors
   -> 默认解除临时文件与知识库关联
 ```
 

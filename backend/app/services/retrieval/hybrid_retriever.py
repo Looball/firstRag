@@ -43,6 +43,7 @@ logger = logging.getLogger(__name__)
 QUERY_EMBEDDING_PROVIDER = "zhipuai"
 QUERY_EMBEDDING_MODEL = "embedding-3"
 QUERY_EMBEDDING_CACHE_TTL_SECONDS = 300.0
+MAX_VECTOR_FILTER_FALLBACK_CANDIDATES = 100
 
 _QUERY_EMBEDDING_CACHE: dict[
     tuple[str, str, str],
@@ -214,6 +215,34 @@ def build_file_chroma_filter(user_id: int, file_id: UUID | str) -> dict:
     }
 
 
+def retry_file_vector_search_without_file_filter(
+    *,
+    vectordb: Any,
+    query_embedding: list[float],
+    user_id: int,
+    file_id: UUID | str,
+    k: int,
+) -> list[tuple[Document, float]]:
+    """单文件过滤失败时，退回用户级检索并在 Python 侧过滤文件。
+
+    Chroma HNSW 删除/重建后偶发 `Error finding id`，常见于带 metadata
+    文件过滤的查询。用户级过滤更宽，命中后再按 file_id 过滤，避免一次
+    Chroma 内部索引残留错误让该文件完全失去 vector 召回机会。
+    """
+    fallback_k = min(max(k * 5, k), MAX_VECTOR_FILTER_FALLBACK_CANDIDATES)
+    candidates = vectordb.similarity_search_by_vector_with_relevance_scores(
+        embedding=query_embedding,
+        k=fallback_k,
+        filter={"user_id": str(user_id)},
+    )
+    normalized_file_id = str(file_id)
+    return [
+        (document, score)
+        for document, score in candidates
+        if str(document.metadata.get("file_id") or "") == normalized_file_id
+    ][:k]
+
+
 def get_vector_documents(
     query: str,
     user_id: int,
@@ -271,6 +300,23 @@ def get_vector_documents(
                         )
                     )
                 except Exception as exc:
+                    try:
+                        fallback_candidates = (
+                            retry_file_vector_search_without_file_filter(
+                                vectordb=vectordb,
+                                query_embedding=query_embedding,
+                                user_id=user_id,
+                                file_id=file_id,
+                                k=k,
+                            )
+                        )
+                    except Exception:
+                        fallback_candidates = []
+
+                    if fallback_candidates:
+                        scored_candidates.extend(fallback_candidates)
+                        continue
+
                     # Chroma 删除/重建向量后偶发 HNSW 残留错误。
                     # 单文件失败不应拖垮整个知识库检索，后续仍可依赖其它文件
                     # 和 PostgreSQL 全文检索兜底。
