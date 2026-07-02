@@ -110,7 +110,7 @@
 | `T-043` | `PLAN-20260701-02` | `P1` | `Done` | 强化文件上传、向量化任务和 worker 异常状态体验 | 2026-07-01 | `6b3b606` |
 | `T-044` | `PLAN-20260701-02` | `P0` | `Done` | 补齐认证、限流、配额和用户 API Key 风控 | 2026-07-01 | `2a27a13` |
 | `T-045` | `PLAN-20260701-02` | `P1` | `Done` | 建立统一日志、错误定位和基础监控指标 | 2026-07-02 | `60fd39c` |
-| `T-046` | `PLAN-20260701-02` | `P1` | `Todo` | 准备真实问题集并固化上线前 RAG 质量门禁 |  |  |
+| `T-046` | `PLAN-20260701-02` | `P1` | `Done` | 准备真实问题集并固化上线前 RAG 质量门禁 | 2026-07-02 | `88d1c49` |
 | `T-047` | `PLAN-20260701-02` | `P2` | `Todo` | 区分普通用户模式和高级/开发模式 |  |  |
 
 ## 新计划接入流程
@@ -1612,6 +1612,16 @@ scripts/acceptance_check.sh
 
 conda run -n firstrag python scripts/eval_summary.py
 ```
+
+- 完成记录：
+  - 完成日期：2026-07-02
+  - 相关 commit：`88d1c49`
+  - `docs/evals/rag_eval_cases.jsonl` 扩展为 14 条非敏感可复跑 case，覆盖默认 `4/16/16/8`、多轮追问、无答案/低相关、rerank/query router 开关、小候选池参数组合和旧 `rrf_k=10` 对照。
+  - `scripts/eval_rag.py` 的 summary、历史 JSON、Markdown 报告和命令行输出新增 case 分类/覆盖项、失败 case 摘要和平均 sources/首 token 门禁摘要。
+  - `docs/evals/README.md` 固化上线前基线口径、回滚/调参建议和 2026-07-02 真实链路结果。
+  - 真实 RAG eval gate：14/14 PASS，通过率 1.00，平均 sources 2.00，平均首 token 2701.22ms，平均耗时 5.90s，失败 case 为 0，质量门禁全部 PASS；报告 `docs/evals/latest_rag_eval_report.md`，历史记录 `docs/evals/runs/20260702_082822.json`。
+  - Indexing eval：通过，job `succeeded`，聊天耗时 9.25s，引用数 1；报告 `docs/evals/latest_indexing_eval_report.md`，历史记录 `docs/evals/indexing_runs/20260702_082957.json`。
+  - 验证命令：`conda run -n firstrag python -c 'import json, pathlib; cases=[json.loads(line) for line in pathlib.Path("docs/evals/rag_eval_cases.jsonl").read_text(encoding="utf-8").splitlines() if line.strip()]; print(len(cases))'`；`cd backend && conda run -n firstrag python -m pytest tests/test_eval_rag_script.py`；`conda run -n firstrag python -m compileall scripts backend/tests/test_eval_rag_script.py`；`conda run -n firstrag python scripts/eval_summary.py`；`FIRSTRAG_EVAL_USERNAME=... FIRSTRAG_EVAL_PASSWORD=... scripts/rag_eval_gate.sh`；`FIRSTRAG_EVAL_USERNAME=... FIRSTRAG_EVAL_PASSWORD=... scripts/acceptance_check.sh`。
 
 ## T-047 区分普通用户模式和高级/开发模式
 
