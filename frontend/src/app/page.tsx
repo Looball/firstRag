@@ -23,6 +23,11 @@ import {
   DEFAULT_KNOWLEDGE_BASE_ID,
   DEFAULT_RETRIEVAL_SETTINGS,
 } from "@/lib/chat-workspace/constants";
+import {
+  getAdvancedModeDefault,
+  readAdvancedModePreference,
+  writeAdvancedModePreference,
+} from "@/lib/chat-workspace/advanced-mode";
 import * as chatApi from "@/lib/chat-workspace/api";
 import { useKnowledgeFiles } from "@/lib/chat-workspace/use-knowledge-files";
 import {
@@ -353,6 +358,7 @@ export default function Home() {
   const [sessions, setSessions] = useState<ChatSession[]>([]);
   const [currentSessionId, setCurrentSessionId] = useState("");
   const [input, setInput] = useState("");
+  const [isAdvancedMode, setIsAdvancedMode] = useState(getAdvancedModeDefault);
   const [editingSessionId, setEditingSessionId] = useState("");
   const [editingTitle, setEditingTitle] = useState("");
   const [renamingSessionId, setRenamingSessionId] = useState("");
@@ -590,6 +596,11 @@ export default function Home() {
     setRetrievalSettingsError("");
   }
 
+  function handleAdvancedModeChange(enabled: boolean) {
+    setIsAdvancedMode(enabled);
+    writeAdvancedModePreference(enabled);
+  }
+
   async function loadRetrievalSettings(knowledgeBaseId: string) {
     if (!knowledgeBaseId || knowledgeBaseId === DEFAULT_KNOWLEDGE_BASE_ID) {
       return;
@@ -715,8 +726,23 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
+    setIsAdvancedMode(readAdvancedModePreference());
+  }, []);
+
+  useEffect(() => {
+    if (isAdvancedMode) {
+      return;
+    }
+
+    setIsQualityDashboardOpen(false);
+    setExpandedDiagnosticPanels({});
+    setActiveFeedbackMessageKey("");
+  }, [isAdvancedMode]);
+
+  useEffect(() => {
     if (
       !hasCheckedAuth ||
+      !isAdvancedMode ||
       !isKnowledgeBaseManagerOpen ||
       !selectedKnowledgeBaseId ||
       selectedKnowledgeBaseId === DEFAULT_KNOWLEDGE_BASE_ID
@@ -727,6 +753,7 @@ export default function Home() {
     void loadRetrievalSettings(selectedKnowledgeBaseId);
   }, [
     hasCheckedAuth,
+    isAdvancedMode,
     isKnowledgeBaseManagerOpen,
     selectedKnowledgeBaseId,
   ]);
@@ -1256,6 +1283,10 @@ export default function Home() {
   }
 
   async function handleExportEvalDraft(messageKey: string, messageId?: string) {
+    if (!isAdvancedMode) {
+      return;
+    }
+
     if (!messageId) {
       setEvalDraftErrors((prev) => ({
         ...prev,
@@ -1308,6 +1339,10 @@ export default function Home() {
   }
 
   async function handleToggleQualityDashboard() {
+    if (!isAdvancedMode) {
+      return;
+    }
+
     const shouldOpen = !isQualityDashboardOpen;
 
     setIsQualityDashboardOpen(shouldOpen);
@@ -1331,6 +1366,10 @@ export default function Home() {
   }
 
   async function handleRefreshQualityDashboard() {
+    if (!isAdvancedMode) {
+      return;
+    }
+
     setIsLoadingQualityDashboard(true);
     setQualityDashboardError("");
 
@@ -1389,6 +1428,10 @@ export default function Home() {
   }
 
   function handleToggleDiagnostics(conversationId: string, messageKey: string) {
+    if (!isAdvancedMode) {
+      return;
+    }
+
     const panelKey = `${conversationId}:${messageKey}`;
     const shouldOpen = !expandedDiagnosticPanels[panelKey];
 
@@ -1664,7 +1707,9 @@ export default function Home() {
         setAssistantRetrieval,
         setAssistantSources,
         onDone: () => {
-          void loadConversationDiagnostics(activeSessionId, { silent: true });
+          if (isAdvancedMode) {
+            void loadConversationDiagnostics(activeSessionId, { silent: true });
+          }
         },
       });
     } catch (error) {
@@ -1687,7 +1732,7 @@ export default function Home() {
       <main className="research-canvas flex min-h-screen items-center justify-center px-4">
         <div className="font-utility flex items-center gap-3 text-xs font-semibold text-[#176b62]">
           <span className="h-2.5 w-2.5 animate-pulse bg-[#e36b4f]" />
-          正在整理研究台...
+          正在打开工作台...
         </div>
       </main>
     );
@@ -1700,7 +1745,7 @@ export default function Home() {
           <div className="flex items-center justify-between gap-3 border-b border-[#c7d1cd] px-1 pb-4">
             <div className="min-w-0">
               <p className="font-utility text-[10px] font-semibold uppercase text-[#72807b]">
-                Researcher
+                FirstRAG
               </p>
               <Link
                 href="/settings"
@@ -1722,36 +1767,71 @@ export default function Home() {
           <div className="border-b border-[#c7d1cd] py-4">
             <div className="flex items-center justify-between gap-3">
               <p className="font-utility text-[10px] font-semibold uppercase text-[#72807b]">
-                Quality
+                模式
               </p>
-              <button
-                type="button"
-                onClick={() => {
-                  void handleToggleQualityDashboard();
-                }}
-                className="text-xs font-semibold text-[#176b62] underline decoration-[#d5a83b] decoration-2 underline-offset-4"
-              >
-                {isQualityDashboardOpen ? "收起" : "质量看板"}
-              </button>
+              <div className="grid grid-cols-2 border border-[#cbd5d1] bg-[#f8faf8] p-0.5 text-[11px] font-semibold text-[#64716d]">
+                <button
+                  type="button"
+                  aria-pressed={!isAdvancedMode}
+                  onClick={() => handleAdvancedModeChange(false)}
+                  className={`px-2 py-1 transition ${
+                    !isAdvancedMode
+                      ? "bg-[#176b62] text-white"
+                      : "hover:text-[#176b62]"
+                  }`}
+                >
+                  普通
+                </button>
+                <button
+                  type="button"
+                  aria-pressed={isAdvancedMode}
+                  onClick={() => handleAdvancedModeChange(true)}
+                  className={`px-2 py-1 transition ${
+                    isAdvancedMode
+                      ? "bg-[#176b62] text-white"
+                      : "hover:text-[#176b62]"
+                  }`}
+                >
+                  高级
+                </button>
+              </div>
             </div>
+          </div>
 
-            {isQualityDashboardOpen && (
-              <div className="mt-3 border border-[#d5ded9] bg-[#f8faf8] p-3 text-xs text-[#46514e]">
-                <div className="flex items-center justify-between gap-2">
-                  <p className="font-utility text-[10px] font-semibold uppercase text-[#64716d]">
-                    最近 {qualityDashboard?.windowDays ?? 7} 天
-                  </p>
-                  <button
-                    type="button"
-                    disabled={isLoadingQualityDashboard}
-                    onClick={() => {
-                      void handleRefreshQualityDashboard();
-                    }}
-                    className="font-utility text-[10px] font-semibold uppercase text-[#176b62] disabled:opacity-60"
-                  >
-                    {isLoadingQualityDashboard ? "加载中" : "刷新"}
-                  </button>
-                </div>
+          {isAdvancedMode && (
+            <div className="border-b border-[#c7d1cd] py-4">
+              <div className="flex items-center justify-between gap-3">
+                <p className="font-utility text-[10px] font-semibold uppercase text-[#72807b]">
+                  Quality
+                </p>
+                <button
+                  type="button"
+                  onClick={() => {
+                    void handleToggleQualityDashboard();
+                  }}
+                  className="text-xs font-semibold text-[#176b62] underline decoration-[#d5a83b] decoration-2 underline-offset-4"
+                >
+                  {isQualityDashboardOpen ? "收起" : "质量看板"}
+                </button>
+              </div>
+
+              {isQualityDashboardOpen && (
+                <div className="mt-3 border border-[#d5ded9] bg-[#f8faf8] p-3 text-xs text-[#46514e]">
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="font-utility text-[10px] font-semibold uppercase text-[#64716d]">
+                      最近 {qualityDashboard?.windowDays ?? 7} 天
+                    </p>
+                    <button
+                      type="button"
+                      disabled={isLoadingQualityDashboard}
+                      onClick={() => {
+                        void handleRefreshQualityDashboard();
+                      }}
+                      className="font-utility text-[10px] font-semibold uppercase text-[#176b62] disabled:opacity-60"
+                    >
+                      {isLoadingQualityDashboard ? "加载中" : "刷新"}
+                    </button>
+                  </div>
 
                 {qualityDashboardError && (
                   <p className="mt-3 text-[#9b3c29]">{qualityDashboardError}</p>
@@ -1856,6 +1936,7 @@ export default function Home() {
               </div>
             )}
           </div>
+          )}
 
           <div className="border-b border-[#c7d1cd] py-4">
             <div className="flex items-center justify-between gap-3">
@@ -2076,7 +2157,7 @@ export default function Home() {
                   </span>
                 </div>
                 <h1 className="font-display mt-4 truncate text-3xl font-semibold text-[#17201f] md:text-4xl">
-                  {currentSession?.title || "研究工作台"}
+                  {currentSession?.title || "聊天工作台"}
                 </h1>
                 <p className="mt-2 max-w-2xl text-sm leading-6 text-[#64716d]">
                   基于当前知识库继续提问，回答与上下文会保存在此会话中。
@@ -2084,13 +2165,13 @@ export default function Home() {
               </div>
               <div className="font-utility flex shrink-0 gap-5 border-t border-[#d6dedb] pt-4 text-[10px] uppercase text-[#72807b] md:border-l md:border-t-0 md:pl-5 md:pt-0">
                 <span>
-                  Messages
+                  消息
                   <strong className="mt-1 block text-base text-[#17201f]">
                     {String(currentSession?.messages.length || 0).padStart(2, "0")}
                   </strong>
                 </span>
                 <span>
-                  Files
+                  文件
                   <strong className="mt-1 block text-base text-[#17201f]">
                     {String(selectedKnowledgeBaseFileCount).padStart(2, "0")}
                   </strong>
@@ -2107,7 +2188,7 @@ export default function Home() {
               {!currentSession && (
                 <div className="flex min-h-[240px] items-center justify-center text-center">
                   <p className="text-sm text-[#7b8884]">
-                    输入问题，开始新的研究会话
+                    输入问题，开始新的对话
                   </p>
                 </div>
               )}
@@ -2115,7 +2196,7 @@ export default function Home() {
               {currentSession?.messages.length === 0 && (
                 <div className="border-y border-[#cbd5d1] py-12 text-center">
                   <p className="font-utility text-[10px] font-semibold uppercase text-[#176b62]">
-                    Empty Research Log
+                    Chat
                   </p>
                   <h2 className="font-display mt-3 text-2xl font-semibold text-[#17201f]">
                     从一个明确的问题开始
@@ -2190,6 +2271,7 @@ export default function Home() {
                 );
                 const evalDraftError = evalDraftErrors[messageKey] || "";
                 const canExportEvalDraft =
+                  isAdvancedMode &&
                   isDevelopmentEnvironment &&
                   message.role === "assistant" &&
                   message.feedback?.rating === "negative";
@@ -2207,7 +2289,7 @@ export default function Home() {
                       <span className="block text-[#17201f]">
                         {String(index + 1).padStart(2, "0")}
                       </span>
-                      {message.role === "user" ? "Question" : "Response"}
+                      {message.role === "user" ? "问题" : "回答"}
                     </div>
                     <article
                       className={`min-w-0 px-5 py-4 ${
@@ -2237,11 +2319,11 @@ export default function Home() {
                         <div className="mt-4 border-t border-[#d6dedb] pt-3">
                           <div className="flex flex-wrap items-baseline justify-between gap-2">
                             <p className="font-utility text-[10px] font-semibold uppercase text-[#64716d]">
-                              Sources
+                              引用来源
                             </p>
                             <p className="text-xs text-[#64716d]">
                               可展示 {displaySourceCount} 条
-                              {retrievedCount !== null
+                              {isAdvancedMode && retrievedCount !== null
                                 ? ` · 召回 ${retrievedCount} 段`
                                 : ""}
                             </p>
@@ -2266,6 +2348,15 @@ export default function Home() {
                                   : sourceFeedbackRating === "irrelevant"
                                     ? "已标记：引用无关"
                                     : "";
+                              const sourceFileMeta = [
+                                source.fileName !== source.title
+                                  ? source.fileName
+                                  : "",
+                                source.fileType,
+                                isAdvancedMode ? source.fileId : "",
+                              ]
+                                .filter(Boolean)
+                                .join(" · ");
 
                               return (
                                 <div
@@ -2276,6 +2367,7 @@ export default function Home() {
                                     <p className="min-w-0 truncate font-semibold text-[#17201f]">
                                       {source.title}
                                     </p>
+                                    {isAdvancedMode && (
                                     <div className="font-utility flex shrink-0 flex-wrap justify-end gap-2 text-[10px] text-[#72807b]">
                                       {source.chunkIndex !== undefined && (
                                         <span>
@@ -2313,28 +2405,19 @@ export default function Home() {
                                         <span>{source.metadata}</span>
                                       )}
                                     </div>
+                                    )}
                                   </div>
                                   {source.content && (
                                     <p className="mt-1 max-h-10 overflow-hidden leading-5 text-[#64716d]">
                                       {source.content}
                                     </p>
                                   )}
-                                  {((source.fileName &&
-                                    source.fileName !== source.title) ||
-                                    source.fileType ||
-                                    source.fileId) && (
+                                  {sourceFileMeta && (
                                     <p className="mt-1 truncate text-[11px] text-[#72807b]">
-                                      {[
-                                        source.fileName !== source.title
-                                          ? source.fileName
-                                          : "",
-                                        source.fileType,
-                                        source.fileId,
-                                      ]
-                                        .filter(Boolean)
-                                        .join(" · ")}
+                                      {sourceFileMeta}
                                     </p>
                                   )}
+                                  {isAdvancedMode && (
                                   <div className="mt-2 flex flex-wrap items-center justify-between gap-2 border-t border-[#e2e8e5] pt-2">
                                     {sourceFeedbackRating &&
                                     !isSourceFeedbackSubmitting ? (
@@ -2399,6 +2482,7 @@ export default function Home() {
                                         </p>
                                       )}
                                   </div>
+                                  )}
                                 </div>
                               );
                             })}
@@ -2407,6 +2491,7 @@ export default function Home() {
                       )}
 
                       {message.role === "assistant" &&
+                        isAdvancedMode &&
                         isDiagnosticExpanded && (
                           <MessageDiagnosticsPanel
                             messageKey={messageKey}
@@ -2419,9 +2504,14 @@ export default function Home() {
 
                       {message.role === "assistant" && message.content && (
                         <div className="mt-4 border-t border-[#d6dedb] pt-3">
-                          <div className="flex flex-wrap items-center justify-between gap-3">
-                            {messageFeedbackRating &&
-                            !isFeedbackSubmitting ? (
+                          <div
+                            className={`flex flex-wrap items-center gap-3 ${
+                              isAdvancedMode ? "justify-between" : "justify-end"
+                            }`}
+                          >
+                            {isAdvancedMode &&
+                              (messageFeedbackRating &&
+                              !isFeedbackSubmitting ? (
                               <p
                                 className={`font-utility text-[10px] font-semibold uppercase ${
                                   messageFeedbackRating === "positive"
@@ -2461,7 +2551,7 @@ export default function Home() {
                                   有问题
                                 </button>
                               </div>
-                            )}
+                            ))}
                             <div className="flex flex-wrap items-center gap-3">
                               {canExportEvalDraft && (
                                 <button
@@ -2480,6 +2570,7 @@ export default function Home() {
                                     : "Eval 草稿"}
                                 </button>
                               )}
+                              {isAdvancedMode && (
                               <button
                                 type="button"
                                 onClick={() =>
@@ -2492,6 +2583,7 @@ export default function Home() {
                               >
                                 {isDiagnosticExpanded ? "收起诊断" : "诊断"}
                               </button>
+                              )}
                               <button
                                 type="button"
                                 onClick={() =>
@@ -2500,12 +2592,12 @@ export default function Home() {
                                 className="font-utility text-[10px] font-semibold uppercase text-[#64716d] transition hover:text-[#176b62]"
                               >
                                 {copiedMessageKey === messageKey
-                                  ? "Copied"
-                                  : "Copy Response"}
+                                  ? "已复制"
+                                  : "复制回答"}
                               </button>
                             </div>
                           </div>
-                          {isFeedbackPanelOpen && (
+                          {isAdvancedMode && isFeedbackPanelOpen && (
                             <div className="mt-3 grid gap-2 border border-[#d5ded9] bg-[#fcfdfb] p-3">
                               <div className="grid gap-2 md:grid-cols-[180px_minmax(0,1fr)]">
                                 <select
@@ -2567,19 +2659,22 @@ export default function Home() {
                               </div>
                             </div>
                           )}
-                          {!isFeedbackPanelOpen && feedbackError && (
+                          {isAdvancedMode && !isFeedbackPanelOpen && feedbackError && (
                             <p className="mt-2 text-xs text-[#9b3c29]">
                               {feedbackError}
                             </p>
                           )}
-                          {!feedbackError &&
+                          {isAdvancedMode &&
+                            !feedbackError &&
                             feedbackMessage &&
                             !messageFeedbackRating && (
                             <p className="mt-2 text-xs text-[#176b62]">
                               {feedbackMessage}
                             </p>
                           )}
-                          {isDevelopmentEnvironment && evalDraftError && (
+                          {isAdvancedMode &&
+                            isDevelopmentEnvironment &&
+                            evalDraftError && (
                             <p className="mt-2 text-xs text-[#9b3c29]">
                               {evalDraftError}
                             </p>
@@ -2761,6 +2856,7 @@ export default function Home() {
                 })}
               </div>
 
+              {isAdvancedMode && (
               <div className="mt-6 border border-[#cbd5d1] bg-[#f7faf8] px-4 py-4">
                 <div className="flex items-start justify-between gap-4">
                   <div>
@@ -2906,6 +3002,7 @@ export default function Home() {
                   {isSavingRetrievalSettings ? "保存中..." : "保存检索设置"}
                 </button>
               </div>
+              )}
 
               <div className="mt-6">
                 <label

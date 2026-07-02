@@ -31,6 +31,12 @@ npm run dev
 
 默认访问 `http://localhost:3000`。
 
+## 普通模式与高级模式
+
+聊天工作台默认按普通用户模式展示，只保留聊天、知识库、文件、引用来源和必要状态提示。高级/开发模式通过工作台侧栏的本地开关打开，打开后展示 diagnostics、eval case 草稿、回答反馈、source feedback、质量看板和知识库检索参数。
+
+新浏览器会使用 `NEXT_PUBLIC_FIRSTRAG_ADVANCED_MODE_DEFAULT` 作为高级模式默认值；未配置或设为 `false` 时默认进入普通模式。用户手动切换后，偏好会写入浏览器 `localStorage`，只影响当前浏览器。
+
 ## API 代理约定
 
 前端 API Route 默认将请求转发到：
