@@ -1,6 +1,7 @@
 """向量化任务 worker 的回归测试。"""
 
 import io
+import json
 import unittest
 from contextlib import redirect_stdout
 from uuid import uuid4
@@ -80,6 +81,10 @@ class VectorIndexWorkerLoggingTests(unittest.TestCase):
         self.assertTrue(processed)
         self.assertEqual(stdout.getvalue(), "")
         self.assertIn("向量化任务失败", "\n".join(logs.output))
+        failed_payload = json.loads(logs.records[-1].getMessage())
+        self.assertEqual(failed_payload["event"], "vector_index_job_failed")
+        self.assertEqual(failed_payload["error_source"], "worker")
+        self.assertEqual(failed_payload["job_id"], str(job_id))
         mark_failed.assert_called_once_with(job_id, "boom")
 
     def test_process_empty_document_failure_marks_job_failed(self) -> None:

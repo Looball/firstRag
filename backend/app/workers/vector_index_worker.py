@@ -2,8 +2,10 @@ import argparse
 import logging
 import socket
 import time
+from time import perf_counter
 from uuid import UUID
 
+from app.core.observability import log_exception_event, log_structured_event
 from app.repositories.knowledge_file_repository import get_user_knowledge_file
 from app.repositories.vector_index_job_repository import (
     claim_next_vector_index_job,
@@ -22,10 +24,13 @@ def process_next_vector_index_job(worker_id: str) -> bool:
     """领取并处理一个向量化任务；没有任务时返回 False。"""
     reclaimed_count = reclaim_expired_vector_index_jobs()
     if reclaimed_count:
-        logger.info(
-            "回收过期向量化任务 worker_id=%s count=%s",
-            worker_id,
-            reclaimed_count,
+        log_structured_event(
+            logger,
+            logging.INFO,
+            "vector_index_jobs_reclaimed",
+            worker_id=worker_id,
+            reclaimed_count=reclaimed_count,
+            message="回收过期向量化任务",
         )
 
     job = claim_next_vector_index_job(worker_id)
@@ -36,6 +41,22 @@ def process_next_vector_index_job(worker_id: str) -> bool:
     user_id = job["user_id"]
     file_id = job["knowledge_file_id"]
     index_version = job.get("index_version", 0)
+    job_started_at = perf_counter()
+    log_context = {
+        "worker_id": worker_id,
+        "job_id": str(job_id),
+        "user_id": user_id,
+        "file_id": str(file_id),
+        "index_version": index_version,
+    }
+
+    log_structured_event(
+        logger,
+        logging.INFO,
+        "vector_index_job_claimed",
+        **log_context,
+        message="领取向量化任务",
+    )
 
     try:
         file_record = get_user_knowledge_file(user_id, file_id)
@@ -47,11 +68,14 @@ def process_next_vector_index_job(worker_id: str) -> bool:
                 UUID(str(job_id)),
                 "文件索引版本已更新，旧任务已取消",
             )
-            logger.info(
-                "取消过期向量化任务 worker_id=%s file_id=%s job_id=%s",
-                worker_id,
-                file_id,
-                job_id,
+            log_structured_event(
+                logger,
+                logging.INFO,
+                "vector_index_job_cancelled",
+                **log_context,
+                status="cancelled",
+                duration_ms=round((perf_counter() - job_started_at) * 1000, 2),
+                message="取消过期向量化任务",
             )
             return True
 
@@ -63,11 +87,15 @@ def process_next_vector_index_job(worker_id: str) -> bool:
                 "message": "文件已完成向量化，跳过重复任务",
             }
             mark_vector_index_job_succeeded(UUID(str(job_id)), result)
-            logger.info(
-                "跳过已完成向量化的文件 worker_id=%s file_id=%s job_id=%s",
-                worker_id,
-                file_id,
-                job_id,
+            log_structured_event(
+                logger,
+                logging.INFO,
+                "vector_index_job_skipped",
+                **log_context,
+                status="succeeded",
+                skipped=True,
+                duration_ms=round((perf_counter() - job_started_at) * 1000, 2),
+                message="跳过已完成向量化的文件",
             )
             return True
 
@@ -77,19 +105,28 @@ def process_next_vector_index_job(worker_id: str) -> bool:
             index_version,
         )
         mark_vector_index_job_succeeded(UUID(str(job_id)), result)
-        logger.info(
-            "完成文件向量化 worker_id=%s file_id=%s job_id=%s",
-            worker_id,
-            file_id,
-            job_id,
+        log_structured_event(
+            logger,
+            logging.INFO,
+            "vector_index_job_succeeded",
+            **log_context,
+            status="succeeded",
+            duration_ms=round((perf_counter() - job_started_at) * 1000, 2),
+            chunk_count=result.get("chunk_count"),
+            character_count=result.get("character_count"),
+            message="完成文件向量化",
         )
     except Exception as exc:
         mark_vector_index_job_failed(UUID(str(job_id)), str(exc))
-        logger.exception(
-            "向量化任务失败 worker_id=%s file_id=%s job_id=%s",
-            worker_id,
-            file_id,
-            job_id,
+        log_exception_event(
+            logger,
+            "vector_index_job_failed",
+            exc,
+            default_source="worker",
+            **log_context,
+            status="failed",
+            duration_ms=round((perf_counter() - job_started_at) * 1000, 2),
+            message="向量化任务失败",
         )
 
     return True

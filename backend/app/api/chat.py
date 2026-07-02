@@ -1,3 +1,4 @@
+import logging
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -7,6 +8,7 @@ from app.core.config import (
     API_RATE_LIMIT_WINDOW_SECONDS,
     CHAT_RATE_LIMIT_MAX_REQUESTS,
 )
+from app.core.observability import get_request_context, log_exception_event
 from app.core.rate_limit import build_rate_limit_identifier, enforce_rate_limit
 from app.core.sensitive_data import sanitize_sensitive_text
 from app.core.security import get_current_user_id
@@ -33,6 +35,7 @@ from app.services.retrieval_settings_cache import (
 
 
 router = APIRouter(tags=["chat"])
+logger = logging.getLogger(__name__)
 
 
 def should_use_local_chat_response(
@@ -123,6 +126,16 @@ def chat(
     try:
         chain = get_chain(user_id)
     except ValueError as exc:
+        log_exception_event(
+            logger,
+            "chat_model_settings_invalid",
+            exc,
+            default_source="llm_provider",
+            user_id=user_id,
+            conversation_id=str(req.conversation_id),
+            knowledge_base_id=str(req.knowledge_base_id),
+            message="模型配置无效",
+        )
         raise HTTPException(
             status_code=400,
             detail=f"模型配置无效：{sanitize_sensitive_text(str(exc))}",
@@ -147,6 +160,7 @@ def chat(
             assistant_message_id=assistant_message["id"],
             user_id=user_id,
             knowledge_base_id=req.knowledge_base_id,
+            request_id=get_request_context().get("request_id"),
         ),
         media_type="text/event-stream; charset=utf-8",
         headers={

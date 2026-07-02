@@ -225,6 +225,45 @@ migration 会被跳过，不会破坏已有数据。
 
 compose 已为所有服务配置 Docker `json-file` 日志轮转，默认 `10m * 5`。生产环境如接入集中日志，应继续保留脱敏规则：日志不得包含完整 API Key、JWT、数据库密码或用户上传原文。
 
+### 日志与基础监控
+
+后端输出统一 JSON 日志事件，日志正文只记录 `method`、`path`、`status_code`、`duration_ms`、`request_id`、`user_id`、`conversation_id`、`knowledge_base_id`、`message_id`、`job_id`、阶段耗时和错误分类等字段，不记录 request body、Authorization header、完整 API Key、JWT、数据库连接串或用户上传原文。响应头会回传 `X-Request-ID`，可用于串联前端报错、后端请求日志和 chat streaming 日志。
+
+重点事件：
+
+| 事件 | 来源 | 用途 |
+| --- | --- | --- |
+| `http_request` / `http_request_failed` | backend middleware | 统计接口请求量、错误率、P95 响应耗时。 |
+| `chat_first_answer_token` | chat streaming | 统计首 token 等待时间。 |
+| `chat_stream_completed` / `chat_stream_failed` / `chat_stream_cancelled` | chat streaming | 区分完成、模型失败、客户端中断和回答总耗时。 |
+| `retrieval_embedding_failed` | hybrid retrieval | 定位 embedding provider 或网络异常。 |
+| `retrieval_vector_failed` / `retrieval_vector_file_failed` | Chroma vector retrieval | 定位 Chroma、HNSW 或单文件向量残留问题。 |
+| `retrieval_fulltext_failed` | PostgreSQL full-text retrieval | 定位 PostgreSQL 或全文检索异常。 |
+| `retrieval_rerank_failed` | CrossEncoder rerank | 定位 reranker 模型或运行时异常；当前会降级为 RRF 结果。 |
+| `vector_index_job_claimed` / `vector_index_job_succeeded` / `vector_index_job_failed` | vector worker | 统计任务吞吐、失败率、处理耗时和失败来源。 |
+
+错误日志统一包含 `error_type`、`error_source` 和 `retryable`。`error_source` 取值优先使用 `llm_provider`、`embedding`、`vector_store`、`postgres`、`rerank`、`document_parse`、`file_storage`、`worker`、`chat_stream` 或 `http`，便于在日志系统中按来源聚合。
+
+最小监控面板建议：
+
+| 指标 | 来源 | 建议告警 |
+| --- | --- | --- |
+| 接口错误率 | `http_request.status_code >= 500` / 总请求数 | 5 分钟内超过 5%。 |
+| P95 接口耗时 | `http_request.duration_ms` | 持续高于平时基线 2 倍。 |
+| 平均首 token 时间 | `chat_first_answer_token.duration_ms` 或 `GET /chat/quality-dashboard` 的 `average_first_token_ms` | 连续窗口高于 8s。 |
+| 模型调用失败率 | `chat_stream_failed.error_source == "llm_provider"` / chat 请求数 | 连续窗口超过 10%。 |
+| 向量化队列长度和 worker 活动 | `GET /chat/vector-index-jobs/health` 的 `queue.active`、`worker.has_recent_activity` | 有 active 任务但 worker 长时间无活动。 |
+| 向量化任务失败率 | `vector_index_job_failed` / `vector_index_job_claimed` | 连续窗口超过 10%。 |
+| 检索降级次数 | `retrieval_embedding_failed`、`retrieval_vector_failed`、`retrieval_fulltext_failed`、`retrieval_rerank_failed` | 突然高于平时基线。 |
+
+本地排查示例：
+
+```bash
+docker compose logs backend worker | rg '"event":"chat_stream_failed"|"event":"vector_index_job_failed"'
+docker compose logs backend | rg '"error_source":"llm_provider"|"error_source":"postgres"|"error_source":"vector_store"'
+curl -s -H "Authorization: Bearer <access_token>" http://127.0.0.1:8000/chat/vector-index-jobs/health
+```
+
 ## 生产安全与数据持久化
 
 本节面向正式部署或公开 demo 的上线前检查。生产 `.env` 只保存在服务器或 secret store，不提交、不截图、不粘贴到 issue；仓库中只维护 `.env.example` 这类占位模板。

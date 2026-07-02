@@ -5,6 +5,11 @@ from time import perf_counter
 from typing import Any
 from uuid import UUID
 
+from app.core.observability import (
+    get_request_context,
+    log_exception_event,
+    log_structured_event,
+)
 from app.repositories.message_repository import (
     create_message,
     finish_assistant_message,
@@ -105,6 +110,7 @@ def stream_answer_and_save(
     assistant_message_id: UUID,
     user_id: int,
     knowledge_base_id: UUID,
+    request_id: str | None = None,
 ) -> Iterator[str]:
     """流式返回答案和引用文档，并更新助手消息的生成状态。
 
@@ -116,6 +122,13 @@ def stream_answer_and_save(
     retrieval: dict[str, Any] = {}
     stream_started_at = perf_counter()
     answer_started_at: float | None = None
+    log_context = {
+        "request_id": request_id or get_request_context().get("request_id"),
+        "user_id": user_id,
+        "conversation_id": str(conversation_id),
+        "knowledge_base_id": str(knowledge_base_id),
+        "message_id": str(assistant_message_id),
+    }
 
     try:
         for event in stream_rag_response(
@@ -171,6 +184,18 @@ def stream_answer_and_save(
                         "first_answer_token",
                         stream_started_at,
                     )
+                    first_token_ms = (
+                        retrieval.get("diagnostics", {})
+                        .get("timing", {})
+                        .get("first_answer_token_ms")
+                    )
+                    log_structured_event(
+                        logger,
+                        logging.INFO,
+                        "chat_first_answer_token",
+                        **log_context,
+                        duration_ms=first_token_ms,
+                    )
                     answer_started_at = perf_counter()
                 content = event["content"]
                 full_answer += content
@@ -181,6 +206,18 @@ def stream_answer_and_save(
         record_stream_timing(retrieval, "chat_stream_total", stream_started_at)
         if answer_started_at is not None:
             record_stream_timing(retrieval, "answer_stream", answer_started_at)
+        timing = retrieval.get("diagnostics", {}).get("timing", {})
+        log_structured_event(
+            logger,
+            logging.WARNING,
+            "chat_stream_cancelled",
+            **log_context,
+            status="cancelled",
+            duration_ms=timing.get("chat_stream_total_ms"),
+            source_count=len(sources),
+            answer_started=answer_started_at is not None,
+            message="客户端中断了流式连接",
+        )
         finish_assistant_message(
             assistant_message_id,
             full_answer,
@@ -190,11 +227,23 @@ def stream_answer_and_save(
             retrieval,
         )
         raise
-    except Exception:
-        logger.exception("流式回答生成失败")
+    except Exception as exc:
         record_stream_timing(retrieval, "chat_stream_total", stream_started_at)
         if answer_started_at is not None:
             record_stream_timing(retrieval, "answer_stream", answer_started_at)
+        timing = retrieval.get("diagnostics", {}).get("timing", {})
+        log_exception_event(
+            logger,
+            "chat_stream_failed",
+            exc,
+            default_source="chat_stream",
+            **log_context,
+            status="failed",
+            duration_ms=timing.get("chat_stream_total_ms"),
+            source_count=len(sources),
+            answer_started=answer_started_at is not None,
+            message="流式回答生成失败",
+        )
         finish_assistant_message(
             assistant_message_id,
             full_answer,
@@ -212,6 +261,19 @@ def stream_answer_and_save(
     record_stream_timing(retrieval, "chat_stream_total", stream_started_at)
     if answer_started_at is not None:
         record_stream_timing(retrieval, "answer_stream", answer_started_at)
+    timing = retrieval.get("diagnostics", {}).get("timing", {})
+    log_structured_event(
+        logger,
+        logging.INFO,
+        "chat_stream_completed",
+        **log_context,
+        status="completed",
+        duration_ms=timing.get("chat_stream_total_ms"),
+        first_answer_token_ms=timing.get("first_answer_token_ms"),
+        source_count=len(sources),
+        retrieved_count=retrieval.get("retrieved_count"),
+        need_retrieval=retrieval.get("need_retrieval"),
+    )
     finish_assistant_message(
         assistant_message_id,
         full_answer,

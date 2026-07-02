@@ -27,6 +27,7 @@ from uuid import UUID
 
 from langchain_core.documents import Document
 
+from app.core.observability import log_exception_event
 from app.services.retrieval.fulltext_retriever import get_fulltext_documents
 from app.services.retrieval.reranker import (
     DEFAULT_RERANKER_MAX_LENGTH,
@@ -233,8 +234,17 @@ def get_vector_documents(
     try:
         # 外部预计算 embedding，绕过 ChromaDB query_texts 路径
         query_embedding = get_query_embedding(query)
-    except Exception:
-        logger.exception("查询向量生成失败，降级为空向量结果")
+    except Exception as exc:
+        log_exception_event(
+            logger,
+            "retrieval_embedding_failed",
+            exc,
+            default_source="embedding",
+            user_id=user_id,
+            file_count=len(file_ids or []),
+            stage="embedding",
+            message="查询向量生成失败，降级为空向量结果",
+        )
         add_vector_diagnostic_error("查询向量生成失败")
         record_retrieval_timing("embedding", embedding_started_at)
         return []
@@ -260,13 +270,19 @@ def get_vector_documents(
                             filter=build_file_chroma_filter(user_id, file_id),
                         )
                     )
-                except Exception:
+                except Exception as exc:
                     # Chroma 删除/重建向量后偶发 HNSW 残留错误。
                     # 单文件失败不应拖垮整个知识库检索，后续仍可依赖其它文件
                     # 和 PostgreSQL 全文检索兜底。
-                    logger.exception(
-                        "Chroma 单文件向量检索失败，跳过该文件 file_id=%s",
-                        file_id,
+                    log_exception_event(
+                        logger,
+                        "retrieval_vector_file_failed",
+                        exc,
+                        default_source="vector_store",
+                        user_id=user_id,
+                        file_id=file_id,
+                        stage="vector",
+                        message="Chroma 单文件向量检索失败，跳过该文件",
                     )
                     add_vector_diagnostic_error(
                         f"Chroma 单文件向量检索失败：{file_id}",
@@ -276,8 +292,17 @@ def get_vector_documents(
             # Chroma 返回的是距离，数值越小语义越相近。
             scored_candidates.sort(key=lambda item: item[1])
             candidates = scored_candidates[:k]
-    except Exception:
-        logger.exception("Chroma 向量检索失败，降级为空向量结果")
+    except Exception as exc:
+        log_exception_event(
+            logger,
+            "retrieval_vector_failed",
+            exc,
+            default_source="vector_store",
+            user_id=user_id,
+            file_count=len(file_ids or []),
+            stage="vector",
+            message="Chroma 向量检索失败，降级为空向量结果",
+        )
         add_vector_diagnostic_error("Chroma 向量检索失败")
         record_retrieval_timing("vector", vector_started_at)
         return []
@@ -309,8 +334,17 @@ def get_vector_documents_with_diagnostics(
             file_ids=file_ids,
             k=k,
         )
-    except Exception:
-        logger.exception("向量粗召回失败，降级为空向量结果")
+    except Exception as exc:
+        log_exception_event(
+            logger,
+            "retrieval_vector_coarse_failed",
+            exc,
+            default_source="vector_store",
+            user_id=user_id,
+            file_count=len(file_ids or []),
+            stage="vector_coarse",
+            message="向量粗召回失败，降级为空向量结果",
+        )
         add_vector_diagnostic_error("向量粗召回失败")
         documents = []
 
@@ -335,8 +369,17 @@ def get_fulltext_documents_with_timing(
             k=k,
         )
         error_message = None
-    except Exception:
-        logger.exception("全文粗召回失败，降级为空全文结果")
+    except Exception as exc:
+        log_exception_event(
+            logger,
+            "retrieval_fulltext_failed",
+            exc,
+            default_source="postgres",
+            user_id=user_id,
+            file_count=len(file_ids or []),
+            stage="fulltext",
+            message="全文粗召回失败，降级为空全文结果",
+        )
         documents = []
         error_message = "全文粗召回失败"
 
@@ -463,12 +506,34 @@ def get_hybrid_documents(
         return fused_documents
 
     rerank_started_at = perf_counter()
-    reranked_documents = get_reranker(reranker_model).rerank(
-        query=query,
-        documents=fused_documents,
-        top_k=k,
-        max_length=DEFAULT_RERANKER_MAX_LENGTH,
-    )
+    try:
+        reranked_documents = get_reranker(reranker_model).rerank(
+            query=query,
+            documents=fused_documents,
+            top_k=k,
+            max_length=DEFAULT_RERANKER_MAX_LENGTH,
+        )
+    except Exception as exc:
+        log_exception_event(
+            logger,
+            "retrieval_rerank_failed",
+            exc,
+            default_source="rerank",
+            user_id=user_id,
+            file_count=len(file_ids or []),
+            stage="rerank",
+            fused_count=len(fused_documents),
+            message="rerank 精排失败，降级为 RRF 融合结果",
+        )
+        record_retrieval_timing("rerank", rerank_started_at)
+        record_retrieval_timing("retrieval_total", total_started_at)
+        update_retrieval_diagnostics(
+            reranked_count=0,
+            rerank_degraded=True,
+            rerank_errors=["rerank 精排失败"],
+        )
+        return fused_documents[:k]
+
     record_retrieval_timing("rerank", rerank_started_at)
     record_retrieval_timing("retrieval_total", total_started_at)
     update_retrieval_diagnostics(reranked_count=len(reranked_documents))

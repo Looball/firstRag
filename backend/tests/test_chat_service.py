@@ -1,5 +1,6 @@
 """聊天服务流式保存行为的回归测试。"""
 
+import json
 import unittest
 from unittest.mock import patch
 from uuid import uuid4
@@ -123,6 +124,47 @@ class ChatServiceSourcePersistenceTests(unittest.TestCase):
         self.assertEqual(saved_llm["prompt_tokens"], 12)
         self.assertEqual(saved_llm["completion_tokens"], 3)
         self.assertEqual(saved_llm["total_tokens"], 15)
+
+    def test_stream_answer_failure_logs_error_source_without_secret(
+        self,
+    ) -> None:
+        """流式失败日志应区分 LLM provider 且不输出 API Key。"""
+        assistant_message_id = uuid4()
+
+        def fail_stream(**_kwargs):
+            """模拟模型流式阶段抛出带敏感值的异常。"""
+            raise RuntimeError("OpenAI failed api_key=test-secret")
+
+        with patch(
+            "app.services.chat_service.stream_rag_response",
+            side_effect=fail_stream,
+        ), patch(
+            "app.services.chat_service.finish_assistant_message",
+        ) as finish_message, self.assertLogs(
+            "app.services.chat_service",
+            level="ERROR",
+        ) as logs:
+            events = list(stream_answer_and_save(
+                chain=object(),
+                user_input="什么是诉讼法",
+                history=[],
+                conversation_id=uuid4(),
+                assistant_message_id=assistant_message_id,
+                user_id=1,
+                knowledge_base_id=uuid4(),
+                request_id="req-chat-1",
+            ))
+
+        error_event = next(event for event in events if "event: error" in event)
+        self.assertIn("回答生成失败，请稍后重试", error_event)
+        finish_message.assert_called_once()
+        self.assertEqual(finish_message.call_args.args[2], "failed")
+
+        log_payload = json.loads(logs.records[0].getMessage())
+        self.assertEqual(log_payload["event"], "chat_stream_failed")
+        self.assertEqual(log_payload["request_id"], "req-chat-1")
+        self.assertEqual(log_payload["error_source"], "llm_provider")
+        self.assertNotIn("test-secret", logs.records[0].getMessage())
 
 
 if __name__ == "__main__":

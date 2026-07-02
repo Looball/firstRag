@@ -220,6 +220,67 @@ class RetrievalResilienceTests(unittest.TestCase):
         self.assertIn("rerank_ms", diagnostics["timing"])
         self.assertFalse(diagnostics.get("rerank_skipped", False))
 
+    def test_hybrid_retrieval_falls_back_when_rerank_fails(self) -> None:
+        """rerank 异常应降级为 RRF 结果并写入可观测日志。"""
+        vector_docs = [
+            Document(
+                page_content=f"向量候选 {index}",
+                metadata={
+                    "user_id": "6",
+                    "file_id": f"vector-file-{index}",
+                    "chunk_index": index,
+                    "retrieval_source": "vector",
+                },
+            )
+            for index in range(3)
+        ]
+        fulltext_docs = [
+            Document(
+                page_content=f"全文候选 {index}",
+                metadata={
+                    "user_id": "6",
+                    "file_id": f"fulltext-file-{index}",
+                    "chunk_index": index,
+                    "retrieval_source": "fulltext",
+                },
+            )
+            for index in range(3)
+        ]
+
+        with unittest.mock.patch(
+            "app.services.retrieval.hybrid_retriever.get_vector_documents",
+            return_value=vector_docs,
+        ), unittest.mock.patch(
+            "app.services.retrieval.hybrid_retriever.get_fulltext_documents",
+            return_value=fulltext_docs,
+        ), unittest.mock.patch(
+            "app.services.retrieval.hybrid_retriever.get_reranker",
+            side_effect=RuntimeError("CrossEncoder rerank failed"),
+        ), self.assertLogs(
+            "app.services.retrieval.hybrid_retriever",
+            level="ERROR",
+        ) as logs:
+            docs = get_hybrid_documents(
+                query="诉讼法的任务是什么",
+                user_id=6,
+                file_ids=["good-file"],
+                k=2,
+                rrf_k=6,
+                rerank=True,
+            )
+
+        diagnostics = get_retrieval_diagnostics()
+
+        self.assertEqual(len(docs), 2)
+        self.assertIsNotNone(diagnostics)
+        assert diagnostics is not None
+        self.assertTrue(diagnostics["rerank_degraded"])
+        self.assertEqual(diagnostics["rerank_errors"], ["rerank 精排失败"])
+        self.assertIn("rerank_ms", diagnostics["timing"])
+        self.assertIn("retrieval_total_ms", diagnostics["timing"])
+        self.assertIn("retrieval_rerank_failed", logs.records[0].getMessage())
+        self.assertIn("rerank", logs.records[0].getMessage())
+
     def test_hybrid_retrieval_keeps_vector_results_when_fulltext_fails(
         self,
     ) -> None:
