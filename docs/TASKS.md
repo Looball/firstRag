@@ -109,7 +109,7 @@
 | `T-042` | `PLAN-20260701-02` | `P0` | `Done` | 建立生产部署安全与数据持久化方案 | 2026-07-01 | `1821713` |
 | `T-043` | `PLAN-20260701-02` | `P1` | `Done` | 强化文件上传、向量化任务和 worker 异常状态体验 | 2026-07-01 | `6b3b606` |
 | `T-044` | `PLAN-20260701-02` | `P0` | `Done` | 补齐认证、限流、配额和用户 API Key 风控 | 2026-07-01 | `2a27a13` |
-| `T-045` | `PLAN-20260701-02` | `P1` | `Todo` | 建立统一日志、错误定位和基础监控指标 |  |  |
+| `T-045` | `PLAN-20260701-02` | `P1` | `Done` | 建立统一日志、错误定位和基础监控指标 | 2026-07-02 | `60fd39c` |
 | `T-046` | `PLAN-20260701-02` | `P1` | `Todo` | 准备真实问题集并固化上线前 RAG 质量门禁 |  |  |
 | `T-047` | `PLAN-20260701-02` | `P2` | `Todo` | 区分普通用户模式和高级/开发模式 |  |  |
 
@@ -1553,7 +1553,7 @@ npm run lint
 
 - 来源计划：`PLAN-20260701-02`
 - 优先级：`P1`
-- 状态：`Todo`
+- 状态：`Done`
 - 背景：当前 diagnostics 已能帮助定位 RAG 检索阶段，但生产运维还需要统一日志、错误归因和基础指标，知道失败发生在 LLM、embedding、Chroma、PostgreSQL、rerank、worker 还是前端代理。
 - 目标：建立最小可用可观测性，让线上错误能被定位、聚合和告警。
 - 范围：
@@ -1573,6 +1573,17 @@ cd backend
 conda run -n firstrag python -m pytest tests/test_retrieval_resilience.py tests/test_vector_index_worker.py tests/test_conversations.py
 rg -n "api_key|Authorization|password|DATABASE_URL" backend/app
 ```
+
+- 完成记录：
+  - 完成日期：2026-07-02
+  - 相关 commit：`60fd39c`
+  - 新增 `backend/app/core/observability.py`，统一 JSON 日志事件、`request_id` 上下文、敏感字段脱敏和 `error_source` 分类。
+  - FastAPI middleware 为每个请求写入 `X-Request-ID`，并记录 `http_request` / `http_request_failed`，只包含 method、path、status、duration 和 request id，不记录 header、body 或 query。
+  - chat streaming 新增 `chat_first_answer_token`、`chat_stream_completed`、`chat_stream_failed`、`chat_stream_cancelled` 事件，保留首 token、总耗时、sources 数和 message/conversation 维度。
+  - hybrid retrieval 对 embedding、Chroma vector、PostgreSQL full-text 和 CrossEncoder rerank 失败输出结构化事件；rerank 失败时降级为 RRF 结果并写入 diagnostics。
+  - vector index worker 新增任务领取、跳过、完成、取消和失败事件，可用于统计任务吞吐、失败率、处理耗时和 worker 活动。
+  - `docs/DEPLOYMENT.md` 新增日志事件、错误来源、最小监控面板和本地排查命令说明。
+  - 验证命令：`cd backend && conda run -n firstrag python -m compileall app`；`cd backend && conda run -n firstrag python -m pytest tests/test_retrieval_resilience.py tests/test_vector_index_worker.py tests/test_conversations.py tests/test_observability.py tests/test_chat_service.py`；`cd backend && rg -n "api_key|Authorization|password|DATABASE_URL" backend/app`。
 
 ## T-046 准备真实问题集并固化上线前 RAG 质量门禁
 
