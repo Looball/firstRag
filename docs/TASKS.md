@@ -113,7 +113,7 @@
 | `T-045` | `PLAN-20260701-02` | `P1` | `Done` | 建立统一日志、错误定位和基础监控指标 | 2026-07-02 | `60fd39c` |
 | `T-046` | `PLAN-20260701-02` | `P1` | `Done` | 准备真实问题集并固化上线前 RAG 质量门禁 | 2026-07-02 | `88d1c49` |
 | `T-047` | `PLAN-20260701-02` | `P2` | `Done` | 区分普通用户模式和高级/开发模式 | 2026-07-02 | `c14ae1a` |
-| `T-048` | `PLAN-20260703-01` | `P1` | `Todo` | 补齐公网反向代理配置 | - | - |
+| `T-048` | `PLAN-20260703-01` | `P1` | `Done` | 补齐公网反向代理配置 | 2026-07-03 | `待提交` |
 | `T-049` | `PLAN-20260703-01` | `P0` | `Todo` | 增加公开环境注册控制 | - | - |
 | `T-050` | `PLAN-20260703-01` | `P0` | `Todo` | 增加 demo 数据清理脚本 | - | - |
 | `T-051` | `PLAN-20260703-01` | `P2` | `Todo` | 部署到受控 staging/demo 环境 | - | - |
@@ -1668,7 +1668,7 @@ npm run build
 
 - 来源计划：`PLAN-20260703-01`
 - 优先级：`P1`
-- 状态：`Todo`
+- 状态：`Done`
 - 背景：当前 `deploy/nginx/` 仍是占位目录；在线 demo 文档已要求反向代理处理 TLS、上传体积、SSE buffering 和公网限流，但仓库尚未提供可复用配置。
 - 目标：提供可审查、可复用的公网反向代理配置模板，为后续 VPS / Docker Compose 公开 demo 减少手工配置风险。
 - 范围：
@@ -1687,6 +1687,16 @@ npm run build
 docker run --rm -v "$PWD/deploy/nginx:/etc/nginx/conf.d:ro" nginx:alpine nginx -t
 git diff --check -- deploy/nginx docs/DEPLOYMENT.md docs/TASKS.md
 ```
+- 完成记录：
+  - 完成日期：2026-07-03
+  - 相关 commit：`待提交`
+  - 新增 `deploy/nginx/00-firstrag-shared.conf`，集中定义 frontend upstream、SSE/WebSocket 连接变量和公网 IP 级限流 zone。
+  - 新增 `deploy/nginx/firstrag-proxy-locations.inc`，复用登录、注册、上传、chat streaming、vector job、模型设置和通用 API 的代理与限流规则；公网只转发到 frontend API proxy，不直接暴露 FastAPI 或 PostgreSQL。
+  - 新增 `deploy/nginx/10-firstrag-public-demo.conf`，作为可语法检查的 Nginx 示例，适用于前置 TLS 终止层位于 Nginx 前面的部署。
+  - 新增 `deploy/nginx/firstrag-public-demo.tls.conf.example`，作为 Nginx 直接终止 TLS 的模板，包含 HTTP 到 HTTPS 跳转、HSTS 和证书路径占位说明。
+  - `docs/DEPLOYMENT.md` 已补充模板文件用途、域名/证书替换方式、body size 同步要求和 `nginx -t` 验证方式。
+  - 验证命令：`git diff --check -- deploy/nginx docs/DEPLOYMENT.md docs/TASKS.md`。
+  - 验证限制：`docker run --rm -v "$PWD/deploy/nginx:/etc/nginx/conf.d:ro" nginx:alpine nginx -t` 因本机 Docker daemon 未运行无法完成；本机也未安装 `nginx` 命令。后续部署到服务器或启动 Docker Desktop 后需补跑 `nginx -t`。
 
 ## T-049 增加公开环境注册控制
 

@@ -457,6 +457,30 @@ MODELS_DIR=/srv/firstrag/models
 - 后端已提供进程内限流；反向代理仍建议对登录、注册、上传、聊天和模型设置接口做 IP 级限流，覆盖多进程、多实例和恶意突发流量。
 - 对 SSE streaming 关闭响应缓冲，避免聊天 token 被代理层攒批返回。
 
+仓库提供了 Nginx 配置模板，位于 `deploy/nginx/`：
+
+| 文件 | 用途 |
+| --- | --- |
+| `00-firstrag-shared.conf` | 定义 frontend upstream、WebSocket/SSE 连接变量和公网 IP 级限流 zone。 |
+| `firstrag-proxy-locations.inc` | 公共 proxy location 片段，只把公网请求转发到 frontend API proxy，不直接暴露 FastAPI 或 PostgreSQL。 |
+| `10-firstrag-public-demo.conf` | 可直接执行 `nginx -t` 的示例配置，适用于 Cloudflare Tunnel、负载均衡器或其它可信 TLS 终止层位于 Nginx 前面的场景。 |
+| `firstrag-public-demo.tls.conf.example` | Nginx 直接终止 TLS 时使用的 server block 模板，证书存在后复制为 `.conf` 并替换域名和证书路径。 |
+
+使用方式：
+
+1. 将 `demo.example.com` 替换为真实域名。
+2. 保持 `FRONTEND_PORT=127.0.0.1:3000`、`BACKEND_PORT=127.0.0.1:8000`、`POSTGRES_PORT=127.0.0.1:5432`，Nginx 只访问 frontend upstream。
+3. 如果 Nginx 前面已有 Cloudflare Tunnel、负载均衡器或其它 TLS 终止层，可以使用 `10-firstrag-public-demo.conf`，但应通过防火墙或内网绑定限制 Nginx 的 HTTP 入口来源。
+4. 如果 Nginx 直接暴露公网并终止 TLS，复制 `firstrag-public-demo.tls.conf.example` 为 `.conf`，替换证书路径，然后停用 `10-firstrag-public-demo.conf`，避免 HTTP 明文入口继续代理业务请求。
+5. `firstrag-proxy-locations.inc` 中的 `client_max_body_size 20m` 必须与 `.env` 的 `MAX_UPLOAD_FILE_SIZE_BYTES` 保持一致；若公开 demo 调小上传上限，需要同步修改两处。
+6. 上线前先在本地或服务器执行语法检查：
+
+```bash
+docker run --rm -v "$PWD/deploy/nginx:/etc/nginx/conf.d:ro" nginx:alpine nginx -t
+```
+
+如果启用直接 TLS 模板，还需要在证书文件存在的服务器上重新执行 `nginx -t`，确保 `ssl_certificate` 与 `ssl_certificate_key` 路径有效。
+
 ### 演示账号和安全边界
 
 - 演示账号在服务器上线后通过 UI 创建，账号和密码只通过可信渠道单独提供，不写入仓库文档。
@@ -495,7 +519,7 @@ MODELS_DIR=/srv/firstrag/models
 ### 当前阻塞项
 
 - 尚未选择真实服务器、域名和 TLS 入口。
-- `deploy/nginx/` 仍是占位目录，没有提交可复用的公网反向代理配置。
+- `deploy/nginx/` 已提供公网反向代理模板，尚需在真实服务器替换域名、证书路径并完成 `nginx -t`。
 - 尚未落地注册访问控制、登录/上传/聊天限流和自动清理脚本。
 - 尚未创建受控演示账号和脱敏样例知识库。
 - 尚未完成公网环境的 smoke test 与真实 RAG eval。

@@ -1,0 +1,40 @@
+# FirstRAG public demo Nginx TLS template.
+#
+# To use this file:
+# 1. Replace demo.example.com with the real domain.
+# 2. Replace the certificate paths with the server's real TLS certificate paths.
+# 3. Copy this file to a *.conf name after certificates exist.
+# 4. Remove or disable 10-firstrag-public-demo.conf if this Nginx instance is
+#    the direct public TLS terminator.
+#
+# Do not commit real certificates, private keys, API keys, JWT secrets, or
+# database passwords.
+
+server {
+    listen 80;
+    server_name demo.example.com;
+
+    location ^~ /.well-known/acme-challenge/ {
+        root /var/www/certbot;
+    }
+
+    location / {
+        return 308 https://$host$request_uri;
+    }
+}
+
+server {
+    listen 443 ssl http2;
+    server_name demo.example.com;
+
+    ssl_certificate /etc/letsencrypt/live/demo.example.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/demo.example.com/privkey.pem;
+    ssl_session_timeout 1d;
+    ssl_session_cache shared:FIRSTRAGTLS:10m;
+    ssl_session_tickets off;
+    ssl_protocols TLSv1.2 TLSv1.3;
+
+    add_header Strict-Transport-Security "max-age=15552000; includeSubDomains" always;
+
+    include /etc/nginx/conf.d/firstrag-proxy-locations.inc;
+}
