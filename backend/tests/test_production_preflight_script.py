@@ -117,27 +117,6 @@ class ProductionPreflightScriptTests(unittest.TestCase):
         self.assertTrue(any("reranker" in error for error in errors))
         self.assertEqual(fixed_errors, [])
 
-    def test_build_compose_command_uses_moved_compose_file(self) -> None:
-        """Compose 命令应显式使用 deploy/compose 下的配置文件。"""
-        env_file = REPO_ROOT / ".env"
-
-        command = production_preflight.build_compose_command(
-            env_file,
-            "config",
-            "--quiet",
-        )
-
-        self.assertIn("--project-directory", command)
-        self.assertIn(os.fspath(REPO_ROOT), command)
-        self.assertIn("--env-file", command)
-        self.assertIn(os.fspath(env_file), command)
-        self.assertIn("-f", command)
-        self.assertIn(
-            os.fspath(REPO_ROOT / "deploy/compose/docker-compose.yml"),
-            command,
-        )
-        self.assertEqual(command[-2:], ("config", "--quiet"))
-
 
 if __name__ == "__main__":
     unittest.main()

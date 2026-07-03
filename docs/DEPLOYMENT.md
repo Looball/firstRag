@@ -7,7 +7,7 @@
 根目录 `.env` 是后端运行时配置来源。首次启动前复制模板：
 
 ```bash
-cp deploy/compose/.env.example .env
+cp .env.example .env
 ```
 
 常用配置：
@@ -153,7 +153,7 @@ scripts/acceptance_check.sh
 
 CI 覆盖：
 
-- 后端：安装 `backend/requirements.txt`、`python -m compileall app`、`python -m unittest discover tests -v`、`python scripts/migrate_db.py --list` 和 `docker compose --project-directory . --env-file deploy/compose/.env.example -f deploy/compose/docker-compose.yml config --quiet`。
+- 后端：安装 `backend/requirements.txt`、`python -m compileall app`、`python -m unittest discover tests -v`、`python scripts/migrate_db.py --list` 和 `docker compose config --quiet`。
 - 前端：`npm ci`、`npm run lint`、`npm run test` 和 `npm run build`。
 
 默认 CI 不运行真实 RAG eval 和 indexing eval，因为它们需要后端服务、真实账号、
@@ -161,10 +161,10 @@ CI 覆盖：
 
 ## Docker Compose
 
-Docker Compose 配置位于 `deploy/compose/docker-compose.yml`，环境变量模板位于 `deploy/compose/.env.example`。完整启动流程、`.env` 准备、reranker 模型下载、日志查看和常见问题见 `docs/docker-startup/README.md`。
+仓库根目录提供本地 compose 方案。完整启动流程、`.env` 准备、reranker 模型下载、日志查看和常见问题见 `docs/docker-startup/README.md`。
 
 ```bash
-docker compose --project-directory . --env-file .env -f deploy/compose/docker-compose.yml up --build
+docker compose up --build
 ```
 
 服务：
@@ -206,17 +206,17 @@ DATABASE_URL=${COMPOSE_DATABASE_URL:-postgresql://${POSTGRES_USER}:${POSTGRES_PA
 
 ```bash
 COMPOSE_DATABASE_URL=postgresql://user:password@postgres:5432/first_rag \
-docker compose --project-directory . --env-file .env -f deploy/compose/docker-compose.yml up --build
+docker compose up --build
 ```
 
 常用命令：
 
 ```bash
-docker compose --project-directory . --env-file .env -f deploy/compose/docker-compose.yml config --quiet
-docker compose --project-directory . --env-file .env -f deploy/compose/docker-compose.yml up --build
-docker compose --project-directory . --env-file .env -f deploy/compose/docker-compose.yml run --rm migrate python /app/scripts/migrate_db.py --dry-run
-docker compose --project-directory . --env-file .env -f deploy/compose/docker-compose.yml logs -f migrate backend worker
-docker compose --project-directory . --env-file .env -f deploy/compose/docker-compose.yml down
+docker compose config --quiet
+docker compose up --build
+docker compose run --rm migrate python /app/scripts/migrate_db.py --dry-run
+docker compose logs -f migrate backend worker
+docker compose down
 ```
 
 新数据库首次运行时，`migrate` 会自动应用 `000_initial_schema.sql` 并创建
@@ -259,14 +259,14 @@ compose 已为所有服务配置 Docker `json-file` 日志轮转，默认 `10m *
 本地排查示例：
 
 ```bash
-docker compose --project-directory . --env-file .env -f deploy/compose/docker-compose.yml logs backend worker | rg '"event":"chat_stream_failed"|"event":"vector_index_job_failed"'
-docker compose --project-directory . --env-file .env -f deploy/compose/docker-compose.yml logs backend | rg '"error_source":"llm_provider"|"error_source":"postgres"|"error_source":"vector_store"'
+docker compose logs backend worker | rg '"event":"chat_stream_failed"|"event":"vector_index_job_failed"'
+docker compose logs backend | rg '"error_source":"llm_provider"|"error_source":"postgres"|"error_source":"vector_store"'
 curl -s -H "Authorization: Bearer <access_token>" http://127.0.0.1:8000/chat/vector-index-jobs/health
 ```
 
 ## 生产安全与数据持久化
 
-本节面向正式部署或公开 demo 的上线前检查。生产 `.env` 只保存在服务器或 secret store，不提交、不截图、不粘贴到 issue；仓库中只维护 `deploy/compose/.env.example` 这类占位模板。
+本节面向正式部署或公开 demo 的上线前检查。生产 `.env` 只保存在服务器或 secret store，不提交、不截图、不粘贴到 issue；仓库中只维护 `.env.example` 这类占位模板。
 
 ### Secret 管理
 
@@ -306,7 +306,7 @@ preflight 会拦截以下问题：
 - `DATABASE_URL` / `COMPOSE_DATABASE_URL` 仍含模板账号、密码或占位值。
 - `FRONTEND_PORT`、`BACKEND_PORT`、`POSTGRES_PORT` 未绑定到 `127.0.0.1` / `localhost`。
 - `UPLOADS_DIR`、`VECTOR_DB_DIR`、`MODELS_DIR` 缺失，或 reranker 模型目录不存在。
-- `docker compose --project-directory . --env-file .env -f deploy/compose/docker-compose.yml config --quiet` 失败。
+- `docker compose config --quiet` 失败。
 - migration dry-run 失败。
 
 ### PostgreSQL 备份与恢复
@@ -326,23 +326,23 @@ preflight 会拦截以下问题：
 
 ```bash
 mkdir -p backups/postgres
-docker compose --project-directory . --env-file .env -f deploy/compose/docker-compose.yml exec -T postgres sh -c 'pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" --format=custom --no-owner' \
+docker compose exec -T postgres sh -c 'pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" --format=custom --no-owner' \
   > "backups/postgres/firstrag-$(date +%Y%m%d%H%M%S).dump"
 ```
 
 恢复前先停止会写入数据库的服务，并优先在 staging 演练：
 
 ```bash
-docker compose --project-directory . --env-file .env -f deploy/compose/docker-compose.yml stop frontend backend worker
-docker compose --project-directory . --env-file .env -f deploy/compose/docker-compose.yml exec -T postgres sh -c 'pg_restore -U "$POSTGRES_USER" -d "$POSTGRES_DB" --clean --if-exists --no-owner' \
+docker compose stop frontend backend worker
+docker compose exec -T postgres sh -c 'pg_restore -U "$POSTGRES_USER" -d "$POSTGRES_DB" --clean --if-exists --no-owner' \
   < backups/postgres/firstrag-YYYYMMDDHHMMSS.dump
-docker compose --project-directory . --env-file .env -f deploy/compose/docker-compose.yml run --rm migrate python /app/scripts/migrate_db.py --dry-run
-docker compose --project-directory . --env-file .env -f deploy/compose/docker-compose.yml up -d backend worker frontend
+docker compose run --rm migrate python /app/scripts/migrate_db.py --dry-run
+docker compose up -d backend worker frontend
 ```
 
 恢复验证：
 
-1. `docker compose --project-directory . --env-file .env -f deploy/compose/docker-compose.yml run --rm migrate python /app/scripts/migrate_db.py --dry-run` 应显示所有已应用 migration 为 skipped，或只显示预期的 pending migration。
+1. `docker compose run --rm migrate python /app/scripts/migrate_db.py --dry-run` 应显示所有已应用 migration 为 skipped，或只显示预期的 pending migration。
 2. 登录预置账号，确认知识库、文件 metadata、会话和历史消息存在。
 3. 打开文件管理，确认文件状态和 vector index job 状态可读。
 4. 对已索引知识库提问，确认回答能返回 sources。
@@ -503,15 +503,15 @@ docker run --rm -v "$PWD/deploy/nginx:/etc/nginx/conf.d:ro" nginx:alpine nginx -
 ### 启动步骤
 
 1. 准备云服务器、域名和 TLS 方案，只开放 80/443 和受控 SSH。
-2. 在服务器拉取仓库，复制 `deploy/compose/.env.example` 为根目录 `.env`，填写非默认密钥和 provider Key。
+2. 在服务器拉取仓库，复制 `.env.example` 为 `.env`，填写非默认密钥和 provider Key。
 3. 准备 `MODELS_DIR/rerankers/bge-reranker-base`，并确认 `UPLOADS_DIR`、`VECTOR_DB_DIR` 可持久化。
 4. 运行 `conda run -n firstrag python scripts/production_preflight.py --env-file .env --skip-migration-dry-run` 检查 secret、端口和目录。
-5. 运行 `docker compose --project-directory . --env-file .env -f deploy/compose/docker-compose.yml config --quiet` 检查 Compose 配置。
-6. 运行 `docker compose --project-directory . --env-file .env -f deploy/compose/docker-compose.yml build` 构建镜像。
-7. 运行 `docker compose --project-directory . --env-file .env -f deploy/compose/docker-compose.yml up -d postgres` 启动 PostgreSQL。
+5. 运行 `docker compose config --quiet` 检查 Compose 配置。
+6. 运行 `docker compose build` 构建镜像。
+7. 运行 `docker compose up -d postgres` 启动 PostgreSQL。
 8. 运行 `conda run -n firstrag python scripts/production_preflight.py --env-file .env --migration-method compose` 检查 migration dry-run。
-9. 运行 `docker compose --project-directory . --env-file .env -f deploy/compose/docker-compose.yml up -d` 启动 migration、backend、frontend 和 worker。
-10. 运行 `docker compose --project-directory . --env-file .env -f deploy/compose/docker-compose.yml logs -f migrate backend worker frontend`，确认 migration 成功、backend 和 worker 无启动错误。
+9. 运行 `docker compose up -d` 启动 migration、backend、frontend 和 worker。
+10. 运行 `docker compose logs -f migrate backend worker frontend`，确认 migration 成功、backend 和 worker 无启动错误。
 11. 配置反向代理到 `http://127.0.0.1:3000`，并设置 TLS、body size、SSE buffering 和限流。
 12. 创建演示账号，上传脱敏样例文件并完成一次向量化和聊天 smoke test。
 13. 在 README 中补充真实 demo URL、使用限制和数据清理说明后，才把 Roadmap 的“发布在线演示环境”标记为完成。

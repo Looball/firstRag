@@ -55,10 +55,11 @@ FirstRAG/
 ├── backend/                  # FastAPI backend
 ├── docs/                     # 项目文档
 ├── deploy/                   # 部署相关
-│   ├── compose/              # Docker Compose 配置和环境变量模板
 │   ├── docker/
 │   └── nginx/
 ├── scripts/                  # 初始化、迁移、测试脚本
+├── .env.example              # 环境变量模板
+├── docker-compose.yml        # Docker Compose 配置
 ├── README.md
 └── .gitignore
 ```
