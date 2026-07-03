@@ -8,7 +8,7 @@
 
 - Docker Desktop 已启动，或 Linux 服务器上 Docker daemon 正常运行。
 - 仓库位于本机可写目录，例如 `/Users/bing/Desktop/Github/FirstRAG`。
-- 已准备可用的 LLM provider API Key 和 `ZAI_EMD_API` embedding Key。
+- LLM provider API Key 和 `ZAI_EMD_API` embedding Key 可以后配置；未配置时服务仍可启动，但默认平台聊天、向量化和向量检索不可用。
 - 如需启用 CrossEncoder rerank，提前下载 Hugging Face 模型 `BAAI/bge-reranker-base`。
 
 ## 2. 准备目录
@@ -36,14 +36,25 @@ mkdir -p uploads vector_db models/rerankers
 cp .env.example .env
 ```
 
-编辑 `.env`，至少替换以下值：
+编辑 `.env`，至少替换启动必需的值：
 
 ```bash
 POSTGRES_PASSWORD=replace-with-a-strong-local-password
 JWT_SECRET_KEY=replace-with-a-random-secret
 USER_SETTINGS_ENCRYPTION_KEY=replace-with-a-fernet-key
-LLM_API_KEY=replace-with-your-llm-api-key
-ZAI_EMD_API=replace-with-your-zhipu-api-key
+```
+
+下面两个 provider Key 可启动后再配置。`LLM_API_KEY` 用于系统默认模型；如果用户在前端设置页保存自己的 provider Key，可以不配置系统默认 Key。`ZAI_EMD_API` 用于文件向量化和向量检索，留空不影响登录、上传和页面启动。
+
+```bash
+LLM_API_KEY=
+ZAI_EMD_API=
+```
+
+如果 Docker 启动后再补充或修改这些 Key，需要重启相关服务：
+
+```bash
+docker compose up -d --build backend worker
 ```
 
 可以用下面命令生成本地开发用随机值：
@@ -124,9 +135,9 @@ docker compose logs -f migrate backend worker frontend
 
 1. 打开 `http://localhost:3000`。
 2. 注册并登录本地测试账号。
-3. 进入模型设置，确认模型 provider 和 API Key 可用。
+3. 进入模型设置，确认模型 provider 和 API Key 可用；如果暂未配置 Key，可以先跳过聊天测试。
 4. 新建知识库，上传一份 `.md`、`.txt`、`.pdf` 或 `.docx` 文件。
-5. 触发向量化，等待任务成功。
+5. 配置 `ZAI_EMD_API` 并重启 backend / worker 后，触发向量化，等待任务成功。
 6. 对知识库提问，确认回答、sources 和任务队列状态正常。
 
 ## 7. 常用命令
@@ -192,7 +203,7 @@ docker compose up -d --build
 
 ### 上传或向量化失败
 
-确认 `ZAI_EMD_API` 可用，并查看 worker 日志：
+确认 `ZAI_EMD_API` 已配置且 backend / worker 已重启，并查看 worker 日志：
 
 ```bash
 docker compose logs -f worker

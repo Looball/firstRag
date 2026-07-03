@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import os
 from typing import List
 
@@ -10,13 +12,22 @@ class ZhipuAIEmbeddings(Embeddings):
 
     def __init__(self):
         """
-        实例化ZhipuAI客户端。
+        初始化 embedding 包装器，客户端在实际调用时再创建。
 
         使用环境变量：ZAI_EMD_API
         """
-        self.client = ZhipuAiClient(
-            api_key=os.environ.get("ZAI_EMD_API")
-        )
+        self.client: ZhipuAiClient | None = None
+
+    def _get_client(self) -> ZhipuAiClient:
+        """按需创建智谱客户端，避免缺少 Key 时影响服务启动。"""
+        api_key = (os.environ.get("ZAI_EMD_API") or "").strip()
+        if not api_key or api_key.startswith("replace-with-"):
+            raise RuntimeError(
+                "缺少环境变量 ZAI_EMD_API，请配置后重启 backend/worker 再执行向量化。"
+            )
+        if self.client is None:
+            self.client = ZhipuAiClient(api_key=api_key)
+        return self.client
 
     def embed_documents(self, texts: List[str]) -> List[List[float]]:
         """
@@ -30,10 +41,11 @@ class ZhipuAIEmbeddings(Embeddings):
         """
         batch_size = 64  # 智谱AI embedding一次最多接收64条
         all_embeddings = []
+        client = self._get_client()
 
         for start in range(0, len(texts), batch_size):
             batch_texts = texts[start:start + batch_size]
-            response = self.client.embeddings.create(
+            response = client.embeddings.create(
                 model="embedding-3",
                 input=batch_texts,
             )

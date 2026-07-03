@@ -49,14 +49,11 @@ class ProductionPreflightScriptTests(unittest.TestCase):
                 "POSTGRES_PASSWORD": "replace-with-a-strong-postgres-password",
                 "JWT_SECRET_KEY": "replace-with-a-random-secret",
                 "USER_SETTINGS_ENCRYPTION_KEY": "replace-with-a-fernet-key",
-                "LLM_API_KEY": "replace-with-your-llm-api-key",
-                "ZAI_EMD_API": "replace-with-your-zhipu-api-key",
             }
         )
 
-        self.assertGreaterEqual(len(errors), 5)
+        self.assertGreaterEqual(len(errors), 3)
         self.assertTrue(any("POSTGRES_PASSWORD" in error for error in errors))
-        self.assertTrue(any("LLM_API_KEY" in error for error in errors))
 
     def test_validate_secret_settings_accepts_realistic_values(self) -> None:
         """格式正确的生产配置不应报 secret 错误。"""
@@ -65,12 +62,46 @@ class ProductionPreflightScriptTests(unittest.TestCase):
                 "POSTGRES_PASSWORD": "a-very-long-random-password",
                 "JWT_SECRET_KEY": "jwt-secret-with-at-least-thirty-two-chars",
                 "USER_SETTINGS_ENCRYPTION_KEY": VALID_FERNET_KEY,
-                "LLM_API_KEY": "sk-production-provider-key",
-                "ZAI_EMD_API": "zhipu-production-key",
             }
         )
 
         self.assertEqual(errors, [])
+
+    def test_optional_provider_settings_allow_missing_keys(self) -> None:
+        """Provider Key 可后配置，默认不应阻塞 preflight。"""
+        errors = production_preflight.validate_optional_provider_settings({})
+
+        self.assertEqual(errors, [])
+
+    def test_optional_provider_settings_reject_configured_placeholders(self) -> None:
+        """已填写的 provider Key 不能仍是模板占位值。"""
+        errors = production_preflight.validate_optional_provider_settings(
+            {
+                "LLM_API_KEY": "replace-with-your-llm-api-key",
+                "ZAI_EMD_API": "replace-with-your-zhipu-api-key",
+            }
+        )
+
+        self.assertEqual(len(errors), 2)
+        self.assertTrue(any("LLM_API_KEY" in error for error in errors))
+        self.assertTrue(any("ZAI_EMD_API" in error for error in errors))
+
+    def test_optional_provider_settings_can_require_keys(self) -> None:
+        """公开 smoke test 前可显式要求 provider Key 已就绪。"""
+        missing_errors = production_preflight.validate_optional_provider_settings(
+            {},
+            require_provider_keys=True,
+        )
+        configured_errors = production_preflight.validate_optional_provider_settings(
+            {
+                "LLM_API_KEY": "sk-production-provider-key",
+                "ZAI_EMD_API": "zhipu-production-key",
+            },
+            require_provider_keys=True,
+        )
+
+        self.assertEqual(len(missing_errors), 2)
+        self.assertEqual(configured_errors, [])
 
     def test_validate_port_bindings_requires_loopback(self) -> None:
         """生产 compose 端口应只绑定本机地址。"""

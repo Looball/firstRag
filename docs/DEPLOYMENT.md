@@ -18,9 +18,9 @@ cp .env.example .env
 | `COMPOSE_DATABASE_URL` | Docker Compose 方式运行时可选覆盖的 PostgreSQL 连接串；不填时默认连接 compose 内的 `postgres` 服务。 |
 | `POSTGRES_DB` / `POSTGRES_USER` / `POSTGRES_PASSWORD` | Docker Compose 中 PostgreSQL 容器的数据库、用户和密码。 |
 | `JWT_SECRET_KEY` | JWT 签名密钥。 |
-| `LLM_PROVIDER` / `LLM_MODEL` / `LLM_API_KEY` | 默认平台模型配置。 |
+| `LLM_PROVIDER` / `LLM_MODEL` / `LLM_API_KEY` | 默认平台模型配置；`LLM_API_KEY` 可后配置，留空不影响服务启动。 |
 | `USER_SETTINGS_ENCRYPTION_KEY` | 用户 API Key 加密主密钥。 |
-| `ZAI_EMD_API` | 智谱 embedding API Key。 |
+| `ZAI_EMD_API` | 智谱 embedding API Key；可后配置，留空不影响服务启动，但向量化和向量检索不可用。 |
 | `VECTOR_STORE_PATH` | Chroma 持久化路径；本地默认 `./vector_db/chroma`，compose 默认 `/app/vector_db/chroma`。 |
 | `RERANKER_MODEL_PATH` | 本地 reranker 模型路径；compose 会把 `./models` 只读挂载到 `/app/models`。 |
 | `UPLOADS_DIR` / `VECTOR_DB_DIR` / `MODELS_DIR` | Docker Compose 宿主机持久化目录；生产环境建议指向独立数据盘。 |
@@ -275,8 +275,8 @@ curl -s -H "Authorization: Bearer <access_token>" http://127.0.0.1:8000/chat/vec
 | `POSTGRES_PASSWORD` | 使用非默认强密码，通过服务器 `.env`、CI/CD secret 或部署平台 secret 注入。 | 需要同步 PostgreSQL 用户密码；如设置了 `COMPOSE_DATABASE_URL`，也要同步更新连接串，并重启依赖服务。 |
 | `JWT_SECRET_KEY` | 使用至少 32 字符随机值，例如 `openssl rand -hex 32`。 | 轮换后已签发 token 全部失效，用户需要重新登录。 |
 | `USER_SETTINGS_ENCRYPTION_KEY` | 使用 Fernet key，和 `JWT_SECRET_KEY` 分离，例如 `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"`。 | 丢失或更换后无法解密已保存的用户 API Key，必须先清空或重新录入用户凭据。 |
-| `LLM_API_KEY` / `DEEPSEEK_API_KEY` | 默认 provider Key 只放在生产 secret 中；如果只允许用户自带 Key，也不能留下占位值覆盖回退逻辑。 | 轮换后重启 backend 和 worker；失败时聊天会返回 provider 配置错误。 |
-| `ZAI_EMD_API` | embedding Key 只放在生产 secret 中。 | 轮换后重启 backend 和 worker；失败时向量化会失败。 |
+| `LLM_API_KEY` / `DEEPSEEK_API_KEY` | 默认 provider Key 可后配置，只放在生产 secret 中；如果只允许用户自带 Key，可以留空，但不能留下占位值覆盖回退逻辑。 | 配置或轮换后重启 backend 和 worker；未配置时系统默认聊天会返回 provider 配置错误。 |
+| `ZAI_EMD_API` | embedding Key 可后配置，只放在生产 secret 中。 | 配置或轮换后重启 backend 和 worker；未配置时向量化和向量检索会失败。 |
 | `ALLOW_USER_CUSTOM_LLM_BASE_URL` | 公开环境默认保持 `false`。 | 开启前必须先完成 SSRF 出口策略、域名 allowlist 或网络隔离。 |
 | `DATABASE_URL` | 仅用于宿主机 conda 方式运行或本地 migration dry-run；Docker Compose 内部连接由 compose 环境覆盖。 | 生产只用 compose 时可以删除该项，避免残留模板连接串。 |
 | `COMPOSE_DATABASE_URL` | 仅在外部数据库或特殊连接串时设置；否则让 compose 根据 `POSTGRES_*` 构造。 | 设置后必须和 PostgreSQL 实际用户、密码、库名保持一致。 |
@@ -293,6 +293,12 @@ conda run -n firstrag python scripts/production_preflight.py --env-file .env --s
 conda run -n firstrag python scripts/production_preflight.py --env-file .env --migration-method compose
 ```
 
+如果要在公开 smoke test 前确认默认平台聊天和向量化也已经就绪，额外加上 `--require-provider-keys`：
+
+```bash
+conda run -n firstrag python scripts/production_preflight.py --env-file .env --migration-method compose --require-provider-keys
+```
+
 如果使用宿主机 conda 环境直接访问数据库，也可以改用 local dry-run：
 
 ```bash
@@ -301,7 +307,8 @@ conda run -n firstrag python scripts/production_preflight.py --env-file .env --m
 
 preflight 会拦截以下问题：
 
-- `POSTGRES_PASSWORD`、`JWT_SECRET_KEY`、`USER_SETTINGS_ENCRYPTION_KEY`、`LLM_API_KEY`、`ZAI_EMD_API` 仍是模板占位值或明显过短。
+- `POSTGRES_PASSWORD`、`JWT_SECRET_KEY`、`USER_SETTINGS_ENCRYPTION_KEY` 仍是模板占位值或明显过短。
+- 已填写的 `LLM_API_KEY`、`DEEPSEEK_API_KEY` 或 `ZAI_EMD_API` 仍是模板占位值；使用 `--require-provider-keys` 时还会要求 LLM 和 embedding Key 均已配置。
 - `USER_SETTINGS_ENCRYPTION_KEY` 不是 Fernet key，或与 `JWT_SECRET_KEY` 相同。
 - `DATABASE_URL` / `COMPOSE_DATABASE_URL` 仍含模板账号、密码或占位值。
 - `FRONTEND_PORT`、`BACKEND_PORT`、`POSTGRES_PORT` 未绑定到 `127.0.0.1` / `localhost`。
@@ -417,8 +424,8 @@ MODELS_DIR=/srv/firstrag/models
 | `POSTGRES_DB` / `POSTGRES_USER` / `POSTGRES_PASSWORD` | 使用非默认强密码；不要沿用模板密码。 |
 | `JWT_SECRET_KEY` | 使用随机长密钥；更换后已有登录态会失效。 |
 | `USER_SETTINGS_ENCRYPTION_KEY` | 使用 Fernet key，并与 `JWT_SECRET_KEY` 分离；丢失后无法解密已保存的用户 API Key。 |
-| `LLM_PROVIDER` / `LLM_MODEL` / `LLM_API_KEY` | 如使用平台默认 Key，只放在服务器 `.env` 或 secret store，不写入 README、issue、日志或截图。 |
-| `ZAI_EMD_API` | embedding Key 只放在服务器 `.env` 或 secret store。 |
+| `LLM_PROVIDER` / `LLM_MODEL` / `LLM_API_KEY` | 如使用平台默认 Key，只放在服务器 `.env` 或 secret store；也可以先留空，后续通过用户设置页或服务器 `.env` 配置。 |
+| `ZAI_EMD_API` | embedding Key 只放在服务器 `.env` 或 secret store；可后配置，但向量化前必须填写并重启 backend / worker。 |
 | `ALLOW_USER_CUSTOM_LLM_BASE_URL` | 公开 demo 保持 `false`，避免用户通过自定义模型地址访问服务器内网。 |
 | `MAX_UPLOAD_FILE_SIZE_BYTES` | 公开 demo 建议调低到 10-20 MB，并与反向代理 body size 一致。 |
 | `USER_UPLOAD_MAX_FILES` / `USER_UPLOAD_MAX_BYTES` | 设置用户级文件数量和总容量上限；公开 demo 建议保守配置。 |
@@ -503,7 +510,7 @@ docker run --rm -v "$PWD/deploy/nginx:/etc/nginx/conf.d:ro" nginx:alpine nginx -
 ### 启动步骤
 
 1. 准备云服务器、域名和 TLS 方案，只开放 80/443 和受控 SSH。
-2. 在服务器拉取仓库，复制 `.env.example` 为 `.env`，填写非默认密钥和 provider Key。
+2. 在服务器拉取仓库，复制 `.env.example` 为 `.env`，填写非默认密钥；provider Key 可先留空，公开 smoke test 前再补齐。
 3. 准备 `MODELS_DIR/rerankers/bge-reranker-base`，并确认 `UPLOADS_DIR`、`VECTOR_DB_DIR` 可持久化。
 4. 运行 `conda run -n firstrag python scripts/production_preflight.py --env-file .env --skip-migration-dry-run` 检查 secret、端口和目录。
 5. 运行 `docker compose config --quiet` 检查 Compose 配置。

@@ -81,6 +81,14 @@ def build_arg_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Skip persistent directory checks.",
     )
+    parser.add_argument(
+        "--require-provider-keys",
+        action="store_true",
+        help=(
+            "Require LLM and embedding provider keys. Use before public smoke "
+            "tests; omit it when booting first and configuring providers later."
+        ),
+    )
     return parser
 
 
@@ -157,21 +165,12 @@ def require_secret(
 
 
 def validate_secret_settings(env: Mapping[str, str]) -> list[str]:
-    """校验生产密钥和 provider Key 的最低要求。"""
+    """校验启动必需的生产密钥最低要求。"""
     errors: list[str] = []
 
     require_secret(env, "POSTGRES_PASSWORD", errors, min_length=MIN_PASSWORD_LENGTH)
     require_secret(env, "JWT_SECRET_KEY", errors)
     require_secret(env, "USER_SETTINGS_ENCRYPTION_KEY", errors)
-    require_secret(env, "ZAI_EMD_API", errors, min_length=12)
-
-    llm_api_key = env.get("LLM_API_KEY")
-    deepseek_api_key = env.get("DEEPSEEK_API_KEY")
-    if is_placeholder(llm_api_key):
-        if is_placeholder(deepseek_api_key):
-            errors.append("LLM_API_KEY 或 DEEPSEEK_API_KEY 必须配置为真实 provider Key。")
-        elif llm_api_key:
-            errors.append("LLM_API_KEY 仍是占位值，会覆盖 DEEPSEEK_API_KEY 回退。")
 
     encryption_key = env.get("USER_SETTINGS_ENCRYPTION_KEY", "")
     jwt_secret = env.get("JWT_SECRET_KEY", "")
@@ -180,6 +179,42 @@ def validate_secret_settings(env: Mapping[str, str]) -> list[str]:
             errors.append("USER_SETTINGS_ENCRYPTION_KEY 必须是有效 Fernet key。")
         if jwt_secret and encryption_key == jwt_secret:
             errors.append("USER_SETTINGS_ENCRYPTION_KEY 必须与 JWT_SECRET_KEY 分离。")
+
+    return errors
+
+
+def has_configured_value(value: str | None) -> bool:
+    """判断可选配置是否实际填写了非空值。"""
+    return bool(value and value.strip())
+
+
+def validate_optional_provider_settings(
+    env: Mapping[str, str],
+    *,
+    require_provider_keys: bool = False,
+) -> list[str]:
+    """校验可后配置的 LLM 与 embedding provider Key。"""
+    errors: list[str] = []
+
+    llm_api_key = env.get("LLM_API_KEY")
+    deepseek_api_key = env.get("DEEPSEEK_API_KEY")
+    if has_configured_value(llm_api_key) and is_placeholder(llm_api_key):
+        errors.append("LLM_API_KEY 仍是占位值，请留空或替换为真实 provider Key。")
+    if has_configured_value(deepseek_api_key) and is_placeholder(deepseek_api_key):
+        errors.append("DEEPSEEK_API_KEY 仍是占位值，请留空或替换为真实 provider Key。")
+    if require_provider_keys and not (
+        has_configured_value(llm_api_key) or has_configured_value(deepseek_api_key)
+    ):
+        errors.append("公开 smoke test 前需要配置 LLM_API_KEY 或 DEEPSEEK_API_KEY。")
+
+    embedding_key = env.get("ZAI_EMD_API")
+    if has_configured_value(embedding_key):
+        if is_placeholder(embedding_key):
+            errors.append("ZAI_EMD_API 仍是占位值，请留空或替换为真实 embedding Key。")
+        elif len(embedding_key.strip()) < 12:
+            errors.append("ZAI_EMD_API 长度过短，请确认是否为真实 embedding Key。")
+    elif require_provider_keys:
+        errors.append("公开 smoke test 前需要配置 ZAI_EMD_API。")
 
     return errors
 
@@ -347,7 +382,14 @@ def run(args: argparse.Namespace) -> int:
         return 1
 
     groups = [
-        ("Secret / provider settings", validate_secret_settings(env)),
+        ("Required secret settings", validate_secret_settings(env)),
+        (
+            "Optional provider settings",
+            validate_optional_provider_settings(
+                env,
+                require_provider_keys=args.require_provider_keys,
+            ),
+        ),
         ("Database settings", validate_database_settings(env)),
         ("Port bindings", validate_port_bindings(env)),
     ]
