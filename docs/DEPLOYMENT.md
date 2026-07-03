@@ -161,7 +161,7 @@ CI 覆盖：
 
 ## Docker Compose
 
-仓库根目录提供本地 compose 方案：
+仓库根目录提供本地 compose 方案。完整启动流程、`.env` 准备、reranker 模型下载、日志查看和常见问题见 `docs/docker-startup/README.md`。
 
 ```bash
 docker compose up --build

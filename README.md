@@ -87,7 +87,7 @@ python -m app.workers.vector_index_worker
 docker compose up --build
 ```
 
-compose 会先运行 `migrate` service 初始化或升级 PostgreSQL schema，再启动后端、前端和 worker。
+compose 会先运行 `migrate` service 初始化或升级 PostgreSQL schema，再启动后端、前端和 worker。完整准备流程见 [`docs/docker-startup/README.md`](docs/docker-startup/README.md)。
 
 ## 技术栈
 

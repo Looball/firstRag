@@ -13,6 +13,7 @@
 | `FRONTEND.md` | Next.js 前端目录、页面、代理层和状态约定。 |
 | `BACKEND.md` | FastAPI 后端分层、服务和 worker 说明。 |
 | `DEPLOYMENT.md` | 本地启动、环境变量、部署目录约定。 |
+| `docker-startup/README.md` | Docker Compose 本地完整链路启动 runbook。 |
 | `AGENT_GUIDE.md` | AI Agent / Codex / Claude Code 协作规范。 |
 | `CODING_STYLE.md` | 代码风格、提交和测试约定。 |
 | `TASKS.md` | 长期任务台账、计划批次、优先级、状态和验收标准。 |
