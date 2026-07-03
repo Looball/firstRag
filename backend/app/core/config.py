@@ -80,6 +80,20 @@ CHROMA_COLLECTION_NAME = os.environ.get(
     "langchain",
 )
 
+# Embedding provider 配置。默认沿用智谱 embedding-3；切到 qwen/dashscope 时
+# 使用阿里云 Model Studio / DashScope 的 OpenAI-compatible embeddings API。
+EMBEDDING_PROVIDER = os.environ.get("EMBEDDING_PROVIDER", "zhipuai").strip().lower()
+EMBEDDING_MODEL = os.environ.get("EMBEDDING_MODEL", "").strip()
+EMBEDDING_BASE_URL = os.environ.get("EMBEDDING_BASE_URL", "").strip()
+EMBEDDING_DIMENSIONS = read_int_env("EMBEDDING_DIMENSIONS", 0)
+
+# Rerank provider 配置。默认仍为本地 CrossEncoder；切到 qwen/dashscope 时
+# 通过阿里云 OpenAI-compatible /reranks 接口远程精排。
+RERANK_PROVIDER = os.environ.get("RERANK_PROVIDER", "local").strip().lower()
+RERANK_MODEL = os.environ.get("RERANK_MODEL", "").strip()
+RERANK_BASE_URL = os.environ.get("RERANK_BASE_URL", "").strip()
+RERANK_INSTRUCT = os.environ.get("RERANK_INSTRUCT", "").strip()
+
 # 设置本地 Cross-Encoder 精排序模型路径
 RERANKER_MODEL_PATH = resolve_project_path(
     os.environ.get("RERANKER_MODEL_PATH", ""),

@@ -69,6 +69,10 @@ export LLM_PROVIDER="deepseek"
 export LLM_MODEL="deepseek-v4-flash"
 export LLM_API_KEY="你的模型 API Key"
 export ZAI_EMD_API="你的智谱 embedding API Key"
+# 或切到阿里云 Qwen embedding：
+# export EMBEDDING_PROVIDER=qwen
+# export EMBEDDING_MODEL=text-embedding-v4
+# export DASHSCOPE_API_KEY="你的 DashScope API Key"
 ```
 
 聊天模型统一通过 OpenAI 兼容协议调用，内置 `deepseek`、`qwen`、`zhipu`、
@@ -131,7 +135,7 @@ python chat.py
 ## 当前特点
 
 - 使用 `Chroma` 作为本地向量数据库
-- 使用智谱 `embedding-3` 生成文本向量
+- 默认使用智谱 `embedding-3` 生成文本向量，也可通过 `EMBEDDING_PROVIDER=qwen` 切到阿里云 `text-embedding-v4`
 - 通过 OpenAI 兼容接口调用国内大语言模型作为回答模型
 - 使用 LangChain LCEL 组合检索链和问答链
 - 当前 prompt 更偏向“严格根据知识库回答”，适合观察 RAG 的检索增强效果

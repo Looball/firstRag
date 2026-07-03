@@ -17,7 +17,7 @@
 2. 使用 PostgreSQL advisory lock 避免同一文件并发索引。
 3. `document_service` 加载 PDF、Markdown 或文本内容。
 4. 文本切分为 chunk。
-5. 智谱 embedding 生成向量。
+5. 当前 embedding provider 生成向量，默认智谱 `embedding-3`，也可切换到阿里云 Qwen `text-embedding-v4`。
 6. Chroma 保存向量。
 7. PostgreSQL `knowledge_file_chunks` 保存 chunk 正文和 metadata，用于全文检索。
 8. 更新文件状态和任务状态。
@@ -32,7 +32,7 @@
 6. 召回候选片段：
    - Chroma 向量检索和 PostgreSQL 全文检索并行粗召回。
    - RRF 融合多路结果。
-   - CrossEncoder reranker 精排。
+   - 可选 reranker 精排，默认本地 CrossEncoder，也可切换到阿里云 Qwen rerank API。
 7. DeepSeek 或用户配置的 OpenAI 兼容模型流式生成回答。
 8. SSE 返回 token、sources、retrieval 诊断。
 9. 回答完成后持久化到 `messages`。
@@ -43,8 +43,8 @@
 
 - `retrieval_mode`：`auto`、`always`、`never`。
 - `enable_query_router`：是否调用 Router LLM 判断本轮是否检索。
-- `enable_rerank`：是否启用 CrossEncoder rerank。
-- `top_k`、`vector_top_k`、`fulltext_top_k`、`rrf_k`：控制最终引用数、两路召回数和 RRF 候选池；默认分别为 `4`、`16`、`16`、`8`，用于减少 CrossEncoder 候选数和首 token 前等待时间。
+- `enable_rerank`：是否启用 rerank 精排。
+- `top_k`、`vector_top_k`、`fulltext_top_k`、`rrf_k`：控制最终引用数、两路召回数和 RRF 候选池；默认分别为 `4`、`16`、`16`、`8`，用于减少 rerank 候选数和首 token 前等待时间。
 - `rerank_score_threshold`：控制低相关片段是否进入上下文和 Sources。
 
 ## 检索诊断
@@ -101,7 +101,7 @@
 - `pre_answer_total_ms`：开始生成回答前的总耗时。
 - `first_answer_token_ms`：从后端开始处理到首个回答 token 的耗时。
 
-当 RRF 融合后的候选数量不超过最终 `top_k` 时，后端会跳过 CrossEncoder rerank，
+当 RRF 融合后的候选数量不超过最终 `top_k` 时，后端会跳过 rerank，
 并在 diagnostics 中写入 `rerank_skipped=true` 与 `rerank_skip_reason`。该策略用于避免
 小候选集场景下的无收益精排开销；候选数超过 `top_k` 时仍会执行 rerank。
 

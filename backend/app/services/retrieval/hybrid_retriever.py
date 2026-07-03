@@ -35,13 +35,14 @@ from app.services.retrieval.reranker import (
     get_reranker,
 )
 from app.services.retrieval.rrf import reciprocal_rank_fusion
-from app.services.vectors.embedding_model import ZhipuAIEmbeddings
+from app.services.vectors.embedding_model import (
+    create_embedding_model,
+    get_embedding_cache_identity,
+)
 from app.services.vectors.vector_index_service import get_vector_store
 
 logger = logging.getLogger(__name__)
 
-QUERY_EMBEDDING_PROVIDER = "zhipuai"
-QUERY_EMBEDDING_MODEL = "embedding-3"
 QUERY_EMBEDDING_CACHE_TTL_SECONDS = 300.0
 MAX_VECTOR_FILTER_FALLBACK_CANDIDATES = 100
 
@@ -131,9 +132,10 @@ def normalize_query_embedding_cache_text(query: str) -> str:
 
 def build_query_embedding_cache_key(query: str) -> tuple[str, str, str]:
     """构造 query embedding 缓存 key。"""
+    provider, model = get_embedding_cache_identity()
     return (
-        QUERY_EMBEDDING_PROVIDER,
-        QUERY_EMBEDDING_MODEL,
+        provider,
+        model,
         normalize_query_embedding_cache_text(query),
     )
 
@@ -165,7 +167,7 @@ def get_query_embedding(query: str) -> list[float]:
         query_embedding_cache_hit=False,
         query_embedding_cache_key=":".join(cache_key),
     )
-    embedding_model = ZhipuAIEmbeddings()
+    embedding_model = create_embedding_model()
     embedding = list(embedding_model.embed_query(query))
 
     with _QUERY_EMBEDDING_CACHE_LOCK:

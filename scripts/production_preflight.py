@@ -29,6 +29,9 @@ PLACEHOLDER_VALUES = {
     "replace-with-your-llm-api-key",
     "replace-with-your-deepseek-api-key",
     "replace-with-your-zhipu-api-key",
+    "replace-with-your-dashscope-api-key",
+    "replace-with-your-qwen-api-key",
+    "replace-with-your-rerank-api-key",
     "replace-with-a-fernet-key",
 }
 
@@ -193,6 +196,35 @@ def has_configured_value(value: str | None) -> bool:
     return bool(value and value.strip())
 
 
+def normalize_optional_provider(value: str | None, default: str) -> str:
+    """归一化可选 provider 名称，供 preflight 做轻量校验。"""
+    return (value or default).strip().lower()
+
+
+def has_any_configured_key(env: Mapping[str, str], keys: Sequence[str]) -> bool:
+    """判断一组可选 Key 中是否至少配置了一个真实值。"""
+    return any(
+        has_configured_value(env.get(key)) and not is_placeholder(env.get(key))
+        for key in keys
+    )
+
+
+def validate_optional_api_keys(
+    env: Mapping[str, str],
+    keys: Sequence[str],
+    errors: list[str],
+) -> None:
+    """校验一组可选 API Key 不应填写占位值或明显过短值。"""
+    for key in keys:
+        value = env.get(key)
+        if not has_configured_value(value):
+            continue
+        if is_placeholder(value):
+            errors.append(f"{key} 仍是占位值，请留空或替换为真实 provider Key。")
+        elif len((value or "").strip()) < 12:
+            errors.append(f"{key} 长度过短，请确认是否为真实 provider Key。")
+
+
 def validate_optional_provider_settings(
     env: Mapping[str, str],
     *,
@@ -201,25 +233,55 @@ def validate_optional_provider_settings(
     """校验可后配置的 LLM 与 embedding provider Key。"""
     errors: list[str] = []
 
-    llm_api_key = env.get("LLM_API_KEY")
-    deepseek_api_key = env.get("DEEPSEEK_API_KEY")
-    if has_configured_value(llm_api_key) and is_placeholder(llm_api_key):
-        errors.append("LLM_API_KEY 仍是占位值，请留空或替换为真实 provider Key。")
-    if has_configured_value(deepseek_api_key) and is_placeholder(deepseek_api_key):
-        errors.append("DEEPSEEK_API_KEY 仍是占位值，请留空或替换为真实 provider Key。")
+    llm_keys = ("LLM_API_KEY", "DEEPSEEK_API_KEY")
+    validate_optional_api_keys(env, llm_keys, errors)
     if require_provider_keys and not (
-        has_configured_value(llm_api_key) or has_configured_value(deepseek_api_key)
+        has_any_configured_key(env, llm_keys)
     ):
         errors.append("公开 smoke test 前需要配置 LLM_API_KEY 或 DEEPSEEK_API_KEY。")
 
-    embedding_key = env.get("ZAI_EMD_API")
-    if has_configured_value(embedding_key):
-        if is_placeholder(embedding_key):
-            errors.append("ZAI_EMD_API 仍是占位值，请留空或替换为真实 embedding Key。")
-        elif len(embedding_key.strip()) < 12:
-            errors.append("ZAI_EMD_API 长度过短，请确认是否为真实 embedding Key。")
-    elif require_provider_keys:
-        errors.append("公开 smoke test 前需要配置 ZAI_EMD_API。")
+    embedding_provider = normalize_optional_provider(
+        env.get("EMBEDDING_PROVIDER"),
+        "zhipuai",
+    )
+    zhipu_embedding_keys = ("ZAI_EMD_API",)
+    qwen_embedding_keys = (
+        "EMBEDDING_API_KEY",
+        "DASHSCOPE_API_KEY",
+        "QWEN_API_KEY",
+    )
+    validate_optional_api_keys(
+        env,
+        zhipu_embedding_keys + qwen_embedding_keys,
+        errors,
+    )
+    if require_provider_keys:
+        if embedding_provider in {"qwen", "dashscope", "aliyun", "aliyun-qwen"}:
+            if not has_any_configured_key(env, qwen_embedding_keys):
+                errors.append("公开 smoke test 前需要配置阿里云 embedding Key。")
+        elif not has_any_configured_key(env, zhipu_embedding_keys):
+            errors.append("公开 smoke test 前需要配置 ZAI_EMD_API。")
+
+    rerank_provider = normalize_optional_provider(
+        env.get("RERANK_PROVIDER"),
+        "local",
+    )
+    qwen_rerank_keys = (
+        "RERANK_API_KEY",
+        "DASHSCOPE_API_KEY",
+        "QWEN_API_KEY",
+        "EMBEDDING_API_KEY",
+    )
+    validate_optional_api_keys(env, ("RERANK_API_KEY",), errors)
+    if rerank_provider in {"qwen", "dashscope", "aliyun", "aliyun-qwen"}:
+        rerank_base_url = env.get("RERANK_BASE_URL", "")
+        if has_configured_value(rerank_base_url) and is_placeholder(rerank_base_url):
+            errors.append("RERANK_BASE_URL 仍是占位值，请替换为阿里云工作空间地址。")
+        if require_provider_keys:
+            if not has_any_configured_key(env, qwen_rerank_keys):
+                errors.append("公开 smoke test 前需要配置阿里云 rerank Key。")
+            if not has_configured_value(rerank_base_url):
+                errors.append("公开 smoke test 前需要配置 RERANK_BASE_URL。")
 
     return errors
 

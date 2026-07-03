@@ -15,7 +15,10 @@ from app.services.retrieval.hybrid_retriever import (
     get_retrieval_diagnostics,
     get_vector_documents,
 )
-from app.services.retrieval.reranker import load_reranker_runtime
+from app.services.retrieval.reranker import (
+    DashScopeQwenReranker,
+    load_reranker_runtime,
+)
 from app.services.retrieval.rrf import reciprocal_rank_fusion
 
 
@@ -127,7 +130,7 @@ class RetrievalResilienceTests(unittest.TestCase):
     def test_vector_search_skips_failed_file(self) -> None:
         """单个 Chroma 文件过滤查询失败时，应继续返回其它文件结果。"""
         with unittest.mock.patch(
-            "app.services.retrieval.hybrid_retriever.ZhipuAIEmbeddings",
+            "app.services.retrieval.hybrid_retriever.create_embedding_model",
         ) as embedding_cls, unittest.mock.patch(
             "app.services.retrieval.hybrid_retriever.get_vector_store",
             return_value=FakeVectorStore(),
@@ -150,7 +153,7 @@ class RetrievalResilienceTests(unittest.TestCase):
     ) -> None:
         """单文件过滤触发 Chroma HNSW 错误时，应退回用户级检索后过滤。"""
         with unittest.mock.patch(
-            "app.services.retrieval.hybrid_retriever.ZhipuAIEmbeddings",
+            "app.services.retrieval.hybrid_retriever.create_embedding_model",
         ) as embedding_cls, unittest.mock.patch(
             "app.services.retrieval.hybrid_retriever.get_vector_store",
             return_value=FakeFallbackVectorStore(),
@@ -182,7 +185,7 @@ class RetrievalResilienceTests(unittest.TestCase):
             },
         )
         with unittest.mock.patch(
-            "app.services.retrieval.hybrid_retriever.ZhipuAIEmbeddings",
+            "app.services.retrieval.hybrid_retriever.create_embedding_model",
         ) as embedding_cls, unittest.mock.patch(
             "app.services.retrieval.hybrid_retriever.get_vector_store",
             return_value=FakeVectorStore(),
@@ -398,7 +401,7 @@ class RetrievalResilienceTests(unittest.TestCase):
         )
 
         with unittest.mock.patch(
-            "app.services.retrieval.hybrid_retriever.ZhipuAIEmbeddings",
+            "app.services.retrieval.hybrid_retriever.create_embedding_model",
         ) as embedding_cls, unittest.mock.patch(
             "app.services.retrieval.hybrid_retriever.get_vector_store",
             return_value=FakeVectorStore(),
@@ -437,7 +440,7 @@ class RetrievalResilienceTests(unittest.TestCase):
     def test_query_embedding_cache_expires(self) -> None:
         """TTL 过期后应重新调用 embedding provider。"""
         with unittest.mock.patch(
-            "app.services.retrieval.hybrid_retriever.ZhipuAIEmbeddings",
+            "app.services.retrieval.hybrid_retriever.create_embedding_model",
         ) as embedding_cls, unittest.mock.patch(
             "app.services.retrieval.hybrid_retriever.get_vector_store",
             return_value=FakeVectorStore(),
@@ -478,7 +481,7 @@ class RetrievalResilienceTests(unittest.TestCase):
     def test_query_embedding_failure_does_not_pollute_cache(self) -> None:
         """embedding 生成失败不应写入缓存，后续请求仍可重试。"""
         with unittest.mock.patch(
-            "app.services.retrieval.hybrid_retriever.ZhipuAIEmbeddings",
+            "app.services.retrieval.hybrid_retriever.create_embedding_model",
         ) as embedding_cls, unittest.mock.patch(
             "app.services.retrieval.hybrid_retriever.get_vector_store",
             return_value=FakeVectorStore(),
@@ -513,6 +516,60 @@ class RetrievalResilienceTests(unittest.TestCase):
         ):
             with self.assertRaisesRegex(RuntimeError, "requirements-rerank"):
                 load_reranker_runtime()
+
+    def test_qwen_reranker_sorts_documents_by_remote_scores(self) -> None:
+        """阿里云 Qwen rerank 应按 API 返回的 relevance score 重排。"""
+        documents = [
+            Document(page_content="候选 A", metadata={}),
+            Document(page_content="候选 B", metadata={}),
+            Document(page_content="候选 C", metadata={}),
+        ]
+        response = {
+            "results": [
+                {"index": 2, "relevance_score": 0.2},
+                {"index": 0, "relevance_score": 0.9},
+                {"index": 1, "relevance_score": 0.5},
+            ],
+        }
+
+        with patch.dict(
+            "os.environ",
+            {"RERANK_API_KEY": "dashscope-test-key"},
+        ), patch("app.services.retrieval.reranker.OpenAI") as client_cls:
+            client_cls.return_value.post.return_value = response
+
+            reranker = DashScopeQwenReranker(
+                model_name="qwen3-rerank",
+                base_url="https://workspace.cn-beijing.maas.aliyuncs.com/compatible-api/v1",
+                instruct="Retrieve semantically similar text.",
+            )
+            reranked = reranker.rerank(
+                query="测试问题",
+                documents=documents,
+                top_k=2,
+            )
+
+        self.assertEqual([document.page_content for document in reranked], [
+            "候选 A",
+            "候选 B",
+        ])
+        self.assertEqual(reranked[0].metadata["rerank_score"], 0.9)
+        self.assertEqual(reranked[0].metadata["rerank_rank"], 1)
+        client_cls.assert_called_once_with(
+            api_key="dashscope-test-key",
+            base_url="https://workspace.cn-beijing.maas.aliyuncs.com/compatible-api/v1",
+        )
+        client_cls.return_value.post.assert_called_once_with(
+            "/reranks",
+            body={
+                "model": "qwen3-rerank",
+                "query": "测试问题",
+                "documents": ["候选 A", "候选 B", "候选 C"],
+                "top_n": 2,
+                "instruct": "Retrieve semantically similar text.",
+            },
+            cast_to=object,
+        )
 
     def test_hybrid_retrieval_runs_coarse_recall_in_parallel(self) -> None:
         """vector 和 fulltext 粗召回应并行执行，避免串行等待。"""

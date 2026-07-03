@@ -19,7 +19,7 @@ from langchain_text_splitters import (
 )
 
 from app.core.config import VECTOR_STORE_PATH
-from app.services.vectors.embedding_model import ZhipuAIEmbeddings
+from app.services.vectors.embedding_model import create_embedding_model
 
 
 logger = logging.getLogger(__name__)
@@ -251,7 +251,7 @@ def build_vector_store(
 
     vectordb = Chroma.from_documents(
         documents=split_docs,
-        embedding=ZhipuAIEmbeddings(),
+        embedding=create_embedding_model(),
         persist_directory=str(persist_directory),
     )
     logger.info("向量库中存储的数量：%s", vectordb._collection.count())

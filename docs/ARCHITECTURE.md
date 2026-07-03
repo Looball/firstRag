@@ -28,7 +28,7 @@ FirstRAG/
   -> Next.js API 代理
   -> FastAPI /chat
   -> rag_service 构建 LCEL 链
-  -> 混合检索：向量 + 全文 + RRF + CrossEncoder
+  -> 混合检索：向量 + 全文 + RRF + rerank
   -> LLM 流式生成
   -> SSE 返回 token、来源和检索诊断
   -> messages 持久化回答、sources、retrieval
@@ -57,4 +57,3 @@ FirstRAG/
 ## 认证与权限
 
 后端使用 JWT Bearer Token。所有用户数据接口通过 `Depends(get_current_user_id)` 取得当前用户 ID。涉及知识库、文件、会话和任务的查询必须带 `user_id` 权限隔离；不存在或不属于当前用户时统一返回 `404`。
-

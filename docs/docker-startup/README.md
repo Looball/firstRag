@@ -8,8 +8,8 @@
 
 - Docker Desktop 已启动，或 Linux 服务器上 Docker daemon 正常运行。
 - 仓库位于本机可写目录，例如 `/Users/bing/Desktop/Github/FirstRAG`。
-- LLM provider API Key 和 `ZAI_EMD_API` embedding Key 可以后配置；未配置时服务仍可启动，但默认平台聊天、向量化和向量检索不可用。
-- 默认 Docker 镜像不安装 `torch` / `transformers`，CrossEncoder rerank 会自动降级为 RRF 结果；如需启用 rerank，再安装可选依赖并下载 Hugging Face 模型 `BAAI/bge-reranker-base`。
+- LLM provider API Key、embedding Key 和远程 rerank Key 可以后配置；未配置时服务仍可启动，但默认平台聊天、向量化、向量检索或远程 rerank 不可用。
+- 默认 Docker 镜像不安装 `torch` / `transformers`。本地 CrossEncoder rerank 会自动降级为 RRF 结果；如需启用本地 rerank，再安装可选依赖并下载 Hugging Face 模型 `BAAI/bge-reranker-base`。也可以改用阿里云 Qwen rerank API，不需要本地模型栈。
 
 ## 2. 准备目录
 
@@ -44,11 +44,12 @@ JWT_SECRET_KEY=replace-with-a-random-secret
 USER_SETTINGS_ENCRYPTION_KEY=replace-with-a-fernet-key
 ```
 
-下面两个 provider Key 可启动后再配置。`LLM_API_KEY` 用于系统默认模型；如果用户在前端设置页保存自己的 provider Key，可以不配置系统默认 Key。`ZAI_EMD_API` 用于文件向量化和向量检索，留空不影响登录、上传和页面启动。
+下面这些 provider Key 可启动后再配置。`LLM_API_KEY` 用于系统默认模型；如果用户在前端设置页保存自己的 provider Key，可以不配置系统默认 Key。`ZAI_EMD_API` 用于默认智谱 embedding；切到阿里云 Qwen embedding/rerank 时，使用 `DASHSCOPE_API_KEY`、`QWEN_API_KEY` 或专用的 `EMBEDDING_API_KEY` / `RERANK_API_KEY`。这些 Key 留空不影响登录、上传和页面启动。
 
 ```bash
 LLM_API_KEY=
 ZAI_EMD_API=
+DASHSCOPE_API_KEY=
 ```
 
 如果 Docker 启动后再补充或修改这些 Key，需要重启相关服务：
@@ -80,7 +81,35 @@ POSTGRES_PORT=127.0.0.1:5432
 
 注意：`DATABASE_URL` 主要用于宿主机 conda 方式运行；Compose 内部默认使用 `POSTGRES_DB`、`POSTGRES_USER` 和 `POSTGRES_PASSWORD` 生成容器网络里的数据库连接。如果需要外部数据库，再设置 `COMPOSE_DATABASE_URL`。
 
-## 4. 可选：启用 reranker
+## 4. 可选：使用阿里云 Qwen embedding 和 rerank
+
+如果想把 embedding 和 rerank 都切到阿里云 Model Studio / DashScope API，可以在 `.env` 中使用下面配置：
+
+```bash
+EMBEDDING_PROVIDER=qwen
+EMBEDDING_MODEL=text-embedding-v4
+EMBEDDING_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
+# text-embedding-v4 可选 2048、1536、1024、768、512、256、128、64；留空使用阿里云默认值。
+EMBEDDING_DIMENSIONS=
+DASHSCOPE_API_KEY=your-dashscope-api-key
+
+RERANK_PROVIDER=qwen
+RERANK_MODEL=qwen3-rerank
+# 替换为你的阿里云工作空间 OpenAI-compatible 地址，并按控制台地域调整。
+RERANK_BASE_URL=https://<WorkspaceId>.ap-southeast-1.maas.aliyuncs.com/compatible-api/v1
+# 如果 rerank 和 embedding 使用同一个 DashScope Key，可以留空；否则填写专用 Key。
+RERANK_API_KEY=
+```
+
+修改 `.env` 后重启 backend 和 worker：
+
+```bash
+docker compose up -d --force-recreate backend worker
+```
+
+注意：切换 embedding provider、模型或维度后，已有 Chroma 向量可能与新 embedding 维度不一致；需要重新向量化相关知识文件，必要时清理旧 `vector_db`。
+
+## 5. 可选：启用本地 reranker
 
 最小 Docker 依赖不包含 `torch` 和 `transformers`。不安装它们时，基础聊天、上传、向量化和 RRF 融合检索仍可启动；涉及 CrossEncoder rerank 的检索会自动降级。
 
@@ -110,7 +139,7 @@ git clone https://huggingface.co/BAAI/bge-reranker-base \
 
 如果暂时不安装依赖或不下载该模型，基础聊天、上传和向量化仍可启动；涉及 rerank 的检索会在可观测日志中记录降级原因。
 
-## 5. 启动
+## 6. 启动
 
 先检查 Compose 配置：
 
@@ -126,7 +155,7 @@ docker compose up -d --build
 
 首次启动时，`postgres` 健康检查通过后会自动运行 `migrate` service 初始化或升级 schema；`backend` 和 `worker` 会等待 migration 成功后再启动。
 
-## 6. 查看状态
+## 7. 查看状态
 
 ```bash
 docker compose ps
@@ -147,10 +176,10 @@ docker compose logs -f migrate backend worker frontend
 2. 注册并登录本地测试账号。
 3. 进入模型设置，确认模型 provider 和 API Key 可用；如果暂未配置 Key，可以先跳过聊天测试。
 4. 新建知识库，上传一份 `.md`、`.txt`、`.pdf` 或 `.docx` 文件。
-5. 配置 `ZAI_EMD_API` 并重启 backend / worker 后，触发向量化，等待任务成功。
+5. 配置当前 embedding provider 对应的 API Key 并重启 backend / worker 后，触发向量化，等待任务成功。
 6. 对知识库提问，确认回答、sources 和任务队列状态正常。
 
-## 7. 常用命令
+## 8. 常用命令
 
 ```bash
 # 查看服务状态
@@ -174,7 +203,7 @@ docker compose down -v
 
 `docker compose down -v` 会删除 PostgreSQL named volume `postgres_data`，只在明确需要重置本地数据库时使用。
 
-## 8. 镜像体积与 worker
+## 9. 镜像体积与 worker
 
 `backend`、`migrate` 和 `worker` 都使用 `deploy/docker/backend.Dockerfile` 构建的 Python runtime 镜像。worker 的启动命令不同，但它仍需要文档解析、embedding、Chroma 入库和 PostgreSQL 队列依赖，因此不会比后端小很多。
 
@@ -190,7 +219,7 @@ docker compose up -d --build
 
 不要使用 `docker compose down -v` 清理镜像；它会删除 PostgreSQL 数据 volume。
 
-## 9. 常见问题
+## 10. 常见问题
 
 ### Docker daemon 未运行
 
@@ -229,7 +258,7 @@ docker compose up -d --build
 
 ### 上传或向量化失败
 
-确认 `ZAI_EMD_API` 已配置且 backend / worker 已重启，并查看 worker 日志：
+确认当前 embedding provider 对应的 API Key 已配置且 backend / worker 已重启，并查看 worker 日志：
 
 ```bash
 docker compose logs -f worker

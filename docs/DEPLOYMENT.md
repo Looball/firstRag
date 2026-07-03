@@ -20,7 +20,16 @@ cp .env.example .env
 | `JWT_SECRET_KEY` | JWT 签名密钥。 |
 | `LLM_PROVIDER` / `LLM_MODEL` / `LLM_API_KEY` | 默认平台模型配置；`LLM_API_KEY` 可后配置，留空不影响服务启动。 |
 | `USER_SETTINGS_ENCRYPTION_KEY` | 用户 API Key 加密主密钥。 |
-| `ZAI_EMD_API` | 智谱 embedding API Key；可后配置，留空不影响服务启动，但向量化和向量检索不可用。 |
+| `EMBEDDING_PROVIDER` | Embedding provider，默认 `zhipuai`；可设为 `qwen` / `dashscope` 使用阿里云 Qwen embedding API。 |
+| `EMBEDDING_MODEL` | Embedding 模型名；智谱默认 `embedding-3`，阿里云 Qwen 推荐 `text-embedding-v4`。 |
+| `EMBEDDING_BASE_URL` | Embedding OpenAI-compatible 地址；阿里云北京默认可用 `https://dashscope.aliyuncs.com/compatible-mode/v1`。 |
+| `EMBEDDING_DIMENSIONS` | 阿里云 `text-embedding-v4` 可选向量维度；切换维度后需要重新向量化。 |
+| `ZAI_EMD_API` | 智谱 embedding API Key；默认 provider 下可后配置，留空不影响服务启动，但向量化和向量检索不可用。 |
+| `DASHSCOPE_API_KEY` / `QWEN_API_KEY` / `EMBEDDING_API_KEY` | 阿里云 Qwen embedding API Key；切到 `EMBEDDING_PROVIDER=qwen` 时使用。 |
+| `RERANK_PROVIDER` | Rerank provider，默认 `local`；可设为 `qwen` / `dashscope` 使用阿里云 Qwen rerank API。 |
+| `RERANK_MODEL` | Rerank 模型名；阿里云 Qwen 推荐 `qwen3-rerank`。 |
+| `RERANK_BASE_URL` | 阿里云 Qwen rerank 的工作空间 OpenAI-compatible 地址，例如 `https://<WorkspaceId>.ap-southeast-1.maas.aliyuncs.com/compatible-api/v1`，按控制台地域调整。 |
+| `RERANK_API_KEY` | 阿里云 rerank 专用 Key；如果和 embedding 使用同一个 DashScope Key，可以留空。 |
 | `VECTOR_STORE_PATH` | Chroma 持久化路径；本地默认 `./vector_db/chroma`，compose 默认 `/app/vector_db/chroma`。 |
 | `RERANKER_MODEL_PATH` | 本地 reranker 模型路径；compose 会把 `./models` 只读挂载到 `/app/models`。 |
 | `UPLOADS_DIR` / `VECTOR_DB_DIR` / `MODELS_DIR` | Docker Compose 宿主机持久化目录；生产环境建议指向独立数据盘。 |
@@ -161,7 +170,7 @@ CI 覆盖：
 
 ## Docker Compose
 
-仓库根目录提供本地 compose 方案。默认后端镜像使用 `backend/requirements.txt` 的最小依赖集，不安装 `torch` / `transformers`；CrossEncoder rerank 会在缺少可选依赖时自动降级为 RRF 结果。完整启动流程、`.env` 准备、可选 reranker、日志查看和常见问题见 `docs/docker-startup/README.md`。
+仓库根目录提供本地 compose 方案。默认后端镜像使用 `backend/requirements.txt` 的最小依赖集，不安装 `torch` / `transformers`；本地 CrossEncoder rerank 会在缺少可选依赖时自动降级为 RRF 结果。也可以通过 `RERANK_PROVIDER=qwen` 改用阿里云 Qwen rerank API。完整启动流程、`.env` 准备、可选 reranker、日志查看和常见问题见 `docs/docker-startup/README.md`。
 
 ```bash
 docker compose up --build
@@ -241,7 +250,7 @@ compose 已为所有服务配置 Docker `json-file` 日志轮转，默认 `10m *
 | `retrieval_embedding_failed` | hybrid retrieval | 定位 embedding provider 或网络异常。 |
 | `retrieval_vector_failed` / `retrieval_vector_file_failed` | Chroma vector retrieval | 定位 Chroma、HNSW 或单文件向量残留问题。 |
 | `retrieval_fulltext_failed` | PostgreSQL full-text retrieval | 定位 PostgreSQL 或全文检索异常。 |
-| `retrieval_rerank_failed` | CrossEncoder rerank | 定位 reranker 模型或运行时异常；当前会降级为 RRF 结果。 |
+| `retrieval_rerank_failed` | rerank provider | 定位本地 reranker 模型、远程 rerank API 或运行时异常；当前会降级为 RRF 结果。 |
 | `vector_index_job_claimed` / `vector_index_job_succeeded` / `vector_index_job_failed` | vector worker | 统计任务吞吐、失败率、处理耗时和失败来源。 |
 
 错误日志统一包含 `error_type`、`error_source` 和 `retryable`。`error_source` 取值优先使用 `llm_provider`、`embedding`、`vector_store`、`postgres`、`rerank`、`document_parse`、`file_storage`、`worker`、`chat_stream` 或 `http`，便于在日志系统中按来源聚合。
@@ -278,7 +287,9 @@ curl -s -H "Authorization: Bearer <access_token>" http://127.0.0.1:8000/chat/vec
 | `JWT_SECRET_KEY` | 使用至少 32 字符随机值，例如 `openssl rand -hex 32`。 | 轮换后已签发 token 全部失效，用户需要重新登录。 |
 | `USER_SETTINGS_ENCRYPTION_KEY` | 使用 Fernet key，和 `JWT_SECRET_KEY` 分离，例如 `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"`。 | 丢失或更换后无法解密已保存的用户 API Key，必须先清空或重新录入用户凭据。 |
 | `LLM_API_KEY` / `DEEPSEEK_API_KEY` | 默认 provider Key 可后配置，只放在生产 secret 中；如果只允许用户自带 Key，可以留空，但不能留下占位值覆盖回退逻辑。 | 配置或轮换后重启 backend 和 worker；未配置时系统默认聊天会返回 provider 配置错误。 |
-| `ZAI_EMD_API` | embedding Key 可后配置，只放在生产 secret 中。 | 配置或轮换后重启 backend 和 worker；未配置时向量化和向量检索会失败。 |
+| `ZAI_EMD_API` | 默认智谱 embedding Key 可后配置，只放在生产 secret 中。 | 配置或轮换后重启 backend 和 worker；默认 provider 下未配置时向量化和向量检索会失败。 |
+| `DASHSCOPE_API_KEY` / `QWEN_API_KEY` / `EMBEDDING_API_KEY` | 阿里云 Qwen embedding Key，可后配置，只放在生产 secret 中。 | 设置 `EMBEDDING_PROVIDER=qwen` 时配置；配置或轮换后重启 backend 和 worker。 |
+| `RERANK_API_KEY` / `RERANK_BASE_URL` | 阿里云 Qwen rerank 专用 Key 与工作空间 OpenAI-compatible 地址。 | 设置 `RERANK_PROVIDER=qwen` 时配置；如果共用 `DASHSCOPE_API_KEY`，`RERANK_API_KEY` 可留空。 |
 | `ALLOW_USER_CUSTOM_LLM_BASE_URL` | 公开环境默认保持 `false`。 | 开启前必须先完成 SSRF 出口策略、域名 allowlist 或网络隔离。 |
 | `DATABASE_URL` | 仅用于宿主机 conda 方式运行或本地 migration dry-run；Docker Compose 内部连接由 compose 环境覆盖。 | 生产只用 compose 时可以删除该项，避免残留模板连接串。 |
 | `COMPOSE_DATABASE_URL` | 仅在外部数据库或特殊连接串时设置；否则让 compose 根据 `POSTGRES_*` 构造。 | 设置后必须和 PostgreSQL 实际用户、密码、库名保持一致。 |
@@ -310,7 +321,7 @@ conda run -n firstrag python scripts/production_preflight.py --env-file .env --m
 preflight 会拦截以下问题：
 
 - `POSTGRES_PASSWORD`、`JWT_SECRET_KEY`、`USER_SETTINGS_ENCRYPTION_KEY` 仍是模板占位值或明显过短。
-- 已填写的 `LLM_API_KEY`、`DEEPSEEK_API_KEY` 或 `ZAI_EMD_API` 仍是模板占位值；使用 `--require-provider-keys` 时还会要求 LLM 和 embedding Key 均已配置。
+- 已填写的 `LLM_API_KEY`、`DEEPSEEK_API_KEY`、`ZAI_EMD_API`、`DASHSCOPE_API_KEY`、`QWEN_API_KEY`、`EMBEDDING_API_KEY` 或 `RERANK_API_KEY` 仍是模板占位值；使用 `--require-provider-keys` 时还会按当前 provider 要求 LLM、embedding 和远程 rerank Key 已配置。
 - `USER_SETTINGS_ENCRYPTION_KEY` 不是 Fernet key，或与 `JWT_SECRET_KEY` 相同。
 - `DATABASE_URL` / `COMPOSE_DATABASE_URL` 仍含模板账号、密码或占位值。
 - `FRONTEND_PORT`、`BACKEND_PORT`、`POSTGRES_PORT` 未绑定到 `127.0.0.1` / `localhost`。
@@ -427,7 +438,8 @@ MODELS_DIR=/srv/firstrag/models
 | `JWT_SECRET_KEY` | 使用随机长密钥；更换后已有登录态会失效。 |
 | `USER_SETTINGS_ENCRYPTION_KEY` | 使用 Fernet key，并与 `JWT_SECRET_KEY` 分离；丢失后无法解密已保存的用户 API Key。 |
 | `LLM_PROVIDER` / `LLM_MODEL` / `LLM_API_KEY` | 如使用平台默认 Key，只放在服务器 `.env` 或 secret store；也可以先留空，后续通过用户设置页或服务器 `.env` 配置。 |
-| `ZAI_EMD_API` | embedding Key 只放在服务器 `.env` 或 secret store；可后配置，但向量化前必须填写并重启 backend / worker。 |
+| `ZAI_EMD_API` / `DASHSCOPE_API_KEY` / `QWEN_API_KEY` / `EMBEDDING_API_KEY` | embedding Key 只放在服务器 `.env` 或 secret store；可后配置，但向量化前必须填写并重启 backend / worker。 |
+| `RERANK_PROVIDER` / `RERANK_BASE_URL` / `RERANK_API_KEY` | 如启用阿里云 Qwen rerank，配置 provider、工作空间地址和可选专用 Key。 |
 | `ALLOW_USER_CUSTOM_LLM_BASE_URL` | 公开 demo 保持 `false`，避免用户通过自定义模型地址访问服务器内网。 |
 | `MAX_UPLOAD_FILE_SIZE_BYTES` | 公开 demo 建议调低到 10-20 MB，并与反向代理 body size 一致。 |
 | `USER_UPLOAD_MAX_FILES` / `USER_UPLOAD_MAX_BYTES` | 设置用户级文件数量和总容量上限；公开 demo 建议保守配置。 |

@@ -105,6 +105,8 @@ def classify_vector_index_failure(error_message: str | None) -> str | None:
             "embedding",
             "embed",
             "zhipu",
+            "qwen",
+            "dashscope",
             "api key",
             "apikey",
             "401",

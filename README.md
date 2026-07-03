@@ -100,7 +100,7 @@ Docker 中的 `backend`、`migrate` 和 `worker` 复用精简后的 Python runti
 | 数据库 | PostgreSQL |
 | 向量库 | Chroma |
 | RAG 编排 | LangChain / LCEL |
-| 检索 | 向量检索、PostgreSQL 全文检索、RRF、可选 CrossEncoder rerank |
+| 检索 | 向量检索、PostgreSQL 全文检索、RRF、可选 CrossEncoder 或阿里云 Qwen API rerank |
 | 模型接口 | OpenAI 兼容协议，支持 DeepSeek、Qwen、Zhipu、Kimi、Doubao、Minimax 等 |
 | 任务处理 | PostgreSQL 队列 + 独立 vector index worker |
 
@@ -114,7 +114,7 @@ Docker 中的 `backend`、`migrate` 和 `worker` 复用精简后的 Python runti
 conda activate firstrag
 ```
 
-复制环境变量模板，并按需填写数据库、JWT 和加密密钥。`LLM_API_KEY`、`DEEPSEEK_API_KEY` 与 `ZAI_EMD_API` 可以先留空，Docker 和后端仍可启动；需要使用平台默认模型或执行向量化前再配置。
+复制环境变量模板，并按需填写数据库、JWT 和加密密钥。`LLM_API_KEY`、`DEEPSEEK_API_KEY`、`ZAI_EMD_API` 与阿里云 Qwen/DashScope Key 可以先留空，Docker 和后端仍可启动；需要使用平台默认模型、执行向量化或启用远程 rerank 前再配置。
 
 ```bash
 cp .env.example .env

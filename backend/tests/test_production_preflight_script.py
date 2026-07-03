@@ -103,6 +103,33 @@ class ProductionPreflightScriptTests(unittest.TestCase):
         self.assertEqual(len(missing_errors), 2)
         self.assertEqual(configured_errors, [])
 
+    def test_optional_provider_settings_support_qwen_embedding(self) -> None:
+        """切到 Qwen embedding 时应接受 DashScope Key。"""
+        errors = production_preflight.validate_optional_provider_settings(
+            {
+                "LLM_API_KEY": "sk-production-provider-key",
+                "EMBEDDING_PROVIDER": "qwen",
+                "DASHSCOPE_API_KEY": "dashscope-production-key",
+            },
+            require_provider_keys=True,
+        )
+
+        self.assertEqual(errors, [])
+
+    def test_optional_provider_settings_requires_qwen_rerank_base_url(self) -> None:
+        """公开 smoke test 前启用 Qwen rerank 时应要求工作空间地址。"""
+        errors = production_preflight.validate_optional_provider_settings(
+            {
+                "LLM_API_KEY": "sk-production-provider-key",
+                "EMBEDDING_PROVIDER": "qwen",
+                "DASHSCOPE_API_KEY": "dashscope-production-key",
+                "RERANK_PROVIDER": "qwen",
+            },
+            require_provider_keys=True,
+        )
+
+        self.assertTrue(any("RERANK_BASE_URL" in error for error in errors))
+
     def test_validate_port_bindings_requires_loopback(self) -> None:
         """生产 compose 端口应只绑定本机地址。"""
         errors = production_preflight.validate_port_bindings(

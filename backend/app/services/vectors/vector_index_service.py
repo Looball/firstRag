@@ -22,7 +22,7 @@ from app.services.documents.document_service import (
 from app.services.knowledge_profile_cache import (
     invalidate_file_knowledge_base_contexts,
 )
-from app.services.vectors.embedding_model import ZhipuAIEmbeddings
+from app.services.vectors.embedding_model import create_embedding_model
 
 
 logger = logging.getLogger(__name__)
@@ -36,7 +36,7 @@ def get_vector_store(
     return Chroma(
         collection_name=collection_name,
         persist_directory=str(persist_directory),
-        embedding_function=ZhipuAIEmbeddings(),
+        embedding_function=create_embedding_model(),
     )
 
 

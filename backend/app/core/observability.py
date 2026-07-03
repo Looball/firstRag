@@ -110,11 +110,19 @@ def classify_exception(
         source = "file_storage"
     elif "emptydocument" in text or "未解析出可入库" in text:
         source = "document_parse"
-    elif "embedding" in text or "zhipu" in text or "embed_query" in text:
+    elif (
+        "embedding" in text
+        or "zhipu" in text
+        or (source != "rerank" and "dashscope" in text)
+        or "embed_query" in text
+    ):
         source = "embedding"
         retryable = True
     elif "chroma" in text or "hnsw" in text or "vector" in text:
         source = "vector_store"
+        retryable = True
+    elif source == "rerank" or "rerank" in text or "crossencoder" in text:
+        source = "rerank"
         retryable = True
     elif (
         "openai" in text
@@ -133,9 +141,6 @@ def classify_exception(
         or "sql" in text
     ):
         source = "postgres"
-        retryable = True
-    elif "rerank" in text or "crossencoder" in text:
-        source = "rerank"
         retryable = True
     elif "worker" in text:
         source = "worker"

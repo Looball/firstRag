@@ -57,7 +57,7 @@ class DocumentServiceTests(unittest.TestCase):
             stdout = StringIO()
 
             with patch(
-                "app.services.documents.document_service.ZhipuAIEmbeddings",
+                "app.services.documents.document_service.create_embedding_model",
                 return_value=Mock(),
             ), patch(
                 "app.services.documents.document_service.Chroma.from_documents",
