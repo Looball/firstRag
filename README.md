@@ -89,6 +89,8 @@ docker compose up --build
 
 compose 会先运行 `migrate` service 初始化或升级 PostgreSQL schema，再启动后端、前端和 worker。完整准备流程见 [`docs/docker-startup/README.md`](docs/docker-startup/README.md)。
 
+Docker 中的 `backend`、`migrate` 和 `worker` 复用精简后的 Python runtime 镜像；worker 不单独安装 `torch`、`transformers` 等可选 rerank 依赖。
+
 ## 技术栈
 
 | 模块 | 技术 |

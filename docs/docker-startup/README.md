@@ -174,7 +174,23 @@ docker compose down -v
 
 `docker compose down -v` 会删除 PostgreSQL named volume `postgres_data`，只在明确需要重置本地数据库时使用。
 
-## 8. 常见问题
+## 8. 镜像体积与 worker
+
+`backend`、`migrate` 和 `worker` 都使用 `deploy/docker/backend.Dockerfile` 构建的 Python runtime 镜像。worker 的启动命令不同，但它仍需要文档解析、embedding、Chroma 入库和 PostgreSQL 队列依赖，因此不会比后端小很多。
+
+后端 Dockerfile 使用 multi-stage build：`builder` 阶段安装编译工具并构建 Python virtualenv，最终 `runtime` 镜像只保留运行依赖和 Chroma/ONNX 可能需要的 `libgomp1`。默认最小镜像不安装 `torch`、`transformers` 和本地 CrossEncoder rerank 依赖。
+
+`docker compose images` 可能会分别列出 `backend`、`migrate` 和 `worker` 的镜像大小；这些服务的底层 layer 可复用，不应简单按三份相加估算磁盘占用。修改依赖或 Dockerfile 后，如需释放旧镜像和构建缓存，可在确认不删除数据库 volume 的前提下执行：
+
+```bash
+docker compose down --rmi local
+docker builder prune
+docker compose up -d --build
+```
+
+不要使用 `docker compose down -v` 清理镜像；它会删除 PostgreSQL 数据 volume。
+
+## 9. 常见问题
 
 ### Docker daemon 未运行
 

@@ -177,6 +177,8 @@ docker compose up --build
 | `frontend` | `http://localhost:3000` | Next.js 前端，容器内代理到 `http://backend:8000`。 |
 | `worker` | 不暴露端口 | 消费 `vector_index_jobs` 的向量化 worker。 |
 
+`backend`、`migrate` 和 `worker` 复用同一份 multi-stage Python runtime 镜像。构建阶段会临时安装 `build-essential`，最终运行镜像只保留 Python 依赖和 Chroma/ONNX 可能需要的 `libgomp1`，避免把编译工具带入 worker 运行环境。
+
 持久化挂载：
 
 | 宿主路径 | 容器路径 | 说明 |
