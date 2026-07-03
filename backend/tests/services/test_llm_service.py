@@ -1,7 +1,6 @@
 """聊天模型兼容工厂的单元测试。"""
 
 import unittest
-from unittest.mock import patch
 
 from app.services.llm_service import (
     ChatModelSettings,
@@ -48,19 +47,18 @@ class ChatModelFactoryTests(unittest.TestCase):
             "https://llm.example.com/v1",
         )
 
-    def test_legacy_deepseek_api_key_is_used_as_fallback(self) -> None:
-        """未配置新变量时应兼容旧 DeepSeek 默认配置。"""
-        with patch("app.services.llm_service.config.LLM_PROVIDER", "deepseek"), patch(
-            "app.services.llm_service.config.LLM_MODEL",
-            None,
-        ), patch(
-            "app.services.llm_service.config.LLM_API_KEY",
-            "legacy-key",
-        ):
-            settings = build_system_chat_model_settings()
-
+    def test_default_settings_do_not_include_environment_api_key(self) -> None:
+        """设置页默认值不应携带服务器环境变量中的 provider Key。"""
+        settings = build_system_chat_model_settings()
         self.assertEqual(settings.model, "deepseek-v4-flash")
-        self.assertEqual(settings.api_key, "legacy-key")
+        self.assertEqual(settings.api_key, "")
+
+    def test_chat_model_requires_user_api_key(self) -> None:
+        """真正创建模型时必须提供当前用户保存的 API Key。"""
+        settings = build_system_chat_model_settings()
+
+        with self.assertRaisesRegex(ValueError, "当前用户"):
+            create_openai_compatible_chat_model(settings)
 
 
 if __name__ == "__main__":

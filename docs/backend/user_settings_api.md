@@ -10,13 +10,12 @@ Authorization: Bearer <access_token>
 
 ## 建议的前端交互流程
 
-1. 页面加载时并行调用 `GET /user/settings/providers` 和 `GET /user/settings`。
-2. 用 `providers` 渲染厂商下拉框；`enabled: false` 的选项应禁用或隐藏。
-3. 用户选择“使用平台配置”时，仅允许调整生成参数；不显示 API Key 输入框。
-4. 用户选择“使用自己的 API Key”时，要求填写厂商、模型名和 API Key。
-5. 点击“测试连接”时，调用 `POST /user/settings/test`，提交当前表单数据，但不保存。
-6. 测试成功后，点击“保存设置”，调用 `PATCH /user/settings`。
-7. 保存后再次调用 `GET /user/settings` 或直接使用 `PATCH` 返回的 `settings` 更新页面。后续发起的 `/chat` 请求会自动使用该用户的新设置。
+1. 页面加载时并行调用聊天模型设置和向量模型设置：`GET /user/settings/providers`、`GET /user/settings`、`GET /user/settings/embedding-providers`、`GET /user/settings/embedding`。
+2. 用 provider 目录渲染厂商下拉框；`enabled: false` 的选项应禁用或隐藏。
+3. 聊天模型和向量模型都必须由当前登录用户配置 API Key，不再支持从服务器环境变量读取平台默认 Key。
+4. 点击聊天模型“测试连接”时，调用 `POST /user/settings/test`；点击向量模型“测试连接”时，调用 `POST /user/settings/embedding/test`。
+5. 测试成功后，分别调用 `PATCH /user/settings` 和 `PATCH /user/settings/embedding` 保存设置。
+6. 保存后再次读取设置或直接使用 `PATCH` 返回的 `settings` 更新页面。后续聊天、向量化和向量检索会自动使用该用户的新设置。
 
 ## 1. 获取厂商目录
 
@@ -65,26 +64,7 @@ GET /user/settings/providers
 GET /user/settings
 ```
 
-平台模式响应示例：
-
-```json
-{
-  "success": true,
-  "settings": {
-    "credential_mode": "platform",
-    "provider": "deepseek",
-    "model": "deepseek-v4-flash",
-    "base_url": "https://api.deepseek.com/v1",
-    "has_api_key": true,
-    "temperature": 0.2,
-    "max_tokens": 8000,
-    "timeout_seconds": 60.0,
-    "max_retries": 2
-  }
-}
-```
-
-个人配置模式响应示例：
+聊天模型响应示例：
 
 ```json
 {
@@ -112,19 +92,7 @@ PATCH /user/settings
 Content-Type: application/json
 ```
 
-切换至平台模式：
-
-```json
-{
-  "credential_mode": "platform",
-  "temperature": 0.2,
-  "max_tokens": 8000,
-  "timeout_seconds": 60,
-  "max_retries": 2
-}
-```
-
-切换至个人 DeepSeek 配置：
+保存 DeepSeek 聊天模型配置：
 
 ```json
 {
@@ -150,7 +118,7 @@ Content-Type: application/json
 }
 ```
 
-注意：从平台模式首次切换到个人模式时，必须同时提交 `credential_mode`、`provider`、`model` 和 `api_key`。切换回平台模式会清除该用户已保存的 API Key 密文。
+注意：`credential_mode` 仍保留 `user` 值用于兼容旧数据结构；新版本不再允许切换到 `platform`。首次保存必须同时提交 `credential_mode=user`、`provider`、`model` 和 `api_key`。
 
 成功响应与 `GET /user/settings` 的 `settings` 结构一致。
 
@@ -195,7 +163,7 @@ POST /user/settings/test
 
 | 字段 | 约束 |
 | --- | --- |
-| `credential_mode` | `platform` 或 `user` |
+| `credential_mode` | 新版本固定为 `user`，`platform` 仅为历史兼容值 |
 | `provider` | 当前支持的厂商 ID，最长 50 个字符 |
 | `model` | 最长 200 个字符 |
 | `base_url` | 最长 500 个字符；仅自定义兼容服务需要 |
@@ -214,6 +182,93 @@ POST /user/settings/test
 
 ## 与聊天接口的关系
 
-`/chat` 会按当前登录用户读取设置。个人配置的 Key 会在服务端解密后用于模型调用，前端无需也不应在聊天请求中再次传递 API Key。若已保存配置无效，`/chat` 返回 `400`，并且不会创建本轮消息记录。
+## 5. 向量模型设置
 
-完整 API Key 只允许在用户输入后随 `PATCH /user/settings` 或 `POST /user/settings/test` 提交。后端仅持久化密文和 `api_key_hint`，错误响应会对提交的 Key、`api_key=...` 和 Bearer token 形态文本做脱敏处理，不回显明文。
+向量模型 provider 目录：
+
+```http
+GET /user/settings/embedding-providers
+```
+
+响应示例：
+
+```json
+{
+  "success": true,
+  "providers": [
+    {
+      "id": "qwen",
+      "name": "通义千问向量",
+      "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+      "requires_base_url": false,
+      "enabled": true,
+      "default_model": "text-embedding-v4",
+      "has_api_key": true,
+      "api_key_hint": "••••abcd"
+    },
+    {
+      "id": "zhipuai",
+      "name": "智谱 Embedding",
+      "base_url": null,
+      "requires_base_url": false,
+      "enabled": true,
+      "default_model": "embedding-3",
+      "has_api_key": false,
+      "api_key_hint": null
+    }
+  ]
+}
+```
+
+读取当前向量模型设置：
+
+```http
+GET /user/settings/embedding
+```
+
+保存向量模型设置：
+
+```http
+PATCH /user/settings/embedding
+Content-Type: application/json
+```
+
+```json
+{
+  "provider": "qwen",
+  "model": "text-embedding-v4",
+  "dimensions": 1024,
+  "api_key": "用户当前输入的向量 API Key",
+  "timeout_seconds": 60,
+  "max_retries": 2
+}
+```
+
+测试向量模型设置：
+
+```http
+POST /user/settings/embedding/test
+Content-Type: application/json
+```
+
+成功响应：
+
+```json
+{
+  "success": true,
+  "message": "向量模型连接测试成功",
+  "provider": "qwen",
+  "model": "text-embedding-v4",
+  "dimensions": 1024
+}
+```
+
+切换向量模型 provider、model 或 dimensions 后，已有文件需要重新向量化。后端会按用户和 embedding 配置隔离 Chroma collection，避免不同维度的向量写入同一 collection。
+
+## 与聊天和向量化接口的关系
+
+`/chat` 会按当前登录用户读取聊天模型设置。个人配置的 Key 会在服务端解密后用于模型调用，前端无需也不应在聊天请求中再次传递 API Key。若已保存配置无效，`/chat` 返回 `400`，并且不会创建本轮消息记录。
+
+向量化任务会按当前登录用户读取向量模型设置。未配置向量模型时，提交向量化任务会返回 `400`，提示先配置向量模型 API Key。
+
+完整 API Key 只允许在用户输入后随聊天模型或向量模型的保存/测试接口提交。后端仅持久化密文和 `api_key_hint`，错误响应会对提交的 Key、`api_key=...` 和 Bearer token 形态文本做脱敏处理，不回显明文。

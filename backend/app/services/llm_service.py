@@ -11,7 +11,7 @@ from app.core import config
 
 OPENAI_COMPATIBLE_PROVIDER = "openai_compatible"
 
-# 国内厂商的预设仅负责提供 OpenAI 兼容入口；模型名称仍由部署配置决定。
+# 国内厂商的预设仅负责提供 OpenAI 兼容入口；模型名称和 API Key 由用户登录后配置。
 PROVIDER_BASE_URLS = {
     "deepseek": "https://api.deepseek.com/v1",
     "qwen": "https://dashscope.aliyuncs.com/compatible-mode/v1",
@@ -20,6 +20,9 @@ PROVIDER_BASE_URLS = {
     "doubao": "https://ark.cn-beijing.volces.com/api/v3",
     "minimax": "https://api.minimaxi.com/v1",
 }
+
+DEFAULT_LLM_PROVIDER = "deepseek"
+DEFAULT_LLM_MODEL = "deepseek-v4-flash"
 
 PROVIDER_DISPLAY_NAMES = {
     "deepseek": "DeepSeek",
@@ -71,17 +74,12 @@ def get_supported_llm_providers() -> list[dict[str, object]]:
 
 
 def build_system_chat_model_settings() -> ChatModelSettings:
-    """从系统环境变量生成默认聊天模型配置。"""
-    provider = config.LLM_PROVIDER
-    model = config.LLM_MODEL or (
-        "deepseek-v4-flash" if provider == "deepseek" else ""
-    )
-
+    """生成设置页默认聊天模型参数，不携带环境变量 API Key。"""
     return ChatModelSettings(
-        provider=provider,
-        model=model,
-        api_key=config.LLM_API_KEY or "",
-        base_url=config.LLM_BASE_URL,
+        provider=DEFAULT_LLM_PROVIDER,
+        model=DEFAULT_LLM_MODEL,
+        api_key="",
+        base_url=None,
         temperature=config.LLM_TEMPERATURE,
         max_tokens=config.LLM_MAX_TOKENS,
         timeout_seconds=config.LLM_TIMEOUT_SECONDS,
@@ -111,9 +109,9 @@ def create_openai_compatible_chat_model(
 ) -> ChatOpenAI:
     """按通用配置创建支持流式输出的 OpenAI 兼容聊天模型。"""
     if not settings.api_key:
-        raise ValueError("缺少环境变量 LLM_API_KEY")
+        raise ValueError("缺少当前用户的聊天模型 API Key")
     if not settings.model:
-        raise ValueError("缺少环境变量 LLM_MODEL")
+        raise ValueError("缺少当前用户的聊天模型名称")
     if not 0 <= settings.temperature <= 2:
         raise ValueError("LLM_TEMPERATURE 必须在 0 到 2 之间")
     if settings.max_tokens <= 0:

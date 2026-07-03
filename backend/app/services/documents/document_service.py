@@ -229,8 +229,12 @@ def split_documents(documents: list[Document]) -> list[Document]:
 def build_vector_store(
     folder_path: str | Path = "./local_doc",
     persist_directory: str | Path = VECTOR_STORE_PATH,
+    user_id: int | None = None,
 ) -> Chroma:
     """加载、切分本地文档并写入Chroma向量数据库。"""
+    if user_id is None:
+        raise ValueError("构建向量库需要传入已配置向量模型的 user_id")
+
     file_paths = get_document_paths(folder_path)
     logger.info("发现可入库文档数量：%s", len(file_paths))
     logger.debug("文档发现样例：%s", [str(path) for path in file_paths[:3]])
@@ -251,7 +255,7 @@ def build_vector_store(
 
     vectordb = Chroma.from_documents(
         documents=split_docs,
-        embedding=create_embedding_model(),
+        embedding=create_embedding_model(user_id),
         persist_directory=str(persist_directory),
     )
     logger.info("向量库中存储的数量：%s", vectordb._collection.count())

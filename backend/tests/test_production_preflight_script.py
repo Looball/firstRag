@@ -73,44 +73,37 @@ class ProductionPreflightScriptTests(unittest.TestCase):
 
         self.assertEqual(errors, [])
 
-    def test_optional_provider_settings_reject_configured_placeholders(self) -> None:
-        """已填写的 provider Key 不能仍是模板占位值。"""
+    def test_optional_provider_settings_reject_rerank_placeholders(self) -> None:
+        """已填写的远程 rerank Key 不能仍是模板占位值。"""
         errors = production_preflight.validate_optional_provider_settings(
             {
-                "LLM_API_KEY": "replace-with-your-llm-api-key",
-                "ZAI_EMD_API": "replace-with-your-zhipu-api-key",
+                "RERANK_API_KEY": "replace-with-your-rerank-api-key",
             }
         )
 
-        self.assertEqual(len(errors), 2)
-        self.assertTrue(any("LLM_API_KEY" in error for error in errors))
-        self.assertTrue(any("ZAI_EMD_API" in error for error in errors))
+        self.assertEqual(len(errors), 1)
+        self.assertTrue(any("RERANK_API_KEY" in error for error in errors))
 
     def test_optional_provider_settings_can_require_keys(self) -> None:
-        """公开 smoke test 前可显式要求 provider Key 已就绪。"""
+        """未启用远程 rerank 时不要求 provider Key。"""
         missing_errors = production_preflight.validate_optional_provider_settings(
             {},
             require_provider_keys=True,
         )
         configured_errors = production_preflight.validate_optional_provider_settings(
             {
-                "LLM_API_KEY": "sk-production-provider-key",
-                "ZAI_EMD_API": "zhipu-production-key",
+                "RERANK_PROVIDER": "local",
             },
             require_provider_keys=True,
         )
 
-        self.assertEqual(len(missing_errors), 2)
+        self.assertEqual(missing_errors, [])
         self.assertEqual(configured_errors, [])
 
-    def test_optional_provider_settings_support_qwen_embedding(self) -> None:
-        """切到 Qwen embedding 时应接受 DashScope Key。"""
+    def test_optional_provider_settings_support_user_configured_embedding(self) -> None:
+        """embedding Key 已迁移到用户设置，不再由 preflight 检查。"""
         errors = production_preflight.validate_optional_provider_settings(
-            {
-                "LLM_API_KEY": "sk-production-provider-key",
-                "EMBEDDING_PROVIDER": "qwen",
-                "DASHSCOPE_API_KEY": "dashscope-production-key",
-            },
+            {},
             require_provider_keys=True,
         )
 
@@ -120,9 +113,6 @@ class ProductionPreflightScriptTests(unittest.TestCase):
         """公开 smoke test 前启用 Qwen rerank 时应要求工作空间地址。"""
         errors = production_preflight.validate_optional_provider_settings(
             {
-                "LLM_API_KEY": "sk-production-provider-key",
-                "EMBEDDING_PROVIDER": "qwen",
-                "DASHSCOPE_API_KEY": "dashscope-production-key",
                 "RERANK_PROVIDER": "qwen",
             },
             require_provider_keys=True,

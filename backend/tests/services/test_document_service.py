@@ -59,17 +59,19 @@ class DocumentServiceTests(unittest.TestCase):
             with patch(
                 "app.services.documents.document_service.create_embedding_model",
                 return_value=Mock(),
-            ), patch(
+            ) as mock_create_embedding_model, patch(
                 "app.services.documents.document_service.Chroma.from_documents",
                 return_value=mock_vector_store,
             ), redirect_stdout(stdout):
                 result = build_vector_store(
                     folder_path=root,
                     persist_directory=persist_directory,
+                    user_id=42,
                 )
 
         self.assertIs(result, mock_vector_store)
         self.assertEqual(stdout.getvalue(), "")
+        mock_create_embedding_model.assert_called_once_with(42)
 
 
 if __name__ == "__main__":

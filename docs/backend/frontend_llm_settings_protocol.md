@@ -18,15 +18,26 @@ Authorization: Bearer <access_token>
 | `GET /api/settings` | `GET /user/settings` | 读取当前生效设置 |
 | `PATCH /api/settings` | `PATCH /user/settings` | 保存当前生效设置 |
 | `POST /api/settings` | `POST /user/settings/test` | 保存草稿后测试连接/获取模型列表 |
+| `GET /api/settings/embedding-providers` | `GET /user/settings/embedding-providers` | 读取向量模型厂商目录 |
+| `GET /api/settings/embedding` | `GET /user/settings/embedding` | 读取当前向量模型设置 |
+| `PATCH /api/settings/embedding` | `PATCH /user/settings/embedding` | 保存当前向量模型设置 |
+| `POST /api/settings/embedding` | `POST /user/settings/embedding/test` | 测试向量模型连接 |
 
 ## 页面初始化
 
 页面加载时并行调用：
 
 ```ts
-const [settingsResponse, providersResponse] = await Promise.all([
+const [
+  settingsResponse,
+  providersResponse,
+  embeddingSettingsResponse,
+  embeddingProvidersResponse,
+] = await Promise.all([
   fetch("/api/settings", { headers: { Authorization } }),
   fetch("/api/settings/providers", { headers: { Authorization } }),
+  fetch("/api/settings/embedding", { headers: { Authorization } }),
+  fetch("/api/settings/embedding-providers", { headers: { Authorization } }),
 ]);
 ```
 
@@ -178,19 +189,48 @@ Content-Type: application/json
 
 请求体与最终测试请求相同。若用户重新输入了 Key，则包含 `api_key`；否则省略该字段，后端自动使用已保存的厂商凭据。
 
-切回平台模式：
+新版本不再提供“平台 Key”模式；聊天模型必须由当前登录用户保存 API Key。历史响应中的 `credential_mode` 仍使用 `user`，用于兼容后端数据结构。
+
+## 向量模型
+
+向量模型设置与聊天模型在同一个页面维护。provider 目录来自：
+
+```http
+GET /api/settings/embedding-providers
+```
+
+当前设置来自：
+
+```http
+GET /api/settings/embedding
+```
+
+保存请求：
 
 ```json
 {
-  "credential_mode": "platform",
-  "temperature": 0.2,
-  "max_tokens": 8000,
+  "provider": "qwen",
+  "model": "text-embedding-v4",
+  "dimensions": 1024,
+  "api_key": "仅当需要新增或替换 Key 时提交",
   "timeout_seconds": 60,
   "max_retries": 2
 }
 ```
 
-平台模式只切换当前生效配置，不会删除用户已经按厂商保存的 Key。
+测试请求走 `POST /api/settings/embedding`，成功响应会返回本次测试得到的向量维度：
+
+```json
+{
+  "success": true,
+  "message": "向量模型连接测试成功",
+  "provider": "qwen",
+  "model": "text-embedding-v4",
+  "dimensions": 1024
+}
+```
+
+切换向量模型 provider、model 或 dimensions 后，前端应提示用户重新向量化相关文件；后端会按用户和 embedding 配置隔离 Chroma collection。
 
 ## 错误处理
 
@@ -198,7 +238,7 @@ Content-Type: application/json
 | --- | --- |
 | `400` | 展示 `detail`，通常是必填字段、厂商或参数校验问题。 |
 | `401` | 清理登录态并跳转登录。 |
-| `502` | 提示连接测试失败；随后重新加载 `/api/settings` 与 `/api/settings/providers`。测试前提交的新 Key 已被加密保存，用户无需重复输入。 |
+| `502` | 提示连接测试失败；随后重新加载聊天和向量模型设置。聊天模型测试前提交的新 Key 已被加密保存，用户无需重复输入。 |
 
 个别兼容厂商不支持 `/models`。若用户已填写模型，且最小对话调用成功，接口仍返回成功并携带：
 

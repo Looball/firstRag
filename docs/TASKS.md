@@ -1821,6 +1821,35 @@ conda run -n firstrag python scripts/eval_indexing.py \
   --password 演示密码
 ```
 
+## T-053 用户登录后配置 LLM 与向量模型 API
+
+- 来源计划：用户要求“不再从环境变量中加载 LLM API 和向量 API，要求用户登录后配置”。
+- 优先级：`P1`
+- 状态：`Done`
+- 完成日期：`2026-07-03`
+- 目标：聊天模型和 embedding/向量化调用都使用当前登录用户保存的 provider/model/API Key。Docker 默认启动不再依赖 `LLM_API_KEY`、`DEEPSEEK_API_KEY`、`ZAI_EMD_API` 或 `EMBEDDING_API_KEY`；`DASHSCOPE_API_KEY` / `QWEN_API_KEY` 仅作为可选远程 Qwen rerank Key。
+- 完成内容：
+  - `llm_service.py`：聊天模型工厂不再读取服务器环境变量中的 provider/model/API Key，只保留生成参数默认值；创建模型时要求用户 Key。
+  - `user_settings_service.py`：业务调用遇到空配置或历史 `platform` 模式时提示用户去设置页配置；保存时不再允许切回平台 Key。
+  - 新增 `user_embedding_settings` 表 migration、repository 和 `embedding_settings_service.py`，用于保存用户级 embedding provider/model/API Key/维度/超时/重试。
+  - `embedding_model.py`：新增 `create_embedding_model(user_id)` 和 `create_embedding_model_from_settings()`，embedding 调用改为用户配置驱动。
+  - `vector_index_service.py`、`hybrid_retriever.py`、`document_service.py`：把 `user_id` 传入 embedding 创建、Chroma collection 隔离与 query embedding cache。
+  - `user_settings.py` API：新增 `/user/settings/embedding-providers`、`/user/settings/embedding`、`/user/settings/embedding/test`。
+  - `vector_indexes.py`：提交向量化任务前检查当前用户是否已配置向量模型，未配置直接返回 400，避免 worker 延迟失败。
+  - 前端设置页：新增“向量模型”配置区块和 `/api/settings/embedding*` 代理路由；聊天模型配置移除“平台 Key”选择。
+  - `.env.example`：已移除 LLM/embedding provider Key 的环境变量入口，仅保留聊天生成参数和可选远程 rerank 配置。
+  - `production_preflight.py`：移除 LLM/embedding Key 的环境变量检查，仅保留远程 rerank 相关检查。
+  - README、部署、Docker 启动、RAG 流程、Schema 和 settings API 文档已同步为登录后配置模型 Key。
+- 已验证：
+  - `cd backend && conda run -n firstrag python -m compileall app` 已通过。
+  - `cd backend && conda run -n firstrag python -m unittest -v tests.services.test_llm_service tests.services.test_embedding_model tests.services.test_embedding_settings_service tests.services.test_user_settings_service tests.test_user_settings tests.test_vector_indexes tests.test_retrieval_resilience tests.test_production_preflight_script` 已通过，70 tests OK。
+  - `cd backend && conda run -n firstrag python -m unittest discover -s tests -v` 已通过，172 tests OK。
+  - `cd frontend && npm run lint` 已通过。
+  - `cd frontend && npm run build` 已通过；sandbox 因 Turbopack 端口绑定限制失败一次，已在授权后重跑通过。
+  - `conda run -n firstrag python -m py_compile scripts/production_preflight.py` 已通过。
+  - `conda run -n firstrag python scripts/migrate_db.py --list` 已识别 `002_create_user_embedding_settings.sql`。
+  - `docker compose --env-file .env.example config --quiet` 已通过。
+
 ## 更新规则
 
 - 每个任务开始时，将状态从 `Todo` 改为 `Doing`。

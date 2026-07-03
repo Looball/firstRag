@@ -1,5 +1,7 @@
+import hashlib
 import logging
 from pathlib import Path
+import re
 from typing import Any
 from uuid import UUID
 
@@ -22,21 +24,62 @@ from app.services.documents.document_service import (
 from app.services.knowledge_profile_cache import (
     invalidate_file_knowledge_base_contexts,
 )
-from app.services.vectors.embedding_model import create_embedding_model
+from app.services.vectors.embedding_model import create_embedding_model_from_settings
+from app.services.vectors.embedding_settings_service import (
+    EmbeddingModelSettings,
+    get_effective_embedding_model_settings,
+)
 
 
 logger = logging.getLogger(__name__)
 
 
+def _normalize_collection_name_part(value: str) -> str:
+    """将 collection 名称片段规范化为 Chroma 可接受的安全字符。"""
+    normalized = re.sub(r"[^a-zA-Z0-9_-]+", "-", value.strip().lower())
+    normalized = normalized.strip("-_")
+    return normalized or "collection"
+
+
+def build_user_vector_collection_name(
+    base_collection_name: str,
+    user_id: int,
+    settings: EmbeddingModelSettings,
+) -> str:
+    """按用户和 embedding 配置生成隔离的 Chroma collection 名称。"""
+    identity = "|".join([
+        str(user_id),
+        settings.provider,
+        settings.model,
+        str(settings.dimensions or ""),
+    ])
+    digest = hashlib.sha1(identity.encode("utf-8")).hexdigest()[:12]
+    base = _normalize_collection_name_part(base_collection_name)[:24]
+    collection_name = f"{base}-u{user_id}-{digest}"
+    return collection_name[:63].strip("-_") or f"u{user_id}-{digest}"
+
+
 def get_vector_store(
+    user_id: int | None = None,
     persist_directory: str | Path = VECTOR_STORE_PATH,
     collection_name: str = CHROMA_COLLECTION_NAME,
 ) -> Chroma:
     """创建或打开 Chroma 向量库。"""
+    resolved_collection_name = collection_name
+    embedding_function = None
+    if user_id is not None:
+        settings = get_effective_embedding_model_settings(user_id)
+        resolved_collection_name = build_user_vector_collection_name(
+            collection_name,
+            user_id,
+            settings,
+        )
+        embedding_function = create_embedding_model_from_settings(settings)
+
     return Chroma(
-        collection_name=collection_name,
+        collection_name=resolved_collection_name,
         persist_directory=str(persist_directory),
-        embedding_function=create_embedding_model(),
+        embedding_function=embedding_function,
     )
 
 
@@ -68,7 +111,14 @@ def delete_file_vector_entries(
     vectordb: Chroma | None = None,
 ) -> None:
     """删除单个文件在 Chroma 中的全部索引版本。"""
-    resolved_vectordb = vectordb or get_vector_store()
+    if vectordb is not None:
+        resolved_vectordb = vectordb
+    else:
+        try:
+            resolved_vectordb = get_vector_store(user_id=user_id)
+        except ValueError:
+            # 兼容迁移前的旧 collection 清理：删除操作不应要求用户先配置 Key。
+            resolved_vectordb = get_vector_store()
     resolved_vectordb.delete(where=build_file_vector_filter(user_id, file_id))
 
 
@@ -118,6 +168,7 @@ def index_file_vectors(
     vectordb: Chroma | None = None
     try:
         vectordb = get_vector_store(
+            user_id=user_id,
             persist_directory=persist_directory,
             collection_name=collection_name,
         )
@@ -143,6 +194,11 @@ def index_file_vectors(
         )
         raise
 
+    actual_collection_name = getattr(
+        getattr(vectordb, "_collection", None),
+        "name",
+        collection_name,
+    )
     return {
         "file_id": normalized_file_id,
         "chunk_count": len(chunks),
@@ -150,7 +206,7 @@ def index_file_vectors(
             len(chunk.page_content)
             for chunk in chunks
         ),
-        "collection_name": collection_name,
+        "collection_name": actual_collection_name,
         "persist_directory": str(persist_directory),
     }
 

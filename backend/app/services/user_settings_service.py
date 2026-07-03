@@ -252,9 +252,8 @@ def get_effective_chat_model_config(user_id: int) -> EffectiveChatModelConfig:
     """获取当前用户实际生效的聊天模型配置及凭据来源。"""
     record = get_user_llm_settings(user_id)
     if record is None or record["credential_mode"] == PLATFORM_CREDENTIAL_MODE:
-        return EffectiveChatModelConfig(
-            settings=_build_platform_settings(record),
-            credential_mode=PLATFORM_CREDENTIAL_MODE,
+        raise ValueError(
+            "请先在设置页配置当前账号的聊天模型 API Key 和模型名称"
         )
 
     credential = get_user_llm_provider_credential(user_id, record["provider"])
@@ -273,8 +272,8 @@ def get_serialized_user_llm_settings(user_id: int) -> dict[str, Any]:
         settings = _build_platform_settings(record)
         return _serialize_settings(
             settings,
-            PLATFORM_CREDENTIAL_MODE,
-            bool(settings.api_key),
+            USER_CREDENTIAL_MODE,
+            False,
         )
 
     credential = get_user_llm_provider_credential(user_id, record["provider"])
@@ -391,19 +390,7 @@ def _merge_settings_record(
     )
 
     if credential_mode == PLATFORM_CREDENTIAL_MODE:
-        return {
-            "credential_mode": PLATFORM_CREDENTIAL_MODE,
-            "provider": None,
-            "model": None,
-            "base_url": None,
-            "api_key_ciphertext": None,
-            "api_key_hint": None,
-            "encryption_key_version": 1,
-            "temperature": temperature,
-            "max_tokens": max_tokens,
-            "timeout_seconds": timeout_seconds,
-            "max_retries": max_retries,
-        }
+        raise ValueError("当前版本需要使用当前账号的 API Key，不能切换平台模式")
 
     provider = updates.get(
         "provider",

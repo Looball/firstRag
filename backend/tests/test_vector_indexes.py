@@ -5,6 +5,7 @@ import unittest
 from unittest.mock import patch
 from uuid import uuid4
 
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
 from app.core.rate_limit import reset_rate_limits
@@ -147,6 +148,8 @@ class VectorIndexJobHealthTests(unittest.TestCase):
             "app.api.vector_indexes.API_RATE_LIMIT_WINDOW_SECONDS",
             60,
         ), patch(
+            "app.api.vector_indexes.ensure_user_embedding_settings",
+        ), patch(
             "app.api.vector_indexes.get_user_knowledge_file",
             return_value=file_record,
         ), patch(
@@ -180,6 +183,8 @@ class VectorIndexJobHealthTests(unittest.TestCase):
                 {"id": uuid4(), "user_id": 1, "status": "pending"},
             ],
         ), patch(
+            "app.api.vector_indexes.ensure_user_embedding_settings",
+        ), patch(
             "app.api.vector_indexes.enqueue_file_vector_index",
         ) as enqueue:
             response = self.client.post(
@@ -188,6 +193,34 @@ class VectorIndexJobHealthTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 413)
         self.assertIn("单次向量化提交文件数量超过上限", response.json()["detail"])
+        enqueue.assert_not_called()
+
+    def test_index_file_vectors_requires_embedding_settings(self) -> None:
+        """未配置向量模型时不应提交 worker 任务。"""
+        file_id = uuid4()
+        file_record = {
+            "id": file_id,
+            "user_id": 1,
+            "original_name": "demo.md",
+            "status": "pending",
+            "index_version": 0,
+        }
+        with patch(
+            "app.api.vector_indexes.get_user_knowledge_file",
+            return_value=file_record,
+        ), patch(
+            "app.api.vector_indexes.ensure_user_embedding_settings",
+            side_effect=HTTPException(
+                status_code=400,
+                detail="向量模型配置无效：请先配置当前账号的向量模型 API Key",
+            ),
+        ), patch(
+            "app.api.vector_indexes.enqueue_file_vector_index",
+        ) as enqueue:
+            response = self.client.post(f"/chat/knowledge-files/{file_id}/vectors")
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("向量模型配置无效", response.json()["detail"])
         enqueue.assert_not_called()
 
     def test_delete_file_vectors_returns_404_for_inaccessible_file(self) -> None:

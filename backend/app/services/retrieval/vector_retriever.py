@@ -19,6 +19,7 @@ from app.services.vectors.vector_index_service import get_vector_store
 
 
 def get_retriever(
+    user_id: int | None = None,
     store_path: str = str(VECTOR_STORE_PATH),
     collection_name: str = CHROMA_COLLECTION_NAME,
     search_type: str = "similarity",
@@ -27,6 +28,7 @@ def get_retriever(
 ) -> VectorStoreRetriever:
     """从本地 Chroma 向量数据库创建检索器。"""
     vectordb = get_vector_store(
+        user_id=user_id,
         persist_directory=store_path,
         collection_name=collection_name,
     )

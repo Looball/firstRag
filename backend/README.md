@@ -60,38 +60,32 @@ backend/demo/
 └── learn_RAG.ipynb     # RAG 学习过程中的 notebook 记录
 ```
 
-## 环境变量
+## 模型配置
 
-运行前需要配置 API Key：
-
-```bash
-export LLM_PROVIDER="deepseek"
-export LLM_MODEL="deepseek-v4-flash"
-export LLM_API_KEY="你的模型 API Key"
-export ZAI_EMD_API="你的智谱 embedding API Key"
-# 或切到阿里云 Qwen embedding：
-# export EMBEDDING_PROVIDER=qwen
-# export EMBEDDING_MODEL=text-embedding-v4
-# export DASHSCOPE_API_KEY="你的 DashScope API Key"
-```
+聊天模型和 embedding/向量模型不再通过服务端环境变量配置。Docker 或本地服务
+启动后，用户登录前端设置页，分别保存当前账号的 provider、model 和 API Key。
 
 聊天模型统一通过 OpenAI 兼容协议调用，内置 `deepseek`、`qwen`、`zhipu`、
 `kimi`、`doubao`、`minimax` 六个国内厂商预设，以及
-`openai_compatible` 自定义兼容地址。切换厂商时设置 `LLM_PROVIDER`、
-`LLM_MODEL` 和 `LLM_API_KEY` 即可；需要自定义地址时额外设置
-`LLM_BASE_URL`。旧的 `DEEPSEEK_API_KEY` 仍可作为 DeepSeek 的兼容回退。
+`openai_compatible` 自定义兼容地址。embedding 当前支持阿里云 Qwen
+`text-embedding-v4` 和智谱 `embedding-3`。
 
-如需允许用户配置自己的模型 Key，还需要生成并配置独立的加密主密钥：
+服务端只保留生成参数默认值、用户设置加密密钥和可选 rerank 配置。远程 rerank
+需要 `RERANK_PROVIDER=qwen`，并配置 `RERANK_API_KEY`、`DASHSCOPE_API_KEY`
+或 `QWEN_API_KEY`；默认本地 rerank 不需要外部 Key。
+
+首次运行前需要生成并配置独立的用户设置加密主密钥：
 
 ```bash
 python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
 export USER_SETTINGS_ENCRYPTION_KEY="上一步生成的值"
 ```
 
-后端提供 `GET /user/settings/providers`、`GET /user/settings`、
-`PATCH /user/settings` 和 `POST /user/settings/test` 四个已认证接口。
-厂商列表和预设地址由 `/user/settings/providers` 统一提供，用户 API Key
-仅以密文保存，读取接口只会返回 `has_api_key` 和类似 `••••abcd` 的
+后端提供聊天模型接口 `GET /user/settings/providers`、`GET /user/settings`、
+`PATCH /user/settings` 和 `POST /user/settings/test`，以及向量模型接口
+`GET /user/settings/embedding-providers`、`GET/PATCH /user/settings/embedding`
+和 `POST /user/settings/embedding/test`。厂商列表和预设地址由 settings API
+统一提供，用户 API Key 仅以密文保存，读取接口只会返回 `has_api_key` 和类似 `••••abcd` 的
 `api_key_hint`，绝不返回明文。为避免 SSRF，用户自定义 `base_url` 默认
 关闭；预设厂商不受影响。
 
@@ -135,7 +129,7 @@ python chat.py
 ## 当前特点
 
 - 使用 `Chroma` 作为本地向量数据库
-- 默认使用智谱 `embedding-3` 生成文本向量，也可通过 `EMBEDDING_PROVIDER=qwen` 切到阿里云 `text-embedding-v4`
+- 使用登录用户保存的 embedding provider 生成文本向量，支持 Qwen `text-embedding-v4` 和智谱 `embedding-3`
 - 通过 OpenAI 兼容接口调用国内大语言模型作为回答模型
 - 使用 LangChain LCEL 组合检索链和问答链
 - 当前 prompt 更偏向“严格根据知识库回答”，适合观察 RAG 的检索增强效果

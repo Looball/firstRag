@@ -132,6 +132,9 @@ class RetrievalResilienceTests(unittest.TestCase):
         with unittest.mock.patch(
             "app.services.retrieval.hybrid_retriever.create_embedding_model",
         ) as embedding_cls, unittest.mock.patch(
+            "app.services.retrieval.hybrid_retriever.get_embedding_cache_identity",
+            return_value=("6", "zhipuai", "embedding-3", ""),
+        ), unittest.mock.patch(
             "app.services.retrieval.hybrid_retriever.get_vector_store",
             return_value=FakeVectorStore(),
         ):
@@ -155,6 +158,9 @@ class RetrievalResilienceTests(unittest.TestCase):
         with unittest.mock.patch(
             "app.services.retrieval.hybrid_retriever.create_embedding_model",
         ) as embedding_cls, unittest.mock.patch(
+            "app.services.retrieval.hybrid_retriever.get_embedding_cache_identity",
+            return_value=("6", "zhipuai", "embedding-3", ""),
+        ), unittest.mock.patch(
             "app.services.retrieval.hybrid_retriever.get_vector_store",
             return_value=FakeFallbackVectorStore(),
         ):
@@ -187,6 +193,9 @@ class RetrievalResilienceTests(unittest.TestCase):
         with unittest.mock.patch(
             "app.services.retrieval.hybrid_retriever.create_embedding_model",
         ) as embedding_cls, unittest.mock.patch(
+            "app.services.retrieval.hybrid_retriever.get_embedding_cache_identity",
+            return_value=("6", "zhipuai", "embedding-3", ""),
+        ), unittest.mock.patch(
             "app.services.retrieval.hybrid_retriever.get_vector_store",
             return_value=FakeVectorStore(),
         ), unittest.mock.patch(
@@ -403,6 +412,9 @@ class RetrievalResilienceTests(unittest.TestCase):
         with unittest.mock.patch(
             "app.services.retrieval.hybrid_retriever.create_embedding_model",
         ) as embedding_cls, unittest.mock.patch(
+            "app.services.retrieval.hybrid_retriever.get_embedding_cache_identity",
+            return_value=("6", "zhipuai", "embedding-3", ""),
+        ), unittest.mock.patch(
             "app.services.retrieval.hybrid_retriever.get_vector_store",
             return_value=FakeVectorStore(),
         ), unittest.mock.patch(
@@ -434,7 +446,7 @@ class RetrievalResilienceTests(unittest.TestCase):
         self.assertTrue(diagnostics["query_embedding_cache_hit"])
         self.assertEqual(
             diagnostics["query_embedding_cache_key"],
-            "zhipuai:embedding-3:hello world",
+            "6:zhipuai:embedding-3::hello world",
         )
 
     def test_query_embedding_cache_expires(self) -> None:
@@ -442,6 +454,9 @@ class RetrievalResilienceTests(unittest.TestCase):
         with unittest.mock.patch(
             "app.services.retrieval.hybrid_retriever.create_embedding_model",
         ) as embedding_cls, unittest.mock.patch(
+            "app.services.retrieval.hybrid_retriever.get_embedding_cache_identity",
+            return_value=("6", "zhipuai", "embedding-3", ""),
+        ), unittest.mock.patch(
             "app.services.retrieval.hybrid_retriever.get_vector_store",
             return_value=FakeVectorStore(),
         ), unittest.mock.patch(
@@ -483,6 +498,9 @@ class RetrievalResilienceTests(unittest.TestCase):
         with unittest.mock.patch(
             "app.services.retrieval.hybrid_retriever.create_embedding_model",
         ) as embedding_cls, unittest.mock.patch(
+            "app.services.retrieval.hybrid_retriever.get_embedding_cache_identity",
+            return_value=("6", "zhipuai", "embedding-3", ""),
+        ), unittest.mock.patch(
             "app.services.retrieval.hybrid_retriever.get_vector_store",
             return_value=FakeVectorStore(),
         ):

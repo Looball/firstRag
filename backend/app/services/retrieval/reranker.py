@@ -26,9 +26,9 @@ from langchain_core.documents import Document
 from openai import OpenAI
 
 from app.core import config
-from app.services.vectors.embedding_model import (
+from app.services.vectors.embedding_model import resolve_dashscope_api_key
+from app.services.vectors.embedding_settings_service import (
     QWEN_EMBEDDING_PROVIDER_ALIASES,
-    resolve_dashscope_api_key,
 )
 
 

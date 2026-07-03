@@ -2,13 +2,13 @@
 
 本文档记录 FirstRAG 使用 Docker Compose 启动本地完整链路的流程。Compose 会启动 PostgreSQL、migration、FastAPI backend、Next.js frontend 和 vector index worker。
 
-敏感信息只写入仓库根目录 `.env`，不要提交、截图或粘贴真实 API Key、JWT secret、数据库密码和用户凭据。
+服务器级 secret 写入仓库根目录 `.env`，不要提交、截图或粘贴真实 JWT secret、数据库密码和用户凭据。聊天模型和向量模型 API Key 在用户登录后的“模型设置”页保存为密文，不再写入 `.env`。
 
 ## 1. 前置条件
 
 - Docker Desktop 已启动，或 Linux 服务器上 Docker daemon 正常运行。
 - 仓库位于本机可写目录，例如 `/Users/bing/Desktop/Github/FirstRAG`。
-- LLM provider API Key、embedding Key 和远程 rerank Key 可以后配置；未配置时服务仍可启动，但默认平台聊天、向量化、向量检索或远程 rerank 不可用。
+- 聊天模型和向量模型 Key 可以登录后配置；未配置时服务仍可启动，但聊天调用、向量化和向量检索会提示先补充用户配置。
 - 默认 Docker 镜像不安装 `torch` / `transformers`。本地 CrossEncoder rerank 会自动降级为 RRF 结果；如需启用本地 rerank，再安装可选依赖并下载 Hugging Face 模型 `BAAI/bge-reranker-base`。也可以改用阿里云 Qwen rerank API，不需要本地模型栈。
 
 ## 2. 准备目录
@@ -44,19 +44,7 @@ JWT_SECRET_KEY=replace-with-a-random-secret
 USER_SETTINGS_ENCRYPTION_KEY=replace-with-a-fernet-key
 ```
 
-下面这些 provider Key 可启动后再配置。`LLM_API_KEY` 用于系统默认模型；如果用户在前端设置页保存自己的 provider Key，可以不配置系统默认 Key。`ZAI_EMD_API` 用于默认智谱 embedding；切到阿里云 Qwen embedding/rerank 时，使用 `DASHSCOPE_API_KEY`、`QWEN_API_KEY` 或专用的 `EMBEDDING_API_KEY` / `RERANK_API_KEY`。这些 Key 留空不影响登录、上传和页面启动。
-
-```bash
-LLM_API_KEY=
-ZAI_EMD_API=
-DASHSCOPE_API_KEY=
-```
-
-如果 Docker 启动后再补充或修改这些 Key，需要重启相关服务：
-
-```bash
-docker compose up -d --build backend worker
-```
+聊天模型和向量模型的 provider、model、API Key、可选维度在前端“模型设置”页配置。保存后立即影响当前用户后续聊天和向量化，不需要重启 backend 或 worker。
 
 可以用下面命令生成本地开发用随机值：
 
@@ -81,24 +69,16 @@ POSTGRES_PORT=127.0.0.1:5432
 
 注意：`DATABASE_URL` 主要用于宿主机 conda 方式运行；Compose 内部默认使用 `POSTGRES_DB`、`POSTGRES_USER` 和 `POSTGRES_PASSWORD` 生成容器网络里的数据库连接。如果需要外部数据库，再设置 `COMPOSE_DATABASE_URL`。
 
-## 4. 可选：使用阿里云 Qwen embedding 和 rerank
+## 4. 可选：使用阿里云 Qwen rerank
 
-如果想把 embedding 和 rerank 都切到阿里云 Model Studio / DashScope API，可以在 `.env` 中使用下面配置：
+Qwen embedding 在登录后的“模型设置”页配置。如果还想把 rerank 也切到阿里云 Model Studio / DashScope API，可以在 `.env` 中使用下面配置：
 
 ```bash
-EMBEDDING_PROVIDER=qwen
-EMBEDDING_MODEL=text-embedding-v4
-EMBEDDING_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
-# text-embedding-v4 可选 2048、1536、1024、768、512、256、128、64；留空使用阿里云默认值。
-EMBEDDING_DIMENSIONS=
-DASHSCOPE_API_KEY=your-dashscope-api-key
-
 RERANK_PROVIDER=qwen
 RERANK_MODEL=qwen3-rerank
 # 替换为你的阿里云工作空间 OpenAI-compatible 地址，并按控制台地域调整。
 RERANK_BASE_URL=https://<WorkspaceId>.ap-southeast-1.maas.aliyuncs.com/compatible-api/v1
-# 如果 rerank 和 embedding 使用同一个 DashScope Key，可以留空；否则填写专用 Key。
-RERANK_API_KEY=
+RERANK_API_KEY=your-rerank-api-key
 ```
 
 修改 `.env` 后重启 backend 和 worker：
@@ -107,7 +87,7 @@ RERANK_API_KEY=
 docker compose up -d --force-recreate backend worker
 ```
 
-注意：切换 embedding provider、模型或维度后，已有 Chroma 向量可能与新 embedding 维度不一致；需要重新向量化相关知识文件，必要时清理旧 `vector_db`。
+注意：切换用户级 embedding provider、模型或维度后，需要重新向量化相关知识文件。系统会按用户和 embedding 配置隔离 Chroma collection，避免不同维度互相污染。
 
 ## 5. 可选：启用本地 reranker
 
@@ -174,9 +154,9 @@ docker compose logs -f migrate backend worker frontend
 
 1. 打开 `http://localhost:3000`。
 2. 注册并登录本地测试账号。
-3. 进入模型设置，确认模型 provider 和 API Key 可用；如果暂未配置 Key，可以先跳过聊天测试。
+3. 进入模型设置，配置并测试聊天模型和向量模型 API Key。
 4. 新建知识库，上传一份 `.md`、`.txt`、`.pdf` 或 `.docx` 文件。
-5. 配置当前 embedding provider 对应的 API Key 并重启 backend / worker 后，触发向量化，等待任务成功。
+5. 触发向量化，等待任务成功。
 6. 对知识库提问，确认回答、sources 和任务队列状态正常。
 
 ## 8. 常用命令
@@ -258,7 +238,7 @@ docker compose up -d --build
 
 ### 上传或向量化失败
 
-确认当前 embedding provider 对应的 API Key 已配置且 backend / worker 已重启，并查看 worker 日志：
+确认当前登录用户已在“模型设置”页配置向量模型 provider、model 和 API Key，并查看 worker 日志：
 
 ```bash
 docker compose logs -f worker

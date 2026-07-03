@@ -9,17 +9,24 @@ import {
   parseAuthState,
 } from "@/lib/auth";
 import {
+  DEFAULT_USER_EMBEDDING_SETTINGS,
   DEFAULT_USER_LLM_SETTINGS,
+  FALLBACK_EMBEDDING_PROVIDER_PRESETS,
   FALLBACK_PROVIDER_PRESETS,
   getSettingsMessage,
   isSuccessfulResponse,
+  parseEmbeddingProviderPresets,
+  parseEmbeddingSettingsTestResult,
   parseSettingsTestResult,
   parseProviderModels,
+  parseUserEmbeddingSettings,
   parseUserLLMSettings,
   parseProviderPresets,
+  toUserEmbeddingSettingsPayload,
   toUserLLMSettingsPayload,
-  type CredentialMode,
+  type EmbeddingProviderPreset,
   type ModelProviderPreset,
+  type UserEmbeddingSettings,
   type UserLLMSettings,
 } from "@/lib/user-settings";
 
@@ -45,6 +52,23 @@ function applyProviderCredentials(
   };
 }
 
+function applyEmbeddingProviderCredentials(
+  settings: UserEmbeddingSettings,
+  provider: EmbeddingProviderPreset | undefined
+) {
+  if (!provider) {
+    return settings;
+  }
+
+  return {
+    ...settings,
+    model: settings.model || provider.defaultModel,
+    baseUrl: settings.baseUrl || provider.baseUrl,
+    hasApiKey: provider.hasApiKey,
+    apiKeyHint: provider.apiKeyHint,
+  };
+}
+
 export function ModelSettingsForm() {
   const [username, setUsername] = useState("");
   const [activeSettings, setActiveSettings] =
@@ -52,16 +76,29 @@ export function ModelSettingsForm() {
   const [settings, setSettings] = useState<UserLLMSettings>(
     DEFAULT_USER_LLM_SETTINGS
   );
+  const [activeEmbeddingSettings, setActiveEmbeddingSettings] =
+    useState<UserEmbeddingSettings | null>(null);
+  const [embeddingSettings, setEmbeddingSettings] =
+    useState<UserEmbeddingSettings>(DEFAULT_USER_EMBEDDING_SETTINGS);
   const [apiKey, setApiKey] = useState("");
+  const [embeddingApiKey, setEmbeddingApiKey] = useState("");
   const [showApiKey, setShowApiKey] = useState(false);
+  const [showEmbeddingApiKey, setShowEmbeddingApiKey] = useState(false);
   const [modelCandidates, setModelCandidates] = useState<string[]>([]);
   const [isCustomModel, setIsCustomModel] = useState(false);
   const [providerPresets, setProviderPresets] = useState<ModelProviderPreset[]>(
     FALLBACK_PROVIDER_PRESETS
   );
+  const [embeddingProviderPresets, setEmbeddingProviderPresets] = useState<
+    EmbeddingProviderPreset[]
+  >(FALLBACK_EMBEDDING_PROVIDER_PRESETS);
   const [isLoading, setIsLoading] = useState(true);
   const [saveState, setSaveState] = useState<RequestState>("idle");
   const [testState, setTestState] = useState<RequestState>("idle");
+  const [embeddingSaveState, setEmbeddingSaveState] =
+    useState<RequestState>("idle");
+  const [embeddingTestState, setEmbeddingTestState] =
+    useState<RequestState>("idle");
   const [modelLoadState, setModelLoadState] = useState<RequestState>("idle");
   const [notice, setNotice] = useState("");
   const modelRequestIdRef = useRef(0);
@@ -71,10 +108,22 @@ export function ModelSettingsForm() {
     () => providerPresets.find((item) => item.value === settings.provider),
     [providerPresets, settings.provider]
   );
+  const embeddingProvider = useMemo(
+    () =>
+      embeddingProviderPresets.find(
+        (item) => item.value === embeddingSettings.provider
+      ),
+    [embeddingProviderPresets, embeddingSettings.provider]
+  );
   const requiresBaseUrl = provider?.requiresBaseUrl === true;
-  const isUserKeyMode = settings.credentialMode === "user";
   const hasSavedApiKey = provider?.hasApiKey ?? settings.hasApiKey;
   const apiKeyHint = provider?.apiKeyHint ?? settings.apiKeyHint;
+  const embeddingRequiresBaseUrl =
+    embeddingProvider?.requiresBaseUrl === true;
+  const hasSavedEmbeddingApiKey =
+    embeddingProvider?.hasApiKey ?? embeddingSettings.hasApiKey;
+  const embeddingApiKeyHint =
+    embeddingProvider?.apiKeyHint ?? embeddingSettings.apiKeyHint;
 
   function redirectToLogin() {
     localStorage.removeItem(AUTH_STORAGE_KEY);
@@ -187,7 +236,12 @@ export function ModelSettingsForm() {
 
   async function refreshSettingsAndProviders(authorization: string) {
     try {
-      const [response, providersResponse] = await Promise.all([
+      const [
+        response,
+        providersResponse,
+        embeddingResponse,
+        embeddingProvidersResponse,
+      ] = await Promise.all([
         fetch("/api/settings", {
           headers: { Authorization: authorization },
           cache: "no-store",
@@ -196,20 +250,46 @@ export function ModelSettingsForm() {
           headers: { Authorization: authorization },
           cache: "no-store",
         }),
+        fetch("/api/settings/embedding", {
+          headers: { Authorization: authorization },
+          cache: "no-store",
+        }),
+        fetch("/api/settings/embedding-providers", {
+          headers: { Authorization: authorization },
+          cache: "no-store",
+        }),
       ]);
 
-      if (response.status === 401 || providersResponse.status === 401) {
+      if (
+        response.status === 401 ||
+        providersResponse.status === 401 ||
+        embeddingResponse.status === 401 ||
+        embeddingProvidersResponse.status === 401
+      ) {
         redirectToLogin();
         return;
       }
 
-      const [data, providersData] = await Promise.all([
+      const [
+        data,
+        providersData,
+        embeddingData,
+        embeddingProvidersData,
+      ] = await Promise.all([
         getResponseData(response),
         getResponseData(providersResponse),
+        getResponseData(embeddingResponse),
+        getResponseData(embeddingProvidersResponse),
       ]);
       const nextSettings = response.ok ? parseUserLLMSettings(data) : null;
       const presets = providersResponse.ok
         ? parseProviderPresets(providersData)
+        : null;
+      const nextEmbeddingSettings = embeddingResponse.ok
+        ? parseUserEmbeddingSettings(embeddingData)
+        : null;
+      const embeddingPresets = embeddingProvidersResponse.ok
+        ? parseEmbeddingProviderPresets(embeddingProvidersData)
         : null;
 
       if (nextSettings) {
@@ -223,6 +303,20 @@ export function ModelSettingsForm() {
 
       if (presets) {
         setProviderPresets(presets);
+      }
+      if (nextEmbeddingSettings) {
+        const nextEmbeddingSettingsWithCredentialState =
+          applyEmbeddingProviderCredentials(
+            nextEmbeddingSettings,
+            embeddingPresets?.find(
+              (item) => item.value === nextEmbeddingSettings.provider
+            )
+          );
+        setActiveEmbeddingSettings(nextEmbeddingSettingsWithCredentialState);
+        setEmbeddingSettings(nextEmbeddingSettingsWithCredentialState);
+      }
+      if (embeddingPresets) {
+        setEmbeddingProviderPresets(embeddingPresets);
       }
     } catch {
       // 测试状态提示优先于刷新失败，不额外暴露后端错误信息。
@@ -243,7 +337,12 @@ export function ModelSettingsForm() {
 
     async function loadSettings() {
       try {
-        const [response, providersResponse] = await Promise.all([
+        const [
+          response,
+          providersResponse,
+          embeddingResponse,
+          embeddingProvidersResponse,
+        ] = await Promise.all([
           fetch("/api/settings", {
             headers: { Authorization: authorization },
             cache: "no-store",
@@ -252,13 +351,33 @@ export function ModelSettingsForm() {
             headers: { Authorization: authorization },
             cache: "no-store",
           }),
+          fetch("/api/settings/embedding", {
+            headers: { Authorization: authorization },
+            cache: "no-store",
+          }),
+          fetch("/api/settings/embedding-providers", {
+            headers: { Authorization: authorization },
+            cache: "no-store",
+          }),
         ]);
-        const [data, providersData] = await Promise.all([
+        const [
+          data,
+          providersData,
+          embeddingData,
+          embeddingProvidersData,
+        ] = await Promise.all([
           getResponseData(response),
           getResponseData(providersResponse),
+          getResponseData(embeddingResponse),
+          getResponseData(embeddingProvidersResponse),
         ]);
 
-        if (response.status === 401 || providersResponse.status === 401) {
+        if (
+          response.status === 401 ||
+          providersResponse.status === 401 ||
+          embeddingResponse.status === 401 ||
+          embeddingProvidersResponse.status === 401
+        ) {
           redirectToLogin();
           return;
         }
@@ -268,13 +387,19 @@ export function ModelSettingsForm() {
         }
 
         const nextSettings = parseUserLLMSettings(data);
+        const nextEmbeddingSettings = embeddingResponse.ok
+          ? parseUserEmbeddingSettings(embeddingData)
+          : null;
 
-        if (!nextSettings) {
+        if (!nextSettings || !nextEmbeddingSettings) {
           throw new Error("后端设置响应格式无效，请联系管理员。");
         }
 
         const presets = providersResponse.ok
           ? parseProviderPresets(providersData)
+          : null;
+        const embeddingPresets = embeddingProvidersResponse.ok
+          ? parseEmbeddingProviderPresets(embeddingProvidersData)
           : null;
 
         if (!isCancelled) {
@@ -284,9 +409,21 @@ export function ModelSettingsForm() {
           );
           setActiveSettings(nextSettingsWithCredentialState);
           setSettings(nextSettingsWithCredentialState);
+          const nextEmbeddingSettingsWithCredentialState =
+            applyEmbeddingProviderCredentials(
+              nextEmbeddingSettings,
+              embeddingPresets?.find(
+                (item) => item.value === nextEmbeddingSettings.provider
+              )
+            );
+          setActiveEmbeddingSettings(nextEmbeddingSettingsWithCredentialState);
+          setEmbeddingSettings(nextEmbeddingSettingsWithCredentialState);
 
           if (presets) {
             setProviderPresets(presets);
+          }
+          if (embeddingPresets) {
+            setEmbeddingProviderPresets(embeddingPresets);
           }
         }
       } catch (error) {
@@ -310,12 +447,6 @@ export function ModelSettingsForm() {
       invalidateProviderModelRequest();
     };
   }, []);
-
-  function updateCredentialMode(credentialMode: CredentialMode) {
-    setSettings((current) => ({ ...current, credentialMode }));
-    setApiKey("");
-    setNotice("");
-  }
 
   function updateProvider(providerValue: string) {
     const nextProvider = providerPresets.find(
@@ -345,16 +476,39 @@ export function ModelSettingsForm() {
     }
   }
 
+  function updateEmbeddingProvider(providerValue: string) {
+    const nextProvider = embeddingProviderPresets.find(
+      (preset) => preset.value === providerValue
+    );
+
+    setEmbeddingSettings((current) => ({
+      ...current,
+      provider: providerValue,
+      model: nextProvider?.defaultModel || "",
+      baseUrl: nextProvider?.baseUrl || "",
+      hasApiKey: nextProvider?.hasApiKey ?? false,
+      apiKeyHint: nextProvider?.apiKeyHint ?? null,
+      dimensions: null,
+    }));
+    setEmbeddingApiKey("");
+    setShowEmbeddingApiKey(false);
+    setNotice(
+      nextProvider?.hasApiKey
+        ? "该向量模型厂商已保存 API Key。"
+        : "该向量模型厂商尚未保存 API Key，请先输入 API Key。"
+    );
+  }
+
   function getPayload(requireModel: boolean) {
-    if (requireModel && isUserKeyMode && !settings.model.trim()) {
+    if (requireModel && !settings.model.trim()) {
       throw new Error("请输入模型名称。");
     }
 
-    if (isUserKeyMode && requiresBaseUrl && !settings.baseUrl.trim()) {
+    if (requiresBaseUrl && !settings.baseUrl.trim()) {
       throw new Error("自定义兼容服务需要填写 API 地址。");
     }
 
-    if (isUserKeyMode && !hasSavedApiKey && !apiKey.trim()) {
+    if (!hasSavedApiKey && !apiKey.trim()) {
       throw new Error("请输入 API Key 后再继续。");
     }
 
@@ -372,6 +526,35 @@ export function ModelSettingsForm() {
     }
 
     return toUserLLMSettingsPayload(settings, apiKey, requiresBaseUrl);
+  }
+
+  function getEmbeddingPayload() {
+    if (!embeddingSettings.model.trim()) {
+      throw new Error("请输入向量模型名称。");
+    }
+
+    if (embeddingRequiresBaseUrl && !embeddingSettings.baseUrl.trim()) {
+      throw new Error("向量模型 API 地址不能为空。");
+    }
+
+    if (!hasSavedEmbeddingApiKey && !embeddingApiKey.trim()) {
+      throw new Error("请输入向量模型 API Key 后再继续。");
+    }
+
+    if (
+      embeddingSettings.timeoutSeconds <= 0 ||
+      embeddingSettings.timeoutSeconds > 600 ||
+      embeddingSettings.maxRetries < 0 ||
+      embeddingSettings.maxRetries > 10
+    ) {
+      throw new Error("请检查向量模型参数的取值范围。");
+    }
+
+    return toUserEmbeddingSettingsPayload(
+      embeddingSettings,
+      embeddingApiKey,
+      embeddingRequiresBaseUrl
+    );
   }
 
   async function handleTest() {
@@ -396,9 +579,9 @@ export function ModelSettingsForm() {
         method: "POST",
         headers: {
           Authorization: authorization,
-          ...(isUserKeyMode ? { "Content-Type": "application/json" } : {}),
+          "Content-Type": "application/json",
         },
-        ...(isUserKeyMode ? { body: JSON.stringify(payload) } : {}),
+        body: JSON.stringify(payload),
       });
       const data = await getResponseData(response);
 
@@ -428,11 +611,7 @@ export function ModelSettingsForm() {
     } catch (error) {
       setTestState("error");
       setNotice(
-        isUserKeyMode
-          ? "连接测试失败，但 API Key 已安全保存，可修改模型或地址后重试。"
-          : error instanceof Error
-            ? error.message
-            : "连接测试失败，请检查配置。"
+        error instanceof Error ? error.message : "连接测试失败，请检查配置。"
       );
     } finally {
       setApiKey("");
@@ -441,6 +620,109 @@ export function ModelSettingsForm() {
       if (authorization) {
         await refreshSettingsAndProviders(authorization);
       }
+    }
+  }
+
+  async function handleEmbeddingTest() {
+    setEmbeddingTestState("loading");
+    setNotice("");
+
+    try {
+      const payload = getEmbeddingPayload();
+      const authState = parseAuthState(localStorage.getItem(AUTH_STORAGE_KEY));
+
+      if (!authState) {
+        redirectToLogin();
+        return;
+      }
+
+      const authorization = buildAuthorizationHeader(authState);
+      const response = await fetch("/api/settings/embedding", {
+        method: "POST",
+        headers: {
+          Authorization: authorization,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(payload),
+      });
+      const data = await getResponseData(response);
+
+      if (response.status === 401) {
+        redirectToLogin();
+        return;
+      }
+
+      const testResult = parseEmbeddingSettingsTestResult(data);
+
+      if (!response.ok || !isSuccessfulResponse(data) || !testResult) {
+        throw new Error(getSettingsMessage(data, "向量模型连接测试失败，请检查配置。"));
+      }
+
+      setEmbeddingTestState("success");
+      setNotice(
+        testResult.dimensions
+          ? `${testResult.message}，返回维度 ${testResult.dimensions}。`
+          : testResult.message
+      );
+    } catch (error) {
+      setEmbeddingTestState("error");
+      setNotice(
+        error instanceof Error ? error.message : "向量模型连接测试失败，请检查配置。"
+      );
+    } finally {
+      setShowEmbeddingApiKey(false);
+    }
+  }
+
+  async function handleEmbeddingSubmit() {
+    setEmbeddingSaveState("loading");
+    setNotice("");
+
+    try {
+      const payload = getEmbeddingPayload();
+      const authState = parseAuthState(localStorage.getItem(AUTH_STORAGE_KEY));
+
+      if (!authState) {
+        redirectToLogin();
+        return;
+      }
+
+      const authorization = buildAuthorizationHeader(authState);
+      const response = await fetch("/api/settings/embedding", {
+        method: "PATCH",
+        headers: {
+          Authorization: authorization,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(payload),
+      });
+      const data = await getResponseData(response);
+
+      if (response.status === 401) {
+        redirectToLogin();
+        return;
+      }
+
+      if (!response.ok || !isSuccessfulResponse(data)) {
+        throw new Error(getSettingsMessage(data, "保存向量模型设置失败，请稍后重试。"));
+      }
+
+      setEmbeddingSaveState("success");
+      setNotice(
+        getSettingsMessage(
+          data,
+          "向量模型设置已保存；如果更换了模型或维度，请重新向量化已有文件。"
+        )
+      );
+      await refreshSettingsAndProviders(authorization);
+    } catch (error) {
+      setEmbeddingSaveState("error");
+      setNotice(
+        error instanceof Error ? error.message : "保存向量模型设置失败，请稍后重试。"
+      );
+    } finally {
+      setEmbeddingApiKey("");
+      setShowEmbeddingApiKey(false);
     }
   }
 
@@ -515,28 +797,15 @@ export function ModelSettingsForm() {
           <div className="flex items-start justify-between gap-5">
             <div>
               <p className="font-utility text-[10px] font-semibold uppercase tracking-[0.18em] text-[var(--research)]">模型控制台</p>
-              <h1 className="font-display mt-3 text-3xl font-semibold text-[var(--foreground)]">聊天模型设置</h1>
-              <p className="mt-2 text-sm text-[var(--ink-muted)]">{username ? `${username} 的设置` : "管理当前账号的模型凭据与默认模型。"}</p>
+              <h1 className="font-display mt-3 text-3xl font-semibold text-[var(--foreground)]">模型设置</h1>
+              <p className="mt-2 text-sm text-[var(--ink-muted)]">{username ? `${username} 的设置` : "管理当前账号的聊天模型与向量模型。"}</p>
             </div>
             <Link href="/" className="shrink-0 text-sm font-semibold text-[var(--research)] underline decoration-[var(--index)] decoration-2 underline-offset-4">返回工作台</Link>
           </div>
         </header>
 
         <div className="space-y-9 px-6 py-8 md:px-10 md:py-10">
-          <section aria-labelledby="credential-mode-title">
-            <p id="credential-mode-title" className="font-utility text-[10px] font-semibold uppercase tracking-[0.16em] text-[var(--ink-muted)]">凭据来源</p>
-            <div className="mt-3 grid gap-3 sm:grid-cols-2">
-              {(["platform", "user"] as const).map((mode) => {
-                const selected = settings.credentialMode === mode;
-                return <button key={mode} type="button" onClick={() => updateCredentialMode(mode)} className={`border-l-4 px-4 py-4 text-left transition ${selected ? "border-[var(--coral)] bg-[var(--foreground)] text-white" : "border-transparent bg-[var(--paper-muted)] text-[var(--foreground)] hover:border-[var(--index)]"}`}>
-                  <span className="block text-sm font-semibold">{mode === "platform" ? "使用平台 Key" : "使用自己的 Key"}</span>
-                  <span className={`mt-1 block text-xs leading-5 ${selected ? "text-[#b8c8c3]" : "text-[var(--ink-muted)]"}`}>{mode === "platform" ? "由平台默认凭据提供服务。" : "为当前账号安全保存独立凭据。"}</span>
-                </button>;
-              })}
-            </div>
-          </section>
-
-          {isUserKeyMode && <section className="grid gap-5 md:grid-cols-2" aria-label="模型参数">
+          <section className="grid gap-5 md:grid-cols-2" aria-label="聊天模型参数">
             <label className="font-utility text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--ink-muted)]">厂商
               <select value={settings.provider} onChange={(event) => updateProvider(event.target.value)} className="research-focus mt-2 w-full border border-[var(--line)] bg-white px-3 py-3 text-sm normal-case tracking-normal text-[var(--foreground)]">
                 {providerPresets.map((item) => <option key={item.value} value={item.value} disabled={!item.enabled}>{item.label}{item.enabled ? "" : "（暂不可用）"}</option>)}
@@ -558,23 +827,60 @@ export function ModelSettingsForm() {
               )}
               {modelLoadState === "loading" && <span className="mt-2 block text-xs normal-case tracking-normal text-[var(--ink-muted)]">正在获取模型列表，请稍候。</span>}
             </label>
-          </section>}
+          </section>
 
-          {isUserKeyMode && requiresBaseUrl && <label className="font-utility block text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--ink-muted)]">API 地址
+          {requiresBaseUrl && <label className="font-utility block text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--ink-muted)]">API 地址
             <input type="url" value={settings.baseUrl} onChange={(event) => setSettings((current) => ({ ...current, baseUrl: event.target.value }))} placeholder="https://api.example.com/v1" className="research-focus mt-2 w-full border border-[var(--line)] bg-white px-3 py-3 text-sm normal-case tracking-normal text-[var(--foreground)]" />
           </label>}
 
-          {isUserKeyMode && <section className="border border-[var(--line)] bg-[var(--paper-muted)] p-5" aria-labelledby="api-key-title">
+          <section className="border border-[var(--line)] bg-[var(--paper-muted)] p-5" aria-labelledby="api-key-title">
             <div className="flex items-baseline justify-between gap-4"><p id="api-key-title" className="font-utility text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--ink-muted)]">API Key</p>{hasSavedApiKey && <span className="text-xs font-semibold text-[var(--research)]">已保存 · {apiKeyHint ?? "已保存"}</span>}</div>
             <div className="mt-3 flex border border-[var(--line)] bg-white focus-within:border-[var(--research)] focus-within:ring-3 focus-within:ring-[var(--research)]/15">
               <input type={showApiKey ? "text" : "password"} value={apiKey} onChange={(event) => setApiKey(event.target.value)} autoComplete="off" placeholder={hasSavedApiKey ? "已保存；填写可替换现有 Key" : "请输入 API Key"} className="min-w-0 flex-1 bg-transparent px-3 py-3 text-sm text-[var(--foreground)] outline-none" />
               <button type="button" onClick={() => setShowApiKey((current) => !current)} disabled={!apiKey} title={apiKey ? undefined : "已保存的 Key 不可查看"} className="border-l border-[var(--line)] px-4 text-xs font-semibold text-[var(--ink-muted)] hover:bg-[var(--paper-muted)] disabled:cursor-not-allowed disabled:text-[var(--line)]">{apiKey ? (showApiKey ? "隐藏" : "显示") : "不可查看"}</button>
             </div>
             <p className="mt-2 text-xs leading-5 text-[var(--ink-muted)]">密钥只会在保存或测试时发送到后端，页面不会回显或存入浏览器。</p>
-          </section>}
+          </section>
+
+          <section className="border-t border-[var(--line)] pt-7" aria-labelledby="embedding-title">
+            <div className="flex items-baseline justify-between gap-4"><p id="embedding-title" className="font-utility text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--ink-muted)]">向量模型</p>{activeEmbeddingSettings?.hasApiKey && <span className="text-xs text-[var(--ink-muted)]">当前已配置</span>}</div>
+            <div className="mt-4 grid gap-5 md:grid-cols-2">
+              <label className="font-utility text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--ink-muted)]">厂商
+                <select value={embeddingSettings.provider} onChange={(event) => updateEmbeddingProvider(event.target.value)} className="research-focus mt-2 w-full border border-[var(--line)] bg-white px-3 py-3 text-sm normal-case tracking-normal text-[var(--foreground)]">
+                  {embeddingProviderPresets.map((item) => <option key={item.value} value={item.value} disabled={!item.enabled}>{item.label}{item.enabled ? "" : "（暂不可用）"}</option>)}
+                </select>
+              </label>
+              <label className="font-utility text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--ink-muted)]">模型名
+                <input value={embeddingSettings.model} onChange={(event) => setEmbeddingSettings((current) => ({ ...current, model: event.target.value }))} placeholder={embeddingProvider?.defaultModel || "输入向量模型名称"} className="research-focus mt-2 w-full border border-[var(--line)] bg-white px-3 py-3 text-sm normal-case tracking-normal text-[var(--foreground)]" />
+              </label>
+              {embeddingRequiresBaseUrl && <label className="font-utility text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--ink-muted)]">API 地址
+                <input type="url" value={embeddingSettings.baseUrl} onChange={(event) => setEmbeddingSettings((current) => ({ ...current, baseUrl: event.target.value }))} placeholder="https://api.example.com/v1" className="research-focus mt-2 w-full border border-[var(--line)] bg-white px-3 py-3 text-sm normal-case tracking-normal text-[var(--foreground)]" />
+              </label>}
+              <label className="font-utility text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--ink-muted)]">向量维度
+                <input type="number" min="1" max="8192" step="1" value={embeddingSettings.dimensions ?? ""} onChange={(event) => setEmbeddingSettings((current) => ({ ...current, dimensions: event.target.value ? Number(event.target.value) : null }))} placeholder="默认维度" className="research-focus mt-2 w-full border border-[var(--line)] bg-white px-3 py-3 text-sm normal-case tracking-normal text-[var(--foreground)]" />
+              </label>
+              <label className="font-utility text-[10px] font-semibold uppercase tracking-[0.1em] text-[var(--ink-muted)]">超时（秒）
+                <input type="number" min="1" max="600" step="1" value={embeddingSettings.timeoutSeconds} onChange={(event) => setEmbeddingSettings((current) => ({ ...current, timeoutSeconds: Number(event.target.value) }))} className="research-focus mt-2 w-full border border-[var(--line)] bg-white px-3 py-3 text-sm normal-case tracking-normal text-[var(--foreground)]" />
+              </label>
+              <label className="font-utility text-[10px] font-semibold uppercase tracking-[0.1em] text-[var(--ink-muted)]">最大重试次数
+                <input type="number" min="0" max="10" step="1" value={embeddingSettings.maxRetries} onChange={(event) => setEmbeddingSettings((current) => ({ ...current, maxRetries: Number(event.target.value) }))} className="research-focus mt-2 w-full border border-[var(--line)] bg-white px-3 py-3 text-sm normal-case tracking-normal text-[var(--foreground)]" />
+              </label>
+            </div>
+            <div className="mt-5 border border-[var(--line)] bg-[var(--paper-muted)] p-5" aria-labelledby="embedding-api-key-title">
+              <div className="flex items-baseline justify-between gap-4"><p id="embedding-api-key-title" className="font-utility text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--ink-muted)]">向量 API Key</p>{hasSavedEmbeddingApiKey && <span className="text-xs font-semibold text-[var(--research)]">已保存 · {embeddingApiKeyHint ?? "已保存"}</span>}</div>
+              <div className="mt-3 flex border border-[var(--line)] bg-white focus-within:border-[var(--research)] focus-within:ring-3 focus-within:ring-[var(--research)]/15">
+                <input type={showEmbeddingApiKey ? "text" : "password"} value={embeddingApiKey} onChange={(event) => setEmbeddingApiKey(event.target.value)} autoComplete="off" placeholder={hasSavedEmbeddingApiKey ? "已保存；填写可替换现有 Key" : "请输入向量 API Key"} className="min-w-0 flex-1 bg-transparent px-3 py-3 text-sm text-[var(--foreground)] outline-none" />
+                <button type="button" onClick={() => setShowEmbeddingApiKey((current) => !current)} disabled={!embeddingApiKey} title={embeddingApiKey ? undefined : "已保存的 Key 不可查看"} className="border-l border-[var(--line)] px-4 text-xs font-semibold text-[var(--ink-muted)] hover:bg-[var(--paper-muted)] disabled:cursor-not-allowed disabled:text-[var(--line)]">{embeddingApiKey ? (showEmbeddingApiKey ? "隐藏" : "显示") : "不可查看"}</button>
+              </div>
+            </div>
+            <div className="mt-4 flex flex-wrap gap-3">
+              <button type="button" onClick={() => void handleEmbeddingTest()} disabled={embeddingTestState === "loading" || embeddingSaveState === "loading"} className="border border-[var(--research)] px-5 py-3 text-sm font-semibold text-[var(--research)] transition hover:bg-[var(--paper-muted)] disabled:border-[var(--line)] disabled:text-[var(--ink-muted)]">{embeddingTestState === "loading" ? "测试中..." : "测试向量模型"}</button>
+              <button type="button" onClick={() => void handleEmbeddingSubmit()} disabled={embeddingSaveState === "loading" || embeddingTestState === "loading"} className="bg-[var(--research)] px-5 py-3 text-sm font-semibold text-white transition hover:bg-[var(--research-dark)] disabled:bg-[var(--line)]">{embeddingSaveState === "loading" ? "保存中..." : "保存向量模型"}</button>
+            </div>
+          </section>
 
           <section className="border-t border-[var(--line)] pt-7" aria-labelledby="generation-title">
-            <div className="flex items-baseline justify-between gap-4"><p id="generation-title" className="font-utility text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--ink-muted)]">生成控制</p><span className="text-xs text-[var(--ink-muted)]">平台模式仅调整此区域</span></div>
+            <div className="flex items-baseline justify-between gap-4"><p id="generation-title" className="font-utility text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--ink-muted)]">生成控制</p></div>
             <div className="mt-4 grid gap-4 sm:grid-cols-2">
               <label className="font-utility text-[10px] font-semibold uppercase tracking-[0.1em] text-[var(--ink-muted)]">Temperature
                 <input type="number" min="0" max="2" step="0.1" value={settings.temperature} onChange={(event) => setSettings((current) => ({ ...current, temperature: Number(event.target.value) }))} className="research-focus mt-2 w-full border border-[var(--line)] bg-white px-3 py-3 text-sm normal-case tracking-normal text-[var(--foreground)]" />
@@ -592,10 +898,10 @@ export function ModelSettingsForm() {
           </section>
 
           <div className="border-t border-[var(--line)] pt-6">
-            <p role="status" className={`min-h-5 text-sm ${saveState === "error" || testState === "error" ? "text-[#9b3c29]" : "text-[var(--ink-muted)]"}`}>{notice || "保存后，工作台的下一次对话会使用当前账号的模型设置。"}</p>
+            <p role="status" className={`min-h-5 text-sm ${saveState === "error" || testState === "error" || embeddingSaveState === "error" || embeddingTestState === "error" ? "text-[#9b3c29]" : "text-[var(--ink-muted)]"}`}>{notice || "保存后，工作台的下一次对话和向量化会使用当前账号的模型设置。"}</p>
             <div className="mt-4 flex flex-wrap gap-3">
-              <button type="button" onClick={() => void handleTest()} disabled={testState === "loading" || saveState === "loading"} className="border border-[var(--research)] px-5 py-3 text-sm font-semibold text-[var(--research)] transition hover:bg-[var(--paper-muted)] disabled:border-[var(--line)] disabled:text-[var(--ink-muted)]">{testState === "loading" ? "测试中..." : isUserKeyMode && !settings.model.trim() ? "获取模型列表" : "测试连接"}</button>
-              <button type="submit" disabled={saveState === "loading" || testState === "loading"} className="bg-[var(--research)] px-5 py-3 text-sm font-semibold text-white transition hover:bg-[var(--research-dark)] disabled:bg-[var(--line)]">{saveState === "loading" ? "保存中..." : "保存设置"}</button>
+              <button type="button" onClick={() => void handleTest()} disabled={testState === "loading" || saveState === "loading"} className="border border-[var(--research)] px-5 py-3 text-sm font-semibold text-[var(--research)] transition hover:bg-[var(--paper-muted)] disabled:border-[var(--line)] disabled:text-[var(--ink-muted)]">{testState === "loading" ? "测试中..." : !settings.model.trim() ? "获取模型列表" : "测试聊天模型"}</button>
+              <button type="submit" disabled={saveState === "loading" || testState === "loading"} className="bg-[var(--research)] px-5 py-3 text-sm font-semibold text-white transition hover:bg-[var(--research-dark)] disabled:bg-[var(--line)]">{saveState === "loading" ? "保存中..." : "保存聊天模型"}</button>
             </div>
           </div>
         </div>

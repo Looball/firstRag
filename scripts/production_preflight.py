@@ -88,8 +88,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
         "--require-provider-keys",
         action="store_true",
         help=(
-            "Require LLM and embedding provider keys. Use before public smoke "
-            "tests; omit it when booting first and configuring providers later."
+            "Require remote rerank provider keys when remote rerank is enabled."
         ),
     )
     parser.add_argument(
@@ -230,37 +229,8 @@ def validate_optional_provider_settings(
     *,
     require_provider_keys: bool = False,
 ) -> list[str]:
-    """校验可后配置的 LLM 与 embedding provider Key。"""
+    """校验仍通过环境变量配置的可选远程 rerank provider。"""
     errors: list[str] = []
-
-    llm_keys = ("LLM_API_KEY", "DEEPSEEK_API_KEY")
-    validate_optional_api_keys(env, llm_keys, errors)
-    if require_provider_keys and not (
-        has_any_configured_key(env, llm_keys)
-    ):
-        errors.append("公开 smoke test 前需要配置 LLM_API_KEY 或 DEEPSEEK_API_KEY。")
-
-    embedding_provider = normalize_optional_provider(
-        env.get("EMBEDDING_PROVIDER"),
-        "zhipuai",
-    )
-    zhipu_embedding_keys = ("ZAI_EMD_API",)
-    qwen_embedding_keys = (
-        "EMBEDDING_API_KEY",
-        "DASHSCOPE_API_KEY",
-        "QWEN_API_KEY",
-    )
-    validate_optional_api_keys(
-        env,
-        zhipu_embedding_keys + qwen_embedding_keys,
-        errors,
-    )
-    if require_provider_keys:
-        if embedding_provider in {"qwen", "dashscope", "aliyun", "aliyun-qwen"}:
-            if not has_any_configured_key(env, qwen_embedding_keys):
-                errors.append("公开 smoke test 前需要配置阿里云 embedding Key。")
-        elif not has_any_configured_key(env, zhipu_embedding_keys):
-            errors.append("公开 smoke test 前需要配置 ZAI_EMD_API。")
 
     rerank_provider = normalize_optional_provider(
         env.get("RERANK_PROVIDER"),
@@ -270,9 +240,8 @@ def validate_optional_provider_settings(
         "RERANK_API_KEY",
         "DASHSCOPE_API_KEY",
         "QWEN_API_KEY",
-        "EMBEDDING_API_KEY",
     )
-    validate_optional_api_keys(env, ("RERANK_API_KEY",), errors)
+    validate_optional_api_keys(env, qwen_rerank_keys, errors)
     if rerank_provider in {"qwen", "dashscope", "aliyun", "aliyun-qwen"}:
         rerank_base_url = env.get("RERANK_BASE_URL", "")
         if has_configured_value(rerank_base_url) and is_placeholder(rerank_base_url):

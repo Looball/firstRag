@@ -114,7 +114,7 @@ Docker 中的 `backend`、`migrate` 和 `worker` 复用精简后的 Python runti
 conda activate firstrag
 ```
 
-复制环境变量模板，并按需填写数据库、JWT 和加密密钥。`LLM_API_KEY`、`DEEPSEEK_API_KEY`、`ZAI_EMD_API` 与阿里云 Qwen/DashScope Key 可以先留空，Docker 和后端仍可启动；需要使用平台默认模型、执行向量化或启用远程 rerank 前再配置。
+复制环境变量模板，并按需填写数据库、JWT 和用户凭据加密密钥。聊天模型和向量模型的 provider、model、API Key 都在用户登录后的“模型设置”页保存，不再从 `.env` 读取；Docker 和后端无需这些 provider Key 也能启动。只有启用远程 Qwen rerank 时，才需要在 `.env` 中配置对应的 rerank 地址和 Key。
 
 ```bash
 cp .env.example .env
@@ -122,7 +122,7 @@ cp .env.example .env
 
 后端运行时会读取仓库根目录的 `.env`。
 
-如果 Docker 启动后再补充 provider Key，需要重启 backend 和 worker 让环境变量生效。
+首次登录后，请先进入“模型设置”配置聊天模型和向量模型；未配置前可以登录和上传文件，但聊天模型调用与向量化会提示补充配置。
 
 初始化或升级 PostgreSQL schema：
 

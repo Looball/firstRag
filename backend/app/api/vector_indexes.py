@@ -29,6 +29,9 @@ from app.services.vectors.vector_index_queue_service import (
     serialize_vector_index_job_health,
     serialize_vector_index_job,
 )
+from app.services.vectors.embedding_settings_service import (
+    get_effective_embedding_model_settings,
+)
 from app.services.vectors.vector_index_service import delete_file_vector_entries
 from app.services.knowledge_profile_cache import (
     invalidate_file_knowledge_base_contexts,
@@ -37,6 +40,17 @@ from app.services.knowledge_profile_cache import (
 
 router = APIRouter(prefix="/chat", tags=["vector-indexes"])
 logger = logging.getLogger(__name__)
+
+
+def ensure_user_embedding_settings(user_id: int) -> None:
+    """确认当前用户已配置向量模型，避免提交无法执行的 worker 任务。"""
+    try:
+        get_effective_embedding_model_settings(user_id)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail=f"向量模型配置无效：{exc}",
+        ) from exc
 
 
 @router.post("/knowledge-files/{knowledge_file_id}/vectors")
@@ -49,6 +63,7 @@ def index_knowledge_file_vectors(
     file_record = get_user_knowledge_file(user_id, knowledge_file_id)
     if file_record is None:
         raise HTTPException(status_code=404, detail="文件不存在")
+    ensure_user_embedding_settings(user_id)
 
     enforce_rate_limit(
         "vector-index",
@@ -91,6 +106,7 @@ def index_knowledge_base_vectors(
             "jobs": [],
             "message": "知识库中没有可向量化的文件",
         }
+    ensure_user_embedding_settings(user_id)
 
     if (
         VECTOR_INDEX_MAX_BATCH_FILES > 0

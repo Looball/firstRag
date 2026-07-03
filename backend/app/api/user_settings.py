@@ -9,13 +9,22 @@ from app.core.config import (
 from app.core.rate_limit import build_rate_limit_identifier, enforce_rate_limit
 from app.core.sensitive_data import sanitize_sensitive_text
 from app.core.security import get_current_user_id
-from app.schemas.user_settings import UpdateUserLLMSettingsRequest
+from app.schemas.user_settings import (
+    UpdateUserEmbeddingSettingsRequest,
+    UpdateUserLLMSettingsRequest,
+)
 from app.services.user_settings_service import (
     check_user_llm_settings,
     get_saved_provider_models,
     get_serialized_user_llm_settings,
     get_serialized_user_llm_providers,
     update_user_llm_settings,
+)
+from app.services.vectors.embedding_settings_service import (
+    check_user_embedding_settings,
+    get_serialized_user_embedding_providers,
+    get_serialized_user_embedding_settings,
+    update_user_embedding_settings,
 )
 
 
@@ -140,6 +149,90 @@ def test_user_settings(
         raise HTTPException(
             status_code=502,
             detail="模型连接测试失败，请检查模型配置和 API Key",
+        ) from exc
+
+    return {"success": True, **test_result}
+
+
+@router.get("/settings/embedding-providers")
+def get_user_embedding_settings_providers(
+    user_id: int = Depends(get_current_user_id),
+):
+    """返回可供当前用户选择的向量模型厂商预设。"""
+    return {
+        "success": True,
+        "providers": get_serialized_user_embedding_providers(user_id),
+    }
+
+
+@router.get("/settings/embedding")
+def get_user_embedding_settings(
+    user_id: int = Depends(get_current_user_id),
+):
+    """获取当前用户的向量模型设置，不返回 API Key 明文。"""
+    try:
+        settings = get_serialized_user_embedding_settings(user_id)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail=_sanitize_settings_error(exc),
+        ) from exc
+
+    return {"success": True, "settings": settings}
+
+
+@router.patch("/settings/embedding")
+def patch_user_embedding_settings(
+    req: UpdateUserEmbeddingSettingsRequest,
+    user_id: int = Depends(get_current_user_id),
+):
+    """局部更新当前用户的向量模型设置。"""
+    try:
+        settings = update_user_embedding_settings(
+            user_id,
+            req.model_dump(exclude_unset=True),
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail=_sanitize_settings_error(exc, req.api_key),
+        ) from exc
+
+    return {"success": True, "settings": settings}
+
+
+@router.post("/settings/embedding/test")
+def test_user_embedding_settings(
+    request: Request,
+    req: UpdateUserEmbeddingSettingsRequest | None = None,
+    user_id: int = Depends(get_current_user_id),
+):
+    """测试已保存或临时提交的向量模型设置。"""
+    enforce_rate_limit(
+        "embedding-test",
+        build_rate_limit_identifier(request, "user", user_id),
+        MODEL_TEST_RATE_LIMIT_MAX_REQUESTS,
+        API_RATE_LIMIT_WINDOW_SECONDS,
+        "向量模型配置测试过于频繁，请稍后再试。",
+    )
+
+    try:
+        test_result = check_user_embedding_settings(
+            user_id,
+            req.model_dump(exclude_unset=True) if req else {},
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail=_sanitize_settings_error(
+                exc,
+                req.api_key if req else None,
+            ),
+        ) from exc
+    except Exception as exc:
+        raise HTTPException(
+            status_code=502,
+            detail="向量模型连接测试失败，请检查模型配置和 API Key",
         ) from exc
 
     return {"success": True, **test_result}

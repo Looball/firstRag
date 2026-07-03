@@ -80,13 +80,6 @@ CHROMA_COLLECTION_NAME = os.environ.get(
     "langchain",
 )
 
-# Embedding provider 配置。默认沿用智谱 embedding-3；切到 qwen/dashscope 时
-# 使用阿里云 Model Studio / DashScope 的 OpenAI-compatible embeddings API。
-EMBEDDING_PROVIDER = os.environ.get("EMBEDDING_PROVIDER", "zhipuai").strip().lower()
-EMBEDDING_MODEL = os.environ.get("EMBEDDING_MODEL", "").strip()
-EMBEDDING_BASE_URL = os.environ.get("EMBEDDING_BASE_URL", "").strip()
-EMBEDDING_DIMENSIONS = read_int_env("EMBEDDING_DIMENSIONS", 0)
-
 # Rerank provider 配置。默认仍为本地 CrossEncoder；切到 qwen/dashscope 时
 # 通过阿里云 OpenAI-compatible /reranks 接口远程精排。
 RERANK_PROVIDER = os.environ.get("RERANK_PROVIDER", "local").strip().lower()
@@ -105,13 +98,7 @@ JWT_SECRET_KEY = os.environ.get("JWT_SECRET_KEY")
 JWT_ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24
 
-# 大语言模型配置。保留 DEEPSEEK_API_KEY 作为旧配置的兼容回退。
-LLM_PROVIDER = os.environ.get("LLM_PROVIDER", "deepseek").strip().lower()
-LLM_MODEL = os.environ.get("LLM_MODEL")
-LLM_API_KEY = os.environ.get("LLM_API_KEY") or os.environ.get(
-    "DEEPSEEK_API_KEY"
-)
-LLM_BASE_URL = os.environ.get("LLM_BASE_URL")
+# 大语言模型生成参数默认值。provider、model 和 API Key 由用户登录后配置。
 LLM_TEMPERATURE = float(os.environ.get("LLM_TEMPERATURE", "0.2"))
 LLM_MAX_TOKENS = int(os.environ.get("LLM_MAX_TOKENS", "8000"))
 LLM_TIMEOUT_SECONDS = float(os.environ.get("LLM_TIMEOUT_SECONDS", "60"))

@@ -47,7 +47,7 @@ QUERY_EMBEDDING_CACHE_TTL_SECONDS = 300.0
 MAX_VECTOR_FILTER_FALLBACK_CANDIDATES = 100
 
 _QUERY_EMBEDDING_CACHE: dict[
-    tuple[str, str, str],
+    tuple[str, str, str, str, str],
     tuple[float, list[float]],
 ] = {}
 _QUERY_EMBEDDING_CACHE_LOCK = RLock()
@@ -130,12 +130,14 @@ def normalize_query_embedding_cache_text(query: str) -> str:
     return " ".join(query.strip().lower().split())
 
 
-def build_query_embedding_cache_key(query: str) -> tuple[str, str, str]:
+def build_query_embedding_cache_key(
+    query: str,
+    user_id: int,
+) -> tuple[str, str, str, str, str]:
     """构造 query embedding 缓存 key。"""
-    provider, model = get_embedding_cache_identity()
+    identity = get_embedding_cache_identity(user_id)
     return (
-        provider,
-        model,
+        *identity,
         normalize_query_embedding_cache_text(query),
     )
 
@@ -146,9 +148,9 @@ def clear_query_embedding_cache() -> None:
         _QUERY_EMBEDDING_CACHE.clear()
 
 
-def get_query_embedding(query: str) -> list[float]:
+def get_query_embedding(query: str, user_id: int) -> list[float]:
     """读取或生成 query embedding，成功结果写入短 TTL 进程内缓存。"""
-    cache_key = build_query_embedding_cache_key(query)
+    cache_key = build_query_embedding_cache_key(query, user_id)
     now = monotonic()
 
     with _QUERY_EMBEDDING_CACHE_LOCK:
@@ -167,7 +169,7 @@ def get_query_embedding(query: str) -> list[float]:
         query_embedding_cache_hit=False,
         query_embedding_cache_key=":".join(cache_key),
     )
-    embedding_model = create_embedding_model()
+    embedding_model = create_embedding_model(user_id)
     embedding = list(embedding_model.embed_query(query))
 
     with _QUERY_EMBEDDING_CACHE_LOCK:
@@ -264,7 +266,7 @@ def get_vector_documents(
     embedding_started_at = perf_counter()
     try:
         # 外部预计算 embedding，绕过 ChromaDB query_texts 路径
-        query_embedding = get_query_embedding(query)
+        query_embedding = get_query_embedding(query, user_id)
     except Exception as exc:
         log_exception_event(
             logger,
@@ -281,7 +283,7 @@ def get_vector_documents(
         return []
     record_retrieval_timing("embedding", embedding_started_at)
 
-    vectordb = get_vector_store()
+    vectordb = get_vector_store(user_id=user_id)
     vector_started_at = perf_counter()
     try:
         if not file_ids:

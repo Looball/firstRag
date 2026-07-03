@@ -15,6 +15,8 @@ FirstRAG 是一个全栈 RAG（Retrieval-Augmented Generation）应用，采用 
 - PostgreSQL 全文检索、Chroma vector search、RRF 融合、CrossEncoder rerank。
 - OpenAI-compatible LLM 流式回答，并通过 SSE 返回 token、sources 和 retrieval diagnostics。
 - 用户可配置自己的 LLM provider、model 和 API Key。
+- 用户可配置自己的 embedding provider（千问/Qwen 或智谱/ZhipuAI）、model 和 API Key。
+- rerank 支持本地 BGE Cross-Encoder 和远程 Qwen rerank API 两种 provider。
 
 核心数据流：
 
@@ -27,12 +29,13 @@ FirstRAG 是一个全栈 RAG（Retrieval-Augmented Generation）应用，采用 
   -> vector_index_worker
   -> document_service 解析/切分
   -> Chroma vector store + PostgreSQL full-text chunks
+  -> embedding 使用用户配置的 provider（千问/ZhipuAI）
 
 用户提问
   -> frontend API proxy
   -> FastAPI /chat
   -> rag_service 构建 LCEL chain
-  -> hybrid retrieval
+  -> hybrid retrieval（用户 embedding 向量召回 + 全文检索 + RRF + rerank）
   -> LLM streaming
   -> SSE 返回回答、sources、retrieval diagnostics
 ```
@@ -70,7 +73,7 @@ FirstRAG/
 | --- | --- |
 | `backend/app/api/` | FastAPI route，参数校验、认证、权限检查、HTTP error。 |
 | `backend/app/schemas/` | Pydantic request/response model。 |
-| `backend/app/services/` | 业务逻辑、RAG chain、LLM 调用、vector indexing。 |
+| `backend/app/services/` | 业务逻辑、RAG chain、LLM 调用、embedding/rerank provider、vector indexing。 |
 | `backend/app/repositories/` | 数据访问层，纯 SQL 查询。 |
 | `backend/app/db/` | 数据库连接、executor、migration SQL、advisory lock。 |
 | `backend/app/core/` | config、security、secret cipher。 |
@@ -96,7 +99,8 @@ FirstRAG/
 - route 层只调用 repository 做权限查询，不直接写 SQL。
 - service 函数接收基本类型参数，例如 `user_id`、`file_id`、`conversation_id`。
 - service 层负责复杂业务流程，例如 RAG chain、hybrid retrieval、LLM streaming、vector indexing。
-- 外部 API 调用在 service 层封装，包括 LLM provider 和 embedding provider。
+- 外部 API 调用在 service 层封装，包括 LLM provider、embedding provider 和 rerank provider。
+- LLM 与 embedding provider 由登录用户在设置页保存 provider/model/API Key；rerank provider 仍通过 `backend/app/core/config.py` 的环境变量选择，默认本地 BGE Cross-Encoder。
 - repository 文件按业务域拆分，所有查询通过 `backend/app/db/executor.py` 的 `fetch_all`、`fetch_one`、`execute`。
 
 ## 5. Frontend Conventions
@@ -114,14 +118,16 @@ FirstRAG/
 
 - 文件上传只负责落盘、metadata 持久化和可选 enqueue，不在 HTTP request 中做重型 indexing。
 - vector indexing 必须通过 `vector_index_jobs` 和 `vector_index_worker` 异步执行。
+- indexing 使用的 embedding 来自用户保存的 provider（千问/ZhipuAI），而非系统级环境变量。
 - 同一文件 indexing 需要使用 PostgreSQL advisory lock 或版本号保护，避免旧任务覆盖新结果。
 - 删除向量化结果时必须同时处理 Chroma entries、PostgreSQL chunks 和 active jobs。
 - RAG retrieval 需要尽量保留 diagnostics，便于前端展示和后续评估。
 - hybrid retrieval 的顺序和职责：
-  - vector retriever 从 Chroma 召回。
+  - vector retriever 使用用户配置的 embedding provider 从 Chroma 召回。
   - full-text retriever 从 PostgreSQL 召回。
   - RRF 融合多路结果。
-  - CrossEncoder reranker 精排。
+  - reranker 精排：默认本地 BGE Cross-Encoder，可通过 `RERANK_PROVIDER=qwen` 切到阿里云 Qwen rerank API。
+- query embedding 按用户、provider、model 和 dimensions 缓存，避免每次查询重新计算。
 - LLM streaming 过程中要持久化 assistant message 状态，失败时写入 `failed` 和 `error_message`。
 - 回答 sources 和 retrieval diagnostics 应保存到 `messages.sources` 与 `messages.retrieval`。
 
@@ -153,6 +159,7 @@ FirstRAG/
 | `vector_index_jobs` | 向量化任务队列。 |
 | `user_llm_settings` | 用户当前 LLM 设置。 |
 | `user_llm_provider_credentials` | 用户按 provider 保存的加密 API Key。 |
+| `user_embedding_settings` | 用户当前 embedding/向量模型设置（provider、model、加密 API Key）。 |
 
 ## 8. API Rules
 
@@ -173,6 +180,7 @@ FirstRAG/
   - vector index：`/chat/knowledge-files/{id}/vectors`、`/chat/vector-index-jobs/{id}`
   - conversations：`/chat/knowledge-bases/{id}/conversations/...`
   - user settings：`/user/settings/...`
+  - user embedding settings：`/user/settings/embedding`、`/user/settings/embedding-providers`、`/user/settings/embedding/test`
 
 ## 9. Documentation Rules
 
