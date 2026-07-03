@@ -15,6 +15,7 @@ from typing import Mapping, Sequence
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_ENV_FILE = PROJECT_ROOT / ".env"
+DEFAULT_COMPOSE_FILE = PROJECT_ROOT / "deploy/compose/docker-compose.yml"
 DEFAULT_CONDA_ENV = "firstrag"
 MIN_SECRET_LENGTH = 32
 MIN_PASSWORD_LENGTH = 16
@@ -278,11 +279,26 @@ def run_external_check(
     return ExternalCheck(name=name, success=True, message=f"{name} 已通过。")
 
 
-def run_compose_check(env: Mapping[str, str]) -> ExternalCheck:
+def build_compose_command(env_file: Path, *args: str) -> tuple[str, ...]:
+    """构造统一的 Docker Compose 命令，保持相对路径从仓库根目录解析。"""
+    return (
+        "docker",
+        "compose",
+        "--project-directory",
+        str(PROJECT_ROOT),
+        "--env-file",
+        str(env_file),
+        "-f",
+        str(DEFAULT_COMPOSE_FILE),
+        *args,
+    )
+
+
+def run_compose_check(env: Mapping[str, str], env_file: Path) -> ExternalCheck:
     """执行 Docker Compose 配置检查。"""
     return run_external_check(
         "Docker Compose config",
-        ("docker", "compose", "config", "--quiet"),
+        build_compose_command(env_file, "config", "--quiet"),
         env,
     )
 
@@ -313,9 +329,8 @@ def run_migration_dry_run(
 
     return run_external_check(
         "Migration dry-run",
-        (
-            "docker",
-            "compose",
+        build_compose_command(
+            env_file,
             "run",
             "--rm",
             "migrate",
@@ -361,7 +376,7 @@ def run(args: argparse.Namespace) -> int:
 
     external_checks: list[ExternalCheck] = []
     if not args.skip_compose_check:
-        external_checks.append(run_compose_check(env))
+        external_checks.append(run_compose_check(env, args.env_file))
     if not args.skip_migration_dry_run:
         external_checks.append(
             run_migration_dry_run(

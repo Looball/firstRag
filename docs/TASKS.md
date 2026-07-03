@@ -340,16 +340,16 @@ scripts/acceptance_check.sh --skip-real-eval
 - 完成记录：
   - 完成日期：2026-06-28
   - 相关 commit：`7c52ae8`
-  - `docker-compose.yml` 已补齐 `postgres`、`backend`、`frontend` 和 `worker` 服务。
+  - `deploy/compose/docker-compose.yml` 已补齐 `postgres`、`backend`、`frontend` 和 `worker` 服务。
   - 新增 `deploy/docker/backend.Dockerfile`、`deploy/docker/frontend.Dockerfile` 和 `.dockerignore`。
-  - `.env.example` 增加 compose PostgreSQL 变量和可选 `COMPOSE_DATABASE_URL`，避免容器内误用指向宿主机的 `DATABASE_URL`。
+  - `deploy/compose/.env.example` 增加 compose PostgreSQL 变量和可选 `COMPOSE_DATABASE_URL`，避免容器内误用指向宿主机的 `DATABASE_URL`。
   - 文档已说明 `uploads`、`vector_db`、`models` 和 `postgres_data` 的持久化方式。
   - 当前 compose 不自动创建业务基础表，该限制已在 `docs/DEPLOYMENT.md` 中说明，后续可单独新增迁移执行任务。
-  - `docker compose config --quiet` 已通过。
+  - `docker compose --project-directory . --env-file .env -f deploy/compose/docker-compose.yml config --quiet` 已通过。
 - 建议验证命令：
 
 ```bash
-docker compose config --quiet
+docker compose --project-directory . --env-file .env -f deploy/compose/docker-compose.yml config --quiet
 ```
 
 ## T-009 继续拆分前端聊天工作台 UI 面板
@@ -1089,7 +1089,7 @@ conda run -n firstrag python -m unittest discover tests -v
   - 基于 `T-030` 的迁移脚本，为 compose 提供一键执行迁移的命令或独立 migration service。
   - 明确 `COMPOSE_DATABASE_URL`、`DATABASE_URL` 与 compose 内 `postgres` service 的关系。
   - 必要时调整 backend Dockerfile，确保容器内包含迁移入口和所需 SQL 文件。
-  - 更新 `docker-compose.yml`、`deploy/docker/` 或文档中的启动顺序，避免 backend 在数据库未初始化时产生误导性错误。
+  - 更新 `deploy/compose/docker-compose.yml`、`deploy/docker/` 或文档中的启动顺序，避免 backend 在数据库未初始化时产生误导性错误。
   - 保持宿主机本地开发流程兼容，不强制所有用户使用 Docker。
 - 验收标准：
   - 新 compose 数据卷场景下，可以按文档完成数据库初始化、后端启动、前端访问和 worker 启动。
@@ -1099,16 +1099,16 @@ conda run -n firstrag python -m unittest discover tests -v
 - 完成记录：
   - 完成日期：2026-06-30
   - 相关 commit：`5d22e59`
-  - `docker-compose.yml` 新增 `migrate` service，复用 backend 镜像执行 `/app/scripts/migrate_db.py`。
+  - `deploy/compose/docker-compose.yml` 新增 `migrate` service，复用 backend 镜像执行 `/app/scripts/migrate_db.py`。
   - backend 和 worker 会等待 `postgres` 健康检查通过、`migrate` 成功退出后再启动。
   - backend Dockerfile 已复制 `scripts/migrate_db.py` 到容器内，迁移脚本可访问 `/app/backend/app/db/sql/` 中的 SQL 文件。
   - 已同步更新 `README.md` 与 `docs/DEPLOYMENT.md`，说明 `COMPOSE_DATABASE_URL`、`DATABASE_URL`、自动迁移和手动 dry-run 命令。
-  - 验证命令：`docker compose config --quiet`；`conda run -n firstrag python -m unittest backend.tests.test_migrate_db_script -v`；`conda run -n firstrag python -m compileall scripts/migrate_db.py backend/tests/test_migrate_db_script.py`。
+  - 验证命令：`docker compose --project-directory . --env-file .env -f deploy/compose/docker-compose.yml config --quiet`；`conda run -n firstrag python -m unittest backend.tests.test_migrate_db_script -v`；`conda run -n firstrag python -m compileall scripts/migrate_db.py backend/tests/test_migrate_db_script.py`。
 - 建议验证命令：
 
 ```bash
-docker compose config --quiet
-docker compose run --rm migrate python /app/scripts/migrate_db.py --dry-run
+docker compose --project-directory . --env-file .env -f deploy/compose/docker-compose.yml config --quiet
+docker compose --project-directory . --env-file .env -f deploy/compose/docker-compose.yml run --rm migrate python /app/scripts/migrate_db.py --dry-run
 ```
 
 ## T-032 增加 GitHub Actions CI
@@ -1137,7 +1137,7 @@ docker compose run --rm migrate python /app/scripts/migrate_db.py --dry-run
   - 前端 job 使用 Node.js 22 和 `npm ci`，运行 lint、Vitest 和 Next build。
   - 默认 CI 不运行真实 RAG eval 或 indexing eval，避免依赖真实账号、模型 API Key、数据库和后端服务。
   - 已同步更新 `README.md` 与 `docs/DEPLOYMENT.md`。
-  - 验证命令：`ruby -e 'require "yaml"; YAML.load_file(".github/workflows/ci.yml"); puts "workflow yaml ok"'`；`docker compose config --quiet`；`conda run -n firstrag python -m unittest backend.tests.test_migrate_db_script -v`；`scripts/acceptance_check.sh --skip-real-eval` 已通过 backend、frontend lint 和 frontend test，frontend build 在沙箱中因 Turbopack 端口绑定限制失败；`cd frontend && npm run build` 提升权限后通过。
+  - 验证命令：`ruby -e 'require "yaml"; YAML.load_file(".github/workflows/ci.yml"); puts "workflow yaml ok"'`；`docker compose --project-directory . --env-file .env -f deploy/compose/docker-compose.yml config --quiet`；`conda run -n firstrag python -m unittest backend.tests.test_migrate_db_script -v`；`scripts/acceptance_check.sh --skip-real-eval` 已通过 backend、frontend lint 和 frontend test，frontend build 在沙箱中因 Turbopack 端口绑定限制失败；`cd frontend && npm run build` 提升权限后通过。
 - 建议验证命令：
 
 ```bash
@@ -1431,7 +1431,7 @@ git status --short
 - 建议验证命令：
 
 ```bash
-docker compose config --quiet
+docker compose --project-directory . --env-file .env -f deploy/compose/docker-compose.yml config --quiet
 ```
 - 完成记录：
   - 完成日期：2026-07-01
@@ -1439,9 +1439,9 @@ docker compose config --quiet
   - `docs/DEPLOYMENT.md` 新增在线演示环境方案，选择“单台云服务器 / VPS + Docker Compose + HTTPS 反向代理”作为第一阶段目标。
   - 已明确拓扑、资源规格、PostgreSQL / uploads / vector_db / models / 日志持久化策略、配置清单、演示账号边界、API Key 策略、上传限制、反向代理限流和数据清理策略。
   - `README.md` Roadmap 已新增“明确在线演示环境方案与上线阻塞项”为完成项；真实在线 demo 仍保持未完成，并列明域名/TLS、限流、演示账号和清理策略等剩余条件。
-  - `.env.example` 补充了公开 demo 的非敏感端口绑定和上传大小示例，没有提交真实 API Key、JWT、数据库密码或 SSH 私钥。
+  - `deploy/compose/.env.example` 补充了公开 demo 的非敏感端口绑定和上传大小示例，没有提交真实 API Key、JWT、数据库密码或 SSH 私钥。
   - `PLAN-20260701-01` 已随 T-041 完成收口为 `Done`。
-  - 验证命令：`docker compose config --quiet`；`env FRONTEND_PORT=127.0.0.1:3000 BACKEND_PORT=127.0.0.1:8000 POSTGRES_PORT=127.0.0.1:5432 docker compose config --quiet`；`git diff --check -- README.md docs/DEPLOYMENT.md .env.example docs/TASKS.md`；`git status --short`。
+  - 验证命令：`docker compose --project-directory . --env-file .env -f deploy/compose/docker-compose.yml config --quiet`；`env FRONTEND_PORT=127.0.0.1:3000 BACKEND_PORT=127.0.0.1:8000 POSTGRES_PORT=127.0.0.1:5432 docker compose --project-directory . --env-file deploy/compose/.env.example -f deploy/compose/docker-compose.yml config --quiet`；`git diff --check -- README.md docs/DEPLOYMENT.md deploy/compose/.env.example docs/TASKS.md`；`git status --short`。
 
 ## T-042 建立生产部署安全与数据持久化方案
 
@@ -1455,7 +1455,7 @@ docker compose config --quiet
   - 明确 PostgreSQL 备份和恢复流程，包括备份频率、保留周期、恢复演练步骤。
   - 明确 `uploads/`、`vector_db/`、Chroma 数据、模型缓存和日志目录的持久化挂载策略。
   - 确认 migration 在生产启动流程中稳定执行，避免依赖手工 SQL。
-  - 更新 `docs/DEPLOYMENT.md`、`.env.example` 或必要的运维说明。
+  - 更新 `docs/DEPLOYMENT.md`、`deploy/compose/.env.example` 或必要的运维说明。
 - 验收标准：
   - 生产部署文档明确哪些配置必须通过 secret / 环境变量注入，仓库不包含真实密钥。
   - 有 PostgreSQL 备份、恢复和验证步骤。
@@ -1465,17 +1465,17 @@ docker compose config --quiet
 
 ```bash
 conda run -n firstrag python scripts/migrate_db.py --dry-run
-docker compose config --quiet
-rg -n "API_KEY|JWT|PASSWORD|SECRET|DATABASE_URL" README.md docs .env.example
+docker compose --project-directory . --env-file .env -f deploy/compose/docker-compose.yml config --quiet
+rg -n "API_KEY|JWT|PASSWORD|SECRET|DATABASE_URL" README.md docs deploy/compose/.env.example
 ```
 
 - 完成记录：
   - 完成日期：2026-07-01
   - 相关 commit：`1821713`
   - 新增 `scripts/production_preflight.py` 与对应单元测试，生产上线前可检查 secret 占位值、端口绑定、持久化目录、Docker Compose 配置和 migration dry-run；脚本不输出真实 secret。
-  - `docker-compose.yml` 改为根据 `POSTGRES_DB` / `POSTGRES_USER` / `POSTGRES_PASSWORD` 构造内部连接串，避免修改数据库密码后 backend / worker 仍使用旧默认密码；同时支持 `UPLOADS_DIR`、`VECTOR_DB_DIR`、`MODELS_DIR` 和 Docker 日志轮转配置。
+  - `deploy/compose/docker-compose.yml` 改为根据 `POSTGRES_DB` / `POSTGRES_USER` / `POSTGRES_PASSWORD` 构造内部连接串，避免修改数据库密码后 backend / worker 仍使用旧默认密码；同时支持 `UPLOADS_DIR`、`VECTOR_DB_DIR`、`MODELS_DIR` 和 Docker 日志轮转配置。
   - `docs/DEPLOYMENT.md` 新增生产安全与数据持久化 runbook，覆盖 secret 管理、PostgreSQL 备份频率、恢复步骤、恢复验证、uploads / vector_db / models 持久化和迁移说明。
-  - `.env.example` 补充生产目录、日志轮转和 compose 数据库连接说明；`.gitignore` 忽略 `/backups/`，避免本地备份误提交。
+  - `deploy/compose/.env.example` 补充生产目录、日志轮转和 compose 数据库连接说明；`.gitignore` 忽略 `/backups/`，避免本地备份误提交。
   - `README.md` Roadmap 已新增生产部署安全、备份恢复和持久化 preflight 完成项。
 
 ## T-043 强化文件上传、向量化任务和 worker 异常状态体验
@@ -1552,7 +1552,7 @@ npm run lint
   - 上传入口新增用户未删除文件数量与总容量配额，继续保留单文件大小限制；重复内容复用已有文件，不重复计入用户全局容量。
   - 知识库批量向量化新增 `VECTOR_INDEX_MAX_BATCH_FILES` 单次提交上限，避免一次性提交过多 vector index job。
   - 用户 API Key 错误响应新增脱敏工具，避免提交值、`api_key=...` 或 Bearer token 形态文本回显；前端文档确认 API Key 只保留在设置页内存状态，不进入浏览器持久化存储。
-  - `.env.example`、`docs/API.md`、`docs/DEPLOYMENT.md`、`docs/FRONTEND.md` 和用户设置协议文档已补充限流、配额和 API Key 安全边界。
+  - `deploy/compose/.env.example`、`docs/API.md`、`docs/DEPLOYMENT.md`、`docs/FRONTEND.md` 和用户设置协议文档已补充限流、配额和 API Key 安全边界。
   - 验证命令：`cd backend && conda run -n firstrag python -m compileall app`；`cd backend && conda run -n firstrag python -m pytest tests`；`cd frontend && npm run test`；`cd frontend && npm run lint`。
 
 ## T-045 建立统一日志、错误定位和基础监控指标
@@ -1661,7 +1661,7 @@ npm run build
   - 前端新增普通/高级模式本地开关，默认普通模式仅展示聊天、知识库、文件、引用来源和必要状态。
   - 高级模式保留质量看板、回答/引用反馈、eval case 草稿、消息诊断、详细 retrieval diagnostics 和知识库检索参数。
   - 新增 `NEXT_PUBLIC_FIRSTRAG_ADVANCED_MODE_DEFAULT` 环境变量作为新浏览器默认值，用户切换后偏好写入浏览器 `localStorage`。
-  - 更新 README、`.env.example` 和 `docs/FRONTEND.md`，明确普通模式与高级/开发模式边界。
+  - 更新 README、`deploy/compose/.env.example` 和 `docs/FRONTEND.md`，明确普通模式与高级/开发模式边界。
   - 验证命令：`cd frontend && npm run test`；`cd frontend && npm run lint`；`cd frontend && npm run build`。
 
 ## T-048 补齐公网反向代理配置
@@ -1709,7 +1709,7 @@ git diff --check -- deploy/nginx docs/DEPLOYMENT.md docs/TASKS.md
   - 新增后端配置，例如 `ALLOW_PUBLIC_REGISTRATION`，默认保持现有开发体验，公开 demo 可设为 `false`。
   - 注册关闭时，后端 `/register` 返回安全、可理解的错误，不泄露内部配置。
   - 前端注册页根据后端响应展示“当前演示环境暂不开放注册”一类提示，并保留登录入口。
-  - 更新 `.env.example`、`docs/API.md`、`docs/DEPLOYMENT.md` 和必要测试。
+  - 更新 `deploy/compose/.env.example`、`docs/API.md`、`docs/DEPLOYMENT.md` 和必要测试。
 - 验收标准：
   - 注册关闭时无法创建新用户，已有用户登录不受影响。
   - 注册关闭不会影响本地开发环境按配置继续注册。
@@ -1782,9 +1782,9 @@ conda run -n firstrag python scripts/demo_cleanup.py --dry-run
 
 ```bash
 conda run -n firstrag python scripts/production_preflight.py --env-file .env --migration-method compose
-docker compose config --quiet
-docker compose ps
-docker compose logs --tail=100 migrate backend worker frontend
+docker compose --project-directory . --env-file .env -f deploy/compose/docker-compose.yml config --quiet
+docker compose --project-directory . --env-file .env -f deploy/compose/docker-compose.yml ps
+docker compose --project-directory . --env-file .env -f deploy/compose/docker-compose.yml logs --tail=100 migrate backend worker frontend
 ```
 
 ## T-052 完成公网 smoke test 与真实 RAG eval

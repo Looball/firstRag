@@ -8,8 +8,11 @@ FirstRAG/
 ├── backend/       # FastAPI 后端
 ├── docs/          # 项目文档
 ├── deploy/        # 部署配置
+│   ├── compose/   # Docker Compose 配置和环境变量模板
+│   ├── docker/    # Docker image 构建配置
+│   └── nginx/     # Nginx 反向代理模板
 ├── scripts/       # 初始化、迁移、维护脚本
-└── .env.example   # 环境变量模板
+└── .env           # 本地运行时配置，不提交
 ```
 
 ## 核心数据流
@@ -57,4 +60,3 @@ FirstRAG/
 ## 认证与权限
 
 后端使用 JWT Bearer Token。所有用户数据接口通过 `Depends(get_current_user_id)` 取得当前用户 ID。涉及知识库、文件、会话和任务的查询必须带 `user_id` 权限隔离；不存在或不属于当前用户时统一返回 `404`。
-

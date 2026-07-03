@@ -84,7 +84,8 @@ python -m app.workers.vector_index_worker
 也可以直接使用 Docker Compose 启动完整链路：
 
 ```bash
-docker compose up --build
+cp deploy/compose/.env.example .env
+docker compose --project-directory . --env-file .env -f deploy/compose/docker-compose.yml up --build
 ```
 
 compose 会先运行 `migrate` service 初始化或升级 PostgreSQL schema，再启动后端、前端和 worker。完整准备流程见 [`docs/docker-startup/README.md`](docs/docker-startup/README.md)。
@@ -115,7 +116,7 @@ conda activate firstrag
 复制环境变量模板，并按需填写数据库、JWT、模型和 embedding 配置：
 
 ```bash
-cp .env.example .env
+cp deploy/compose/.env.example .env
 ```
 
 后端运行时会读取仓库根目录的 `.env`。
@@ -164,10 +165,10 @@ python -m app.workers.vector_index_worker
 仓库提供本地 Docker Compose 方案，可启动 PostgreSQL、后端、前端和 worker：
 
 ```bash
-docker compose up --build
+docker compose --project-directory . --env-file .env -f deploy/compose/docker-compose.yml up --build
 ```
 
-compose 会挂载 `uploads/`、`vector_db/` 和 `models/`，并默认让后端与 worker 连接 compose 内的 `postgres` 服务。启动时会先运行 `migrate` service 初始化或升级 PostgreSQL schema，成功后再启动后端和 worker。更多细节见 `docs/DEPLOYMENT.md`。
+compose 会挂载 `uploads/`、`vector_db/` 和 `models/`，并默认让后端与 worker 连接 compose 内的 `postgres` 服务。启动时会先运行 `migrate` service 初始化或升级 PostgreSQL schema，成功后再启动后端和 worker。完整流程见 `docs/docker-startup/README.md`。
 
 ## 项目结构
 
@@ -177,11 +178,10 @@ FirstRAG/
 ├── backend/                  # FastAPI 后端
 ├── docs/                     # 项目文档
 ├── deploy/                   # 部署相关
+│   ├── compose/              # Docker Compose 配置和环境变量模板
 │   ├── docker/
 │   └── nginx/
 ├── scripts/                  # 初始化、迁移、测试脚本
-├── .env.example              # 环境变量模板
-├── docker-compose.yml        # 本地 Docker Compose 配置
 ├── README.md
 └── .gitignore
 ```

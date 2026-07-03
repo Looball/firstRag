@@ -48,7 +48,7 @@ jobs:
         run: python scripts/migrate_db.py --list
 
       - name: Check Docker Compose config
-        run: docker compose config --quiet
+        run: docker compose --project-directory . --env-file deploy/compose/.env.example -f deploy/compose/docker-compose.yml config --quiet
 
   frontend:
     name: Frontend

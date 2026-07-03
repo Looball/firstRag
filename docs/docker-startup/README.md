@@ -33,7 +33,7 @@ mkdir -p uploads vector_db models/rerankers
 复制模板：
 
 ```bash
-cp .env.example .env
+cp deploy/compose/.env.example .env
 ```
 
 编辑 `.env`，至少替换以下值：
@@ -94,13 +94,13 @@ git clone https://huggingface.co/BAAI/bge-reranker-base \
 先检查 Compose 配置：
 
 ```bash
-docker compose config --quiet
+docker compose --project-directory . --env-file .env -f deploy/compose/docker-compose.yml config --quiet
 ```
 
 构建并后台启动：
 
 ```bash
-docker compose up -d --build
+docker compose --project-directory . --env-file .env -f deploy/compose/docker-compose.yml up -d --build
 ```
 
 首次启动时，`postgres` 健康检查通过后会自动运行 `migrate` service 初始化或升级 schema；`backend` 和 `worker` 会等待 migration 成功后再启动。
@@ -108,8 +108,8 @@ docker compose up -d --build
 ## 6. 查看状态
 
 ```bash
-docker compose ps
-docker compose logs -f migrate backend worker frontend
+docker compose --project-directory . --env-file .env -f deploy/compose/docker-compose.yml ps
+docker compose --project-directory . --env-file .env -f deploy/compose/docker-compose.yml logs -f migrate backend worker frontend
 ```
 
 常用访问地址：
@@ -133,25 +133,25 @@ docker compose logs -f migrate backend worker frontend
 
 ```bash
 # 查看服务状态
-docker compose ps
+docker compose --project-directory . --env-file .env -f deploy/compose/docker-compose.yml ps
 
 # 查看日志
-docker compose logs -f backend worker frontend
+docker compose --project-directory . --env-file .env -f deploy/compose/docker-compose.yml logs -f backend worker frontend
 
 # 只重启后端和 worker
-docker compose up -d --build backend worker
+docker compose --project-directory . --env-file .env -f deploy/compose/docker-compose.yml up -d --build backend worker
 
 # 手动运行 migration dry-run
-docker compose run --rm migrate python /app/scripts/migrate_db.py --dry-run
+docker compose --project-directory . --env-file .env -f deploy/compose/docker-compose.yml run --rm migrate python /app/scripts/migrate_db.py --dry-run
 
 # 停止服务，保留数据
-docker compose down
+docker compose --project-directory . --env-file .env -f deploy/compose/docker-compose.yml down
 
 # 停止服务并删除 PostgreSQL volume
-docker compose down -v
+docker compose --project-directory . --env-file .env -f deploy/compose/docker-compose.yml down -v
 ```
 
-`docker compose down -v` 会删除 PostgreSQL named volume `postgres_data`，只在明确需要重置本地数据库时使用。
+带 `down -v` 的完整 Compose 命令会删除 PostgreSQL named volume `postgres_data`，只在明确需要重置本地数据库时使用。
 
 ## 8. 常见问题
 
@@ -160,7 +160,7 @@ docker compose down -v
 如果出现 `Cannot connect to the Docker daemon`，先启动 Docker Desktop，再重试：
 
 ```bash
-docker compose ps
+docker compose --project-directory . --env-file .env -f deploy/compose/docker-compose.yml ps
 ```
 
 ### 端口被占用
@@ -180,14 +180,14 @@ POSTGRES_PORT=127.0.0.1:5433
 查看 migration 日志：
 
 ```bash
-docker compose logs migrate
+docker compose --project-directory . --env-file .env -f deploy/compose/docker-compose.yml logs migrate
 ```
 
 确认 `.env` 中 `POSTGRES_DB`、`POSTGRES_USER`、`POSTGRES_PASSWORD` 和可选的 `COMPOSE_DATABASE_URL` 一致。如果是首次本地测试且不需要保留数据，可以在确认影响后重置 volume：
 
 ```bash
-docker compose down -v
-docker compose up -d --build
+docker compose --project-directory . --env-file .env -f deploy/compose/docker-compose.yml down -v
+docker compose --project-directory . --env-file .env -f deploy/compose/docker-compose.yml up -d --build
 ```
 
 ### 上传或向量化失败
@@ -195,7 +195,7 @@ docker compose up -d --build
 确认 `ZAI_EMD_API` 可用，并查看 worker 日志：
 
 ```bash
-docker compose logs -f worker
+docker compose --project-directory . --env-file .env -f deploy/compose/docker-compose.yml logs -f worker
 ```
 
 如果文件解析成功但检索质量不稳定，确认 reranker 模型目录是否存在：
