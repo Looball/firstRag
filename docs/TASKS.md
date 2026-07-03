@@ -60,6 +60,7 @@
 | `PLAN-20260630-02` | 2026-06-30 | `Done` | 补强工程化交付闭环，优先解决数据库迁移、Docker Compose 初始化、CI 和发布前验收可运行性。 | `T-030` - `T-036` |
 | `PLAN-20260701-01` | 2026-07-01 | `Done` | 发布前收口专项，优先修正文档台账状态、继续降低前端工作台复杂度，并刷新真实链路验收基线。 | `T-037` - `T-041` |
 | `PLAN-20260701-02` | 2026-07-01 | `Done` | 正式生产上线补强专项，补齐部署安全、稳定性、风控、可观测性、评测质量和产品化分层。 | `T-042` - `T-047` |
+| `PLAN-20260703-01` | 2026-07-03 | `Todo` | 公开 Demo 上线试运行专项；暂不立即部署，先补齐不依赖真实服务器的上线阻塞项，并为后续公网验证留出明确步骤。 | `T-048` - `T-052` |
 
 ## 任务总览
 
@@ -112,6 +113,11 @@
 | `T-045` | `PLAN-20260701-02` | `P1` | `Done` | 建立统一日志、错误定位和基础监控指标 | 2026-07-02 | `60fd39c` |
 | `T-046` | `PLAN-20260701-02` | `P1` | `Done` | 准备真实问题集并固化上线前 RAG 质量门禁 | 2026-07-02 | `88d1c49` |
 | `T-047` | `PLAN-20260701-02` | `P2` | `Done` | 区分普通用户模式和高级/开发模式 | 2026-07-02 | `c14ae1a` |
+| `T-048` | `PLAN-20260703-01` | `P1` | `Todo` | 补齐公网反向代理配置 | - | - |
+| `T-049` | `PLAN-20260703-01` | `P0` | `Todo` | 增加公开环境注册控制 | - | - |
+| `T-050` | `PLAN-20260703-01` | `P0` | `Todo` | 增加 demo 数据清理脚本 | - | - |
+| `T-051` | `PLAN-20260703-01` | `P2` | `Todo` | 部署到受控 staging/demo 环境 | - | - |
+| `T-052` | `PLAN-20260703-01` | `P2` | `Todo` | 完成公网 smoke test 与真实 RAG eval | - | - |
 
 ## 新计划接入流程
 
@@ -1657,6 +1663,153 @@ npm run build
   - 新增 `NEXT_PUBLIC_FIRSTRAG_ADVANCED_MODE_DEFAULT` 环境变量作为新浏览器默认值，用户切换后偏好写入浏览器 `localStorage`。
   - 更新 README、`.env.example` 和 `docs/FRONTEND.md`，明确普通模式与高级/开发模式边界。
   - 验证命令：`cd frontend && npm run test`；`cd frontend && npm run lint`；`cd frontend && npm run build`。
+
+## T-048 补齐公网反向代理配置
+
+- 来源计划：`PLAN-20260703-01`
+- 优先级：`P1`
+- 状态：`Todo`
+- 背景：当前 `deploy/nginx/` 仍是占位目录；在线 demo 文档已要求反向代理处理 TLS、上传体积、SSE buffering 和公网限流，但仓库尚未提供可复用配置。
+- 目标：提供可审查、可复用的公网反向代理配置模板，为后续 VPS / Docker Compose 公开 demo 减少手工配置风险。
+- 范围：
+  - 在 `deploy/nginx/` 增加 Nginx 配置模板或示例，覆盖 frontend 反代、HTTPS 跳转、上传 body size、SSE 关闭缓冲和基础安全响应头。
+  - 对登录、注册、上传、chat、模型设置等路径配置 IP 级限流示例，与后端进程内限流形成双层保护。
+  - 明确 backend、PostgreSQL 不直接暴露公网，只由 frontend API proxy 或内网路径访问。
+  - 更新 `docs/DEPLOYMENT.md` 中反向代理章节，说明如何替换域名、证书路径和上游地址。
+- 验收标准：
+  - 配置模板不包含真实域名、证书私钥、API Key、JWT 或数据库密码。
+  - 支持 SSE streaming，不因代理缓冲导致聊天 token 被攒批返回。
+  - 上传 body size 与 `MAX_UPLOAD_FILE_SIZE_BYTES` 保持一致或文档明确要求同步调整。
+  - 文档说明公网只暴露 80/443，backend 和 PostgreSQL 端口保持 loopback 或防火墙隔离。
+- 建议验证命令：
+
+```bash
+docker run --rm -v "$PWD/deploy/nginx:/etc/nginx/conf.d:ro" nginx:alpine nginx -t
+git diff --check -- deploy/nginx docs/DEPLOYMENT.md docs/TASKS.md
+```
+
+## T-049 增加公开环境注册控制
+
+- 来源计划：`PLAN-20260703-01`
+- 优先级：`P0`
+- 状态：`Todo`
+- 背景：当前应用仍开放注册接口；公开 demo 若允许任意注册，容易带来滥用、上传成本、API 调用成本和数据清理压力。
+- 目标：为公开 demo 增加可配置注册开关，让受控演示环境可以只开放预置账号或受邀账号。
+- 范围：
+  - 新增后端配置，例如 `ALLOW_PUBLIC_REGISTRATION`，默认保持现有开发体验，公开 demo 可设为 `false`。
+  - 注册关闭时，后端 `/register` 返回安全、可理解的错误，不泄露内部配置。
+  - 前端注册页根据后端响应展示“当前演示环境暂不开放注册”一类提示，并保留登录入口。
+  - 更新 `.env.example`、`docs/API.md`、`docs/DEPLOYMENT.md` 和必要测试。
+- 验收标准：
+  - 注册关闭时无法创建新用户，已有用户登录不受影响。
+  - 注册关闭不会影响本地开发环境按配置继续注册。
+  - 错误响应不包含 secret、服务器路径或内部异常。
+  - 后端和前端测试覆盖注册开启、关闭和用户提示路径。
+- 建议验证命令：
+
+```bash
+cd backend
+conda run -n firstrag python -m compileall app
+conda run -n firstrag python -m pytest tests/test_auth_rate_limit.py
+
+cd ../frontend
+npm run test
+npm run lint
+```
+
+## T-050 增加 demo 数据清理脚本
+
+- 来源计划：`PLAN-20260703-01`
+- 优先级：`P0`
+- 状态：`Todo`
+- 背景：在线 demo 文档已把数据清理流程列为正式公开前阻塞项；当前还没有专门脚本清理临时用户、知识库、上传文件、chunks、vector entries 和相关 jobs。
+- 目标：提供可 dry-run、可审计、可重复执行的 demo cleanup 脚本，降低公开演示环境的数据累积和误删风险。
+- 范围：
+  - 新增 `scripts/demo_cleanup.py` 或同等脚本，默认 dry-run，执行模式需要显式参数确认。
+  - 支持保留指定演示账号、样例知识库和脱敏文件，其余临时数据按创建时间或用户白名单清理。
+  - 清理 PostgreSQL metadata、knowledge chunks、vector index jobs、Chroma entries 和 uploads 文件，确保权限边界和路径边界安全。
+  - 输出清理摘要，只记录数量、ID 和安全路径摘要，不打印用户上传原文、API Key、JWT 或数据库密码。
+  - 更新 `docs/DEPLOYMENT.md`，说明执行频率、执行前备份和清理后 smoke test。
+- 验收标准：
+  - dry-run 能展示将清理的用户、知识库、文件、chunks、jobs 和向量数量。
+  - 执行模式不会删除保留账号和保留样例知识库。
+  - 文件删除只发生在配置的 `UPLOADS_DIR` 内，禁止越界路径。
+  - 清理后可以重新运行最小 smoke test：登录、上传小文件、向量化、提问和查看 sources。
+- 建议验证命令：
+
+```bash
+conda run -n firstrag python -m compileall backend/app scripts
+
+cd backend
+conda run -n firstrag python -m pytest tests/test_migrate_db_script.py tests/test_vector_indexes.py
+
+cd ..
+conda run -n firstrag python scripts/demo_cleanup.py --dry-run
+```
+
+## T-051 部署到受控 staging/demo 环境
+
+- 来源计划：`PLAN-20260703-01`
+- 优先级：`P2`
+- 状态：`Todo`
+- 背景：当前用户决策是暂不部署；本任务仅记录资源就绪后的执行步骤，不在没有服务器、域名和 TLS 方案前启动。
+- 目标：在真实服务器上完成受控 staging/demo 环境部署，并保持 backend、worker、PostgreSQL、uploads、vector_db 和 models 的持久化边界清晰。
+- 启动条件：
+  - 已选择云服务器、域名和 TLS 入口。
+  - 已准备生产 `.env`、非默认 secret、provider Key、持久化目录和 reranker 模型目录。
+  - `T-048`、`T-049`、`T-050` 已完成或有明确替代方案。
+- 范围：
+  - 在服务器执行 production preflight、Docker Compose 配置检查、镜像构建、migration dry-run 和服务启动。
+  - 创建受控演示账号和少量脱敏样例知识库，不在仓库中记录真实密码。
+  - 确认公网只暴露 80/443，backend 和 PostgreSQL 不直接暴露。
+  - 记录服务器资源、持久化目录、备份策略和部署命令，不提交真实 secret。
+- 验收标准：
+  - `migrate`、`backend`、`frontend`、`worker` 和 `postgres` 均正常启动。
+  - 生产 preflight 不输出真实 secret，且阻止默认密码、占位 Key 和公网数据库端口。
+  - 演示账号可以登录，样例知识库可以完成一次向量化。
+  - README 仍不公开账号密码，只说明 demo 访问限制和数据清理边界。
+- 建议验证命令：
+
+```bash
+conda run -n firstrag python scripts/production_preflight.py --env-file .env --migration-method compose
+docker compose config --quiet
+docker compose ps
+docker compose logs --tail=100 migrate backend worker frontend
+```
+
+## T-052 完成公网 smoke test 与真实 RAG eval
+
+- 来源计划：`PLAN-20260703-01`
+- 优先级：`P2`
+- 状态：`Todo`
+- 背景：公开 demo 是否可用不能只看本机或内网；需要从真实域名验证 TLS、反向代理、上传、SSE、worker、sources 和 RAG 质量门禁。
+- 目标：完成一次公网入口验收，确认外部访问者通过真实域名使用 FirstRAG 时核心链路稳定、安全且质量不过度退化。
+- 启动条件：
+  - `T-051` 已完成 staging/demo 环境部署。
+  - 已准备演示账号、脱敏样例知识库和可复跑 eval case。
+- 范围：
+  - 从公网域名验证 HTTPS、登录、上传小文件、触发向量化、提问、SSE token streaming、sources 展示和失败提示。
+  - 使用 `FIRSTRAG_EVAL_BASE_URL` 指向公网 backend 或公开 API 入口，运行 RAG eval gate 和 indexing eval。
+  - 检查后端、worker 和反向代理日志，确认无 API Key、JWT、数据库密码或用户上传原文泄露。
+  - 记录通过率、平均 sources、平均首 token、失败 case、索引状态和公网访问限制。
+- 验收标准：
+  - 公网 smoke test 覆盖登录、上传、向量化、聊天和 sources。
+  - RAG eval gate 通过，或清楚记录失败 case、回滚/调参建议和是否允许继续公开。
+  - Indexing eval 通过，或清楚记录 worker、Chroma、PostgreSQL、embedding provider 的阻塞原因。
+  - README Roadmap 只有在真实 demo URL、使用限制和清理策略落地后才标记“发布在线演示环境”为完成。
+- 建议验证命令：
+
+```bash
+FIRSTRAG_EVAL_BASE_URL=https://api.example.com \
+FIRSTRAG_EVAL_USERNAME=演示账号 \
+FIRSTRAG_EVAL_PASSWORD=演示密码 \
+scripts/rag_eval_gate.sh
+
+conda run -n firstrag python scripts/eval_indexing.py \
+  --base-url https://api.example.com \
+  --username 演示账号 \
+  --password 演示密码
+```
 
 ## 更新规则
 
