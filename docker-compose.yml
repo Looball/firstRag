@@ -33,6 +33,7 @@ services:
     build:
       context: .
       dockerfile: deploy/docker/backend.Dockerfile
+    image: firstrag-backend:latest
     restart: unless-stopped
     env_file:
       - path: .env
@@ -55,9 +56,7 @@ services:
         condition: service_completed_successfully
 
   migrate:
-    build:
-      context: .
-      dockerfile: deploy/docker/backend.Dockerfile
+    image: firstrag-backend:latest
     restart: "no"
     environment:
       DATABASE_URL: "${COMPOSE_DATABASE_URL:-postgresql://${POSTGRES_USER:-firstrag}:${POSTGRES_PASSWORD:-firstrag-password}@postgres:5432/${POSTGRES_DB:-first_rag}}"
@@ -68,9 +67,7 @@ services:
         condition: service_healthy
 
   worker:
-    build:
-      context: .
-      dockerfile: deploy/docker/backend.Dockerfile
+    image: firstrag-backend:latest
     restart: unless-stopped
     env_file:
       - path: .env

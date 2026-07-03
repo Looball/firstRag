@@ -6,7 +6,9 @@ ENV PIP_NO_CACHE_DIR=1 \
 
 WORKDIR /app
 
-RUN apt-get update \
+# 使用清华镜像加速（国内环境）
+RUN sed -i 's/deb.debian.org/mirrors.tuna.tsinghua.edu.cn/g' /etc/apt/sources.list.d/debian.sources \
+    && apt-get update \
     && apt-get install -y --no-install-recommends \
         build-essential \
     && rm -rf /var/lib/apt/lists/*
@@ -14,8 +16,12 @@ RUN apt-get update \
 RUN python -m venv "$VIRTUAL_ENV"
 
 COPY backend/requirements.txt /app/backend/requirements.txt
-RUN pip install --upgrade pip setuptools wheel \
-    && pip install -r /app/backend/requirements.txt
+RUN pip install --upgrade pip setuptools wheel -i https://pypi.tuna.tsinghua.edu.cn/simple \
+    && pip install -r /app/backend/requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple \
+    # 删掉不需要的巨型包，减小镜像体积
+    && pip uninstall -y kubernetes pip setuptools wheel || true \
+    && find /opt/venv -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true \
+    && find /opt/venv -type f -name "*.pyc" -delete 2>/dev/null || true
 
 FROM python:3.12-slim AS runtime
 
@@ -28,7 +34,8 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 WORKDIR /app
 
 # Chroma/ONNX runtime 可能需要 libgomp；编译工具只保留在 builder 阶段。
-RUN apt-get update \
+RUN sed -i 's/deb.debian.org/mirrors.tuna.tsinghua.edu.cn/g' /etc/apt/sources.list.d/debian.sources \
+    && apt-get update \
     && apt-get install -y --no-install-recommends \
         libgomp1 \
     && rm -rf /var/lib/apt/lists/*

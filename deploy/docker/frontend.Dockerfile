@@ -13,7 +13,9 @@ ENV NEXT_TELEMETRY_DISABLED=1
 
 COPY --from=deps /app/frontend/node_modules ./node_modules
 COPY frontend ./
-RUN npm run build
+RUN npm run build \
+    # 构建完成后删掉 devDependencies，减少镜像体积
+    && npm prune --omit=dev
 
 FROM node:22-slim AS runner
 
@@ -24,6 +26,7 @@ ENV NODE_ENV=production \
 
 COPY --from=builder /app/frontend/package.json ./package.json
 COPY --from=builder /app/frontend/package-lock.json ./package-lock.json
+# node_modules 已在 builder 阶段 prune 过（不含 devDependencies）
 COPY --from=builder /app/frontend/node_modules ./node_modules
 COPY --from=builder /app/frontend/.next ./.next
 COPY --from=builder /app/frontend/public ./public
