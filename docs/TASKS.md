@@ -113,7 +113,7 @@
 | `T-045` | `PLAN-20260701-02` | `P1` | `Done` | 建立统一日志、错误定位和基础监控指标 | 2026-07-02 | `60fd39c` |
 | `T-046` | `PLAN-20260701-02` | `P1` | `Done` | 准备真实问题集并固化上线前 RAG 质量门禁 | 2026-07-02 | `88d1c49` |
 | `T-047` | `PLAN-20260701-02` | `P2` | `Done` | 区分普通用户模式和高级/开发模式 | 2026-07-02 | `c14ae1a` |
-| `T-048` | `PLAN-20260703-01` | `P1` | `Done` | 补齐公网反向代理配置 | 2026-07-03 | `待提交` |
+| `T-048` | `PLAN-20260703-01` | `P1` | `Done` | 补齐公网反向代理配置 | 2026-07-03 | `309ef7c` |
 | `T-049` | `PLAN-20260703-01` | `P0` | `Todo` | 增加公开环境注册控制 | - | - |
 | `T-050` | `PLAN-20260703-01` | `P0` | `Todo` | 增加 demo 数据清理脚本 | - | - |
 | `T-051` | `PLAN-20260703-01` | `P2` | `Todo` | 部署到受控 staging/demo 环境 | - | - |
@@ -1689,7 +1689,7 @@ git diff --check -- deploy/nginx docs/DEPLOYMENT.md docs/TASKS.md
 ```
 - 完成记录：
   - 完成日期：2026-07-03
-  - 相关 commit：`待提交`
+  - 相关 commit：`309ef7c`
   - 新增 `deploy/nginx/00-firstrag-shared.conf`，集中定义 frontend upstream、SSE/WebSocket 连接变量和公网 IP 级限流 zone。
   - 新增 `deploy/nginx/firstrag-proxy-locations.inc`，复用登录、注册、上传、chat streaming、vector job、模型设置和通用 API 的代理与限流规则；公网只转发到 frontend API proxy，不直接暴露 FastAPI 或 PostgreSQL。
   - 新增 `deploy/nginx/10-firstrag-public-demo.conf`，作为可语法检查的 Nginx 示例，适用于前置 TLS 终止层位于 Nginx 前面的部署。
