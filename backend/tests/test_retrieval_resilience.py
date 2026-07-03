@@ -3,6 +3,7 @@
 import time
 import unittest
 from threading import Event
+from unittest.mock import patch
 
 from langchain_core.documents import Document
 
@@ -14,6 +15,7 @@ from app.services.retrieval.hybrid_retriever import (
     get_retrieval_diagnostics,
     get_vector_documents,
 )
+from app.services.retrieval.reranker import load_reranker_runtime
 from app.services.retrieval.rrf import reciprocal_rank_fusion
 
 
@@ -502,6 +504,15 @@ class RetrievalResilienceTests(unittest.TestCase):
         self.assertEqual(failed_docs, [])
         self.assertEqual(len(retried_docs), 1)
         self.assertEqual(embedding_cls.return_value.embed_query.call_count, 2)
+
+    def test_missing_reranker_dependencies_raise_clear_error(self) -> None:
+        """未安装 torch/transformers 时应给出可降级的明确错误。"""
+        with patch(
+            "app.services.retrieval.reranker.import_module",
+            side_effect=ImportError("missing optional dependency"),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "requirements-rerank"):
+                load_reranker_runtime()
 
     def test_hybrid_retrieval_runs_coarse_recall_in_parallel(self) -> None:
         """vector 和 fulltext 粗召回应并行执行，避免串行等待。"""

@@ -1,0 +1,6 @@
+# Optional CrossEncoder rerank dependencies.
+# Install this file only when local BGE reranker is needed.
+-r requirements.txt
+
+torch==2.12.0
+transformers==5.12.0

@@ -135,6 +135,14 @@ class ProductionPreflightScriptTests(unittest.TestCase):
                     "MODELS_DIR": os.fspath(models),
                 }
             )
+            reranker_errors = production_preflight.validate_runtime_paths(
+                {
+                    "UPLOADS_DIR": os.fspath(uploads),
+                    "VECTOR_DB_DIR": os.fspath(vector_db),
+                    "MODELS_DIR": os.fspath(models),
+                },
+                require_reranker=True,
+            )
 
             (models / "rerankers/bge-reranker-base").mkdir(parents=True)
             fixed_errors = production_preflight.validate_runtime_paths(
@@ -145,7 +153,8 @@ class ProductionPreflightScriptTests(unittest.TestCase):
                 }
             )
 
-        self.assertTrue(any("reranker" in error for error in errors))
+        self.assertEqual(errors, [])
+        self.assertTrue(any("reranker" in error for error in reranker_errors))
         self.assertEqual(fixed_errors, [])
 
 

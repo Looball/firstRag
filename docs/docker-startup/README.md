@@ -9,7 +9,7 @@
 - Docker Desktop 已启动，或 Linux 服务器上 Docker daemon 正常运行。
 - 仓库位于本机可写目录，例如 `/Users/bing/Desktop/Github/FirstRAG`。
 - LLM provider API Key 和 `ZAI_EMD_API` embedding Key 可以后配置；未配置时服务仍可启动，但默认平台聊天、向量化和向量检索不可用。
-- 如需启用 CrossEncoder rerank，提前下载 Hugging Face 模型 `BAAI/bge-reranker-base`。
+- 默认 Docker 镜像不安装 `torch` / `transformers`，CrossEncoder rerank 会自动降级为 RRF 结果；如需启用 rerank，再安装可选依赖并下载 Hugging Face 模型 `BAAI/bge-reranker-base`。
 
 ## 2. 准备目录
 
@@ -26,7 +26,7 @@ mkdir -p uploads vector_db models/rerankers
 | --- | --- | --- |
 | `./uploads` | `/app/uploads` | 用户上传文件。 |
 | `./vector_db` | `/app/vector_db` | Chroma 持久化数据。 |
-| `./models` | `/app/models` | 本地 reranker 模型，只读挂载。 |
+| `./models` | `/app/models` | 可选本地 reranker 模型，只读挂载。 |
 
 ## 3. 准备 `.env`
 
@@ -80,9 +80,19 @@ POSTGRES_PORT=127.0.0.1:5432
 
 注意：`DATABASE_URL` 主要用于宿主机 conda 方式运行；Compose 内部默认使用 `POSTGRES_DB`、`POSTGRES_USER` 和 `POSTGRES_PASSWORD` 生成容器网络里的数据库连接。如果需要外部数据库，再设置 `COMPOSE_DATABASE_URL`。
 
-## 4. 下载 reranker 模型
+## 4. 可选：启用 reranker
 
-项目中的 reranker 使用 `local_files_only=True` 加载模型，所以运行时不会自动联网下载。若要启用 rerank，先把 Hugging Face 模型拉到 `models/rerankers/bge-reranker-base`：
+最小 Docker 依赖不包含 `torch` 和 `transformers`。不安装它们时，基础聊天、上传、向量化和 RRF 融合检索仍可启动；涉及 CrossEncoder rerank 的检索会自动降级。
+
+若要启用 rerank，先安装可选依赖：
+
+```bash
+cd backend
+conda activate firstrag
+python -m pip install -r requirements-rerank.txt
+```
+
+项目中的 reranker 使用 `local_files_only=True` 加载模型，所以运行时不会自动联网下载。还需要把 Hugging Face 模型拉到 `models/rerankers/bge-reranker-base`：
 
 ```bash
 conda run -n firstrag python -m pip install -U huggingface_hub
@@ -98,7 +108,7 @@ git clone https://huggingface.co/BAAI/bge-reranker-base \
   models/rerankers/bge-reranker-base
 ```
 
-如果暂时不下载该模型，基础聊天、上传和向量化仍可启动；涉及 rerank 的检索会在模型不可用时降级。
+如果暂时不安装依赖或不下载该模型，基础聊天、上传和向量化仍可启动；涉及 rerank 的检索会在可观测日志中记录降级原因。
 
 ## 5. 启动
 

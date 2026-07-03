@@ -4,7 +4,6 @@ from pathlib import Path
 from uuid import UUID
 
 from langchain_chroma import Chroma
-from langchain_community.document_loaders import TextLoader
 
 # 将docx转为md文件
 import mammoth
@@ -170,14 +169,15 @@ def load_document(
         ]
 
     if suffix == ".txt":
-        loader = TextLoader(str(file_path), encoding="utf-8")
-        documents = loader.load()
-        for document in documents:
-            document.metadata.update({
-                **base_metadata,
-                "content_format": "plain_text",
-            })
-        return documents
+        return [
+            Document(
+                page_content=file_path.read_text(encoding="utf-8"),
+                metadata={
+                    **base_metadata,
+                    "content_format": "plain_text",
+                },
+            )
+        ]
 
     raise UnsupportedDocumentTypeError(
         build_unsupported_document_type_message(file_path.name),

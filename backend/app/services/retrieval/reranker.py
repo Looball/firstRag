@@ -17,16 +17,34 @@ BAAI/bge-reranker-base 输出的是 raw relevance score。排序只需要比较�
 """
 
 from functools import lru_cache
+from importlib import import_module
+from typing import Any
 
-import torch
 from langchain_core.documents import Document
-from transformers import AutoModelForSequenceClassification, AutoTokenizer
 
 from app.core.config import RERANKER_MODEL_PATH
 
 
 DEFAULT_RERANKER_MODEL = str(RERANKER_MODEL_PATH)
 DEFAULT_RERANKER_MAX_LENGTH = 384
+
+
+def load_reranker_runtime() -> tuple[Any, Any, Any]:
+    """按需加载 Cross-Encoder 依赖，避免默认镜像强制安装大模型栈。"""
+    try:
+        torch = import_module("torch")
+        transformers = import_module("transformers")
+    except ImportError as exc:
+        raise RuntimeError(
+            "CrossEncoder rerank 依赖未安装。默认 Docker 镜像会跳过 rerank，"
+            "如需启用请安装 backend/requirements-rerank.txt。"
+        ) from exc
+
+    return (
+        torch,
+        transformers.AutoModelForSequenceClassification,
+        transformers.AutoTokenizer,
+    )
 
 
 class LocalCrossEncoderReranker:
@@ -37,14 +55,16 @@ class LocalCrossEncoderReranker:
         model_name: str = DEFAULT_RERANKER_MODEL,
         device: str | None = None,
     ) -> None:
+        torch, model_cls, tokenizer_cls = load_reranker_runtime()
+        self.torch = torch
         self.device = device or (
             "cuda" if torch.cuda.is_available() else "cpu"
         )
-        self.tokenizer = AutoTokenizer.from_pretrained(
+        self.tokenizer = tokenizer_cls.from_pretrained(
             model_name,
             local_files_only=True,
         )
-        self.model = AutoModelForSequenceClassification.from_pretrained(
+        self.model = model_cls.from_pretrained(
             model_name,
             local_files_only=True,
         ).to(self.device)
@@ -79,7 +99,7 @@ class LocalCrossEncoderReranker:
                 for name, value in features.items()
             }
 
-            with torch.no_grad():
+            with self.torch.no_grad():
                 logits = self.model(**features).logits
 
             # BGE reranker 输出 raw relevance score；排序时直接使用 logits。

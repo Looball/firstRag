@@ -89,6 +89,11 @@ def build_arg_parser() -> argparse.ArgumentParser:
             "tests; omit it when booting first and configuring providers later."
         ),
     )
+    parser.add_argument(
+        "--require-reranker",
+        action="store_true",
+        help="Require local CrossEncoder reranker model files before smoke tests.",
+    )
     return parser
 
 
@@ -257,7 +262,11 @@ def resolve_host_path(value: str | None, default: str) -> Path:
     return path if path.is_absolute() else PROJECT_ROOT / path
 
 
-def validate_runtime_paths(env: Mapping[str, str]) -> list[str]:
+def validate_runtime_paths(
+    env: Mapping[str, str],
+    *,
+    require_reranker: bool = False,
+) -> list[str]:
     """校验生产需要持久化的宿主目录存在。"""
     errors: list[str] = []
     required_dirs = {
@@ -274,7 +283,11 @@ def validate_runtime_paths(env: Mapping[str, str]) -> list[str]:
             errors.append(f"{key} 指向的宿主路径不是目录。")
 
     reranker_model = required_dirs["MODELS_DIR"] / "rerankers/bge-reranker-base"
-    if required_dirs["MODELS_DIR"].exists() and not reranker_model.exists():
+    if (
+        require_reranker
+        and required_dirs["MODELS_DIR"].exists()
+        and not reranker_model.exists()
+    ):
         errors.append("MODELS_DIR 缺少 reranker 模型目录 rerankers/bge-reranker-base。")
 
     return errors
@@ -394,7 +407,13 @@ def run(args: argparse.Namespace) -> int:
         ("Port bindings", validate_port_bindings(env)),
     ]
     if not args.skip_path_check:
-        groups.append(("Persistent directories", validate_runtime_paths(env)))
+        groups.append((
+            "Persistent directories",
+            validate_runtime_paths(
+                env,
+                require_reranker=args.require_reranker,
+            ),
+        ))
 
     failed = False
     for title, errors in groups:
