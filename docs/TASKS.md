@@ -61,6 +61,7 @@
 | `PLAN-20260701-01` | 2026-07-01 | `Done` | 发布前收口专项，优先修正文档台账状态、继续降低前端工作台复杂度，并刷新真实链路验收基线。 | `T-037` - `T-041` |
 | `PLAN-20260701-02` | 2026-07-01 | `Done` | 正式生产上线补强专项，补齐部署安全、稳定性、风控、可观测性、评测质量和产品化分层。 | `T-042` - `T-047` |
 | `PLAN-20260703-01` | 2026-07-03 | `Todo` | 公开 Demo 上线试运行专项；暂不立即部署，先补齐不依赖真实服务器的上线阻塞项，并为后续公网验证留出明确步骤。 | `T-048` - `T-052` |
+| `PLAN-20260704-01` | 2026-07-04 | `Todo` | 聊天图片能力专项；先支持聊天框图片附件和视觉模型调用，再扩展图片/OCR 入知识库。 | `T-054` - `T-055` |
 
 ## 任务总览
 
@@ -119,6 +120,8 @@
 | `T-051` | `PLAN-20260703-01` | `P2` | `Blocked` | 部署到受控 staging/demo 环境 | 2026-07-04 | 缺少真实服务器、域名/TLS 和生产 `.env` |
 | `T-052` | `PLAN-20260703-01` | `P2` | `Todo` | 完成公网 smoke test 与真实 RAG eval | - | - |
 | `T-053` | 用户要求 | `P1` | `Done` | 用户登录后配置 LLM 与向量模型 API | 2026-07-03 | `6124b2d` |
+| `T-054` | `PLAN-20260704-01` | `P1` | `Todo` | 支持聊天框图片附件和视觉模型调用 | - | - |
+| `T-055` | `PLAN-20260704-01` | `P2` | `Todo` | 支持图片/OCR 入知识库检索 | - | - |
 
 ## 新计划接入流程
 
@@ -1876,6 +1879,86 @@ conda run -n firstrag python scripts/eval_indexing.py \
   - `conda run -n firstrag python -m py_compile scripts/production_preflight.py` 已通过。
   - `conda run -n firstrag python scripts/migrate_db.py --list` 已识别 `002_create_user_embedding_settings.sql`。
   - `docker compose --env-file .env.example config --quiet` 已通过。
+
+## T-054 支持聊天框图片附件和视觉模型调用
+
+- 来源计划：`PLAN-20260704-01`
+- 优先级：`P1`
+- 状态：`Todo`
+- 背景：当前聊天链路是纯文本：前端输入区只有 `textarea`，`POST /chat` 只提交 `message` 字符串，`messages.content` 只保存文本，RAG chain 也把用户输入作为字符串传给 OpenAI-compatible 文本模型。用户在聊天框中上传图片并提问时，当前没有附件存储、消息结构或视觉模型调用能力。
+- 目标：实现聊天图片附件 MVP，让用户可以在当前聊天框中上传少量图片，并在支持 vision 的聊天模型下基于图片内容回答问题。
+- 范围：
+  - 新增消息附件数据结构，例如 `message_attachments` 表或等价 JSONB metadata，记录 `user_id`、`conversation_id`、`message_id`、文件路径、mime type、size、hash 和创建时间。
+  - 后端新增聊天附件上传/绑定流程，限制 `png`、`jpeg`、`webp` 等图片类型，限制单张大小、单轮数量和总大小。
+  - `POST /chat` 支持文本问题加图片附件；保存用户消息时保留附件 metadata，历史消息接口返回附件缩略信息。
+  - LLM 调用层增加 vision 能力判断和多模态 message payload 构造；当前模型不支持图片时返回清晰的 400 提示，不写入孤立 assistant message。
+  - 前端聊天输入区增加图片选择按钮、缩略图预览、删除、上传中/失败状态和移动端布局适配；不把图片 base64 持久化到浏览器存储。
+  - SSE streaming、sources、retrieval diagnostics 继续保持可用；图片消息仍可结合当前知识库做文本检索。
+  - 日志和错误响应不得输出图片原始 base64、API Key、JWT 或本地绝对路径。
+- 非目标：
+  - 本任务不做图片入知识库持久检索，不做 OCR chunk 入库。
+  - 本任务不要求所有 LLM provider 都支持 vision，只要求对支持 vision 的 OpenAI-compatible provider 形成可用路径，并对不支持模型给出明确提示。
+- 验收标准：
+  - 用户可以在聊天框附加图片并发送文本问题；支持 vision 的模型能收到多模态输入。
+  - 不支持 vision 或未配置模型时，前端展示安全、可理解的错误，不产生半成品消息。
+  - 历史消息可展示该轮用户消息的图片附件缩略信息。
+  - 权限校验确保用户只能访问自己的图片附件，删除会话或清理用户数据时附件不会越权残留。
+  - 文件大小、类型和数量限制在前后端都生效。
+- 建议验证命令：
+
+```bash
+cd backend
+conda run -n firstrag python -m compileall app
+conda run -n firstrag python -m pytest tests/test_chat_settings.py tests/test_chat_service.py tests/test_user_settings.py
+
+cd ../frontend
+npm run test
+npm run build
+
+cd ..
+docker compose up -d --build
+docker compose ps
+docker compose logs --tail=100 migrate backend worker frontend postgres
+```
+
+## T-055 支持图片/OCR 入知识库检索
+
+- 来源计划：`PLAN-20260704-01`
+- 优先级：`P2`
+- 状态：`Todo`
+- 背景：聊天图片附件解决的是单轮视觉问答；另一类需求是把图片、截图或扫描件作为知识库资料长期保存，并通过 RAG 检索。当前知识库文件上传主要面向 PDF、DOCX、Markdown 和 TXT，图片文件不会被解析成可检索文本 chunk。
+- 目标：让知识库可以接收图片资料，通过 OCR 或视觉 caption 转成文本 chunk，再进入现有 embedding、全文检索、RRF、rerank 和 sources 展示链路。
+- 启动条件：
+  - `T-054` 已明确图片存储、安全边界和模型能力判断策略，或已形成独立的图片文件存储方案。
+  - 已选择 OCR/视觉解析 provider 或本地解析方案，并明确费用、速率限制和失败降级。
+- 范围：
+  - 扩展知识文件上传类型，支持常见图片 mime type，并在上传阶段继续执行大小、hash 去重和权限隔离。
+  - document parsing 层为图片生成可检索文本：OCR 原文、视觉 caption、图片 metadata 或多页/多区域结果。
+  - vector index worker 将图片解析结果切分为 chunks，写入 PostgreSQL full-text chunks 和 Chroma vector store。
+  - sources 展示中标明来源是图片文件，并尽可能保留图片页/区域、OCR 置信度或 caption 类型 metadata。
+  - 解析失败时写入安全错误摘要，任务状态可重试，不输出图片原文、provider Key 或本地路径。
+  - 更新 RAG eval 或 indexing eval，覆盖至少一个小图片样例。
+- 验收标准：
+  - 用户可以把图片作为知识库文件上传，并异步完成解析、chunk、embedding 和索引。
+  - 对图片内容提问时，检索结果能返回对应图片 source，并展示文件名和可读摘要。
+  - 图片解析失败不会阻塞其他文件向量化任务，worker 可继续处理队列。
+  - 未配置 OCR/视觉解析 provider 时，上传或向量化阶段给出明确提示。
+- 建议验证命令：
+
+```bash
+cd backend
+conda run -n firstrag python -m compileall app
+conda run -n firstrag python -m pytest tests/test_knowledge_files.py tests/test_vector_indexes.py tests/test_vector_index_failure_recovery.py
+
+cd ../frontend
+npm run test
+npm run build
+
+cd ..
+docker compose up -d --build
+docker compose ps
+docker compose logs --tail=100 migrate backend worker frontend postgres
+```
 
 ## 更新规则
 
