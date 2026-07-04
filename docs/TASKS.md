@@ -114,7 +114,7 @@
 | `T-046` | `PLAN-20260701-02` | `P1` | `Done` | 准备真实问题集并固化上线前 RAG 质量门禁 | 2026-07-02 | `88d1c49` |
 | `T-047` | `PLAN-20260701-02` | `P2` | `Done` | 区分普通用户模式和高级/开发模式 | 2026-07-02 | `c14ae1a` |
 | `T-048` | `PLAN-20260703-01` | `P1` | `Done` | 补齐公网反向代理配置 | 2026-07-03 | `309ef7c` |
-| `T-049` | `PLAN-20260703-01` | `P0` | `Todo` | 增加公开环境注册控制 | - | - |
+| `T-049` | `PLAN-20260703-01` | `P0` | `Done` | 增加公开环境注册控制 | 2026-07-04 | `5ccc8a2` |
 | `T-050` | `PLAN-20260703-01` | `P0` | `Todo` | 增加 demo 数据清理脚本 | - | - |
 | `T-051` | `PLAN-20260703-01` | `P2` | `Todo` | 部署到受控 staging/demo 环境 | - | - |
 | `T-052` | `PLAN-20260703-01` | `P2` | `Todo` | 完成公网 smoke test 与真实 RAG eval | - | - |
@@ -1702,7 +1702,7 @@ git diff --check -- deploy/nginx docs/DEPLOYMENT.md docs/TASKS.md
 
 - 来源计划：`PLAN-20260703-01`
 - 优先级：`P0`
-- 状态：`Todo`
+- 状态：`Done`
 - 背景：当前应用仍开放注册接口；公开 demo 若允许任意注册，容易带来滥用、上传成本、API 调用成本和数据清理压力。
 - 目标：为公开 demo 增加可配置注册开关，让受控演示环境可以只开放预置账号或受邀账号。
 - 范围：
@@ -1715,6 +1715,17 @@ git diff --check -- deploy/nginx docs/DEPLOYMENT.md docs/TASKS.md
   - 注册关闭不会影响本地开发环境按配置继续注册。
   - 错误响应不包含 secret、服务器路径或内部异常。
   - 后端和前端测试覆盖注册开启、关闭和用户提示路径。
+- 完成记录：
+  - 完成日期：2026-07-04
+  - 相关 commit：`5ccc8a2`
+  - 新增 `ALLOW_PUBLIC_REGISTRATION`，本地默认允许注册，公开 demo 可设为 `false`。
+  - 注册关闭时，后端 `POST /register` 返回 `403` 和安全中文提示，不创建用户；`POST /login` 不受影响。
+  - 前端注册页沿用后端 `detail` 展示“当前演示环境暂不开放注册，请使用已提供的账号登录。”，并保留登录入口。
+  - `.env.example`、`docs/API.md` 和 `docs/DEPLOYMENT.md` 已补充配置与公开 demo 推荐值。
+  - 验证命令：`cd backend && conda run -n firstrag python -m compileall app`。
+  - 验证命令：`cd backend && conda run -n firstrag python -m unittest -v tests.test_auth_rate_limit`。
+  - 验证命令：`cd frontend && npm run test`。
+  - 验证命令：`cd frontend && npm run lint`。
 - 建议验证命令：
 
 ```bash
