@@ -22,6 +22,20 @@ def read_int_env(name: str, default: int) -> int:
         return default
 
 
+def read_bool_env(name: str, default: bool) -> bool:
+    """读取布尔环境变量，非法值回退到默认配置。"""
+    raw_value = os.environ.get(name)
+    if raw_value is None:
+        return default
+
+    normalized_value = raw_value.strip().lower()
+    if normalized_value in {"1", "true", "yes", "on"}:
+        return True
+    if normalized_value in {"0", "false", "no", "off"}:
+        return False
+    return default
+
+
 # 设置文件存储路径
 UPLOAD_ROOT = PROJECT_ROOT / "uploads"
 
@@ -97,6 +111,7 @@ RERANKER_MODEL_PATH = resolve_project_path(
 JWT_SECRET_KEY = os.environ.get("JWT_SECRET_KEY")
 JWT_ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24
+ALLOW_PUBLIC_REGISTRATION = read_bool_env("ALLOW_PUBLIC_REGISTRATION", True)
 
 # 大语言模型生成参数默认值。provider、model 和 API Key 由用户登录后配置。
 LLM_TEMPERATURE = float(os.environ.get("LLM_TEMPERATURE", "0.2"))
@@ -108,7 +123,7 @@ LLM_MAX_RETRIES = int(os.environ.get("LLM_MAX_RETRIES", "2"))
 USER_SETTINGS_ENCRYPTION_KEY = os.environ.get(
     "USER_SETTINGS_ENCRYPTION_KEY"
 )
-ALLOW_USER_CUSTOM_LLM_BASE_URL = os.environ.get(
+ALLOW_USER_CUSTOM_LLM_BASE_URL = read_bool_env(
     "ALLOW_USER_CUSTOM_LLM_BASE_URL",
-    "false",
-).lower() == "true"
+    False,
+)

@@ -17,6 +17,14 @@ Authorization: Bearer <access_token>
 | `POST` | `/register` | 注册用户，并创建默认知识库。 |
 | `POST` | `/login` | 登录并返回 Bearer Token。 |
 
+`/register` 受 `ALLOW_PUBLIC_REGISTRATION` 控制。默认 `true` 保持本地开发体验；公开 demo 可设为 `false`，此时注册接口不会创建用户，并返回：
+
+```json
+{
+  "detail": "当前演示环境暂不开放注册，请使用已提供的账号登录。"
+}
+```
+
 请求体：
 
 ```json

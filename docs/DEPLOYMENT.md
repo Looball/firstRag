@@ -18,6 +18,7 @@ cp .env.example .env
 | `COMPOSE_DATABASE_URL` | Docker Compose 方式运行时可选覆盖的 PostgreSQL 连接串；不填时默认连接 compose 内的 `postgres` 服务。 |
 | `POSTGRES_DB` / `POSTGRES_USER` / `POSTGRES_PASSWORD` | Docker Compose 中 PostgreSQL 容器的数据库、用户和密码。 |
 | `JWT_SECRET_KEY` | JWT 签名密钥。 |
+| `ALLOW_PUBLIC_REGISTRATION` | 是否允许公开注册；本地默认 `true`，公开 demo 建议设为 `false` 并只使用预置账号。 |
 | `USER_SETTINGS_ENCRYPTION_KEY` | 用户聊天模型和向量模型 API Key 的加密主密钥。 |
 | `LLM_TEMPERATURE` / `LLM_MAX_TOKENS` / `LLM_TIMEOUT_SECONDS` / `LLM_MAX_RETRIES` | 聊天模型设置页的默认生成参数；provider、model 和 API Key 由用户登录后配置。 |
 | `RERANK_PROVIDER` | Rerank provider，默认 `local`；可设为 `qwen` / `dashscope` 使用阿里云 Qwen rerank API。 |
@@ -429,6 +430,7 @@ MODELS_DIR=/srv/firstrag/models
 | --- | --- |
 | `POSTGRES_DB` / `POSTGRES_USER` / `POSTGRES_PASSWORD` | 使用非默认强密码；不要沿用模板密码。 |
 | `JWT_SECRET_KEY` | 使用随机长密钥；更换后已有登录态会失效。 |
+| `ALLOW_PUBLIC_REGISTRATION` | 公开 demo 设为 `false`，只允许预置账号或受邀账号登录。 |
 | `USER_SETTINGS_ENCRYPTION_KEY` | 使用 Fernet key，并与 `JWT_SECRET_KEY` 分离；丢失后无法解密已保存的用户 API Key。 |
 | 聊天模型 provider / model / API Key | 登录后在“模型设置”页配置并加密保存；服务器 `.env` 不再保存 LLM provider Key。 |
 | 向量模型 provider / model / API Key / dimensions | 登录后在“模型设置”页配置并加密保存；切换 provider、model 或维度后需要重新向量化文件。 |
@@ -453,6 +455,7 @@ VECTOR_INDEX_MAX_BATCH_FILES=50
 LOGIN_FAILURE_RATE_LIMIT_MAX_ATTEMPTS=5
 LOGIN_FAILURE_RATE_LIMIT_WINDOW_SECONDS=300
 API_RATE_LIMIT_WINDOW_SECONDS=60
+ALLOW_PUBLIC_REGISTRATION=false
 CHAT_RATE_LIMIT_MAX_REQUESTS=30
 UPLOAD_RATE_LIMIT_MAX_REQUESTS=10
 VECTOR_INDEX_RATE_LIMIT_MAX_REQUESTS=20
@@ -497,8 +500,8 @@ docker run --rm -v "$PWD/deploy/nginx:/etc/nginx/conf.d:ro" nginx:alpine nginx -
 
 ### 演示账号和安全边界
 
-- 演示账号在服务器上线后通过 UI 创建，账号和密码只通过可信渠道单独提供，不写入仓库文档。
-- 当前应用仍开放注册接口，公开 demo 上线前需要在反向代理层临时加访问控制、Basic Auth、IP allowlist 或实现后端注册开关。
+- 演示账号在服务器上线后临时保持 `ALLOW_PUBLIC_REGISTRATION=true` 创建，创建完成后改为 `false` 并重启 backend；账号和密码只通过可信渠道单独提供，不写入仓库文档。
+- 注册关闭后，`POST /register` 会返回“当前演示环境暂不开放注册，请使用已提供的账号登录。”，已有账号登录不受影响。
 - 不要求访客输入自己的真实 API Key；如果需要测试用户 Key 模式，必须提示只在可信 demo 环境使用，且前端不会持久化完整 Key。
 - 上传文件只用于演示，不接收私人、商业或敏感文档。公开 demo 应在页面说明上传数据会被定期清理。
 - 进程内限流状态不会跨多实例共享；公网访问仍应由反向代理、WAF 或 API 网关承担全局限流。

@@ -2,6 +2,7 @@ from fastapi import APIRouter, HTTPException, Request
 from pwdlib import PasswordHash
 
 from app.core.config import (
+    ALLOW_PUBLIC_REGISTRATION,
     LOGIN_FAILURE_RATE_LIMIT_MAX_ATTEMPTS,
     LOGIN_FAILURE_RATE_LIMIT_WINDOW_SECONDS,
 )
@@ -22,6 +23,9 @@ from app.schemas.auth import LoginRequest, RegisterRequest
 
 router = APIRouter(tags=["auth"])
 LOGIN_FAILURE_RATE_LIMIT_SCOPE = "login-failures"
+REGISTRATION_DISABLED_MESSAGE = (
+    "当前演示环境暂不开放注册，请使用已提供的账号登录。"
+)
 
 
 def _raise_invalid_login(
@@ -65,6 +69,12 @@ def _enforce_login_failure_limit(rate_limit_identifier: str) -> None:
 # 注册界面'/register'接口处理
 @router.post("/register")
 def register(req: RegisterRequest):
+    if not ALLOW_PUBLIC_REGISTRATION:
+        raise HTTPException(
+            status_code=403,
+            detail=REGISTRATION_DISABLED_MESSAGE,
+        )
+
     # 使用hash算法加密密码
     password_hash = PasswordHash.recommended().hash(req.password)
 
