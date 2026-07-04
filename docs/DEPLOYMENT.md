@@ -508,14 +508,55 @@ docker run --rm -v "$PWD/deploy/nginx:/etc/nginx/conf.d:ro" nginx:alpine nginx -
 
 ### 数据清理策略
 
-上线前需要准备一个可重复执行的清理流程：
+公开 demo 应使用 `scripts/demo_cleanup.py` 定期清理临时数据。脚本默认 `dry-run`，执行模式必须显式传入 `--execute --confirm cleanup-demo-data`，并且会同时处理 PostgreSQL metadata、knowledge chunks、vector index jobs、Chroma entries 和 uploads 文件。
 
-1. 保留预置演示账号和少量脱敏样例知识库。
-2. 定期删除临时用户、临时知识库、上传文件、向量索引和对应 chunks。
-3. 清理后运行一次最小 smoke test：登录、上传小文件、向量化、提问和查看 sources。
-4. 清理脚本未完成前，公开 demo 应只提供给受控测试者。
+推荐频率：
 
-当前仓库还没有专门的 demo cleanup 脚本，因此这是正式公开上线前的阻塞项。
+- 受控测试阶段：每周 1 次，或每次集中测试结束后执行。
+- 公开 demo 阶段：每日 1 次，访问量较高时可提高到每 6-12 小时 1 次。
+- 每次执行模式前先完成 PostgreSQL 备份，并确认 `uploads/` 与 `vector_db/` 已被快照或纳入同周期备份。
+
+示例 dry-run：
+
+```bash
+conda run -n firstrag python scripts/demo_cleanup.py \
+  --retain-user demo \
+  --retain-knowledge-base-id 00000000-0000-0000-0000-000000000000 \
+  --older-than-days 7
+```
+
+示例执行：
+
+```bash
+conda run -n firstrag python scripts/demo_cleanup.py \
+  --retain-user demo \
+  --retain-knowledge-base-id 00000000-0000-0000-0000-000000000000 \
+  --older-than-days 7 \
+  --execute \
+  --confirm cleanup-demo-data
+```
+
+参数说明：
+
+| 参数 | 用途 |
+| --- | --- |
+| `--retain-user` / `--retain-user-id` | 保留预置演示账号；脚本不会删除这些用户。 |
+| `--retain-knowledge-base-id` | 保留脱敏样例知识库；其关联文件会自动保留，避免样例知识库断链。 |
+| `--retain-file-id` | 额外保留指定脱敏文件。 |
+| `--cleanup-user` / `--cleanup-user-id` | 按用户白名单清理临时账号，不受 `--older-than-days` 限制，但不能与保留用户冲突。 |
+| `--older-than-days` | 清理早于指定天数的非保留用户、知识库、文件和会话；默认 7 天。 |
+| `--uploads-dir` | 指定宿主机或容器中的 uploads 根目录，默认读取 `UPLOADS_DIR`，否则使用仓库根目录 `uploads/`。 |
+| `--vector-store-path` | 指定 Chroma 持久化目录，默认读取 `VECTOR_STORE_PATH` 或 `VECTOR_DB_DIR/chroma`。 |
+
+脚本只输出数量、ID 和安全路径摘要，不打印用户上传原文、API Key、JWT 或数据库密码。文件删除只允许发生在配置的 uploads 根目录内；如果发现越界或不可解析路径，执行模式会停止。
+
+清理完成后运行最小 smoke test：
+
+1. 使用保留演示账号登录。
+2. 上传一个小型 TXT 或 Markdown 文件。
+3. 提交单文件向量化并确认 vector index job 成功。
+4. 在对应知识库提问，确认回答返回 sources。
+5. 打开 sources 和 diagnostics，确认引用、文件名和检索信息正常。
 
 ### 启动步骤
 

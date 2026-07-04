@@ -115,7 +115,7 @@
 | `T-047` | `PLAN-20260701-02` | `P2` | `Done` | 区分普通用户模式和高级/开发模式 | 2026-07-02 | `c14ae1a` |
 | `T-048` | `PLAN-20260703-01` | `P1` | `Done` | 补齐公网反向代理配置 | 2026-07-03 | `309ef7c` |
 | `T-049` | `PLAN-20260703-01` | `P0` | `Done` | 增加公开环境注册控制 | 2026-07-04 | `5ccc8a2` |
-| `T-050` | `PLAN-20260703-01` | `P0` | `Todo` | 增加 demo 数据清理脚本 | - | - |
+| `T-050` | `PLAN-20260703-01` | `P0` | `Done` | 增加 demo 数据清理脚本 | `2026-07-04` | `scripts/demo_cleanup.py`、`docs/DEPLOYMENT.md` |
 | `T-051` | `PLAN-20260703-01` | `P2` | `Todo` | 部署到受控 staging/demo 环境 | - | - |
 | `T-052` | `PLAN-20260703-01` | `P2` | `Todo` | 完成公网 smoke test 与真实 RAG eval | - | - |
 | `T-053` | 用户要求 | `P1` | `Done` | 用户登录后配置 LLM 与向量模型 API | 2026-07-03 | `6124b2d` |
@@ -1743,9 +1743,15 @@ npm run lint
 
 - 来源计划：`PLAN-20260703-01`
 - 优先级：`P0`
-- 状态：`Todo`
+- 状态：`Done`
 - 背景：在线 demo 文档已把数据清理流程列为正式公开前阻塞项；当前还没有专门脚本清理临时用户、知识库、上传文件、chunks、vector entries 和相关 jobs。
 - 目标：提供可 dry-run、可审计、可重复执行的 demo cleanup 脚本，降低公开演示环境的数据累积和误删风险。
+- 完成时间：`2026-07-04`
+- 交付：
+  - 新增 `scripts/demo_cleanup.py`，默认 dry-run，执行模式需要 `--execute --confirm cleanup-demo-data`。
+  - 支持保留演示账号、样例知识库和脱敏文件；保留样例知识库时自动保留关联文件和 owner 用户。
+  - 支持按创建时间和显式清理用户清理 PostgreSQL metadata、chunks、jobs、Chroma entries 与 uploads 文件。
+  - 更新 `docs/DEPLOYMENT.md`，补充执行频率、备份要求、示例命令和清理后 smoke test。
 - 范围：
   - 新增 `scripts/demo_cleanup.py` 或同等脚本，默认 dry-run，执行模式需要显式参数确认。
   - 支持保留指定演示账号、样例知识库和脱敏文件，其余临时数据按创建时间或用户白名单清理。
