@@ -4,10 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from decimal import Decimal
-from ipaddress import ip_address
-import socket
 from typing import Any
-from urllib.parse import urlparse
 
 from app.core.config import ALLOW_USER_CUSTOM_LLM_BASE_URL
 from app.core.secret_cipher import (
@@ -15,19 +12,39 @@ from app.core.secret_cipher import (
     decrypt_secret,
     encrypt_secret,
 )
+from app.repositories.user_embedding_provider_credential_repository import (
+    get_user_embedding_provider_credential,
+    get_user_embedding_provider_credentials,
+    upsert_user_embedding_provider_credential,
+)
 from app.repositories.user_embedding_settings_repository import (
     get_user_embedding_settings,
     upsert_user_embedding_settings,
 )
+from app.services.provider_base_url import validate_public_https_base_url
 
 
 ZHIPU_EMBEDDING_PROVIDER = "zhipuai"
 QWEN_EMBEDDING_PROVIDER = "qwen"
+OPENAI_EMBEDDING_PROVIDER = "openai"
+VOYAGE_EMBEDDING_PROVIDER = "voyage"
+COHERE_EMBEDDING_PROVIDER = "cohere"
+JINA_EMBEDDING_PROVIDER = "jina"
+OPENAI_COMPATIBLE_EMBEDDING_PROVIDER = "openai_compatible"
+
 DEFAULT_ZHIPU_EMBEDDING_MODEL = "embedding-3"
 DEFAULT_QWEN_EMBEDDING_MODEL = "text-embedding-v4"
+DEFAULT_OPENAI_EMBEDDING_MODEL = "text-embedding-3-small"
+DEFAULT_VOYAGE_EMBEDDING_MODEL = "voyage-4"
+DEFAULT_COHERE_EMBEDDING_MODEL = "embed-v4.0"
+DEFAULT_JINA_EMBEDDING_MODEL = "jina-embeddings-v3"
 DEFAULT_QWEN_EMBEDDING_BASE_URL = (
     "https://dashscope.aliyuncs.com/compatible-mode/v1"
 )
+DEFAULT_OPENAI_EMBEDDING_BASE_URL = "https://api.openai.com/v1"
+DEFAULT_VOYAGE_EMBEDDING_BASE_URL = "https://api.voyageai.com/v1"
+DEFAULT_COHERE_EMBEDDING_BASE_URL = "https://api.cohere.com"
+DEFAULT_JINA_EMBEDDING_BASE_URL = "https://api.jina.ai/v1"
 DEFAULT_EMBEDDING_PROVIDER = QWEN_EMBEDDING_PROVIDER
 DEFAULT_EMBEDDING_TIMEOUT_SECONDS = 60.0
 DEFAULT_EMBEDDING_MAX_RETRIES = 2
@@ -39,14 +56,43 @@ QWEN_EMBEDDING_PROVIDER_ALIASES = {
     "aliyun-qwen",
 }
 ZHIPU_EMBEDDING_PROVIDER_ALIASES = {"zhipu", "zhipuai", "glm"}
+OPENAI_EMBEDDING_PROVIDER_ALIASES = {"openai"}
+VOYAGE_EMBEDDING_PROVIDER_ALIASES = {"voyage", "voyageai", "voyage-ai"}
+COHERE_EMBEDDING_PROVIDER_ALIASES = {"cohere"}
+JINA_EMBEDDING_PROVIDER_ALIASES = {"jina", "jinaai", "jina-ai"}
+OPENAI_COMPATIBLE_EMBEDDING_PROVIDER_ALIASES = {
+    "openai_compatible",
+    "openai-compatible",
+    "custom",
+    "custom_openai",
+}
 
+EMBEDDING_PROVIDER_ORDER = (
+    QWEN_EMBEDDING_PROVIDER,
+    ZHIPU_EMBEDDING_PROVIDER,
+    OPENAI_EMBEDDING_PROVIDER,
+    VOYAGE_EMBEDDING_PROVIDER,
+    COHERE_EMBEDDING_PROVIDER,
+    JINA_EMBEDDING_PROVIDER,
+    OPENAI_COMPATIBLE_EMBEDDING_PROVIDER,
+)
 EMBEDDING_PROVIDER_DISPLAY_NAMES = {
     QWEN_EMBEDDING_PROVIDER: "通义千问向量",
     ZHIPU_EMBEDDING_PROVIDER: "智谱 Embedding",
+    OPENAI_EMBEDDING_PROVIDER: "OpenAI Embeddings",
+    VOYAGE_EMBEDDING_PROVIDER: "Voyage AI Embeddings",
+    COHERE_EMBEDDING_PROVIDER: "Cohere Embed",
+    JINA_EMBEDDING_PROVIDER: "Jina Embeddings",
+    OPENAI_COMPATIBLE_EMBEDDING_PROVIDER: "自定义 OpenAI 兼容向量服务",
 }
 EMBEDDING_PROVIDER_BASE_URLS = {
     QWEN_EMBEDDING_PROVIDER: DEFAULT_QWEN_EMBEDDING_BASE_URL,
     ZHIPU_EMBEDDING_PROVIDER: None,
+    OPENAI_EMBEDDING_PROVIDER: DEFAULT_OPENAI_EMBEDDING_BASE_URL,
+    VOYAGE_EMBEDDING_PROVIDER: DEFAULT_VOYAGE_EMBEDDING_BASE_URL,
+    COHERE_EMBEDDING_PROVIDER: DEFAULT_COHERE_EMBEDDING_BASE_URL,
+    JINA_EMBEDDING_PROVIDER: DEFAULT_JINA_EMBEDDING_BASE_URL,
+    OPENAI_COMPATIBLE_EMBEDDING_PROVIDER: None,
 }
 
 
@@ -77,6 +123,16 @@ def normalize_embedding_provider(raw_provider: str | None = None) -> str:
         return ZHIPU_EMBEDDING_PROVIDER
     if provider in QWEN_EMBEDDING_PROVIDER_ALIASES:
         return QWEN_EMBEDDING_PROVIDER
+    if provider in OPENAI_EMBEDDING_PROVIDER_ALIASES:
+        return OPENAI_EMBEDDING_PROVIDER
+    if provider in VOYAGE_EMBEDDING_PROVIDER_ALIASES:
+        return VOYAGE_EMBEDDING_PROVIDER
+    if provider in COHERE_EMBEDDING_PROVIDER_ALIASES:
+        return COHERE_EMBEDDING_PROVIDER
+    if provider in JINA_EMBEDDING_PROVIDER_ALIASES:
+        return JINA_EMBEDDING_PROVIDER
+    if provider in OPENAI_COMPATIBLE_EMBEDDING_PROVIDER_ALIASES:
+        return OPENAI_COMPATIBLE_EMBEDDING_PROVIDER
     raise ValueError(f"不支持的向量模型厂商：{provider}")
 
 
@@ -88,58 +144,31 @@ def resolve_embedding_model_name(
     model = (configured_model or "").strip()
     if model:
         return model
-    if provider == QWEN_EMBEDDING_PROVIDER:
-        return DEFAULT_QWEN_EMBEDDING_MODEL
-    return DEFAULT_ZHIPU_EMBEDDING_MODEL
-
-
-def _ensure_public_host(host: str, port: int | None = None) -> None:
-    """校验自定义 embedding 主机只能解析到公网地址。"""
-    normalized_host = host.rstrip(".").lower()
-    if (
-        normalized_host == "localhost"
-        or normalized_host.endswith(".localhost")
-        or normalized_host.endswith(".local")
-    ):
-        raise ValueError("用户自定义 embedding API 地址不能指向本机地址")
-
-    try:
-        host_ip = ip_address(normalized_host)
-    except ValueError as exc:
-        if normalized_host.replace(".", "").isdigit():
-            raise ValueError("embedding API 地址的 IP 地址无效") from exc
-    else:
-        if not host_ip.is_global:
-            raise ValueError("用户自定义 embedding API 地址不能指向私网地址")
-        return
-
-    try:
-        resolved_addresses = socket.getaddrinfo(
-            normalized_host,
-            port or 443,
-            type=socket.SOCK_STREAM,
-        )
-    except socket.gaierror as exc:
-        raise ValueError("无法解析用户自定义 embedding API 地址主机") from exc
-
-    resolved_ips = {
-        address[0]
-        for *_, address in resolved_addresses
-        if address and address[0]
+    defaults = {
+        QWEN_EMBEDDING_PROVIDER: DEFAULT_QWEN_EMBEDDING_MODEL,
+        ZHIPU_EMBEDDING_PROVIDER: DEFAULT_ZHIPU_EMBEDDING_MODEL,
+        OPENAI_EMBEDDING_PROVIDER: DEFAULT_OPENAI_EMBEDDING_MODEL,
+        VOYAGE_EMBEDDING_PROVIDER: DEFAULT_VOYAGE_EMBEDDING_MODEL,
+        COHERE_EMBEDDING_PROVIDER: DEFAULT_COHERE_EMBEDDING_MODEL,
+        JINA_EMBEDDING_PROVIDER: DEFAULT_JINA_EMBEDDING_MODEL,
+        OPENAI_COMPATIBLE_EMBEDDING_PROVIDER: DEFAULT_OPENAI_EMBEDDING_MODEL,
     }
-    if not resolved_ips:
-        raise ValueError("无法解析用户自定义 embedding API 地址主机")
+    return defaults[provider]
 
-    for resolved_ip in resolved_ips:
-        try:
-            parsed_ip = ip_address(resolved_ip)
-        except ValueError as exc:
-            raise ValueError("embedding API 地址解析结果无效") from exc
 
-        if not parsed_ip.is_global:
-            raise ValueError(
-                "用户自定义 embedding API 地址不能解析到私网地址"
-            )
+def resolve_embedding_base_url(provider: str, base_url: str | None) -> str | None:
+    """解析 embedding provider 的实际 API 地址。"""
+    if provider == ZHIPU_EMBEDDING_PROVIDER:
+        return None
+    resolved_base_url = base_url or EMBEDDING_PROVIDER_BASE_URLS.get(provider)
+    if not resolved_base_url:
+        raise ValueError("自定义 OpenAI 兼容向量服务必须配置 API 地址")
+    return resolved_base_url.rstrip("/")
+
+
+def _requires_base_url(provider: str) -> bool:
+    """判断指定向量 provider 是否必须由用户填写 API 地址。"""
+    return provider == OPENAI_COMPATIBLE_EMBEDDING_PROVIDER
 
 
 def _validate_embedding_base_url(
@@ -148,10 +177,14 @@ def _validate_embedding_base_url(
 ) -> str | None:
     """规范化 embedding API 地址，并避免用户配置内网地址。"""
     if base_url is None:
+        if _requires_base_url(provider):
+            raise ValueError("自定义 OpenAI 兼容向量服务需要填写 API 地址")
         return None
 
     normalized_base_url = base_url.strip().rstrip("/")
     if not normalized_base_url:
+        if _requires_base_url(provider):
+            raise ValueError("自定义 OpenAI 兼容向量服务需要填写 API 地址")
         return None
 
     preset_base_url = EMBEDDING_PROVIDER_BASE_URLS.get(provider)
@@ -161,33 +194,25 @@ def _validate_embedding_base_url(
         raise ValueError("智谱 embedding 当前不支持自定义 API 地址")
     if not ALLOW_USER_CUSTOM_LLM_BASE_URL:
         raise ValueError("当前不允许用户自定义 embedding API 地址")
-
-    parsed_url = urlparse(normalized_base_url)
-    host = parsed_url.hostname
-    if (
-        parsed_url.scheme != "https"
-        or parsed_url.username
-        or parsed_url.password
-        or not host
-    ):
-        raise ValueError("用户自定义 embedding API 地址必须是不含凭据的 HTTPS 地址")
-    _ensure_public_host(host, parsed_url.port)
-    return normalized_base_url
+    return validate_public_https_base_url(normalized_base_url)
 
 
 def get_supported_embedding_providers() -> list[dict[str, object]]:
     """返回供前端展示的向量模型厂商预设。"""
-    return [
-        {
+    providers = []
+    for provider in EMBEDDING_PROVIDER_ORDER:
+        providers.append({
             "id": provider,
             "name": EMBEDDING_PROVIDER_DISPLAY_NAMES[provider],
             "base_url": EMBEDDING_PROVIDER_BASE_URLS[provider],
-            "requires_base_url": False,
-            "enabled": True,
+            "requires_base_url": _requires_base_url(provider),
+            "enabled": (
+                provider != OPENAI_COMPATIBLE_EMBEDDING_PROVIDER
+                or ALLOW_USER_CUSTOM_LLM_BASE_URL
+            ),
             "default_model": resolve_embedding_model_name(provider),
-        }
-        for provider in (QWEN_EMBEDDING_PROVIDER, ZHIPU_EMBEDDING_PROVIDER)
-    ]
+        })
+    return providers
 
 
 def _build_default_embedding_settings() -> EmbeddingModelSettings:
@@ -225,6 +250,21 @@ def _serialize_embedding_settings(
     }
 
 
+def _apply_provider_credential(
+    record: dict[str, Any],
+    credential: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """优先使用向量厂商凭据表中的 Key，兼容旧设置表中的活动 Key。"""
+    if credential is None:
+        return record
+    return {
+        **record,
+        "api_key_ciphertext": credential["api_key_ciphertext"],
+        "api_key_hint": credential.get("api_key_hint"),
+        "encryption_key_version": credential["encryption_key_version"],
+    }
+
+
 def _build_embedding_settings(
     record: dict[str, Any],
     *,
@@ -255,6 +295,11 @@ def get_effective_embedding_model_settings(
     if record is None:
         raise ValueError("请先在设置页配置当前账号的向量模型 API Key")
 
+    provider = normalize_embedding_provider(record["provider"])
+    credential = get_user_embedding_provider_credential(user_id, provider)
+    record = _apply_provider_credential(record, credential)
+    if not record.get("api_key_ciphertext"):
+        raise ValueError("请先在设置页配置当前账号的向量模型 API Key")
     return _build_embedding_settings(record)
 
 
@@ -267,15 +312,18 @@ def get_serialized_user_embedding_settings(user_id: int) -> dict[str, Any]:
             False,
         )
 
+    provider = normalize_embedding_provider(record["provider"])
+    credential = get_user_embedding_provider_credential(user_id, provider)
+    record = _apply_provider_credential(record, credential)
     settings = _build_embedding_settings(record, decrypt_api_key=False)
     api_key_hint = record.get("api_key_hint")
-    if not api_key_hint and record["api_key_ciphertext"]:
+    if not api_key_hint and record.get("api_key_ciphertext"):
         api_key_hint = build_secret_hint(
             decrypt_secret(record["api_key_ciphertext"])
         )
     return _serialize_embedding_settings(
         settings,
-        bool(record["api_key_ciphertext"]),
+        bool(record.get("api_key_ciphertext")),
         api_key_hint,
     )
 
@@ -284,28 +332,57 @@ def get_serialized_user_embedding_providers(
     user_id: int,
 ) -> list[dict[str, Any]]:
     """返回向量厂商目录及当前用户的已保存状态。"""
+    credentials_by_provider = {
+        row["provider"]: row
+        for row in get_user_embedding_provider_credentials(user_id)
+    }
     record = get_user_embedding_settings(user_id)
     active_provider = (
         normalize_embedding_provider(record["provider"]) if record else None
     )
     providers = []
     for provider in get_supported_embedding_providers():
-        has_api_key = (
-            record is not None
+        credential = credentials_by_provider.get(provider["id"])
+        legacy_active_key = (
+            credential is None
+            and record is not None
             and active_provider == provider["id"]
-            and bool(record["api_key_ciphertext"])
+            and bool(record.get("api_key_ciphertext"))
         )
         providers.append({
             **provider,
-            "has_api_key": has_api_key,
-            "api_key_hint": record.get("api_key_hint") if has_api_key else None,
+            "has_api_key": credential is not None or legacy_active_key,
+            "api_key_hint": (
+                credential.get("api_key_hint")
+                if credential
+                else (
+                    record.get("api_key_hint") if legacy_active_key else None
+                )
+            ),
         })
     return providers
+
+
+def _get_provider_credential_for_updates(
+    user_id: int,
+    current_record: dict[str, Any] | None,
+    updates: dict[str, Any],
+) -> dict[str, Any] | None:
+    """查询本次向量厂商已有凭据，以便切换时自动复用。"""
+    provider = normalize_embedding_provider(
+        updates.get(
+            "provider",
+            current_record.get("provider") if current_record else None,
+        )
+    )
+    return get_user_embedding_provider_credential(user_id, provider)
 
 
 def _merge_embedding_settings_record(
     current_record: dict[str, Any] | None,
     updates: dict[str, Any],
+    *,
+    provider_credential: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """合并局部更新并生成可直接持久化的向量设置记录。"""
     provider = normalize_embedding_provider(
@@ -370,6 +447,9 @@ def _merge_embedding_settings_record(
     if "api_key" in updates:
         api_key_ciphertext = encrypt_secret(updates["api_key"])
         api_key_hint = build_secret_hint(updates["api_key"])
+    elif provider_credential is not None:
+        api_key_ciphertext = provider_credential["api_key_ciphertext"]
+        api_key_hint = provider_credential.get("api_key_hint")
     elif current_record is not None and current_provider == provider:
         api_key_ciphertext = current_record.get("api_key_ciphertext")
         api_key_hint = current_record.get("api_key_hint")
@@ -399,7 +479,24 @@ def update_user_embedding_settings(
 ) -> dict[str, Any]:
     """更新当前用户向量模型设置，并返回不含 API Key 的配置。"""
     current_record = get_user_embedding_settings(user_id)
-    settings_record = _merge_embedding_settings_record(current_record, updates)
+    provider_credential = _get_provider_credential_for_updates(
+        user_id,
+        current_record,
+        updates,
+    )
+    settings_record = _merge_embedding_settings_record(
+        current_record,
+        updates,
+        provider_credential=provider_credential,
+    )
+    saved_credential = upsert_user_embedding_provider_credential(
+        user_id,
+        settings_record["provider"],
+        settings_record,
+    )
+    if saved_credential is None:
+        raise RuntimeError("保存用户向量厂商凭据失败")
+
     saved_record = upsert_user_embedding_settings(user_id, settings_record)
     if saved_record is None:
         raise RuntimeError("保存用户向量模型设置失败")
@@ -413,10 +510,16 @@ def check_user_embedding_settings(
 ) -> dict[str, Any]:
     """测试当前用户向量模型设置。"""
     current_record = get_user_embedding_settings(user_id)
+    provider_credential = _get_provider_credential_for_updates(
+        user_id,
+        current_record,
+        updates,
+    )
     if updates:
         settings_record = _merge_embedding_settings_record(
             current_record,
             updates,
+            provider_credential=provider_credential,
         )
         settings = _build_embedding_settings(settings_record)
     else:

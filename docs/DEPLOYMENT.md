@@ -19,12 +19,9 @@ cp .env.example .env
 | `POSTGRES_DB` / `POSTGRES_USER` / `POSTGRES_PASSWORD` | Docker Compose 中 PostgreSQL 容器的数据库、用户和密码。 |
 | `JWT_SECRET_KEY` | JWT 签名密钥。 |
 | `ALLOW_PUBLIC_REGISTRATION` | 是否允许公开注册；本地默认 `true`，公开 demo 建议设为 `false` 并只使用预置账号。 |
-| `USER_SETTINGS_ENCRYPTION_KEY` | 用户聊天模型和向量模型 API Key 的加密主密钥。 |
+| `USER_SETTINGS_ENCRYPTION_KEY` | 用户聊天模型、向量模型和远程 rerank API Key 的加密主密钥。 |
 | `LLM_TEMPERATURE` / `LLM_MAX_TOKENS` / `LLM_TIMEOUT_SECONDS` / `LLM_MAX_RETRIES` | 聊天模型设置页的默认生成参数；provider、model 和 API Key 由用户登录后配置。 |
-| `RERANK_PROVIDER` | Rerank provider，默认 `local`；可设为 `qwen` / `dashscope` 使用阿里云 Qwen rerank API。 |
-| `RERANK_MODEL` | Rerank 模型名；阿里云 Qwen 推荐 `qwen3-rerank`。 |
-| `RERANK_BASE_URL` | 阿里云 Qwen rerank 的工作空间 OpenAI-compatible 地址，例如 `https://<WorkspaceId>.ap-southeast-1.maas.aliyuncs.com/compatible-api/v1`，按控制台地域调整。 |
-| `RERANK_API_KEY` / `DASHSCOPE_API_KEY` / `QWEN_API_KEY` | 远程 Qwen rerank Key；默认本地 rerank 不需要。 |
+| `RERANK_PROVIDER` / `RERANK_MODEL` / `RERANK_BASE_URL` / `RERANK_API_KEY` | 历史环境变量兼容；新版本远程 rerank 推荐在登录后的“模型设置”页按用户配置。 |
 | `VECTOR_STORE_PATH` | Chroma 持久化路径；本地默认 `./vector_db/chroma`，compose 默认 `/app/vector_db/chroma`。 |
 | `RERANKER_MODEL_PATH` | 本地 reranker 模型路径；compose 会把 `./models` 只读挂载到 `/app/models`。 |
 | `UPLOADS_DIR` / `VECTOR_DB_DIR` / `MODELS_DIR` | Docker Compose 宿主机持久化目录；生产环境建议指向独立数据盘。 |
@@ -182,7 +179,7 @@ CI 覆盖：
 
 ## Docker Compose
 
-仓库根目录提供本地 compose 方案。默认后端镜像使用 `backend/requirements.txt` 的最小依赖集，不安装 `torch` / `transformers`；本地 CrossEncoder rerank 会在缺少可选依赖时自动降级为 RRF 结果。也可以通过 `RERANK_PROVIDER=qwen` 改用阿里云 Qwen rerank API。完整启动流程、`.env` 准备、可选 reranker、日志查看和常见问题见 `docs/docker-startup/README.md`。
+仓库根目录提供本地 compose 方案。默认后端镜像使用 `backend/requirements.txt` 的最小依赖集，不安装 `torch` / `transformers`；本地 CrossEncoder rerank 会在缺少可选依赖时自动降级为 RRF 结果。远程 rerank 推荐登录后在“模型设置”页配置。完整启动流程、`.env` 准备、可选 reranker、日志查看和常见问题见 `docs/docker-startup/README.md`。
 
 ```bash
 docker compose up -d --build
@@ -299,8 +296,8 @@ curl -s -H "Authorization: Bearer <access_token>" http://127.0.0.1:8000/chat/vec
 | `JWT_SECRET_KEY` | 使用至少 32 字符随机值，例如 `openssl rand -hex 32`。 | 轮换后已签发 token 全部失效，用户需要重新登录。 |
 | `USER_SETTINGS_ENCRYPTION_KEY` | 使用 Fernet key，和 `JWT_SECRET_KEY` 分离，例如 `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"`。 | 丢失或更换后无法解密已保存的用户 API Key，必须先清空或重新录入用户凭据。 |
 | 用户聊天模型 Key | 通过登录后的“模型设置”页保存到数据库密文，不放在服务器 `.env`。 | 单个用户轮换后立即影响该用户后续聊天；不需要重启服务。 |
-| 用户向量模型 Key | 通过登录后的“模型设置”页保存到数据库密文，不放在服务器 `.env`。 | 单个用户轮换 provider、model 或维度后，需要重新向量化相关文件；不需要重启服务。 |
-| `RERANK_API_KEY` / `RERANK_BASE_URL` | 阿里云 Qwen rerank 专用 Key 与工作空间 OpenAI-compatible 地址。 | 仅设置 `RERANK_PROVIDER=qwen` 时需要；配置或轮换后重启 backend。 |
+| 用户向量模型 Key | 通过登录后的“模型设置”页按厂商保存到数据库密文，不放在服务器 `.env`。 | 单个用户轮换 provider、model 或维度后，需要重新向量化相关文件；不需要重启服务。 |
+| 用户远程 rerank Key | 通过登录后的“模型设置”页按厂商保存到数据库密文，不放在服务器 `.env`。 | 单个用户轮换后立即影响该用户后续检索精排；不需要重启服务。 |
 | `ALLOW_USER_CUSTOM_LLM_BASE_URL` | 公开环境默认保持 `false`。 | 开启前必须先完成 SSRF 出口策略、域名 allowlist 或网络隔离。 |
 | `DATABASE_URL` | 仅用于宿主机 conda 方式运行或本地 migration dry-run；Docker Compose 内部连接由 compose 环境覆盖。 | 生产只用 compose 时可以删除该项，避免残留模板连接串。 |
 | `COMPOSE_DATABASE_URL` | 仅在外部数据库或特殊连接串时设置；否则让 compose 根据 `POSTGRES_*` 构造。 | 设置后必须和 PostgreSQL 实际用户、密码、库名保持一致。 |
@@ -317,7 +314,7 @@ conda run -n firstrag python scripts/production_preflight.py --env-file .env --s
 conda run -n firstrag python scripts/production_preflight.py --env-file .env --migration-method compose
 ```
 
-如果启用了远程 Qwen rerank，想在公开 smoke test 前确认 rerank Key 和本地 reranker 模型目录也已经就绪，额外加上 `--require-provider-keys --require-reranker`：
+如果仍使用旧的全局 Qwen rerank 环境变量，或想在公开 smoke test 前确认本地 reranker 模型目录也已经就绪，可以额外加上 `--require-provider-keys --require-reranker`。新版本推荐在登录后的“模型设置”页配置用户级远程 rerank Key，preflight 不会读取数据库中的用户密文：
 
 ```bash
 conda run -n firstrag python scripts/production_preflight.py --env-file .env --migration-method compose --require-provider-keys --require-reranker
@@ -332,7 +329,7 @@ conda run -n firstrag python scripts/production_preflight.py --env-file .env --m
 preflight 会拦截以下问题：
 
 - `POSTGRES_PASSWORD`、`JWT_SECRET_KEY`、`USER_SETTINGS_ENCRYPTION_KEY` 仍是模板占位值或明显过短。
-- 已填写的 `RERANK_API_KEY`、`DASHSCOPE_API_KEY` 或 `QWEN_API_KEY` 仍是模板占位值；使用 `--require-provider-keys` 且 `RERANK_PROVIDER=qwen` 时还会要求远程 rerank Key 和 `RERANK_BASE_URL` 已配置。
+- 已填写的 `RERANK_API_KEY`、`DASHSCOPE_API_KEY` 或 `QWEN_API_KEY` 仍是模板占位值；使用 `--require-provider-keys` 且旧全局 `RERANK_PROVIDER=qwen` 时，还会要求全局 rerank Key 和 `RERANK_BASE_URL` 已配置。
 - `USER_SETTINGS_ENCRYPTION_KEY` 不是 Fernet key，或与 `JWT_SECRET_KEY` 相同。
 - `DATABASE_URL` / `COMPOSE_DATABASE_URL` 仍含模板账号、密码或占位值。
 - `FRONTEND_PORT`、`BACKEND_PORT`、`POSTGRES_PORT` 未绑定到 `127.0.0.1` / `localhost`。
@@ -450,8 +447,8 @@ MODELS_DIR=/srv/firstrag/models
 | `ALLOW_PUBLIC_REGISTRATION` | 公开 demo 设为 `false`，只允许预置账号或受邀账号登录。 |
 | `USER_SETTINGS_ENCRYPTION_KEY` | 使用 Fernet key，并与 `JWT_SECRET_KEY` 分离；丢失后无法解密已保存的用户 API Key。 |
 | 聊天模型 provider / model / API Key | 登录后在“模型设置”页配置并加密保存；服务器 `.env` 不再保存 LLM provider Key。 |
-| 向量模型 provider / model / API Key / dimensions | 登录后在“模型设置”页配置并加密保存；切换 provider、model 或维度后需要重新向量化文件。 |
-| `RERANK_PROVIDER` / `RERANK_BASE_URL` / `RERANK_API_KEY` | 如启用阿里云 Qwen rerank，配置 provider、工作空间地址和可选专用 Key。 |
+| 向量模型 provider / model / API Key / dimensions | 登录后在“模型设置”页按厂商配置并加密保存；切换 provider、model 或维度后需要重新向量化文件。 |
+| Rerank provider / model / API Key / base_url | 登录后在“模型设置”页按厂商配置并加密保存；本地 rerank 不需要 API Key。 |
 | `ALLOW_USER_CUSTOM_LLM_BASE_URL` | 公开 demo 保持 `false`，避免用户通过自定义模型地址访问服务器内网。 |
 | `MAX_UPLOAD_FILE_SIZE_BYTES` | 公开 demo 建议调低到 10-20 MB，并与反向代理 body size 一致。 |
 | `USER_UPLOAD_MAX_FILES` / `USER_UPLOAD_MAX_BYTES` | 设置用户级文件数量和总容量上限；公开 demo 建议保守配置。 |

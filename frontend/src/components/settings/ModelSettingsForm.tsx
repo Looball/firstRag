@@ -11,23 +11,31 @@ import {
 import {
   DEFAULT_USER_EMBEDDING_SETTINGS,
   DEFAULT_USER_LLM_SETTINGS,
+  DEFAULT_USER_RERANK_SETTINGS,
   FALLBACK_EMBEDDING_PROVIDER_PRESETS,
   FALLBACK_PROVIDER_PRESETS,
+  FALLBACK_RERANK_PROVIDER_PRESETS,
   getSettingsMessage,
   isSuccessfulResponse,
   parseEmbeddingProviderPresets,
   parseEmbeddingSettingsTestResult,
   parseSettingsTestResult,
   parseProviderModels,
+  parseRerankProviderPresets,
+  parseRerankSettingsTestResult,
+  parseUserRerankSettings,
   parseUserEmbeddingSettings,
   parseUserLLMSettings,
   parseProviderPresets,
   toUserEmbeddingSettingsPayload,
   toUserLLMSettingsPayload,
+  toUserRerankSettingsPayload,
   type EmbeddingProviderPreset,
   type ModelProviderPreset,
+  type RerankProviderPreset,
   type UserEmbeddingSettings,
   type UserLLMSettings,
+  type UserRerankSettings,
 } from "@/lib/user-settings";
 
 type RequestState = "idle" | "loading" | "success" | "error";
@@ -69,6 +77,24 @@ function applyEmbeddingProviderCredentials(
   };
 }
 
+function applyRerankProviderCredentials(
+  settings: UserRerankSettings,
+  provider: RerankProviderPreset | undefined
+) {
+  if (!provider) {
+    return settings;
+  }
+
+  return {
+    ...settings,
+    model: settings.model || provider.defaultModel,
+    baseUrl: settings.baseUrl || provider.baseUrl,
+    hasApiKey: provider.hasApiKey,
+    apiKeyHint: provider.apiKeyHint,
+    requiresApiKey: provider.requiresApiKey,
+  };
+}
+
 export function ModelSettingsForm() {
   const [username, setUsername] = useState("");
   const [activeSettings, setActiveSettings] =
@@ -80,10 +106,16 @@ export function ModelSettingsForm() {
     useState<UserEmbeddingSettings | null>(null);
   const [embeddingSettings, setEmbeddingSettings] =
     useState<UserEmbeddingSettings>(DEFAULT_USER_EMBEDDING_SETTINGS);
+  const [activeRerankSettings, setActiveRerankSettings] =
+    useState<UserRerankSettings | null>(null);
+  const [rerankSettings, setRerankSettings] =
+    useState<UserRerankSettings>(DEFAULT_USER_RERANK_SETTINGS);
   const [apiKey, setApiKey] = useState("");
   const [embeddingApiKey, setEmbeddingApiKey] = useState("");
+  const [rerankApiKey, setRerankApiKey] = useState("");
   const [showApiKey, setShowApiKey] = useState(false);
   const [showEmbeddingApiKey, setShowEmbeddingApiKey] = useState(false);
+  const [showRerankApiKey, setShowRerankApiKey] = useState(false);
   const [modelCandidates, setModelCandidates] = useState<string[]>([]);
   const [isCustomModel, setIsCustomModel] = useState(false);
   const [providerPresets, setProviderPresets] = useState<ModelProviderPreset[]>(
@@ -92,12 +124,19 @@ export function ModelSettingsForm() {
   const [embeddingProviderPresets, setEmbeddingProviderPresets] = useState<
     EmbeddingProviderPreset[]
   >(FALLBACK_EMBEDDING_PROVIDER_PRESETS);
+  const [rerankProviderPresets, setRerankProviderPresets] = useState<
+    RerankProviderPreset[]
+  >(FALLBACK_RERANK_PROVIDER_PRESETS);
   const [isLoading, setIsLoading] = useState(true);
   const [saveState, setSaveState] = useState<RequestState>("idle");
   const [testState, setTestState] = useState<RequestState>("idle");
   const [embeddingSaveState, setEmbeddingSaveState] =
     useState<RequestState>("idle");
   const [embeddingTestState, setEmbeddingTestState] =
+    useState<RequestState>("idle");
+  const [rerankSaveState, setRerankSaveState] =
+    useState<RequestState>("idle");
+  const [rerankTestState, setRerankTestState] =
     useState<RequestState>("idle");
   const [modelLoadState, setModelLoadState] = useState<RequestState>("idle");
   const [notice, setNotice] = useState("");
@@ -115,6 +154,13 @@ export function ModelSettingsForm() {
       ),
     [embeddingProviderPresets, embeddingSettings.provider]
   );
+  const rerankProvider = useMemo(
+    () =>
+      rerankProviderPresets.find(
+        (item) => item.value === rerankSettings.provider
+      ),
+    [rerankProviderPresets, rerankSettings.provider]
+  );
   const requiresBaseUrl = provider?.requiresBaseUrl === true;
   const hasSavedApiKey = provider?.hasApiKey ?? settings.hasApiKey;
   const apiKeyHint = provider?.apiKeyHint ?? settings.apiKeyHint;
@@ -124,6 +170,14 @@ export function ModelSettingsForm() {
     embeddingProvider?.hasApiKey ?? embeddingSettings.hasApiKey;
   const embeddingApiKeyHint =
     embeddingProvider?.apiKeyHint ?? embeddingSettings.apiKeyHint;
+  const rerankRequiresBaseUrl = rerankProvider?.requiresBaseUrl === true;
+  const rerankRequiresApiKey =
+    rerankProvider?.requiresApiKey ?? rerankSettings.requiresApiKey;
+  const hasSavedRerankApiKey =
+    !rerankRequiresApiKey ||
+    (rerankProvider?.hasApiKey ?? rerankSettings.hasApiKey);
+  const rerankApiKeyHint =
+    rerankProvider?.apiKeyHint ?? rerankSettings.apiKeyHint;
 
   function redirectToLogin() {
     localStorage.removeItem(AUTH_STORAGE_KEY);
@@ -241,6 +295,8 @@ export function ModelSettingsForm() {
         providersResponse,
         embeddingResponse,
         embeddingProvidersResponse,
+        rerankResponse,
+        rerankProvidersResponse,
       ] = await Promise.all([
         fetch("/api/settings", {
           headers: { Authorization: authorization },
@@ -258,13 +314,23 @@ export function ModelSettingsForm() {
           headers: { Authorization: authorization },
           cache: "no-store",
         }),
+        fetch("/api/settings/rerank", {
+          headers: { Authorization: authorization },
+          cache: "no-store",
+        }),
+        fetch("/api/settings/rerank-providers", {
+          headers: { Authorization: authorization },
+          cache: "no-store",
+        }),
       ]);
 
       if (
         response.status === 401 ||
         providersResponse.status === 401 ||
         embeddingResponse.status === 401 ||
-        embeddingProvidersResponse.status === 401
+        embeddingProvidersResponse.status === 401 ||
+        rerankResponse.status === 401 ||
+        rerankProvidersResponse.status === 401
       ) {
         redirectToLogin();
         return;
@@ -275,11 +341,15 @@ export function ModelSettingsForm() {
         providersData,
         embeddingData,
         embeddingProvidersData,
+        rerankData,
+        rerankProvidersData,
       ] = await Promise.all([
         getResponseData(response),
         getResponseData(providersResponse),
         getResponseData(embeddingResponse),
         getResponseData(embeddingProvidersResponse),
+        getResponseData(rerankResponse),
+        getResponseData(rerankProvidersResponse),
       ]);
       const nextSettings = response.ok ? parseUserLLMSettings(data) : null;
       const presets = providersResponse.ok
@@ -290,6 +360,12 @@ export function ModelSettingsForm() {
         : null;
       const embeddingPresets = embeddingProvidersResponse.ok
         ? parseEmbeddingProviderPresets(embeddingProvidersData)
+        : null;
+      const nextRerankSettings = rerankResponse.ok
+        ? parseUserRerankSettings(rerankData)
+        : null;
+      const rerankPresets = rerankProvidersResponse.ok
+        ? parseRerankProviderPresets(rerankProvidersData)
         : null;
 
       if (nextSettings) {
@@ -318,6 +394,20 @@ export function ModelSettingsForm() {
       if (embeddingPresets) {
         setEmbeddingProviderPresets(embeddingPresets);
       }
+      if (nextRerankSettings) {
+        const nextRerankSettingsWithCredentialState =
+          applyRerankProviderCredentials(
+            nextRerankSettings,
+            rerankPresets?.find(
+              (item) => item.value === nextRerankSettings.provider
+            )
+          );
+        setActiveRerankSettings(nextRerankSettingsWithCredentialState);
+        setRerankSettings(nextRerankSettingsWithCredentialState);
+      }
+      if (rerankPresets) {
+        setRerankProviderPresets(rerankPresets);
+      }
     } catch {
       // 测试状态提示优先于刷新失败，不额外暴露后端错误信息。
     }
@@ -342,6 +432,8 @@ export function ModelSettingsForm() {
           providersResponse,
           embeddingResponse,
           embeddingProvidersResponse,
+          rerankResponse,
+          rerankProvidersResponse,
         ] = await Promise.all([
           fetch("/api/settings", {
             headers: { Authorization: authorization },
@@ -359,24 +451,38 @@ export function ModelSettingsForm() {
             headers: { Authorization: authorization },
             cache: "no-store",
           }),
+          fetch("/api/settings/rerank", {
+            headers: { Authorization: authorization },
+            cache: "no-store",
+          }),
+          fetch("/api/settings/rerank-providers", {
+            headers: { Authorization: authorization },
+            cache: "no-store",
+          }),
         ]);
         const [
           data,
           providersData,
           embeddingData,
           embeddingProvidersData,
+          rerankData,
+          rerankProvidersData,
         ] = await Promise.all([
           getResponseData(response),
           getResponseData(providersResponse),
           getResponseData(embeddingResponse),
           getResponseData(embeddingProvidersResponse),
+          getResponseData(rerankResponse),
+          getResponseData(rerankProvidersResponse),
         ]);
 
         if (
           response.status === 401 ||
           providersResponse.status === 401 ||
           embeddingResponse.status === 401 ||
-          embeddingProvidersResponse.status === 401
+          embeddingProvidersResponse.status === 401 ||
+          rerankResponse.status === 401 ||
+          rerankProvidersResponse.status === 401
         ) {
           redirectToLogin();
           return;
@@ -390,8 +496,11 @@ export function ModelSettingsForm() {
         const nextEmbeddingSettings = embeddingResponse.ok
           ? parseUserEmbeddingSettings(embeddingData)
           : null;
+        const nextRerankSettings = rerankResponse.ok
+          ? parseUserRerankSettings(rerankData)
+          : null;
 
-        if (!nextSettings || !nextEmbeddingSettings) {
+        if (!nextSettings || !nextEmbeddingSettings || !nextRerankSettings) {
           throw new Error("后端设置响应格式无效，请联系管理员。");
         }
 
@@ -400,6 +509,9 @@ export function ModelSettingsForm() {
           : null;
         const embeddingPresets = embeddingProvidersResponse.ok
           ? parseEmbeddingProviderPresets(embeddingProvidersData)
+          : null;
+        const rerankPresets = rerankProvidersResponse.ok
+          ? parseRerankProviderPresets(rerankProvidersData)
           : null;
 
         if (!isCancelled) {
@@ -418,12 +530,24 @@ export function ModelSettingsForm() {
             );
           setActiveEmbeddingSettings(nextEmbeddingSettingsWithCredentialState);
           setEmbeddingSettings(nextEmbeddingSettingsWithCredentialState);
+          const nextRerankSettingsWithCredentialState =
+            applyRerankProviderCredentials(
+              nextRerankSettings,
+              rerankPresets?.find(
+                (item) => item.value === nextRerankSettings.provider
+              )
+            );
+          setActiveRerankSettings(nextRerankSettingsWithCredentialState);
+          setRerankSettings(nextRerankSettingsWithCredentialState);
 
           if (presets) {
             setProviderPresets(presets);
           }
           if (embeddingPresets) {
             setEmbeddingProviderPresets(embeddingPresets);
+          }
+          if (rerankPresets) {
+            setRerankProviderPresets(rerankPresets);
           }
         }
       } catch (error) {
@@ -499,6 +623,32 @@ export function ModelSettingsForm() {
     );
   }
 
+  function updateRerankProvider(providerValue: string) {
+    const nextProvider = rerankProviderPresets.find(
+      (preset) => preset.value === providerValue
+    );
+
+    setRerankSettings((current) => ({
+      ...current,
+      provider: providerValue,
+      model: nextProvider?.defaultModel || "",
+      baseUrl: nextProvider?.baseUrl || "",
+      hasApiKey: nextProvider?.hasApiKey ?? false,
+      apiKeyHint: nextProvider?.apiKeyHint ?? null,
+      requiresApiKey: nextProvider?.requiresApiKey ?? true,
+      instruct: "",
+    }));
+    setRerankApiKey("");
+    setShowRerankApiKey(false);
+    setNotice(
+      nextProvider?.requiresApiKey === false
+        ? "本地 Rerank 不需要 API Key。"
+        : nextProvider?.hasApiKey
+          ? "该 Rerank 厂商已保存 API Key。"
+          : "该 Rerank 厂商尚未保存 API Key，请先输入 API Key。"
+    );
+  }
+
   function getPayload(requireModel: boolean) {
     if (requireModel && !settings.model.trim()) {
       throw new Error("请输入模型名称。");
@@ -554,6 +704,36 @@ export function ModelSettingsForm() {
       embeddingSettings,
       embeddingApiKey,
       embeddingRequiresBaseUrl
+    );
+  }
+
+  function getRerankPayload() {
+    if (!rerankSettings.model.trim()) {
+      throw new Error("请输入 Rerank 模型名称。");
+    }
+
+    if (rerankRequiresBaseUrl && !rerankSettings.baseUrl.trim()) {
+      throw new Error("Rerank API 地址不能为空。");
+    }
+
+    if (rerankRequiresApiKey && !hasSavedRerankApiKey && !rerankApiKey.trim()) {
+      throw new Error("请输入 Rerank API Key 后再继续。");
+    }
+
+    if (
+      rerankSettings.timeoutSeconds <= 0 ||
+      rerankSettings.timeoutSeconds > 600 ||
+      rerankSettings.maxRetries < 0 ||
+      rerankSettings.maxRetries > 10
+    ) {
+      throw new Error("请检查 Rerank 模型参数的取值范围。");
+    }
+
+    return toUserRerankSettingsPayload(
+      rerankSettings,
+      rerankApiKey,
+      rerankRequiresBaseUrl,
+      rerankRequiresApiKey
     );
   }
 
@@ -726,6 +906,104 @@ export function ModelSettingsForm() {
     }
   }
 
+  async function handleRerankTest() {
+    setRerankTestState("loading");
+    setNotice("");
+
+    try {
+      const payload = getRerankPayload();
+      const authState = parseAuthState(localStorage.getItem(AUTH_STORAGE_KEY));
+
+      if (!authState) {
+        redirectToLogin();
+        return;
+      }
+
+      const authorization = buildAuthorizationHeader(authState);
+      const response = await fetch("/api/settings/rerank", {
+        method: "POST",
+        headers: {
+          Authorization: authorization,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(payload),
+      });
+      const data = await getResponseData(response);
+
+      if (response.status === 401) {
+        redirectToLogin();
+        return;
+      }
+
+      const testResult = parseRerankSettingsTestResult(data);
+
+      if (!response.ok || !isSuccessfulResponse(data) || !testResult) {
+        throw new Error(getSettingsMessage(data, "Rerank 模型连接测试失败，请检查配置。"));
+      }
+
+      setRerankTestState("success");
+      setNotice(
+        testResult.topScore !== null
+          ? `${testResult.message}，测试分数 ${testResult.topScore.toFixed(4)}。`
+          : testResult.message
+      );
+    } catch (error) {
+      setRerankTestState("error");
+      setNotice(
+        error instanceof Error ? error.message : "Rerank 模型连接测试失败，请检查配置。"
+      );
+    } finally {
+      setShowRerankApiKey(false);
+    }
+  }
+
+  async function handleRerankSubmit() {
+    setRerankSaveState("loading");
+    setNotice("");
+
+    try {
+      const payload = getRerankPayload();
+      const authState = parseAuthState(localStorage.getItem(AUTH_STORAGE_KEY));
+
+      if (!authState) {
+        redirectToLogin();
+        return;
+      }
+
+      const authorization = buildAuthorizationHeader(authState);
+      const response = await fetch("/api/settings/rerank", {
+        method: "PATCH",
+        headers: {
+          Authorization: authorization,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(payload),
+      });
+      const data = await getResponseData(response);
+
+      if (response.status === 401) {
+        redirectToLogin();
+        return;
+      }
+
+      if (!response.ok || !isSuccessfulResponse(data)) {
+        throw new Error(getSettingsMessage(data, "保存 Rerank 模型设置失败，请稍后重试。"));
+      }
+
+      setRerankSaveState("success");
+      setNotice(getSettingsMessage(data, "Rerank 模型设置已保存。"));
+      await refreshSettingsAndProviders(authorization);
+    } catch (error) {
+      setRerankSaveState("error");
+      setNotice(
+        error instanceof Error ? error.message : "保存 Rerank 模型设置失败，请稍后重试。"
+      );
+    } finally {
+      setRerankApiKey("");
+      setShowRerankApiKey(false);
+    }
+  }
+
   function handleModelSelection(model: string) {
     if (model === CUSTOM_MODEL_VALUE) {
       setIsCustomModel(true);
@@ -879,6 +1157,43 @@ export function ModelSettingsForm() {
             </div>
           </section>
 
+          <section className="border-t border-[var(--line)] pt-7" aria-labelledby="rerank-title">
+            <div className="flex items-baseline justify-between gap-4"><p id="rerank-title" className="font-utility text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--ink-muted)]">Rerank 模型</p>{activeRerankSettings && <span className="text-xs text-[var(--ink-muted)]">当前 {activeRerankSettings.provider}</span>}</div>
+            <div className="mt-4 grid gap-5 md:grid-cols-2">
+              <label className="font-utility text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--ink-muted)]">厂商
+                <select value={rerankSettings.provider} onChange={(event) => updateRerankProvider(event.target.value)} className="research-focus mt-2 w-full border border-[var(--line)] bg-white px-3 py-3 text-sm normal-case tracking-normal text-[var(--foreground)]">
+                  {rerankProviderPresets.map((item) => <option key={item.value} value={item.value} disabled={!item.enabled}>{item.label}{item.enabled ? "" : "（暂不可用）"}</option>)}
+                </select>
+              </label>
+              <label className="font-utility text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--ink-muted)]">模型名
+                <input value={rerankSettings.model} onChange={(event) => setRerankSettings((current) => ({ ...current, model: event.target.value }))} placeholder={rerankProvider?.defaultModel || "输入 Rerank 模型名称"} className="research-focus mt-2 w-full border border-[var(--line)] bg-white px-3 py-3 text-sm normal-case tracking-normal text-[var(--foreground)]" />
+              </label>
+              {rerankRequiresBaseUrl && <label className="font-utility text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--ink-muted)]">API 地址
+                <input type="url" value={rerankSettings.baseUrl} onChange={(event) => setRerankSettings((current) => ({ ...current, baseUrl: event.target.value }))} placeholder="https://api.example.com/v1" className="research-focus mt-2 w-full border border-[var(--line)] bg-white px-3 py-3 text-sm normal-case tracking-normal text-[var(--foreground)]" />
+              </label>}
+              <label className="font-utility text-[10px] font-semibold uppercase tracking-[0.1em] text-[var(--ink-muted)]">超时（秒）
+                <input type="number" min="1" max="600" step="1" value={rerankSettings.timeoutSeconds} onChange={(event) => setRerankSettings((current) => ({ ...current, timeoutSeconds: Number(event.target.value) }))} className="research-focus mt-2 w-full border border-[var(--line)] bg-white px-3 py-3 text-sm normal-case tracking-normal text-[var(--foreground)]" />
+              </label>
+              <label className="font-utility text-[10px] font-semibold uppercase tracking-[0.1em] text-[var(--ink-muted)]">最大重试次数
+                <input type="number" min="0" max="10" step="1" value={rerankSettings.maxRetries} onChange={(event) => setRerankSettings((current) => ({ ...current, maxRetries: Number(event.target.value) }))} className="research-focus mt-2 w-full border border-[var(--line)] bg-white px-3 py-3 text-sm normal-case tracking-normal text-[var(--foreground)]" />
+              </label>
+              <label className="font-utility text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--ink-muted)] md:col-span-2">Instruction
+                <input value={rerankSettings.instruct} onChange={(event) => setRerankSettings((current) => ({ ...current, instruct: event.target.value }))} placeholder="可选：传给支持 instruct 的 rerank provider" className="research-focus mt-2 w-full border border-[var(--line)] bg-white px-3 py-3 text-sm normal-case tracking-normal text-[var(--foreground)]" />
+              </label>
+            </div>
+            {rerankRequiresApiKey && <div className="mt-5 border border-[var(--line)] bg-[var(--paper-muted)] p-5" aria-labelledby="rerank-api-key-title">
+              <div className="flex items-baseline justify-between gap-4"><p id="rerank-api-key-title" className="font-utility text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--ink-muted)]">Rerank API Key</p>{hasSavedRerankApiKey && <span className="text-xs font-semibold text-[var(--research)]">已保存 · {rerankApiKeyHint ?? "已保存"}</span>}</div>
+              <div className="mt-3 flex border border-[var(--line)] bg-white focus-within:border-[var(--research)] focus-within:ring-3 focus-within:ring-[var(--research)]/15">
+                <input type={showRerankApiKey ? "text" : "password"} value={rerankApiKey} onChange={(event) => setRerankApiKey(event.target.value)} autoComplete="off" placeholder={hasSavedRerankApiKey ? "已保存；填写可替换现有 Key" : "请输入 Rerank API Key"} className="min-w-0 flex-1 bg-transparent px-3 py-3 text-sm text-[var(--foreground)] outline-none" />
+                <button type="button" onClick={() => setShowRerankApiKey((current) => !current)} disabled={!rerankApiKey} title={rerankApiKey ? undefined : "已保存的 Key 不可查看"} className="border-l border-[var(--line)] px-4 text-xs font-semibold text-[var(--ink-muted)] hover:bg-[var(--paper-muted)] disabled:cursor-not-allowed disabled:text-[var(--line)]">{rerankApiKey ? (showRerankApiKey ? "隐藏" : "显示") : "不可查看"}</button>
+              </div>
+            </div>}
+            <div className="mt-4 flex flex-wrap gap-3">
+              <button type="button" onClick={() => void handleRerankTest()} disabled={rerankTestState === "loading" || rerankSaveState === "loading"} className="border border-[var(--research)] px-5 py-3 text-sm font-semibold text-[var(--research)] transition hover:bg-[var(--paper-muted)] disabled:border-[var(--line)] disabled:text-[var(--ink-muted)]">{rerankTestState === "loading" ? "测试中..." : "测试 Rerank 模型"}</button>
+              <button type="button" onClick={() => void handleRerankSubmit()} disabled={rerankSaveState === "loading" || rerankTestState === "loading"} className="bg-[var(--research)] px-5 py-3 text-sm font-semibold text-white transition hover:bg-[var(--research-dark)] disabled:bg-[var(--line)]">{rerankSaveState === "loading" ? "保存中..." : "保存 Rerank 模型"}</button>
+            </div>
+          </section>
+
           <section className="border-t border-[var(--line)] pt-7" aria-labelledby="generation-title">
             <div className="flex items-baseline justify-between gap-4"><p id="generation-title" className="font-utility text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--ink-muted)]">生成控制</p></div>
             <div className="mt-4 grid gap-4 sm:grid-cols-2">
@@ -898,7 +1213,7 @@ export function ModelSettingsForm() {
           </section>
 
           <div className="border-t border-[var(--line)] pt-6">
-            <p role="status" className={`min-h-5 text-sm ${saveState === "error" || testState === "error" || embeddingSaveState === "error" || embeddingTestState === "error" ? "text-[#9b3c29]" : "text-[var(--ink-muted)]"}`}>{notice || "保存后，工作台的下一次对话和向量化会使用当前账号的模型设置。"}</p>
+            <p role="status" className={`min-h-5 text-sm ${saveState === "error" || testState === "error" || embeddingSaveState === "error" || embeddingTestState === "error" || rerankSaveState === "error" || rerankTestState === "error" ? "text-[#9b3c29]" : "text-[var(--ink-muted)]"}`}>{notice || "保存后，工作台的下一次对话、向量化和检索精排会使用当前账号的模型设置。"}</p>
             <div className="mt-4 flex flex-wrap gap-3">
               <button type="button" onClick={() => void handleTest()} disabled={testState === "loading" || saveState === "loading"} className="border border-[var(--research)] px-5 py-3 text-sm font-semibold text-[var(--research)] transition hover:bg-[var(--paper-muted)] disabled:border-[var(--line)] disabled:text-[var(--ink-muted)]">{testState === "loading" ? "测试中..." : !settings.model.trim() ? "获取模型列表" : "测试聊天模型"}</button>
               <button type="submit" disabled={saveState === "loading" || testState === "loading"} className="bg-[var(--research)] px-5 py-3 text-sm font-semibold text-white transition hover:bg-[var(--research-dark)] disabled:bg-[var(--line)]">{saveState === "loading" ? "保存中..." : "保存聊天模型"}</button>

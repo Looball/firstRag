@@ -557,7 +557,10 @@ def get_hybrid_documents(
 
     rerank_started_at = perf_counter()
     try:
-        reranked_documents = get_reranker(reranker_model).rerank(
+        reranked_documents = get_reranker(
+            reranker_model,
+            user_id=user_id,
+        ).rerank(
             query=query,
             documents=fused_documents,
             top_k=k,

@@ -343,5 +343,13 @@ Authorization: Bearer <access_token>
 | `GET` | `/user/settings` | 当前模型设置。 |
 | `PATCH` | `/user/settings` | 保存模型设置。 |
 | `POST` | `/user/settings/test` | 测试当前或草稿设置。 |
+| `GET` | `/user/settings/embedding-providers` | 向量厂商目录和凭据状态。 |
+| `GET` | `/user/settings/embedding` | 当前向量模型设置。 |
+| `PATCH` | `/user/settings/embedding` | 保存向量模型设置。 |
+| `POST` | `/user/settings/embedding/test` | 测试当前或草稿向量模型设置。 |
+| `GET` | `/user/settings/rerank-providers` | Rerank 厂商目录和凭据状态。 |
+| `GET` | `/user/settings/rerank` | 当前 Rerank 模型设置。 |
+| `PATCH` | `/user/settings/rerank` | 保存 Rerank 模型设置。 |
+| `POST` | `/user/settings/rerank/test` | 测试当前或草稿 Rerank 模型设置。 |
 
 更细的设置页协议见 `backend/frontend_llm_settings_protocol.md` 和 `backend/user_settings_api.md`。

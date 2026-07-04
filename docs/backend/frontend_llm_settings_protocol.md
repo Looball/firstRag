@@ -22,6 +22,10 @@ Authorization: Bearer <access_token>
 | `GET /api/settings/embedding` | `GET /user/settings/embedding` | 读取当前向量模型设置 |
 | `PATCH /api/settings/embedding` | `PATCH /user/settings/embedding` | 保存当前向量模型设置 |
 | `POST /api/settings/embedding` | `POST /user/settings/embedding/test` | 测试向量模型连接 |
+| `GET /api/settings/rerank-providers` | `GET /user/settings/rerank-providers` | 读取 Rerank 厂商目录 |
+| `GET /api/settings/rerank` | `GET /user/settings/rerank` | 读取当前 Rerank 模型设置 |
+| `PATCH /api/settings/rerank` | `PATCH /user/settings/rerank` | 保存当前 Rerank 模型设置 |
+| `POST /api/settings/rerank` | `POST /user/settings/rerank/test` | 测试 Rerank 模型连接 |
 
 ## 页面初始化
 
@@ -33,11 +37,15 @@ const [
   providersResponse,
   embeddingSettingsResponse,
   embeddingProvidersResponse,
+  rerankSettingsResponse,
+  rerankProvidersResponse,
 ] = await Promise.all([
   fetch("/api/settings", { headers: { Authorization } }),
   fetch("/api/settings/providers", { headers: { Authorization } }),
   fetch("/api/settings/embedding", { headers: { Authorization } }),
   fetch("/api/settings/embedding-providers", { headers: { Authorization } }),
+  fetch("/api/settings/rerank", { headers: { Authorization } }),
+  fetch("/api/settings/rerank-providers", { headers: { Authorization } }),
 ]);
 ```
 
@@ -232,13 +240,55 @@ GET /api/settings/embedding
 
 切换向量模型 provider、model 或 dimensions 后，前端应提示用户重新向量化相关文件；后端会按用户和 embedding 配置隔离 Chroma collection。
 
+向量 provider 支持 `qwen`、`zhipuai`、`openai`、`voyage`、`cohere`、`jina` 和 `openai_compatible`。后端按 `(user_id, provider)` 保存多份向量 API Key，切换回已保存厂商时前端可省略 `api_key`。
+
+## Rerank 模型
+
+Rerank 模型设置与聊天模型、向量模型在同一个页面维护。provider 目录来自：
+
+```http
+GET /api/settings/rerank-providers
+```
+
+当前设置来自：
+
+```http
+GET /api/settings/rerank
+```
+
+保存请求：
+
+```json
+{
+  "provider": "voyage",
+  "model": "rerank-2.5",
+  "api_key": "仅当需要新增或替换 Key 时提交",
+  "timeout_seconds": 60,
+  "max_retries": 2
+}
+```
+
+测试请求走 `POST /api/settings/rerank`，成功响应会返回测试排序的最高分：
+
+```json
+{
+  "success": true,
+  "message": "Rerank 模型连接测试成功",
+  "provider": "voyage",
+  "model": "rerank-2.5",
+  "top_score": 0.93
+}
+```
+
+Rerank provider 支持 `local`、`qwen`、`voyage`、`cohere`、`jina` 和 `openai_compatible`。`local` 不需要 API Key；远程 provider 的 Key 按 `(user_id, provider)` 加密保存。`qwen` 和 `openai_compatible` 需要填写 `base_url`。
+
 ## 错误处理
 
 | 状态码 | 前端处理 |
 | --- | --- |
 | `400` | 展示 `detail`，通常是必填字段、厂商或参数校验问题。 |
 | `401` | 清理登录态并跳转登录。 |
-| `502` | 提示连接测试失败；随后重新加载聊天和向量模型设置。聊天模型测试前提交的新 Key 已被加密保存，用户无需重复输入。 |
+| `502` | 提示连接测试失败；随后重新加载聊天、向量和 Rerank 模型设置。聊天模型测试前提交的新 Key 已被加密保存，用户无需重复输入。 |
 
 个别兼容厂商不支持 `/models`。若用户已填写模型，且最小对话调用成功，接口仍返回成功并携带：
 

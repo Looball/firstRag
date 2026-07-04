@@ -12,6 +12,13 @@ from app.core.security import get_current_user_id
 from app.schemas.user_settings import (
     UpdateUserEmbeddingSettingsRequest,
     UpdateUserLLMSettingsRequest,
+    UpdateUserRerankSettingsRequest,
+)
+from app.services.rerank_settings_service import (
+    check_user_rerank_settings,
+    get_serialized_user_rerank_providers,
+    get_serialized_user_rerank_settings,
+    update_user_rerank_settings,
 )
 from app.services.user_settings_service import (
     check_user_llm_settings,
@@ -233,6 +240,90 @@ def test_user_embedding_settings(
         raise HTTPException(
             status_code=502,
             detail="向量模型连接测试失败，请检查模型配置和 API Key",
+        ) from exc
+
+    return {"success": True, **test_result}
+
+
+@router.get("/settings/rerank-providers")
+def get_user_rerank_settings_providers(
+    user_id: int = Depends(get_current_user_id),
+):
+    """返回可供当前用户选择的 rerank 模型厂商预设。"""
+    return {
+        "success": True,
+        "providers": get_serialized_user_rerank_providers(user_id),
+    }
+
+
+@router.get("/settings/rerank")
+def get_user_rerank_settings(
+    user_id: int = Depends(get_current_user_id),
+):
+    """获取当前用户的 rerank 模型设置，不返回 API Key 明文。"""
+    try:
+        settings = get_serialized_user_rerank_settings(user_id)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail=_sanitize_settings_error(exc),
+        ) from exc
+
+    return {"success": True, "settings": settings}
+
+
+@router.patch("/settings/rerank")
+def patch_user_rerank_settings(
+    req: UpdateUserRerankSettingsRequest,
+    user_id: int = Depends(get_current_user_id),
+):
+    """局部更新当前用户的 rerank 模型设置。"""
+    try:
+        settings = update_user_rerank_settings(
+            user_id,
+            req.model_dump(exclude_unset=True),
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail=_sanitize_settings_error(exc, req.api_key),
+        ) from exc
+
+    return {"success": True, "settings": settings}
+
+
+@router.post("/settings/rerank/test")
+def test_user_rerank_settings(
+    request: Request,
+    req: UpdateUserRerankSettingsRequest | None = None,
+    user_id: int = Depends(get_current_user_id),
+):
+    """测试已保存或临时提交的 rerank 模型设置。"""
+    enforce_rate_limit(
+        "rerank-test",
+        build_rate_limit_identifier(request, "user", user_id),
+        MODEL_TEST_RATE_LIMIT_MAX_REQUESTS,
+        API_RATE_LIMIT_WINDOW_SECONDS,
+        "Rerank 模型配置测试过于频繁，请稍后再试。",
+    )
+
+    try:
+        test_result = check_user_rerank_settings(
+            user_id,
+            req.model_dump(exclude_unset=True) if req else {},
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail=_sanitize_settings_error(
+                exc,
+                req.api_key if req else None,
+            ),
+        ) from exc
+    except Exception as exc:
+        raise HTTPException(
+            status_code=502,
+            detail="Rerank 模型连接测试失败，请检查模型配置和 API Key",
         ) from exc
 
     return {"success": True, **test_result}

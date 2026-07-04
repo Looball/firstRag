@@ -164,6 +164,61 @@ class UserLLMSettingsApiTests(unittest.TestCase):
         self.assertNotIn(submitted_api_key, detail)
         self.assertIn("[已脱敏]", detail)
 
+    def test_get_rerank_settings_returns_sanitized_settings(self) -> None:
+        """读取 rerank 设置接口只能返回已脱敏的模型配置。"""
+        settings = {
+            "provider": "voyage",
+            "model": "rerank-2.5",
+            "base_url": "https://api.voyageai.com/v1",
+            "instruct": None,
+            "has_api_key": True,
+            "api_key_hint": "••••abcd",
+            "requires_api_key": True,
+            "timeout_seconds": 60.0,
+            "max_retries": 2,
+        }
+        with patch(
+            "app.api.user_settings.get_serialized_user_rerank_settings",
+            return_value=settings,
+        ):
+            response = self.client.get("/user/settings/rerank")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json()["success"])
+        self.assertNotIn("api_key", response.json()["settings"])
+        self.assertEqual(
+            response.json()["settings"]["api_key_hint"],
+            "••••abcd",
+        )
+
+    def test_test_rerank_settings_is_rate_limited(self) -> None:
+        """Rerank 测试接口高频调用应返回 429 并停止访问 provider。"""
+        with patch(
+            "app.api.user_settings.MODEL_TEST_RATE_LIMIT_MAX_REQUESTS",
+            1,
+        ), patch(
+            "app.api.user_settings.API_RATE_LIMIT_WINDOW_SECONDS",
+            60,
+        ), patch(
+            "app.api.user_settings.check_user_rerank_settings",
+            return_value={
+                "message": "Rerank 模型连接测试成功",
+                "provider": "local",
+                "model": "models/rerankers/bge-reranker-base",
+                "top_score": 0.9,
+            },
+        ) as test_settings:
+            first = self.client.post("/user/settings/rerank/test")
+            second = self.client.post("/user/settings/rerank/test")
+
+        self.assertEqual(first.status_code, 200)
+        self.assertEqual(second.status_code, 429)
+        self.assertEqual(
+            second.json(),
+            {"detail": "Rerank 模型配置测试过于频繁，请稍后再试。"},
+        )
+        test_settings.assert_called_once()
+
 
 if __name__ == "__main__":
     unittest.main()

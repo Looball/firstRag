@@ -576,6 +576,8 @@ class RetrievalResilienceTests(unittest.TestCase):
         client_cls.assert_called_once_with(
             api_key="dashscope-test-key",
             base_url="https://workspace.cn-beijing.maas.aliyuncs.com/compatible-api/v1",
+            timeout=60.0,
+            max_retries=2,
         )
         client_cls.return_value.post.assert_called_once_with(
             "/reranks",

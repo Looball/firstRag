@@ -94,8 +94,8 @@ CHROMA_COLLECTION_NAME = os.environ.get(
     "langchain",
 )
 
-# Rerank provider 配置。默认仍为本地 CrossEncoder；切到 qwen/dashscope 时
-# 通过阿里云 OpenAI-compatible /reranks 接口远程精排。
+# Rerank provider 历史环境变量兼容。新版本远程 rerank 推荐在
+# 登录后的设置页按用户保存 provider/model/API Key。
 RERANK_PROVIDER = os.environ.get("RERANK_PROVIDER", "local").strip().lower()
 RERANK_MODEL = os.environ.get("RERANK_MODEL", "").strip()
 RERANK_BASE_URL = os.environ.get("RERANK_BASE_URL", "").strip()

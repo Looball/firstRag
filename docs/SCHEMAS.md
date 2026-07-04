@@ -19,7 +19,10 @@
 | `vector_index_jobs` | 向量化任务队列，支持租约、重试、取消和并发 worker。 |
 | `user_llm_settings` | 当前用户生效模型设置。 |
 | `user_llm_provider_credentials` | 按厂商保存的加密 API Key。 |
-| `user_embedding_settings` | 当前用户生效 embedding/向量模型设置，保存 provider、model、维度和加密 API Key。 |
+| `user_embedding_settings` | 当前用户生效 embedding/向量模型设置，保存 provider、model、维度和兼容旧数据的活动密文。 |
+| `user_embedding_provider_credentials` | 按向量厂商保存的加密 API Key。 |
+| `user_rerank_settings` | 当前用户生效 rerank 模型设置。 |
+| `user_rerank_provider_credentials` | 按 rerank 厂商保存的加密 API Key。 |
 
 数据库 SQL 位于 `backend/app/db/sql/`。当前项目尚未进入生产环境，已整理为
 `000_initial_schema.sql` 作为空库初始化基线；后续新增表、字段、索引或约束时，
@@ -45,6 +48,9 @@
 | `user_llm_settings` | `user_id`, `credential_mode`, `provider`, `model`, `base_url`, `api_key_ciphertext`, `encryption_key_version`, `temperature`, `max_tokens`, `timeout_seconds`, `max_retries`, `created_at`, `updated_at`, `api_key_hint` |
 | `user_llm_provider_credentials` | `user_id`, `provider`, `api_key_ciphertext`, `api_key_hint`, `encryption_key_version`, `created_at`, `updated_at` |
 | `user_embedding_settings` | `user_id`, `provider`, `model`, `base_url`, `dimensions`, `api_key_ciphertext`, `api_key_hint`, `encryption_key_version`, `timeout_seconds`, `max_retries`, `created_at`, `updated_at` |
+| `user_embedding_provider_credentials` | `user_id`, `provider`, `api_key_ciphertext`, `api_key_hint`, `encryption_key_version`, `created_at`, `updated_at` |
+| `user_rerank_settings` | `user_id`, `provider`, `model`, `base_url`, `instruct`, `timeout_seconds`, `max_retries`, `created_at`, `updated_at` |
+| `user_rerank_provider_credentials` | `user_id`, `provider`, `api_key_ciphertext`, `api_key_hint`, `encryption_key_version`, `created_at`, `updated_at` |
 | `knowledge_base_retrieval_settings` | `knowledge_base_id`, `user_id`, `retrieval_mode`, `enable_query_router`, `enable_rerank`, `top_k`, `vector_top_k`, `fulltext_top_k`, `rrf_k`, `rerank_score_threshold`, `created_at`, `updated_at` |
 | `message_feedback` | `id`, `user_id`, `message_id`, `rating`, `reason`, `note`, `metadata`, `created_at`, `updated_at` |
 | `message_source_feedback` | `id`, `user_id`, `message_id`, `source_index`, `knowledge_file_id`, `chunk_index`, `rating`, `note`, `metadata`, `created_at`, `updated_at` |
@@ -64,6 +70,7 @@
 | `UpdateRetrievalSettingsRequest` | `retrieval_mode`, `enable_query_router`, `enable_rerank`, `top_k`, `vector_top_k`, `fulltext_top_k`, `rrf_k`, `rerank_score_threshold` | 更新知识库检索策略。 |
 | `UpdateUserLLMSettingsRequest` | `credential_mode`, `provider`, `model`, `base_url`, `api_key`, `temperature`, `max_tokens`, `timeout_seconds`, `max_retries` | 更新或测试用户模型设置。 |
 | `UpdateUserEmbeddingSettingsRequest` | `provider`, `model`, `base_url`, `dimensions`, `api_key`, `timeout_seconds`, `max_retries` | 更新或测试用户 embedding/向量模型设置。 |
+| `UpdateUserRerankSettingsRequest` | `provider`, `model`, `base_url`, `instruct`, `api_key`, `timeout_seconds`, `max_retries` | 更新或测试用户 rerank 模型设置。 |
 
 ## 消息结构
 
@@ -207,7 +214,7 @@
 
 ## 凭据安全结构
 
-用户 API Key 只保存密文和脱敏提示：
+用户聊天、向量和 rerank API Key 只保存密文和脱敏提示：
 
 - `api_key_ciphertext`
 - `api_key_hint`

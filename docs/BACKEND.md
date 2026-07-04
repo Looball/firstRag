@@ -67,7 +67,7 @@ python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 | `llm_service.py` | OpenAI 兼容模型厂商预设、用户/平台配置解析。 |
 | `file_service.py` | 上传文件大小限制、SHA-256、落盘路径。 |
 | `documents/document_service.py` | 文档加载、切分、向量库构建。 |
-| `retrieval/*` | 向量检索、全文检索、RRF 融合、本地 CrossEncoder 或远程 Qwen rerank 精排。 |
+| `retrieval/*` | 向量检索、全文检索、RRF 融合、本地 CrossEncoder 或用户级远程 rerank 精排。 |
 | `vectors/*` | embedding 模型、向量化队列、索引生命周期。 |
 
 ## Worker

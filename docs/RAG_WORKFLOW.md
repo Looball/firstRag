@@ -17,7 +17,7 @@
 2. 使用 PostgreSQL advisory lock 避免同一文件并发索引。
 3. `document_service` 加载 PDF、Markdown 或文本内容。
 4. 文本切分为 chunk。
-5. 当前登录用户保存的 embedding provider 生成向量，支持阿里云 Qwen `text-embedding-v4` 和智谱 `embedding-3`。
+5. 当前登录用户保存的 embedding provider 生成向量，支持 Qwen、智谱、OpenAI、Voyage、Cohere、Jina 和自定义 OpenAI-compatible embedding API。用户可按厂商保存多份 API Key，当前生效配置决定实际调用的 provider/model/base_url。
 6. Chroma 保存向量。
 7. PostgreSQL `knowledge_file_chunks` 保存 chunk 正文和 metadata，用于全文检索。
 8. 更新文件状态和任务状态。
@@ -32,7 +32,7 @@
 6. 召回候选片段：
    - Chroma 向量检索和 PostgreSQL 全文检索并行粗召回。
    - RRF 融合多路结果。
-   - 可选 reranker 精排，默认本地 CrossEncoder，也可切换到阿里云 Qwen rerank API。
+   - 可选 reranker 精排，默认本地 CrossEncoder；也可在用户设置中切换到 Qwen、Voyage、Cohere、Jina 或自定义 rerank API。
 7. 用户配置的 OpenAI 兼容聊天模型流式生成回答。
 8. SSE 返回 token、sources、retrieval 诊断。
 9. 回答完成后持久化到 `messages`。
@@ -120,6 +120,11 @@ rerank 流程。
 query embedding 使用进程内短 TTL 缓存，key 由用户 ID、embedding provider、model、维度和归一化后的
 query 组成，用于减少 eval 重跑、短时间重复问题和多轮相近测试对 embedding provider 的
 重复调用。缓存只保存 query embedding；embedding 生成失败不会写入缓存，后续请求仍可重试。
+
+Rerank provider 由当前登录用户的 `user_rerank_settings` 决定；远程 provider 的 API Key
+按 `(user_id, provider)` 保存到 `user_rerank_provider_credentials`。本地 provider 不需要
+API Key；远程 provider 只在服务端调用时临时解密，前端只能看到 `has_api_key` 与
+`api_key_hint`。
 - `answer_stream_ms`：首个回答 token 后到回答完成的流式耗时。
 - `chat_stream_total_ms`：本轮后端流式回答总耗时。
 

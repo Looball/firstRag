@@ -24,6 +24,18 @@ export type UserEmbeddingSettings = {
   maxRetries: number;
 };
 
+export type UserRerankSettings = {
+  provider: string;
+  model: string;
+  baseUrl: string;
+  instruct: string;
+  hasApiKey: boolean;
+  apiKeyHint: string | null;
+  requiresApiKey: boolean;
+  timeoutSeconds: number;
+  maxRetries: number;
+};
+
 export type ModelProviderPreset = {
   value: string;
   label: string;
@@ -45,6 +57,18 @@ export type EmbeddingProviderPreset = {
   apiKeyHint: string | null;
 };
 
+export type RerankProviderPreset = {
+  value: string;
+  label: string;
+  baseUrl: string;
+  requiresBaseUrl: boolean;
+  requiresApiKey: boolean;
+  enabled: boolean;
+  defaultModel: string;
+  hasApiKey: boolean;
+  apiKeyHint: string | null;
+};
+
 export type SettingsTestResult = {
   message: string;
   models: string[];
@@ -56,6 +80,13 @@ export type EmbeddingSettingsTestResult = {
   provider: string;
   model: string;
   dimensions: number | null;
+};
+
+export type RerankSettingsTestResult = {
+  message: string;
+  provider: string;
+  model: string;
+  topScore: number | null;
 };
 
 export const FALLBACK_PROVIDER_PRESETS: ModelProviderPreset[] = [
@@ -83,6 +114,10 @@ export const DEFAULT_USER_LLM_SETTINGS: UserLLMSettings = {
 export const FALLBACK_EMBEDDING_PROVIDER_PRESETS: EmbeddingProviderPreset[] = [
   { value: "qwen", label: "通义千问向量", baseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1", requiresBaseUrl: false, enabled: true, defaultModel: "text-embedding-v4", hasApiKey: false, apiKeyHint: null },
   { value: "zhipuai", label: "智谱 Embedding", baseUrl: "", requiresBaseUrl: false, enabled: true, defaultModel: "embedding-3", hasApiKey: false, apiKeyHint: null },
+  { value: "openai", label: "OpenAI Embeddings", baseUrl: "https://api.openai.com/v1", requiresBaseUrl: false, enabled: true, defaultModel: "text-embedding-3-small", hasApiKey: false, apiKeyHint: null },
+  { value: "voyage", label: "Voyage AI Embeddings", baseUrl: "https://api.voyageai.com/v1", requiresBaseUrl: false, enabled: true, defaultModel: "voyage-4", hasApiKey: false, apiKeyHint: null },
+  { value: "cohere", label: "Cohere Embed", baseUrl: "https://api.cohere.com", requiresBaseUrl: false, enabled: true, defaultModel: "embed-v4.0", hasApiKey: false, apiKeyHint: null },
+  { value: "jina", label: "Jina Embeddings", baseUrl: "https://api.jina.ai/v1", requiresBaseUrl: false, enabled: true, defaultModel: "jina-embeddings-v3", hasApiKey: false, apiKeyHint: null },
 ];
 
 export const DEFAULT_USER_EMBEDDING_SETTINGS: UserEmbeddingSettings = {
@@ -92,6 +127,26 @@ export const DEFAULT_USER_EMBEDDING_SETTINGS: UserEmbeddingSettings = {
   dimensions: null,
   hasApiKey: false,
   apiKeyHint: null,
+  timeoutSeconds: 60,
+  maxRetries: 2,
+};
+
+export const FALLBACK_RERANK_PROVIDER_PRESETS: RerankProviderPreset[] = [
+  { value: "local", label: "本地 BGE Cross-Encoder", baseUrl: "", requiresBaseUrl: false, requiresApiKey: false, enabled: true, defaultModel: "models/rerankers/bge-reranker-base", hasApiKey: true, apiKeyHint: null },
+  { value: "qwen", label: "通义千问 Rerank", baseUrl: "", requiresBaseUrl: true, requiresApiKey: true, enabled: true, defaultModel: "qwen3-rerank", hasApiKey: false, apiKeyHint: null },
+  { value: "voyage", label: "Voyage AI Rerank", baseUrl: "https://api.voyageai.com/v1", requiresBaseUrl: false, requiresApiKey: true, enabled: true, defaultModel: "rerank-2.5", hasApiKey: false, apiKeyHint: null },
+  { value: "cohere", label: "Cohere Rerank", baseUrl: "https://api.cohere.com", requiresBaseUrl: false, requiresApiKey: true, enabled: true, defaultModel: "rerank-v3.5", hasApiKey: false, apiKeyHint: null },
+  { value: "jina", label: "Jina Reranker", baseUrl: "https://api.jina.ai/v1", requiresBaseUrl: false, requiresApiKey: true, enabled: true, defaultModel: "jina-reranker-v2-base-multilingual", hasApiKey: false, apiKeyHint: null },
+];
+
+export const DEFAULT_USER_RERANK_SETTINGS: UserRerankSettings = {
+  provider: "local",
+  model: "models/rerankers/bge-reranker-base",
+  baseUrl: "",
+  instruct: "",
+  hasApiKey: true,
+  apiKeyHint: null,
+  requiresApiKey: false,
   timeoutSeconds: 60,
   maxRetries: 2,
 };
@@ -158,6 +213,30 @@ function toEmbeddingProviderPreset(value: unknown): EmbeddingProviderPreset | nu
   };
 }
 
+function toRerankProviderPreset(value: unknown): RerankProviderPreset | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+
+  const provider = readString(value.value, readString(value.id, readString(value.provider))).trim();
+
+  if (!provider) {
+    return null;
+  }
+
+  return {
+    value: provider,
+    label: readString(value.label, readString(value.display_name, readString(value.name, provider))).trim(),
+    baseUrl: readString(value.base_url),
+    requiresBaseUrl: value.requires_base_url === true,
+    requiresApiKey: value.requires_api_key === true,
+    enabled: value.enabled !== false,
+    defaultModel: readString(value.default_model),
+    hasApiKey: value.has_api_key === true,
+    apiKeyHint: readApiKeyHint(value.api_key_hint),
+  };
+}
+
 export function parseProviderPresets(value: unknown) {
   if (!isRecord(value)) {
     return null;
@@ -198,6 +277,28 @@ export function parseEmbeddingProviderPresets(value: unknown) {
   const presets = candidates
     .map(toEmbeddingProviderPreset)
     .filter((preset): preset is EmbeddingProviderPreset => preset !== null);
+
+  return presets.length > 0 ? presets : null;
+}
+
+export function parseRerankProviderPresets(value: unknown) {
+  if (!isRecord(value)) {
+    return null;
+  }
+
+  const candidates = Array.isArray(value.providers)
+    ? value.providers
+    : Array.isArray(value.data)
+      ? value.data
+      : null;
+
+  if (!candidates) {
+    return null;
+  }
+
+  const presets = candidates
+    .map(toRerankProviderPreset)
+    .filter((preset): preset is RerankProviderPreset => preset !== null);
 
   return presets.length > 0 ? presets : null;
 }
@@ -291,6 +392,44 @@ export function toUserEmbeddingSettingsPayload(
   };
 }
 
+export function parseUserRerankSettings(value: unknown): UserRerankSettings | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+
+  const settings = isRecord(value.settings) ? value.settings : value;
+  return {
+    provider: readString(settings.provider, DEFAULT_USER_RERANK_SETTINGS.provider),
+    model: readString(settings.model, DEFAULT_USER_RERANK_SETTINGS.model),
+    baseUrl: readString(settings.base_url),
+    instruct: readString(settings.instruct),
+    hasApiKey: settings.has_api_key === true,
+    apiKeyHint: readApiKeyHint(settings.api_key_hint),
+    requiresApiKey: settings.requires_api_key === true,
+    timeoutSeconds: readNumber(settings.timeout_seconds, DEFAULT_USER_RERANK_SETTINGS.timeoutSeconds),
+    maxRetries: readNumber(settings.max_retries, DEFAULT_USER_RERANK_SETTINGS.maxRetries),
+  };
+}
+
+export function toUserRerankSettingsPayload(
+  settings: UserRerankSettings,
+  apiKey: string,
+  requiresBaseUrl: boolean,
+  requiresApiKey: boolean
+) {
+  const trimmedApiKey = apiKey.trim();
+
+  return {
+    provider: settings.provider.trim(),
+    model: settings.model.trim(),
+    ...(requiresBaseUrl ? { base_url: settings.baseUrl.trim() } : {}),
+    ...(settings.instruct.trim() ? { instruct: settings.instruct.trim() } : {}),
+    ...(requiresApiKey && trimmedApiKey ? { api_key: trimmedApiKey } : {}),
+    timeout_seconds: settings.timeoutSeconds,
+    max_retries: settings.maxRetries,
+  };
+}
+
 export function getSettingsMessage(value: unknown, fallback: string) {
   if (!isRecord(value)) {
     return fallback;
@@ -340,6 +479,20 @@ export function parseEmbeddingSettingsTestResult(value: unknown): EmbeddingSetti
     provider: readString(value.provider),
     model: readString(value.model),
     dimensions: readNumber(value.dimensions, 0) || null,
+  };
+}
+
+export function parseRerankSettingsTestResult(value: unknown): RerankSettingsTestResult | null {
+  if (!isRecord(value) || value.success !== true) {
+    return null;
+  }
+  const topScore = readNumber(value.top_score, Number.NaN);
+
+  return {
+    message: readString(value.message, "Rerank 模型连接测试成功"),
+    provider: readString(value.provider),
+    model: readString(value.model),
+    topScore: Number.isFinite(topScore) ? topScore : null,
   };
 }
 

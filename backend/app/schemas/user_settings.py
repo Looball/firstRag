@@ -33,3 +33,17 @@ class UpdateUserEmbeddingSettingsRequest(BaseModel):
     api_key: str | None = Field(default=None, min_length=1, max_length=2000)
     timeout_seconds: float | None = Field(default=None, gt=0, le=600)
     max_retries: int | None = Field(default=None, ge=0, le=10)
+
+
+class UpdateUserRerankSettingsRequest(BaseModel):
+    """更新用户 rerank 模型设置的局部请求。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    provider: str | None = Field(default=None, max_length=50)
+    model: str | None = Field(default=None, max_length=200)
+    base_url: str | None = Field(default=None, max_length=500)
+    instruct: str | None = Field(default=None, max_length=1000)
+    api_key: str | None = Field(default=None, min_length=1, max_length=2000)
+    timeout_seconds: float | None = Field(default=None, gt=0, le=600)
+    max_retries: int | None = Field(default=None, ge=0, le=10)

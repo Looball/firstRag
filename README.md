@@ -75,7 +75,7 @@ Docker 中的 `backend`、`migrate` 和 `worker` 复用精简后的 Python runti
 | 数据库 | PostgreSQL |
 | 向量库 | Chroma |
 | RAG 编排 | LangChain / LCEL |
-| 检索 | 向量检索、PostgreSQL 全文检索、RRF、可选 CrossEncoder 或阿里云 Qwen API rerank |
+| 检索 | 向量检索、PostgreSQL 全文检索、RRF、可选本地 CrossEncoder 或用户级远程 rerank |
 | 模型接口 | OpenAI 兼容协议，支持 DeepSeek、Qwen、Zhipu、Kimi、Doubao、Minimax 等 |
 | 任务处理 | PostgreSQL 队列 + 独立 vector index worker |
 
@@ -89,7 +89,7 @@ Docker 中的 `backend`、`migrate` 和 `worker` 复用精简后的 Python runti
 conda activate firstrag
 ```
 
-复制环境变量模板，并按需填写数据库、JWT 和用户凭据加密密钥。聊天模型和向量模型的 provider、model、API Key 都在用户登录后的“模型设置”页保存，不再从 `.env` 读取；Docker 和后端无需这些 provider Key 也能启动。只有启用远程 Qwen rerank 时，才需要在 `.env` 中配置对应的 rerank 地址和 Key。
+复制环境变量模板，并按需填写数据库、JWT 和用户凭据加密密钥。聊天模型、向量模型和远程 rerank 的 provider、model、API Key 都在用户登录后的“模型设置”页保存，不再从 `.env` 读取；Docker 和后端无需这些 provider Key 也能启动。
 
 ```bash
 cp .env.example .env
@@ -97,7 +97,7 @@ cp .env.example .env
 
 后端运行时会读取仓库根目录的 `.env`。
 
-首次登录后，请先进入“模型设置”配置聊天模型和向量模型；未配置前可以登录和上传文件，但聊天模型调用与向量化会提示补充配置。
+首次登录后，请先进入“模型设置”配置聊天模型和向量模型；如需远程 rerank，也在同页配置。未配置前可以登录和上传文件，但聊天模型调用与向量化会提示补充配置。
 
 启动完整本地环境：
 

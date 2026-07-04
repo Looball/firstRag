@@ -10,12 +10,12 @@ Authorization: Bearer <access_token>
 
 ## 建议的前端交互流程
 
-1. 页面加载时并行调用聊天模型设置和向量模型设置：`GET /user/settings/providers`、`GET /user/settings`、`GET /user/settings/embedding-providers`、`GET /user/settings/embedding`。
+1. 页面加载时并行调用聊天、向量和 rerank 模型设置：`GET /user/settings/providers`、`GET /user/settings`、`GET /user/settings/embedding-providers`、`GET /user/settings/embedding`、`GET /user/settings/rerank-providers`、`GET /user/settings/rerank`。
 2. 用 provider 目录渲染厂商下拉框；`enabled: false` 的选项应禁用或隐藏。
-3. 聊天模型和向量模型都必须由当前登录用户配置 API Key，不再支持从服务器环境变量读取平台默认 Key。
-4. 点击聊天模型“测试连接”时，调用 `POST /user/settings/test`；点击向量模型“测试连接”时，调用 `POST /user/settings/embedding/test`。
-5. 测试成功后，分别调用 `PATCH /user/settings` 和 `PATCH /user/settings/embedding` 保存设置。
-6. 保存后再次读取设置或直接使用 `PATCH` 返回的 `settings` 更新页面。后续聊天、向量化和向量检索会自动使用该用户的新设置。
+3. 聊天模型、向量模型和远程 rerank 模型都必须由当前登录用户配置 API Key；本地 rerank 不需要 Key。
+4. 点击聊天模型“测试连接”时，调用 `POST /user/settings/test`；点击向量模型“测试连接”时，调用 `POST /user/settings/embedding/test`；点击 rerank“测试连接”时，调用 `POST /user/settings/rerank/test`。
+5. 测试成功后，分别调用 `PATCH /user/settings`、`PATCH /user/settings/embedding` 和 `PATCH /user/settings/rerank` 保存设置。
+6. 保存后再次读取设置或直接使用 `PATCH` 返回的 `settings` 更新页面。后续聊天、向量化、向量检索和 rerank 精排会自动使用该用户的新设置。
 
 ## 1. 获取厂商目录
 
@@ -180,8 +180,6 @@ POST /user/settings/test
 | `429` | 测试或模型列表请求过于频繁；读取 `Retry-After` 后再允许重试。 |
 | `502` | 仅出现在测试连接失败时；提示用户检查 Key、模型名与网络，不展示服务端异常细节。 |
 
-## 与聊天接口的关系
-
 ## 5. 向量模型设置
 
 向量模型 provider 目录：
@@ -265,10 +263,98 @@ Content-Type: application/json
 
 切换向量模型 provider、model 或 dimensions 后，已有文件需要重新向量化。后端会按用户和 embedding 配置隔离 Chroma collection，避免不同维度的向量写入同一 collection。
 
+当前内置向量 provider：`qwen`、`zhipuai`、`openai`、`voyage`、`cohere`、`jina`、`openai_compatible`。用户可按厂商保存多份 API Key，切换回已保存厂商时可省略 `api_key`。`openai_compatible` 仅在服务端开启 `ALLOW_USER_CUSTOM_LLM_BASE_URL=true` 后可用。
+
+## 6. Rerank 模型设置
+
+Rerank provider 目录：
+
+```http
+GET /user/settings/rerank-providers
+```
+
+响应示例：
+
+```json
+{
+  "success": true,
+  "providers": [
+    {
+      "id": "local",
+      "name": "本地 BGE Cross-Encoder",
+      "base_url": null,
+      "requires_base_url": false,
+      "requires_api_key": false,
+      "enabled": true,
+      "default_model": "models/rerankers/bge-reranker-base",
+      "has_api_key": true,
+      "api_key_hint": null
+    },
+    {
+      "id": "voyage",
+      "name": "Voyage AI Rerank",
+      "base_url": "https://api.voyageai.com/v1",
+      "requires_base_url": false,
+      "requires_api_key": true,
+      "enabled": true,
+      "default_model": "rerank-2.5",
+      "has_api_key": false,
+      "api_key_hint": null
+    }
+  ]
+}
+```
+
+读取当前 rerank 设置：
+
+```http
+GET /user/settings/rerank
+```
+
+保存 rerank 设置：
+
+```http
+PATCH /user/settings/rerank
+Content-Type: application/json
+```
+
+```json
+{
+  "provider": "voyage",
+  "model": "rerank-2.5",
+  "api_key": "用户当前输入的 Rerank API Key",
+  "timeout_seconds": 60,
+  "max_retries": 2
+}
+```
+
+测试 rerank 设置：
+
+```http
+POST /user/settings/rerank/test
+Content-Type: application/json
+```
+
+成功响应：
+
+```json
+{
+  "success": true,
+  "message": "Rerank 模型连接测试成功",
+  "provider": "voyage",
+  "model": "rerank-2.5",
+  "top_score": 0.93
+}
+```
+
+当前内置 rerank provider：`local`、`qwen`、`voyage`、`cohere`、`jina`、`openai_compatible`。`local` 使用本地 Cross-Encoder，不保存 API Key；远程 provider 的 Key 按 `(user_id, provider)` 加密保存。`qwen` 和 `openai_compatible` 需要填写 `base_url`。
+
 ## 与聊天和向量化接口的关系
 
 `/chat` 会按当前登录用户读取聊天模型设置。个人配置的 Key 会在服务端解密后用于模型调用，前端无需也不应在聊天请求中再次传递 API Key。若已保存配置无效，`/chat` 返回 `400`，并且不会创建本轮消息记录。
 
 向量化任务会按当前登录用户读取向量模型设置。未配置向量模型时，提交向量化任务会返回 `400`，提示先配置向量模型 API Key。
 
-完整 API Key 只允许在用户输入后随聊天模型或向量模型的保存/测试接口提交。后端仅持久化密文和 `api_key_hint`，错误响应会对提交的 Key、`api_key=...` 和 Bearer token 形态文本做脱敏处理，不回显明文。
+Hybrid retrieval 会按当前登录用户读取 rerank 模型设置；若远程 rerank 调用失败，会降级为 RRF 融合结果并写入 retrieval diagnostics。
+
+完整 API Key 只允许在用户输入后随聊天模型、向量模型或 rerank 模型的保存/测试接口提交。后端仅持久化密文和 `api_key_hint`，错误响应会对提交的 Key、`api_key=...` 和 Bearer token 形态文本做脱敏处理，不回显明文。
