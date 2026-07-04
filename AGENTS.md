@@ -224,34 +224,33 @@ FirstRAG/
 
 ## 12. Testing Requirements
 
-- 后端测试优先在 `backend/` 下运行。
-- Python 环境使用 conda，当前环境名为 `firstrag`。
-- 轻量语法检查：
+- 默认验证路径改为 Docker Compose。每次完成代码或配置修改后，先在仓库根目录构建并启动容器：
 
 ```bash
-cd backend
-conda activate firstrag
-python -m compileall app
+docker compose up -d --build
 ```
 
-- 后端测试：
+- 容器启动后检查服务状态：
 
 ```bash
-cd backend
-conda activate firstrag
-python -m pytest tests
+docker compose ps
 ```
 
-- 前端检查：
+- 查看关键服务日志，确认 `migrate` 成功结束，`backend`、`worker`、`frontend` 和 `postgres` 没有启动错误：
 
 ```bash
-cd frontend
-npm install
-npm run lint
-npm run build
+docker compose logs --tail=100 migrate backend worker frontend postgres
 ```
 
-- 如果依赖缺失、服务不可用或外部 API Key 不可用，应在最终回复中明确说明未运行的检查和原因。
+- 涉及数据库结构、部署配置或公开 demo 前置检查时，补充运行：
+
+```bash
+conda run -n firstrag python scripts/production_preflight.py --env-file .env --migration-method compose
+```
+
+- 涉及后端 API、前端页面、RAG、上传、向量化或认证改动时，应基于已启动的容器做 smoke test；至少覆盖相关服务健康、登录、上传小文件、向量化、提问和 sources 展示中受影响的链路。
+- 本地 conda / npm 命令仅作为补充排查手段或在用户明确要求时运行，不再作为每次验证的默认构建方式。
+- 如果 Docker、依赖、服务、数据库或外部 API Key 不可用，应在最终回复中明确说明未运行或失败的检查和原因。
 
 ## 13. Common Tasks
 
