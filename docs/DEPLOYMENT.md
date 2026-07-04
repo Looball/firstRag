@@ -577,8 +577,9 @@ conda run -n firstrag python scripts/demo_cleanup.py \
 ### 当前阻塞项
 
 - 尚未选择真实服务器、域名和 TLS 入口。
+- 尚未准备生产 `.env`；本地 preflight 已能阻止模板数据库密码、过短 JWT secret 和非生产端口暴露。
 - `deploy/nginx/` 已提供公网反向代理模板，尚需在真实服务器替换域名、证书路径并完成 `nginx -t`。
-- 尚未落地注册访问控制、登录/上传/聊天限流和自动清理脚本。
+- 后端注册控制、登录/上传/聊天限流和 demo cleanup 脚本已具备；仍需在真实反向代理层落地公网 IP 级限流。
 - 尚未创建受控演示账号和脱敏样例知识库。
 - 尚未完成公网环境的 smoke test 与真实 RAG eval。
 

@@ -116,7 +116,7 @@
 | `T-048` | `PLAN-20260703-01` | `P1` | `Done` | 补齐公网反向代理配置 | 2026-07-03 | `309ef7c` |
 | `T-049` | `PLAN-20260703-01` | `P0` | `Done` | 增加公开环境注册控制 | 2026-07-04 | `5ccc8a2` |
 | `T-050` | `PLAN-20260703-01` | `P0` | `Done` | 增加 demo 数据清理脚本 | `2026-07-04` | `scripts/demo_cleanup.py`、`docs/DEPLOYMENT.md` |
-| `T-051` | `PLAN-20260703-01` | `P2` | `Todo` | 部署到受控 staging/demo 环境 | - | - |
+| `T-051` | `PLAN-20260703-01` | `P2` | `Blocked` | 部署到受控 staging/demo 环境 | 2026-07-04 | 缺少真实服务器、域名/TLS 和生产 `.env` |
 | `T-052` | `PLAN-20260703-01` | `P2` | `Todo` | 完成公网 smoke test 与真实 RAG eval | - | - |
 | `T-053` | 用户要求 | `P1` | `Done` | 用户登录后配置 LLM 与向量模型 API | 2026-07-03 | `6124b2d` |
 
@@ -1779,9 +1779,18 @@ conda run -n firstrag python scripts/demo_cleanup.py --dry-run
 
 - 来源计划：`PLAN-20260703-01`
 - 优先级：`P2`
-- 状态：`Todo`
+- 状态：`Blocked`
 - 背景：当前用户决策是暂不部署；本任务仅记录资源就绪后的执行步骤，不在没有服务器、域名和 TLS 方案前启动。
 - 目标：在真实服务器上完成受控 staging/demo 环境部署，并保持 backend、worker、PostgreSQL、uploads、vector_db 和 models 的持久化边界清晰。
+- 执行尝试：`2026-07-04`
+- 当前阻塞：
+  - 尚未提供真实云服务器、域名和 TLS 入口。
+  - 当前 `.env` 未达到生产要求，production preflight 已拦截模板数据库密码和过短 JWT secret。
+  - 当前本机 Compose 服务端口绑定为 `0.0.0.0:3000/8000/5432`，不满足公开 demo 只暴露 80/443、backend/PostgreSQL 不直接暴露的验收标准。
+- 已验证：
+  - `docker compose config --quiet` 通过。
+  - `conda run -n firstrag python scripts/production_preflight.py --env-file .env --migration-method compose --skip-migration-dry-run` 正确失败，未输出真实 secret。
+  - `docker compose ps` 可读取当前本机服务状态，但当前服务不是合格的受控 staging/demo 部署。
 - 启动条件：
   - 已选择云服务器、域名和 TLS 入口。
   - 已准备生产 `.env`、非默认 secret、provider Key、持久化目录和 reranker 模型目录。
