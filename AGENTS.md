@@ -254,7 +254,22 @@ conda run -n firstrag python scripts/production_preflight.py --env-file .env --m
 
 ## 13. Common Tasks
 
-### 启动后端
+### 启动完整应用
+
+```bash
+docker compose up -d --build
+```
+
+默认访问 `http://localhost:3000`。FastAPI backend、Next.js frontend、PostgreSQL、migration 和 vector index worker 均由 Compose 管理。
+
+### 查看服务状态和日志
+
+```bash
+docker compose ps
+docker compose logs --tail=100 migrate backend worker frontend postgres
+```
+
+### 本地调试后端
 
 ```bash
 cd backend
@@ -262,7 +277,9 @@ conda activate firstrag
 python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
-### 启动前端
+本地单独启动 FastAPI 只用于专项调试；常规验证仍以 Docker Compose 为准。
+
+### 本地调试前端
 
 ```bash
 cd frontend
@@ -270,13 +287,17 @@ npm install
 npm run dev
 ```
 
-### 启动 vector index worker
+本地单独启动 Next.js 只用于页面专项调试；常规验证仍以 Docker Compose 为准。
+
+### 本地调试 vector index worker
 
 ```bash
 cd backend
 conda activate firstrag
 python -m app.workers.vector_index_worker
 ```
+
+本地单独启动 worker 只用于专项排查；常规验证仍以 Docker Compose 为准。
 
 ### 新增 API
 

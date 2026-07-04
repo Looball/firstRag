@@ -23,13 +23,23 @@ frontend/
 
 ## 启动
 
+默认在仓库根目录通过 Docker Compose 启动完整链路：
+
+```bash
+docker compose up -d --build
+docker compose ps
+docker compose logs --tail=100 migrate backend worker frontend postgres
+```
+
+默认访问 `http://localhost:3000`。常规验证应基于 Compose 中的 Next.js frontend service。
+
+本地单独启动 Next.js 仅用于页面专项调试：
+
 ```bash
 cd frontend
 npm install
 npm run dev
 ```
-
-默认访问 `http://localhost:3000`。
 
 ## 普通模式与高级模式
 

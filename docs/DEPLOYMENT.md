@@ -32,15 +32,22 @@ cp .env.example .env
 
 ## 本地启动
 
-### 1. 启动后端
+### 1. 启动完整 Compose 环境
 
 ```bash
-cd backend
-conda activate firstrag
-python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+docker compose up -d --build
 ```
 
-后端默认读取仓库根目录 `.env`。如果本地数据库为空，请先运行迁移脚本初始化当前完整 schema；后续数据库结构变化会从 `001_xxx.sql` 开始追加增量 migration。
+Compose 会启动 PostgreSQL、migration、FastAPI backend、Next.js frontend 和 vector index worker。`migrate` service 会先初始化或升级当前完整 schema；后续数据库结构变化会从 `001_xxx.sql` 开始追加增量 migration。
+
+启动后检查服务状态和关键日志：
+
+```bash
+docker compose ps
+docker compose logs --tail=100 migrate backend worker frontend postgres
+```
+
+默认访问 `http://localhost:3000`。后端、前端和 worker 的常规验证都应基于 Compose 容器；本地 conda / npm 启动仅用于专项调试。
 
 ### 数据库初始化与迁移
 
@@ -67,7 +74,17 @@ conda run -n firstrag python scripts/migrate_db.py
 脚本会自动创建 `schema_migrations` 记录表。已执行文件的 checksum 如果发生变化，
 脚本会停止并提示不一致，避免继续执行后续 migration。
 
-### 2. 启动前端
+### 2. 可选：本地调试后端
+
+```bash
+cd backend
+conda activate firstrag
+python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+```
+
+后端默认读取仓库根目录 `.env`。本地单独启动后端只用于专项排查；常规验证请使用 Docker Compose。
+
+### 3. 可选：本地调试前端
 
 ```bash
 cd frontend
@@ -75,9 +92,9 @@ npm install
 npm run dev
 ```
 
-默认访问 `http://localhost:3000`。前端 API route 默认代理到 `http://127.0.0.1:8000`。
+前端 API route 默认代理到 `http://127.0.0.1:8000`。本地单独启动前端只用于页面专项调试；常规验证请使用 Docker Compose。
 
-### 3. 启动 vector index worker
+### 4. 可选：本地调试 vector index worker
 
 上传文件并需要异步向量化时必须启动 worker：
 
@@ -87,33 +104,33 @@ conda activate firstrag
 python -m app.workers.vector_index_worker
 ```
 
-只做登录、模型设置、普通聊天 UI 调整、静态前端开发时，可以不启动 worker。涉及文件上传、自动向量化、删除向量、indexing eval 或 RAG 真实回归时，应启动 worker。
+本地单独启动 worker 只用于专项排查。涉及文件上传、自动向量化、删除向量、indexing eval 或 RAG 真实回归时，默认通过 Docker Compose 启动并验证 worker。
 
 ## 单人开发日常流程
 
 推荐顺序：
 
 1. 同步代码后检查 `.env` 是否仍符合本地环境。
-2. 启动后端和前端。
-3. 涉及文件向量化或真实 eval 时启动 worker。
+2. 运行 `docker compose up -d --build` 启动完整链路。
+3. 运行 `docker compose ps` 和 `docker compose logs --tail=100 migrate backend worker frontend postgres` 检查状态。
 4. 完成代码或文档修改。
-5. 先运行静态验收。
-6. 涉及真实链路时再运行完整验收。
+5. 基于 Compose 容器完成相关 smoke test。
+6. 涉及真实链路时再运行 eval / acceptance 脚本作为补充验收。
 7. 检查 `git status --short`，只提交当前任务相关文件。
 8. push 前确认没有 `.env`、上传文件、向量库、模型缓存或 eval 历史 JSON 被提交。
 
-静态验收命令：
+补充静态检查命令：
 
 ```bash
 scripts/acceptance_check.sh --skip-real-eval
 ```
 
-静态验收默认会运行 migration 文件检查、后端 compileall、后端 unittest、前端
-lint、前端单测和前端 build。如果当前环境配置了 `DATABASE_URL` 或
+该脚本会运行 migration 文件检查、后端 compileall、后端 unittest、前端
+lint、前端单测和前端 build，作为 Compose 验证后的补充检查。如果当前环境配置了 `DATABASE_URL` 或
 `COMPOSE_DATABASE_URL`，脚本会额外执行 migration dry-run；如果没有数据库连接，
 则只检查本地 migration 文件列表并提示跳过 dry-run。
 
-完整验收命令：
+补充真实链路验收命令：
 
 ```bash
 FIRSTRAG_EVAL_USERNAME=你的用户名 \
@@ -121,7 +138,7 @@ FIRSTRAG_EVAL_PASSWORD=你的密码 \
 scripts/acceptance_check.sh
 ```
 
-完整验收会额外运行：
+该命令会额外运行：
 
 - `scripts/rag_eval_gate.sh`
 - `scripts/eval_indexing.py`
@@ -130,7 +147,7 @@ scripts/acceptance_check.sh
 
 - 只改文档、类型、纯前端展示或单元测试。
 - 后端服务、worker、数据库、模型 API Key 或真实账号不可用。
-- 只需要 push 前快速确认 lint/build/unit test。
+- 已经完成 Compose 构建启动和相关 smoke test，只需要补充确认 lint/build/unit test。
 
 必须跑真实验收的场景：
 
@@ -168,7 +185,7 @@ CI 覆盖：
 仓库根目录提供本地 compose 方案。默认后端镜像使用 `backend/requirements.txt` 的最小依赖集，不安装 `torch` / `transformers`；本地 CrossEncoder rerank 会在缺少可选依赖时自动降级为 RRF 结果。也可以通过 `RERANK_PROVIDER=qwen` 改用阿里云 Qwen rerank API。完整启动流程、`.env` 准备、可选 reranker、日志查看和常见问题见 `docs/docker-startup/README.md`。
 
 ```bash
-docker compose up --build
+docker compose up -d --build
 ```
 
 服务：
@@ -212,16 +229,16 @@ DATABASE_URL=${COMPOSE_DATABASE_URL:-postgresql://${POSTGRES_USER}:${POSTGRES_PA
 
 ```bash
 COMPOSE_DATABASE_URL=postgresql://user:password@postgres:5432/first_rag \
-docker compose up --build
+docker compose up -d --build
 ```
 
 常用命令：
 
 ```bash
 docker compose config --quiet
-docker compose up --build
+docker compose up -d --build
 docker compose run --rm migrate python /app/scripts/migrate_db.py --dry-run
-docker compose logs -f migrate backend worker
+docker compose logs -f migrate backend worker frontend postgres
 docker compose down
 ```
 

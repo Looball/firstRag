@@ -4,7 +4,7 @@
 
 ## 最近整体回归验收
 
-2026-07-02 已刷新一轮真实链路 eval 基线，覆盖 RAG 真实评测门禁、上传与向量化真实链路验收，以及 eval 历史趋势摘要。静态验收入口见 `scripts/acceptance_check.sh`。
+2026-07-02 已刷新一轮真实链路 eval 基线，覆盖 RAG 真实评测门禁、上传与向量化真实链路验收，以及 eval 历史趋势摘要。Compose 启动后的补充验收入口见 `scripts/acceptance_check.sh`。
 
 `T-046` 已将 RAG 上线前评测集扩展为 14 条非敏感可复跑 case，并把默认检索参数 `top_k/vector_top_k/fulltext_top_k/rrf_k = 4/16/16/8` 写入主基线 case 的 `retrieval_settings` 和 diagnostics 断言。2026-07-01 的旧 10 条 case 基线仅作为历史对照。
 
@@ -24,9 +24,17 @@
 
 该记录用于进入文档整理、提交、推送或 PR 前的 release readiness 检查。再次修改 RAG 检索、token usage、eval gate、indexing、worker health、vector failure recovery 或前端文件管理链路后，应重新运行上述验收。
 
-## 一键本地验收
+## 一键验收
 
-单人开发时，推荐在 push 前使用一键脚本串行运行主要检查：
+运行 eval 或 acceptance 前，先在仓库根目录构建并启动完整 Docker Compose 链路：
+
+```bash
+docker compose up -d --build
+docker compose ps
+docker compose logs --tail=100 migrate backend worker frontend postgres
+```
+
+需要补充真实链路验收时，再使用一键脚本串行运行主要检查：
 
 ```bash
 FIRSTRAG_EVAL_USERNAME=你的用户名 \
@@ -34,7 +42,7 @@ FIRSTRAG_EVAL_PASSWORD=你的密码 \
 scripts/acceptance_check.sh
 ```
 
-该脚本会依次执行：
+该脚本会在 Compose 服务可用的前提下依次执行：
 
 1. migration 文件检查，存在数据库连接时额外执行 dry-run。
 2. 后端 `compileall`。
@@ -45,13 +53,13 @@ scripts/acceptance_check.sh
 7. RAG eval gate。
 8. Indexing eval。
 
-只做静态检查、不访问真实后端时可跳过真实 eval：
+只做补充静态检查、不访问真实后端时可跳过真实 eval：
 
 ```bash
 scripts/acceptance_check.sh --skip-real-eval
 ```
 
-如果本地沙箱限制 Turbopack 创建辅助进程或绑定本地端口，`npm run build` 可能需要在非沙箱环境或提权环境中重跑确认。
+如果本地沙箱限制 Turbopack 创建辅助进程或绑定本地端口，`npm run build` 可能需要在非沙箱环境或提权环境中重跑确认。常规构建和启动验证仍以 Docker Compose 为准。
 
 ## 历史趋势摘要
 
@@ -269,16 +277,12 @@ conda run -n firstrag python scripts/eval_indexing.py \
   --base-url http://127.0.0.1:8000
 ```
 
-运行前需要同时启动后端和 vector index worker：
+运行前需要先在仓库根目录启动完整 Docker Compose 链路：
 
 ```bash
-cd backend
-conda activate firstrag
-python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
-
-cd backend
-conda activate firstrag
-python -m app.workers.vector_index_worker
+docker compose up -d --build
+docker compose ps
+docker compose logs --tail=100 migrate backend worker frontend postgres
 ```
 
 默认输出：

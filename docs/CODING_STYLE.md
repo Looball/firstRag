@@ -35,14 +35,14 @@
 
 ## 测试与验证
 
-- 后端测试目录：`backend/tests/`。
-- 前端验证优先运行 `npm run lint` 和 `npm run build`。
-- Python 轻量检查可使用：
+- 默认验证路径是 Docker Compose，在仓库根目录构建并启动完整容器链路：
 
 ```bash
-cd backend
-conda activate firstrag
-python -m compileall app
+docker compose up -d --build
+docker compose ps
+docker compose logs --tail=100 migrate backend worker frontend postgres
 ```
 
-依赖缺失时要如实说明，不伪造测试结果。
+- 后端测试目录：`backend/tests/`。
+- 前端 lint/build、后端 compileall/pytest 等本地命令仅作为专项排查或 CI 补充，不再作为每次验证的默认构建方式。
+- 依赖、Docker、数据库或外部 API Key 不可用时要如实说明，不伪造测试结果。

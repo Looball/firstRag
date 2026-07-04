@@ -1,36 +1,33 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# FirstRAG 前端说明
 
-## Getting Started
+前端位于 `frontend/`，使用 Next.js App Router。浏览器请求 Next.js 页面和 API Route，API Route 再代理到 FastAPI backend。
 
-First, run the development server:
+## 默认启动
+
+在仓库根目录通过 Docker Compose 启动完整链路：
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+docker compose up -d --build
+docker compose ps
+docker compose logs --tail=100 migrate backend worker frontend postgres
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+默认访问 `http://localhost:3000`。常规验证应基于 Compose 中的 frontend service。
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## 本地专项调试
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+只有在需要单独调试 Next.js 页面或 API proxy 时，才在 `frontend/` 目录启动本地 dev server：
 
-## Learn More
+```bash
+cd frontend
+npm install
+npm run dev
+```
 
-To learn more about Next.js, take a look at the following resources:
+本地 dev server 默认将 API 请求代理到 `http://127.0.0.1:8000`，因此需要同时准备可用的 FastAPI backend。常规构建和验收仍以 Docker Compose 为准。
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## 参考文档
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+- `../README.md`：项目总览和最短演示路径。
+- `../docs/FRONTEND.md`：前端结构、API 代理和页面职责。
+- `../docs/DEPLOYMENT.md`：Docker Compose、本地工作流和部署说明。

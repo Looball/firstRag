@@ -6,13 +6,25 @@
 
 ## 当前后端主入口
 
+默认在仓库根目录通过 Docker Compose 启动完整链路：
+
+```bash
+docker compose up -d --build
+docker compose ps
+docker compose logs --tail=100 migrate backend worker frontend postgres
+```
+
+Compose 会启动 FastAPI 后端、PostgreSQL、migration、Next.js 前端和 worker。常规验证以 Compose 容器为准。
+
+本地单独启动 FastAPI 仅用于专项调试：
+
 ```bash
 cd backend
 conda activate firstrag
 python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
-如果需要文件上传和异步向量化，同时启动 worker：
+如果需要本地排查文件上传和异步向量化，也可以单独启动 worker：
 
 ```bash
 cd backend
@@ -20,7 +32,7 @@ conda activate firstrag
 python -m app.workers.vector_index_worker
 ```
 
-首次运行或数据库结构变化时，先在仓库根目录执行迁移：
+本地调试时，如需手动检查 migration，可在仓库根目录执行：
 
 ```bash
 conda run -n firstrag python scripts/migrate_db.py --dry-run

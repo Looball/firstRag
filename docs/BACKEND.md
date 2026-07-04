@@ -22,13 +22,23 @@ backend/
 
 ## 启动
 
+默认通过仓库根目录 Docker Compose 启动后端、数据库、migration、前端和 worker：
+
+```bash
+docker compose up -d --build
+docker compose ps
+docker compose logs --tail=100 migrate backend worker frontend postgres
+```
+
+配置从 monorepo 根目录 `.env` 加载，不从 `backend/.env` 加载。常规验证应基于 Compose 容器完成。
+
+本地单独启动 FastAPI 仅用于专项调试：
+
 ```bash
 cd backend
 conda activate firstrag
 python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
-
-配置从 monorepo 根目录 `.env` 加载，不从 `backend/.env` 加载。
 
 ## 路由模块
 
@@ -62,7 +72,7 @@ python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 
 ## Worker
 
-向量化任务由独立 worker 处理：
+向量化任务由 Compose 中的 `worker` service 处理。需要本地专项排查时，也可以单独启动 worker：
 
 ```bash
 cd backend
@@ -70,4 +80,4 @@ conda activate firstrag
 python -m app.workers.vector_index_worker
 ```
 
-worker 从 `vector_index_jobs` 领取任务，解析文件、切分文本、写 Chroma、写 PostgreSQL chunk，并更新任务状态。
+worker 从 `vector_index_jobs` 领取任务，解析文件、切分文本、写 Chroma、写 PostgreSQL chunk，并更新任务状态。常规验证仍以 Docker Compose 中的 `worker` service 为准。

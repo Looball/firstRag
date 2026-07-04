@@ -41,7 +41,7 @@
 ## 当前基线
 
 - 2026-06-29 已完成静态回归验收：后端 107 个 unittest 通过、前端 lint 通过、Vitest 32 个用例通过、Next build 通过；真实 RAG eval 和 indexing eval 可在发布前按需运行。
-- 本地 push 前推荐运行 `scripts/acceptance_check.sh`；只做静态检查时可运行 `scripts/acceptance_check.sh --skip-real-eval`。
+- 当前默认验证路径为 `docker compose up -d --build` 后检查 `docker compose ps` 与关键服务日志；`scripts/acceptance_check.sh` 作为补充验收脚本，静态补充检查可运行 `scripts/acceptance_check.sh --skip-real-eval`。
 - 当前阶段优先做“可维护性 + 可观测性 + 验收自动化”，避免在关键链路刚稳定后继续堆叠大功能；前端工作台已开始引入 React Query 和 Zod 做请求层集中化与轻量响应校验。
 - 修改项目文件后，继续遵守只暂存当前任务相关文件、不混入 unrelated refactor 的规则。
 
@@ -1231,7 +1231,7 @@ git status --short
   - 已运行 `conda run -n firstrag python scripts/eval_summary.py`，本地历史摘要生成成功：RAG 历史 25 次，Indexing 历史 2 次。
   - 最近 RAG 历史记录：2026-06-30T08:57:03，10/10 通过，通过率 1.00，平均引用 2.20，平均首 token 3715.19ms，平均耗时 5.96s，门禁通过。
   - 最近 Indexing 历史记录：2026-06-28T08:40:37，通过，job 状态 `succeeded`，聊天耗时 3.51s，引用数 1，清理关联完成。
-  - 解除阻塞条件：启动后端服务、完成数据库迁移、启动 vector index worker，并在当前 shell 设置 eval 测试账号密码；账号还需要可用的 LLM provider / API Key。
+  - 解除阻塞条件：运行 `docker compose up -d --build` 启动完整链路并完成 migration，在当前 shell 设置 eval 测试账号密码；账号还需要可用的 LLM provider / API Key。
   - 解除后建议运行：`FIRSTRAG_EVAL_USERNAME=... FIRSTRAG_EVAL_PASSWORD=... scripts/acceptance_check.sh`，或分别运行 `scripts/rag_eval_gate.sh` 与 `conda run -n firstrag python scripts/eval_indexing.py --base-url http://127.0.0.1:8000`。
 - 完成记录：
   - 完成日期：2026-06-30
