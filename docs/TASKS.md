@@ -120,7 +120,7 @@
 | `T-051` | `PLAN-20260703-01` | `P2` | `Blocked` | 部署到受控 staging/demo 环境 | 2026-07-04 | 缺少真实服务器、域名/TLS 和生产 `.env` |
 | `T-052` | `PLAN-20260703-01` | `P2` | `Todo` | 完成公网 smoke test 与真实 RAG eval | - | - |
 | `T-053` | 用户要求 | `P1` | `Done` | 用户登录后配置 LLM 与向量模型 API | 2026-07-03 | `6124b2d` |
-| `T-054` | `PLAN-20260704-01` | `P1` | `Done` | 支持聊天框图片附件和视觉模型调用 | 2026-07-05 | 待提交 |
+| `T-054` | `PLAN-20260704-01` | `P1` | `Done` | 支持聊天框图片附件和视觉模型调用 | 2026-07-05 | `42f206b` |
 | `T-055` | `PLAN-20260704-01` | `P2` | `Todo` | 支持图片/OCR 入知识库检索 | - | - |
 
 ## 新计划接入流程
@@ -1922,7 +1922,7 @@ docker compose logs --tail=100 migrate backend worker frontend postgres
 ```
 - 完成记录：
   - 完成日期：2026-07-05
-  - 相关 commit：待提交。
+  - 相关 commit：`42f206b`
   - 新增 `message_attachments` migration、repository 和 `chat_attachment_service.py`，支持 PNG/JPEG/WebP 上传、magic bytes 校验、单轮数量/大小限制、用户/会话权限校验和安全 metadata 序列化。
   - 新增 `/chat/attachments` 上传接口和 `/chat/attachments/{attachment_id}/content` 读取接口；`POST /chat` 支持 `attachment_ids`，保存用户消息后绑定附件。
   - LLM 调用层增加 vision 模型能力判断；带图片时构造 OpenAI-compatible 多模态 `HumanMessage`，不支持 vision 的模型返回清晰 `400`，不会写入半成品 assistant message。
