@@ -123,7 +123,7 @@
 | `T-053` | 用户要求 | `P1` | `Done` | 用户登录后配置 LLM 与向量模型 API | 2026-07-03 | `6124b2d` |
 | `T-054` | `PLAN-20260704-01` | `P1` | `Done` | 支持聊天框图片附件和视觉模型调用 | 2026-07-05 | `42f206b` |
 | `T-055` | `PLAN-20260704-01` | `P2` | `Done` | 支持图片/OCR 入知识库检索 | 2026-07-05 | `d8cd9ce` |
-| `T-056` | `PLAN-20260705-01` | `P0` | `Blocked` | 引入 Redis 基础设施、配置和健康检查 | 2026-07-05 | `5e8c32c`；Redis 镜像源 403，待完整 Compose 验证 |
+| `T-056` | `PLAN-20260705-01` | `P0` | `Done` | 引入 Redis 基础设施、配置和健康检查 | 2026-07-05 | `5e8c32c`、`d0aee38` |
 | `T-057` | `PLAN-20260705-01` | `P1` | `Todo` | 抽象缓存层并迁移 RAG 热点缓存到 Redis | - | - |
 | `T-058` | `PLAN-20260705-01` | `P0` | `Todo` | 将登录和 API 限流升级为 Redis 分布式限流 | - | - |
 | `T-059` | `PLAN-20260705-01` | `P1` | `Todo` | 为 vector worker 增加 Redis 运行态、锁和队列观测 | - | - |
@@ -2013,7 +2013,7 @@ docker compose logs --tail=100 migrate backend worker frontend postgres
 
 - 来源计划：`PLAN-20260705-01`
 - 优先级：`P0`
-- 状态：`Blocked`
+- 状态：`Done`
 - 背景：当前缓存、限流和 worker 运行态主要使用进程内状态；单实例可以工作，但多实例部署时无法共享命中、限流计数和 worker 在线状态。
 - 目标：为后续缓存、限流和 worker 运行态提供统一 Redis 基础设施，默认 Docker Compose 内置 Redis，并允许生产环境通过 `REDIS_URL` 指向托管 Redis。
 - 范围：
@@ -2040,7 +2040,7 @@ docker compose ps
 docker compose logs --tail=100 redis backend worker
 ```
 - 实现记录：
-  - 相关 commit：`5e8c32c`。
+  - 相关 commit：`5e8c32c`、`d0aee38`。
   - 新增 `redis==5.2.1` 后端依赖。
   - 新增 Redis client/service 封装，支持 `REDIS_URL`、连接超时、命令超时、启用开关、健康检查和 Redis URL 脱敏。
   - 新增公开 `GET /health`，返回后端和 Redis 基础设施的安全健康摘要，不返回 Redis URL、密码、JWT 或数据库连接串。
@@ -2056,12 +2056,14 @@ docker compose logs --tail=100 redis backend worker
   - `cd backend && conda run -n firstrag python -m pytest`，206 passed。
   - `docker compose build --pull=false backend` 已通过，backend 镜像内 `redis-5.2.1` 安装成功。
   - `docker run --rm firstrag-backend:latest python -c "import redis; print(redis.__version__)"` 输出 `5.2.1`。
-- 阻塞记录：
-  - `docker compose up -d --build` 未完成，原因是 Docker registry mirror `vxuhih4a.mirror.aliyuncs.com` 拉取 `redis:7-alpine` manifest 时返回 `403 Forbidden`。
-  - 当前 `docker compose ps` 未出现 `redis` service；backend/frontend/worker/postgres 仍是本次变更前启动的旧容器。
-- 收尾条件：
-  - Redis 镜像可以成功拉取后，重新运行 `docker compose up -d --build`、`docker compose ps` 和 `docker compose logs --tail=100 redis migrate backend worker frontend postgres`。
-  - 确认 `redis` healthy、backend 和 worker 使用新镜像启动、`GET /health` 返回 Redis healthy 后，将本任务状态改为 `Done`。
+  - `docker compose up -d --build` 已由用户重新执行成功。
+  - `docker compose ps` 显示 `redis` 为 `healthy`，backend、frontend 和 worker 使用新镜像约 1 分钟前启动，postgres 为 `healthy`。
+  - `docker compose logs --tail=100 redis migrate backend worker frontend postgres` 已确认 Redis `Ready to accept connections`，migration `applied=0 skipped=5`，backend、frontend 和 worker 无启动错误。
+  - `docker compose exec -T redis redis-cli ping` 输出 `PONG`。
+  - `curl -s http://127.0.0.1:8000/health` 返回 `status=healthy` 且 `dependencies.redis.status=healthy`。
+  - `conda run -n firstrag python scripts/production_preflight.py --env-file .env --migration-method compose` 已执行；本地 `.env` 仍因 `POSTGRES_PASSWORD` 是模板占位值、`JWT_SECRET_KEY` 长度过短而未通过生产 secret 检查，且 migration dry-run 提示未通过。该问题属于本地生产配置未达标，不影响本次 Redis 基础设施接入的 Compose 验证结果。
+- 历史阻塞：
+  - 首次 `docker compose up -d --build` 曾因 Docker registry mirror `vxuhih4a.mirror.aliyuncs.com` 拉取 `redis:7-alpine` manifest 返回 `403 Forbidden` 未完成；后续用户重新构建已解除。
 
 ## T-057 抽象缓存层并迁移 RAG 热点缓存到 Redis
 
