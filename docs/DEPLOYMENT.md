@@ -16,6 +16,8 @@ cp .env.example .env
 | --- | --- |
 | `DATABASE_URL` | 本地 conda 方式运行时使用的 PostgreSQL 连接串。 |
 | `COMPOSE_DATABASE_URL` | Docker Compose 方式运行时可选覆盖的 PostgreSQL 连接串；不填时默认连接 compose 内的 `postgres` 服务。 |
+| `REDIS_ENABLED` / `REDIS_URL` | Redis 基础设施开关和连接地址；Compose 默认连接内置 `redis` 服务，生产环境可指向托管 Redis 内网地址。 |
+| `REDIS_CONNECT_TIMEOUT_SECONDS` / `REDIS_COMMAND_TIMEOUT_SECONDS` | Redis 连接和命令超时。 |
 | `POSTGRES_DB` / `POSTGRES_USER` / `POSTGRES_PASSWORD` | Docker Compose 中 PostgreSQL 容器的数据库、用户和密码。 |
 | `JWT_SECRET_KEY` | JWT 签名密钥。 |
 | `ALLOW_PUBLIC_REGISTRATION` | 是否允许公开注册；本地默认 `true`，公开 demo 建议设为 `false` 并只使用预置账号。 |
@@ -35,13 +37,13 @@ cp .env.example .env
 docker compose up -d --build
 ```
 
-Compose 会启动 PostgreSQL、migration、FastAPI backend、Next.js frontend 和 vector index worker。`migrate` service 会先初始化或升级当前完整 schema；后续数据库结构变化会从 `001_xxx.sql` 开始追加增量 migration。
+Compose 会启动 Redis、PostgreSQL、migration、FastAPI backend、Next.js frontend 和 vector index worker。`migrate` service 会先初始化或升级当前完整 schema；后续数据库结构变化会从 `001_xxx.sql` 开始追加增量 migration。
 
 启动后检查服务状态和关键日志：
 
 ```bash
 docker compose ps
-docker compose logs --tail=100 migrate backend worker frontend postgres
+docker compose logs --tail=100 redis migrate backend worker frontend postgres
 ```
 
 默认访问 `http://localhost:3000`。后端、前端和 worker 的常规验证都应基于 Compose 容器；本地 conda / npm 启动仅用于专项调试。
@@ -109,7 +111,7 @@ python -m app.workers.vector_index_worker
 
 1. 同步代码后检查 `.env` 是否仍符合本地环境。
 2. 运行 `docker compose up -d --build` 启动完整链路。
-3. 运行 `docker compose ps` 和 `docker compose logs --tail=100 migrate backend worker frontend postgres` 检查状态。
+3. 运行 `docker compose ps` 和 `docker compose logs --tail=100 redis migrate backend worker frontend postgres` 检查状态。
 4. 完成代码或文档修改。
 5. 基于 Compose 容器完成相关 smoke test。
 6. 涉及真实链路时再运行 eval / acceptance 脚本作为补充验收。

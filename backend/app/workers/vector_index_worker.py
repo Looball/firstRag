@@ -15,9 +15,27 @@ from app.repositories.vector_index_job_repository import (
     reclaim_expired_vector_index_jobs,
 )
 from app.services.vectors.vector_index_service import index_knowledge_file_record
+from app.services.redis_service import check_redis_health
 
 
 logger = logging.getLogger(__name__)
+
+
+def log_worker_redis_health(worker_id: str) -> None:
+    """记录 worker 启动时 Redis 基础设施状态，不阻塞任务队列。"""
+    redis_health = check_redis_health()
+    log_structured_event(
+        logger,
+        logging.INFO if redis_health.is_healthy else logging.WARNING,
+        "redis_health_checked",
+        worker_id=worker_id,
+        redis_enabled=redis_health.enabled,
+        redis_status=redis_health.status,
+        redis_healthy=redis_health.is_healthy,
+        redis_error_source=redis_health.error_source,
+        redis_error_message=redis_health.error_message,
+        message="检查 Redis 基础设施状态",
+    )
 
 
 def process_next_vector_index_job(worker_id: str) -> bool:
@@ -139,6 +157,7 @@ def run_vector_index_worker(
 ) -> None:
     """持续消费 PostgreSQL 中的向量化任务队列。"""
     resolved_worker_id = worker_id or f"{socket.gethostname()}:{time.time_ns()}"
+    log_worker_redis_health(resolved_worker_id)
 
     while True:
         processed = process_next_vector_index_job(resolved_worker_id)

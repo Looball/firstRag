@@ -1,6 +1,6 @@
 # Docker 启动流程
 
-本文档记录 FirstRAG 使用 Docker Compose 启动本地完整链路的流程。Compose 会启动 PostgreSQL、migration、FastAPI backend、Next.js frontend 和 vector index worker。
+本文档记录 FirstRAG 使用 Docker Compose 启动本地完整链路的流程。Compose 会启动 Redis、PostgreSQL、migration、FastAPI backend、Next.js frontend 和 vector index worker。
 
 服务器级 secret 写入仓库根目录 `.env`，不要提交、截图或粘贴真实 JWT secret、数据库密码和用户凭据。聊天模型、向量模型和远程 rerank API Key 在用户登录后的“模型设置”页保存为密文，不再写入 `.env`。
 
@@ -69,6 +69,10 @@ POSTGRES_PORT=127.0.0.1:5432
 
 注意：`DATABASE_URL` 主要用于宿主机 conda 方式运行；Compose 内部默认使用 `POSTGRES_DB`、`POSTGRES_USER` 和 `POSTGRES_PASSWORD` 生成容器网络里的数据库连接。如果需要外部数据库，再设置 `COMPOSE_DATABASE_URL`。
 
+Redis 默认使用 Compose 内置 `redis` service，backend 和 worker 通过
+`REDIS_URL=redis://redis:6379/0` 访问。当前 Redis 已接入基础设施健康检查；
+业务缓存、分布式限流和 worker 运行态迁移会在后续 Redis 专项任务中继续推进。
+
 ## 4. 可选：配置远程 rerank
 
 推荐在登录后的“模型设置”页配置远程 rerank。当前支持 Qwen、Voyage、Cohere、Jina 和自定义 rerank API；远程 provider 的 Key 会按用户和厂商加密保存。
@@ -135,13 +139,13 @@ docker compose config --quiet
 docker compose up -d --build
 ```
 
-首次启动时，`postgres` 健康检查通过后会自动运行 `migrate` service 初始化或升级 schema；`backend` 和 `worker` 会等待 migration 成功后再启动。
+首次启动时，`redis` 和 `postgres` 健康检查通过后会自动运行 `migrate` service 初始化或升级 schema；`backend` 和 `worker` 会等待 Redis 健康且 migration 成功后再启动。
 
 ## 7. 查看状态
 
 ```bash
 docker compose ps
-docker compose logs -f migrate backend worker frontend
+docker compose logs -f redis migrate backend worker frontend
 ```
 
 常用访问地址：
@@ -168,7 +172,7 @@ docker compose logs -f migrate backend worker frontend
 docker compose ps
 
 # 查看日志
-docker compose logs -f backend worker frontend
+docker compose logs -f redis backend worker frontend
 
 # 只重启后端和 worker
 docker compose up -d --build backend worker

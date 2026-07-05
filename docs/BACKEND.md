@@ -27,7 +27,7 @@ backend/
 ```bash
 docker compose up -d --build
 docker compose ps
-docker compose logs --tail=100 migrate backend worker frontend postgres
+docker compose logs --tail=100 redis migrate backend worker frontend postgres
 ```
 
 配置从 monorepo 根目录 `.env` 加载，不从 `backend/.env` 加载。常规验证应基于 Compose 容器完成。
@@ -47,6 +47,7 @@ python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 | `auth.py` | 注册、登录、JWT 返回。 |
 | `chat.py` | SSE 聊天接口和 RAG 链调用。 |
 | `conversations.py` | 会话列表、创建、重命名、删除、消息和诊断读取。 |
+| `health.py` | 后端和 Redis 基础设施健康检查，不返回敏感连接串。 |
 | `knowledge_bases.py` | 知识库列表、创建、文件关联管理。 |
 | `knowledge_files.py` | 文件上传、复用、知识文件列表。 |
 | `user_settings.py` | 用户模型厂商、凭据、测试连接和设置保存。 |
@@ -65,6 +66,7 @@ python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 | `rag/diagnostics.py` | RAG timing、retrieval settings diagnostics 和 LLM usage 合并。 |
 | `rag/streaming.py` | LCEL stream chunk 到 SSE 事件的转换。 |
 | `llm_service.py` | OpenAI 兼容模型厂商预设、用户/平台配置解析。 |
+| `redis_service.py` | Redis client 封装、连接健康检查和 Redis URL 脱敏。 |
 | `file_service.py` | 上传文件大小限制、SHA-256、落盘路径。 |
 | `documents/document_service.py` | 文档加载、图片知识文件 vision 解析、切分、向量库构建。 |
 | `retrieval/*` | 向量检索、全文检索、RRF 融合、本地 CrossEncoder 或用户级远程 rerank 精排。 |

@@ -7,7 +7,7 @@ from collections.abc import Iterable
 
 
 _SECRET_LIKE_PATTERN = re.compile(
-    r"(?i)(postgres(?:ql)?://[^\s,;]+|sk-[a-z0-9][a-z0-9_\-]{6,}|bearer\s+[a-z0-9._\-]+|api[_-]?key\s*[:=]\s*[^\s,;]+)"
+    r"(?i)((?:postgres(?:ql)?|rediss?)://[^\s,;]+|sk-[a-z0-9][a-z0-9_\-]{6,}|bearer\s+[a-z0-9._\-]+|api[_-]?key\s*[:=]\s*[^\s,;]+)"
 )
 
 

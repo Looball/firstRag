@@ -29,6 +29,7 @@ class ObservabilityTests(unittest.TestCase):
                 "prompt_tokens": 12,
                 "total_tokens": 15,
                 "message": "provider rejected api_key=test-secret",
+                "redis_error": "redis://:redis-secret@localhost:6379/0",
             },
         )
 
@@ -36,6 +37,7 @@ class ObservabilityTests(unittest.TestCase):
 
         self.assertNotIn("test-secret", payload)
         self.assertNotIn("user:pass", payload)
+        self.assertNotIn("redis-secret", payload)
         self.assertEqual(event["api_key"], "[已脱敏]")
         self.assertEqual(event["nested"]["authorization"], "[已脱敏]")
         self.assertEqual(event["nested"]["prompt_tokens"], 12)
@@ -60,6 +62,7 @@ class ObservabilityTests(unittest.TestCase):
             (RuntimeError("psycopg database timeout"), "postgres"),
             (RuntimeError("CrossEncoder rerank failed"), "rerank"),
             (RuntimeError("Zhipu embedding failed"), "embedding"),
+            (RuntimeError("Redis ping timeout"), "redis"),
             (FileNotFoundError("missing upload"), "file_storage"),
         ]
 

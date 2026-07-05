@@ -22,6 +22,14 @@ def read_int_env(name: str, default: int) -> int:
         return default
 
 
+def read_float_env(name: str, default: float) -> float:
+    """读取浮点数环境变量，非法值回退到默认配置。"""
+    try:
+        return float(os.environ.get(name, str(default)))
+    except ValueError:
+        return default
+
+
 def read_bool_env(name: str, default: bool) -> bool:
     """读取布尔环境变量，非法值回退到默认配置。"""
     raw_value = os.environ.get(name)
@@ -136,4 +144,17 @@ USER_SETTINGS_ENCRYPTION_KEY = os.environ.get(
 ALLOW_USER_CUSTOM_LLM_BASE_URL = read_bool_env(
     "ALLOW_USER_CUSTOM_LLM_BASE_URL",
     False,
+)
+
+# Redis 基础设施配置。当前 T-056 只建立连接与健康检查；业务缓存、
+# 分布式限流和 worker 运行态迁移由后续任务接入。
+REDIS_URL = os.environ.get("REDIS_URL", "").strip()
+REDIS_ENABLED = read_bool_env("REDIS_ENABLED", bool(REDIS_URL))
+REDIS_CONNECT_TIMEOUT_SECONDS = read_float_env(
+    "REDIS_CONNECT_TIMEOUT_SECONDS",
+    1.0,
+)
+REDIS_COMMAND_TIMEOUT_SECONDS = read_float_env(
+    "REDIS_COMMAND_TIMEOUT_SECONDS",
+    1.0,
 )

@@ -5,6 +5,7 @@ pwdlib[argon2]==0.3.0
 PyJWT==2.12.1
 python-dotenv==1.2.1
 python-multipart==0.0.30
+redis==5.2.1
 
 # LangChain / RAG
 langchain-core==1.4.0

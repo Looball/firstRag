@@ -7,6 +7,17 @@ x-default-logging: &default-logging
     max-file: "${DOCKER_LOG_MAX_FILE:-5}"
 
 services:
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    logging: *default-logging
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
   postgres:
     image: postgres:16-alpine
     restart: unless-stopped
@@ -40,6 +51,10 @@ services:
         required: false
     environment:
       DATABASE_URL: "${COMPOSE_DATABASE_URL:-postgresql://${POSTGRES_USER:-firstrag}:${POSTGRES_PASSWORD:-firstrag-password}@postgres:5432/${POSTGRES_DB:-first_rag}}"
+      REDIS_ENABLED: ${REDIS_ENABLED:-true}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      REDIS_CONNECT_TIMEOUT_SECONDS: ${REDIS_CONNECT_TIMEOUT_SECONDS:-1}
+      REDIS_COMMAND_TIMEOUT_SECONDS: ${REDIS_COMMAND_TIMEOUT_SECONDS:-1}
       VECTOR_STORE_PATH: ${VECTOR_STORE_PATH:-/app/vector_db/chroma}
       RERANKER_MODEL_PATH: ${RERANKER_MODEL_PATH:-/app/models/rerankers/bge-reranker-base}
     ports:
@@ -50,6 +65,8 @@ services:
       - ${MODELS_DIR:-./models}:/app/models:ro
     logging: *default-logging
     depends_on:
+      redis:
+        condition: service_healthy
       postgres:
         condition: service_healthy
       migrate:
@@ -74,6 +91,10 @@ services:
         required: false
     environment:
       DATABASE_URL: "${COMPOSE_DATABASE_URL:-postgresql://${POSTGRES_USER:-firstrag}:${POSTGRES_PASSWORD:-firstrag-password}@postgres:5432/${POSTGRES_DB:-first_rag}}"
+      REDIS_ENABLED: ${REDIS_ENABLED:-true}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      REDIS_CONNECT_TIMEOUT_SECONDS: ${REDIS_CONNECT_TIMEOUT_SECONDS:-1}
+      REDIS_COMMAND_TIMEOUT_SECONDS: ${REDIS_COMMAND_TIMEOUT_SECONDS:-1}
       VECTOR_STORE_PATH: ${VECTOR_STORE_PATH:-/app/vector_db/chroma}
       RERANKER_MODEL_PATH: ${RERANKER_MODEL_PATH:-/app/models/rerankers/bge-reranker-base}
     command: ["python", "-m", "app.workers.vector_index_worker"]
@@ -83,6 +104,8 @@ services:
       - ${MODELS_DIR:-./models}:/app/models:ro
     logging: *default-logging
     depends_on:
+      redis:
+        condition: service_healthy
       postgres:
         condition: service_healthy
       migrate:

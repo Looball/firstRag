@@ -17,7 +17,9 @@ _REQUEST_CONTEXT: ContextVar[dict[str, Any]] = ContextVar(
     "request_context",
     default={},
 )
-_DATABASE_URL_PATTERN = re.compile(r"(?i)postgres(?:ql)?://[^\s,;]+")
+_DATABASE_URL_PATTERN = re.compile(
+    r"(?i)(?:postgres(?:ql)?|rediss?)://[^\s,;]+"
+)
 
 SENSITIVE_FIELD_NAMES = {
     "api_key",
@@ -141,6 +143,9 @@ def classify_exception(
         or "sql" in text
     ):
         source = "postgres"
+        retryable = True
+    elif "redis" in text:
+        source = "redis"
         retryable = True
     elif "worker" in text:
         source = "worker"

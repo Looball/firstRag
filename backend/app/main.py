@@ -8,6 +8,7 @@ from app.api import (
     auth,
     chat,
     conversations,
+    health,
     knowledge_bases,
     knowledge_files,
     user_settings,
@@ -80,6 +81,7 @@ def create_app() -> FastAPI:
         return response
 
     app.include_router(auth.router)
+    app.include_router(health.router)
     app.include_router(chat.router)
     app.include_router(conversations.router)
     app.include_router(knowledge_bases.router)
