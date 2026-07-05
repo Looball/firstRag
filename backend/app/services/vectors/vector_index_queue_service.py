@@ -49,6 +49,17 @@ def classify_vector_index_failure(error_message: str | None) -> str | None:
     if any(
         keyword in normalized
         for keyword in [
+            "图片解析",
+            "vision",
+            "视觉能力",
+            "qwen-vl",
+            "glm-4v",
+        ]
+    ):
+        return "image_parse_error"
+    if any(
+        keyword in normalized
+        for keyword in [
             "timeout",
             "timed out",
             "deadline",
@@ -141,11 +152,13 @@ def classify_vector_index_failure(error_message: str | None) -> str | None:
 def build_vector_index_failure_hint(failure_type: str | None) -> str | None:
     """根据失败类型生成可恢复建议。"""
     if failure_type == "unsupported_file_type":
-        return "文件类型暂不支持。请上传 PDF、DOCX、Markdown 或 TXT 文件后重新向量化。"
+        return "文件类型暂不支持。请上传 PDF、DOCX、Markdown、TXT、PNG、JPEG 或 WebP 文件后重新向量化。"
     if failure_type == "empty_document":
-        return "文件没有解析出可入库文本。请确认文件不是空文件或扫描图片，必要时转为可复制文本后重新上传。"
+        return "文件没有解析出可入库文本。请确认文件不是空文件，必要时转为可复制文本后重新上传。"
+    if failure_type == "image_parse_error":
+        return "图片解析失败。请在设置页配置支持 vision 的聊天模型，例如 Qwen-VL 或 GLM-4V，然后重新向量化。"
     if failure_type == "parse_error":
-        return "文件解析失败。请确认文件内容可读取，必要时转为 PDF、Markdown 或 TXT 后重新上传。"
+        return "文件解析失败。请确认文件内容可读取，必要时转为 PDF、Markdown、TXT 或支持的图片格式后重新上传。"
     if failure_type == "embedding_error":
         return "Embedding 调用失败。请检查向量模型 API Key、网络连通性或稍后重新向量化。"
     if failure_type == "vector_store_error":
@@ -175,6 +188,8 @@ def build_safe_vector_index_error_message(
         return "文件类型暂不支持"
     if failure_type == "empty_document":
         return "文件没有可入库文本"
+    if failure_type == "image_parse_error":
+        return "图片解析失败"
     if failure_type == "parse_error":
         return "文件解析失败"
     if failure_type == "embedding_error":

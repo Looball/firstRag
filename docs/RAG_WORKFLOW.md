@@ -15,8 +15,8 @@
 
 1. `vector_index_worker` 领取 `queued` 任务。
 2. 使用 PostgreSQL advisory lock 避免同一文件并发索引。
-3. `document_service` 加载 PDF、Markdown 或文本内容。
-4. 文本切分为 chunk。
+3. `document_service` 加载 PDF、DOCX、Markdown、TXT 或图片知识文件。图片文件会使用当前用户配置的 vision 聊天模型解析为可检索 Markdown；聊天图片附件不走这条入库链路。
+4. 文本或图片解析结果切分为 chunk。
 5. 当前登录用户保存的 embedding provider 生成向量，支持 Qwen、智谱、OpenAI、Voyage、Cohere、Jina 和自定义 OpenAI-compatible embedding API。用户可按厂商保存多份 API Key，当前生效配置决定实际调用的 provider/model/base_url。
 6. Chroma 保存向量。
 7. PostgreSQL `knowledge_file_chunks` 保存 chunk 正文和 metadata，用于全文检索。
@@ -38,7 +38,7 @@
 9. SSE 返回 token、sources、retrieval 诊断。
 10. 回答完成后持久化到 `messages`，用户图片 metadata 通过 `message_attachments` 与用户消息关联。
 
-聊天图片附件通过 `POST /chat/attachments` 先上传到本地文件系统，后端只向前端返回安全 metadata 和读取 URL。附件用于当前会话消息的视觉问答，不进入 `knowledge_files`、`knowledge_file_chunks` 或 Chroma；图片/OCR 入知识库属于独立链路。
+聊天图片附件通过 `POST /chat/attachments` 先上传到本地文件系统，后端只向前端返回安全 metadata 和读取 URL。附件用于当前会话消息的视觉问答，不会自动进入 `knowledge_files`、`knowledge_file_chunks` 或 Chroma。需要长期检索的图片应作为知识文件上传，worker 会用当前用户的 vision 模型解析图片内容并写入既有 chunk 与向量链路。
 
 知识库级 retrieval settings 可通过
 `GET/PATCH /chat/knowledge-base/{knowledge_base_id}/retrieval-settings`

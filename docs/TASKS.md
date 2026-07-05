@@ -61,7 +61,7 @@
 | `PLAN-20260701-01` | 2026-07-01 | `Done` | 发布前收口专项，优先修正文档台账状态、继续降低前端工作台复杂度，并刷新真实链路验收基线。 | `T-037` - `T-041` |
 | `PLAN-20260701-02` | 2026-07-01 | `Done` | 正式生产上线补强专项，补齐部署安全、稳定性、风控、可观测性、评测质量和产品化分层。 | `T-042` - `T-047` |
 | `PLAN-20260703-01` | 2026-07-03 | `Todo` | 公开 Demo 上线试运行专项；暂不立即部署，先补齐不依赖真实服务器的上线阻塞项，并为后续公网验证留出明确步骤。 | `T-048` - `T-052` |
-| `PLAN-20260704-01` | 2026-07-04 | `Todo` | 聊天图片能力专项；先支持聊天框图片附件和视觉模型调用，再扩展图片/OCR 入知识库。 | `T-054` - `T-055` |
+| `PLAN-20260704-01` | 2026-07-04 | `Done` | 聊天图片能力专项；先支持聊天框图片附件和视觉模型调用，再扩展图片/OCR 入知识库。 | `T-054` - `T-055` |
 
 ## 任务总览
 
@@ -121,7 +121,7 @@
 | `T-052` | `PLAN-20260703-01` | `P2` | `Todo` | 完成公网 smoke test 与真实 RAG eval | - | - |
 | `T-053` | 用户要求 | `P1` | `Done` | 用户登录后配置 LLM 与向量模型 API | 2026-07-03 | `6124b2d` |
 | `T-054` | `PLAN-20260704-01` | `P1` | `Done` | 支持聊天框图片附件和视觉模型调用 | 2026-07-05 | `42f206b` |
-| `T-055` | `PLAN-20260704-01` | `P2` | `Todo` | 支持图片/OCR 入知识库检索 | - | - |
+| `T-055` | `PLAN-20260704-01` | `P2` | `Done` | 支持图片/OCR 入知识库检索 | 2026-07-05 | 待提交 |
 
 ## 新计划接入流程
 
@@ -1884,7 +1884,7 @@ conda run -n firstrag python scripts/eval_indexing.py \
 
 - 来源计划：`PLAN-20260704-01`
 - 优先级：`P1`
-- 状态：`Todo`
+- 状态：`Done`
 - 背景：当前聊天链路是纯文本：前端输入区只有 `textarea`，`POST /chat` 只提交 `message` 字符串，`messages.content` 只保存文本，RAG chain 也把用户输入作为字符串传给 OpenAI-compatible 文本模型。用户在聊天框中上传图片并提问时，当前没有附件存储、消息结构或视觉模型调用能力。
 - 目标：实现聊天图片附件 MVP，让用户可以在当前聊天框中上传少量图片，并在支持 vision 的聊天模型下基于图片内容回答问题。
 - 范围：
@@ -1944,7 +1944,8 @@ docker compose logs --tail=100 migrate backend worker frontend postgres
 
 - 来源计划：`PLAN-20260704-01`
 - 优先级：`P2`
-- 状态：`Todo`
+- 状态：`Done`
+- 完成日期：`2026-07-05`
 - 背景：聊天图片附件解决的是单轮视觉问答；另一类需求是把图片、截图或扫描件作为知识库资料长期保存，并通过 RAG 检索。当前知识库文件上传主要面向 PDF、DOCX、Markdown 和 TXT，图片文件不会被解析成可检索文本 chunk。
 - 目标：让知识库可以接收图片资料，通过 OCR 或视觉 caption 转成文本 chunk，再进入现有 embedding、全文检索、RRF、rerank 和 sources 展示链路。
 - 启动条件：
@@ -1978,6 +1979,27 @@ docker compose up -d --build
 docker compose ps
 docker compose logs --tail=100 migrate backend worker frontend postgres
 ```
+- 完成记录：
+  - 相关 commit：待提交。
+  - 扩展知识文件上传支持 PNG、JPEG 和 WebP，并在上传阶段校验图片文件头与 MIME/扩展名一致性。
+  - `document_service` 新增图片知识文件解析路径：通过当前用户的 vision-capable 聊天模型把图片转为可检索 Markdown，再进入既有 chunk、embedding、PostgreSQL full-text 和 Chroma 链路。
+  - 单文件和整库向量化提交会提前检查图片文件所需的 vision 模型配置；`auto_index=true` 入队后仍由 worker 兜底失败并返回 `image_parse_error` 恢复提示。
+  - 前端文件上传 accept、上传错误文案和向量化失败恢复动作已同步支持图片知识文件。
+  - `scripts/eval_indexing.py` 增加 `--file-kind image` / `FIRSTRAG_INDEXING_EVAL_FILE_KIND=image`，可用最小 PNG 样例覆盖图片上传、vision 解析、向量化和 Sources 命中链路。
+  - README、API、RAG 流程、Schema、后端、前端和 eval 文档已同步。
+  - 已验证：
+    - `cd backend && conda run -n firstrag python -m compileall app ../scripts/eval_indexing.py`
+    - `cd backend && conda run -n firstrag python -m pytest tests/services/test_document_service.py tests/test_knowledge_files.py tests/test_vector_indexes.py tests/test_vector_index_failure_recovery.py tests/test_eval_indexing_script.py`，35 passed。
+    - `cd backend && conda run -n firstrag python -m pytest`，197 passed。
+    - `cd frontend && npm test -- use-knowledge-files.test.ts utils.test.ts`，16 passed。
+    - `cd frontend && npm test`，50 passed。
+    - `cd frontend && npm run lint` 通过，保留 2 个图片缩略图 `<img>` 性能提示。
+    - `cd frontend && npm run build` 沙箱内因 Turbopack 创建进程/绑定端口限制失败一次，授权后重跑通过。
+    - `git diff --check` 通过。
+  - Docker Compose 验证：
+    - `docker compose up -d --build` 未完成，Docker registry mirror 对 `node:22-slim` 和 `python:3.12-slim` metadata 请求返回 `403 Forbidden`。
+    - `docker compose build --pull=false` 同样被上述镜像站 `403 Forbidden` 阻塞。
+    - `docker compose ps` 显示当前既有 backend、frontend、worker、postgres 容器仍在运行；`docker compose logs --tail=100 migrate backend worker frontend postgres` 未见启动错误。但由于新镜像未能构建，当前容器状态不计为 T-055 新代码的完整容器验证。
 
 ## 更新规则
 

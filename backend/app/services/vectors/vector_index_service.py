@@ -156,6 +156,7 @@ def index_file_vectors(
         file_path=file_path,
         file_id=file_id,
         user_id=user_id,
+        original_name=str(file_record.get("original_name") or file_path.name),
     )
     chunks = split_documents(documents)
     if not chunks:

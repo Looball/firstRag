@@ -223,6 +223,36 @@ class VectorIndexJobHealthTests(unittest.TestCase):
         self.assertIn("向量模型配置无效", response.json()["detail"])
         enqueue.assert_not_called()
 
+    def test_index_image_file_vectors_requires_vision_settings(self) -> None:
+        """图片文件向量化前应检查当前聊天模型支持 vision。"""
+        file_id = uuid4()
+        file_record = {
+            "id": file_id,
+            "user_id": 1,
+            "original_name": "chart.png",
+            "status": "pending",
+            "index_version": 0,
+        }
+        with patch(
+            "app.api.vector_indexes.get_user_knowledge_file",
+            return_value=file_record,
+        ), patch(
+            "app.api.vector_indexes.ensure_user_embedding_settings",
+        ), patch(
+            "app.api.vector_indexes.ensure_image_document_vision_settings",
+            side_effect=HTTPException(
+                status_code=400,
+                detail="图片解析需要支持视觉能力的聊天模型",
+            ),
+        ), patch(
+            "app.api.vector_indexes.enqueue_file_vector_index",
+        ) as enqueue:
+            response = self.client.post(f"/chat/knowledge-files/{file_id}/vectors")
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("图片解析需要支持视觉能力", response.json()["detail"])
+        enqueue.assert_not_called()
+
     def test_delete_file_vectors_returns_404_for_inaccessible_file(self) -> None:
         """删除向量化结果前必须先确认文件属于当前用户。"""
         file_id = uuid4()

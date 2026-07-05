@@ -25,6 +25,7 @@ class VectorIndexFailureRecoveryTests(unittest.TestCase):
         cases = {
             "不支持的文件类型：.exe": "unsupported_file_type",
             "文件为空，未解析出可入库的文本分块": "empty_document",
+            "图片解析需要支持视觉能力的聊天模型": "image_parse_error",
             "PDF loader 解析失败": "parse_error",
             "Embedding request returned 429": "embedding_error",
             "Chroma collection write failed": "vector_store_error",
@@ -47,6 +48,7 @@ class VectorIndexFailureRecoveryTests(unittest.TestCase):
             "parse_error",
             "unsupported_file_type",
             "empty_document",
+            "image_parse_error",
             "embedding_error",
             "vector_store_error",
             "chunk_write_error",

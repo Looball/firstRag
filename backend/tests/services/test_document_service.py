@@ -8,9 +8,37 @@ import unittest
 from unittest.mock import Mock, patch
 
 from app.services.documents.document_service import (
+    ImageDocumentParseError,
     build_vector_store,
     get_document_paths,
+    load_document,
 )
+from app.services.llm_service import ChatModelSettings
+from app.services.user_settings_service import EffectiveChatModelConfig
+
+
+PNG_BYTES = (
+    b"\x89PNG\r\n\x1a\n"
+    b"\x00\x00\x00\rIHDR"
+    b"\x00\x00\x00\x01\x00\x00\x00\x01"
+    b"\x08\x04\x00\x00\x00\xb5\x1c\x0c\x02"
+    b"\x00\x00\x00\x0bIDATx\xdac\xfc\xff\x1f"
+    b"\x00\x03\x03\x02\x00\xef\xbf\xa7\xdb"
+    b"\x00\x00\x00\x00IEND\xaeB`\x82"
+)
+
+
+class FakeVisionModel:
+    """测试用 vision 模型，记录调用消息并返回固定解析文本。"""
+
+    def __init__(self) -> None:
+        """初始化调用记录。"""
+        self.messages = []
+
+    def invoke(self, messages):
+        """模拟 LangChain ChatModel invoke。"""
+        self.messages = messages
+        return Mock(content="# 图片解析\n\n唯一标识：FirstRAGImageEval-test")
 
 
 class DocumentServiceTests(unittest.TestCase):
@@ -26,7 +54,8 @@ class DocumentServiceTests(unittest.TestCase):
                 "z-last.txt",
                 "a-first.md",
                 "nested/middle.PDF",
-                "ignored.png",
+                "image.png",
+                "ignored.gif",
             ):
                 path = root / relative_path
                 path.parent.mkdir(parents=True, exist_ok=True)
@@ -39,6 +68,7 @@ class DocumentServiceTests(unittest.TestCase):
             sorted(
                 [
                     root / "a-first.md",
+                    root / "image.png",
                     root / "nested" / "middle.PDF",
                     root / "z-last.txt",
                 ]
@@ -72,6 +102,84 @@ class DocumentServiceTests(unittest.TestCase):
         self.assertIs(result, mock_vector_store)
         self.assertEqual(stdout.getvalue(), "")
         mock_create_embedding_model.assert_called_once_with(42)
+
+    def test_load_image_document_uses_user_vision_model(self) -> None:
+        """图片文件应通过当前用户 vision 模型解析为可检索 Markdown。"""
+        with TemporaryDirectory() as temporary_directory:
+            image_path = Path(temporary_directory) / "chart.png"
+            image_path.write_bytes(PNG_BYTES)
+            fake_model = FakeVisionModel()
+
+            with patch(
+                "app.services.documents.document_service.get_effective_chat_model_config",
+                return_value=EffectiveChatModelConfig(
+                    settings=ChatModelSettings(
+                        provider="qwen",
+                        model="qwen-vl-plus",
+                        api_key="sk-test",
+                        base_url=None,
+                        temperature=0.2,
+                        max_tokens=1000,
+                        timeout_seconds=60,
+                        max_retries=2,
+                    ),
+                    credential_mode="user",
+                ),
+            ), patch(
+                "app.services.documents.document_service.create_openai_compatible_chat_model",
+                return_value=fake_model,
+            ):
+                documents = load_document(
+                    image_path,
+                    file_id="file-1",
+                    user_id=1,
+                    original_name="用户上传图表.png",
+                )
+
+        self.assertEqual(len(documents), 1)
+        self.assertIn("FirstRAGImageEval-test", documents[0].page_content)
+        self.assertIn("用户上传图表.png", documents[0].page_content)
+        self.assertEqual(documents[0].metadata["file_name"], "用户上传图表.png")
+        self.assertEqual(documents[0].metadata["file_type"], "image")
+        self.assertEqual(documents[0].metadata["image_mime_type"], "image/png")
+        self.assertEqual(documents[0].metadata["image_parse_method"], "vision_llm")
+        self.assertEqual(documents[0].metadata["image_parse_provider"], "qwen")
+        self.assertEqual(documents[0].metadata["image_parse_model"], "qwen-vl-plus")
+        message_content = fake_model.messages[0].content
+        self.assertEqual(message_content[0]["type"], "text")
+        self.assertIn("用户上传图表.png", message_content[0]["text"])
+        self.assertTrue(
+            message_content[1]["image_url"]["url"].startswith(
+                "data:image/png;base64,"
+            )
+        )
+
+    def test_load_image_document_requires_vision_model(self) -> None:
+        """当前聊天模型不支持 vision 时，图片解析应给出清晰错误。"""
+        with TemporaryDirectory() as temporary_directory:
+            image_path = Path(temporary_directory) / "chart.png"
+            image_path.write_bytes(PNG_BYTES)
+
+            with patch(
+                "app.services.documents.document_service.get_effective_chat_model_config",
+                return_value=EffectiveChatModelConfig(
+                    settings=ChatModelSettings(
+                        provider="qwen",
+                        model="qwen-plus",
+                        api_key="sk-test",
+                        base_url=None,
+                        temperature=0.2,
+                        max_tokens=1000,
+                        timeout_seconds=60,
+                        max_retries=2,
+                    ),
+                    credential_mode="user",
+                ),
+            ):
+                with self.assertRaises(ImageDocumentParseError) as exc:
+                    load_document(image_path, file_id="file-1", user_id=1)
+
+        self.assertIn("支持视觉能力", str(exc.exception))
 
 
 if __name__ == "__main__":

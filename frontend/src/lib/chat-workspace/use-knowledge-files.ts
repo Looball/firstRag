@@ -27,6 +27,8 @@ export const VECTOR_INDEX_HEALTH_QUERY_KEY = [
 ] as const;
 
 const MAX_UPLOAD_FILE_SIZE = 200 * 1024 * 1024;
+export const KNOWLEDGE_FILE_SUPPORTED_TYPES_TEXT =
+  "PDF、DOCX、Markdown、TXT、PNG、JPEG 和 WebP";
 
 type LoadingOptions = {
   showLoading?: boolean;
@@ -137,7 +139,7 @@ export function buildKnowledgeFileUploadErrorMessage(error: unknown) {
   }
 
   if (message.includes("不支持的文件类型")) {
-    return `${message}。当前支持 PDF、DOCX、Markdown 和 TXT 文件。`;
+    return `${message}。当前支持 ${KNOWLEDGE_FILE_SUPPORTED_TYPES_TEXT} 文件。`;
   }
 
   return message;

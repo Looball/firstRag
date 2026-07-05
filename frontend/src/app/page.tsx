@@ -2234,7 +2234,7 @@ export default function Home() {
               ref={fileInputRef}
               type="file"
               multiple
-              accept=".txt,.md,.csv,.json,.pdf,.png,.jpg,.jpeg,.webp,.gif"
+              accept=".pdf,.docx,.md,.txt,.png,.jpg,.jpeg,.webp"
               onChange={(event) => {
                 void handleSelectFiles(event.target.files);
               }}

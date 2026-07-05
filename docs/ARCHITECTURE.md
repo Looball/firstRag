@@ -21,7 +21,7 @@ FirstRAG/
   -> 文件落盘 + PostgreSQL 元数据
   -> 创建 vector_index_jobs 队列任务
   -> vector_index_worker 消费任务
-  -> document_service 解析/切分
+  -> document_service 解析/切分（图片知识文件先经用户 vision 模型转为可检索文本）
   -> Chroma 写入向量 + PostgreSQL 写入全文检索 chunk
 
 用户提问
@@ -57,7 +57,7 @@ FirstRAG/
 
 ## 存储组件
 
-- PostgreSQL：用户、知识库、文件、会话、消息、聊天附件 metadata、文本分块、向量化任务队列。
+- PostgreSQL：用户、知识库、文件、会话、消息、聊天附件 metadata、文本/图片解析分块、向量化任务队列。
 - Chroma：文档分块向量，默认持久化到根目录 `vector_db/chroma`。
 - 本地文件系统：知识文件默认保存到根目录 `uploads/users/...`，聊天图片附件默认保存到 `uploads/chat_attachments/users/...`。
 

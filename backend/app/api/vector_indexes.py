@@ -1,4 +1,6 @@
 import logging
+from collections.abc import Sequence
+from typing import Any
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -36,6 +38,11 @@ from app.services.vectors.vector_index_service import delete_file_vector_entries
 from app.services.knowledge_profile_cache import (
     invalidate_file_knowledge_base_contexts,
 )
+from app.services.documents.document_service import (
+    ImageDocumentParseError,
+    ensure_image_document_vision_settings,
+    is_image_document_file_name,
+)
 
 
 router = APIRouter(prefix="/chat", tags=["vector-indexes"])
@@ -53,6 +60,24 @@ def ensure_user_embedding_settings(user_id: int) -> None:
         ) from exc
 
 
+def ensure_image_index_settings(
+    user_id: int,
+    file_records: Sequence[dict[str, Any]],
+) -> None:
+    """图片知识文件向量化前确认当前用户已配置 vision 模型。"""
+    has_image_file = any(
+        is_image_document_file_name(str(file_record.get("original_name") or ""))
+        for file_record in file_records
+    )
+    if not has_image_file:
+        return
+
+    try:
+        ensure_image_document_vision_settings(user_id)
+    except ImageDocumentParseError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
 @router.post("/knowledge-files/{knowledge_file_id}/vectors")
 def index_knowledge_file_vectors(
     request: Request,
@@ -64,6 +89,7 @@ def index_knowledge_file_vectors(
     if file_record is None:
         raise HTTPException(status_code=404, detail="文件不存在")
     ensure_user_embedding_settings(user_id)
+    ensure_image_index_settings(user_id, [dict(file_record)])
 
     enforce_rate_limit(
         "vector-index",
@@ -107,6 +133,10 @@ def index_knowledge_base_vectors(
             "message": "知识库中没有可向量化的文件",
         }
     ensure_user_embedding_settings(user_id)
+    ensure_image_index_settings(
+        user_id,
+        [dict(file_record) for file_record in file_records],
+    )
 
     if (
         VECTOR_INDEX_MAX_BATCH_FILES > 0

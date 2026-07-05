@@ -258,7 +258,7 @@ scripts/rag_eval_gate.sh
 ```text
 登录
   -> 选择默认知识库
-  -> 上传临时 Markdown 文件
+  -> 上传临时 Markdown 文件，或通过 `--file-kind image` 上传最小 PNG 图片样例
   -> auto_index 提交 vector index job
   -> 等待 worker 完成
   -> 确认文件状态为 indexed
@@ -289,6 +289,18 @@ docker compose logs --tail=100 migrate backend worker frontend postgres
 
 - `docs/evals/latest_indexing_eval_report.md`：最新 Markdown 报告。
 - `docs/evals/indexing_runs/YYYYMMDD_HHMMSS.json`：带时间戳的历史 JSON 记录。
+
+默认 `--file-kind markdown` 不依赖 vision 模型。需要覆盖图片知识文件入库时，可使用支持 vision 的聊天模型配置运行：
+
+```bash
+FIRSTRAG_EVAL_USERNAME=你的用户名 \
+FIRSTRAG_EVAL_PASSWORD=你的密码 \
+conda run -n firstrag python scripts/eval_indexing.py \
+  --base-url http://127.0.0.1:8000 \
+  --file-kind image
+```
+
+也可以通过 `FIRSTRAG_INDEXING_EVAL_FILE_KIND=image` 设置默认文件类型。图片模式会上传一个最小 PNG 样例，验证图片上传、vision 解析、向量化、Sources 命中和 vector 通道；若当前聊天模型不支持 vision，评测会失败并暴露相应恢复提示。
 
 默认情况下，脚本只会解除临时文件和知识库的关联，不会删除全局文件记录、上传目录、chunks 或 Chroma 数据，避免误删用户数据。如果需要保留临时文件关联，可加：
 

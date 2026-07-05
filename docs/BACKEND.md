@@ -66,7 +66,7 @@ python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 | `rag/streaming.py` | LCEL stream chunk 到 SSE 事件的转换。 |
 | `llm_service.py` | OpenAI 兼容模型厂商预设、用户/平台配置解析。 |
 | `file_service.py` | 上传文件大小限制、SHA-256、落盘路径。 |
-| `documents/document_service.py` | 文档加载、切分、向量库构建。 |
+| `documents/document_service.py` | 文档加载、图片知识文件 vision 解析、切分、向量库构建。 |
 | `retrieval/*` | 向量检索、全文检索、RRF 融合、本地 CrossEncoder 或用户级远程 rerank 精排。 |
 | `vectors/*` | embedding 模型、向量化队列、索引生命周期。 |
 
@@ -80,4 +80,4 @@ conda activate firstrag
 python -m app.workers.vector_index_worker
 ```
 
-worker 从 `vector_index_jobs` 领取任务，解析文件、切分文本、写 Chroma、写 PostgreSQL chunk，并更新任务状态。常规验证仍以 Docker Compose 中的 `worker` service 为准。
+worker 从 `vector_index_jobs` 领取任务，解析文件、切分文本、写 Chroma、写 PostgreSQL chunk，并更新任务状态。图片知识文件会在 worker 中通过当前用户的 vision 聊天模型解析为可检索 Markdown；解析失败只会标记当前任务失败，不阻塞后续队列。常规验证仍以 Docker Compose 中的 `worker` service 为准。

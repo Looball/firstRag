@@ -1435,7 +1435,7 @@ export function getVectorFailureRecoveryActions(
 
   if (failureType === "unsupported_file_type") {
     return [
-      "请改用 PDF、DOCX、Markdown 或 TXT 文件",
+      "请改用 PDF、DOCX、Markdown、TXT、PNG、JPEG 或 WebP 文件",
       "替换文件后重新上传",
       ...retryAction,
     ];
@@ -1443,16 +1443,23 @@ export function getVectorFailureRecoveryActions(
 
   if (failureType === "empty_document") {
     return [
-      "确认文件不是空文件或纯扫描图片",
+      "确认文件不是空文件",
       "转为可复制文本后重新上传",
       ...retryAction,
+    ];
+  }
+
+  if (failureType === "image_parse_error") {
+    return [
+      "在模型设置中选择支持 vision 的聊天模型",
+      "确认图片文字清晰后重新向量化",
     ];
   }
 
   if (failureType === "parse_error") {
     return [
       "确认文件可打开且内容可复制",
-      "必要时转为 PDF、Markdown 或 TXT 后重新上传",
+      "必要时转为 PDF、Markdown、TXT 或支持的图片格式后重新上传",
       ...retryAction,
     ];
   }

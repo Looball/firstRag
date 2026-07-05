@@ -273,7 +273,7 @@ describe("chat workspace vector status parsing", () => {
       failureHint: "请确认文件内容可读取。",
       recoveryActions: [
         "确认文件可打开且内容可复制",
-        "必要时转为 PDF、Markdown 或 TXT 后重新上传",
+        "必要时转为 PDF、Markdown、TXT 或支持的图片格式后重新上传",
         "重新向量化",
       ],
       canRetry: true,
@@ -287,9 +287,13 @@ describe("chat workspace vector status parsing", () => {
       "清理残留向量后重新向量化",
     ]);
     expect(getVectorFailureRecoveryActions("empty_document", true)).toEqual([
-      "确认文件不是空文件或纯扫描图片",
+      "确认文件不是空文件",
       "转为可复制文本后重新上传",
       "重新向量化",
+    ]);
+    expect(getVectorFailureRecoveryActions("image_parse_error", true)).toEqual([
+      "在模型设置中选择支持 vision 的聊天模型",
+      "确认图片文字清晰后重新向量化",
     ]);
     expect(getVectorFailureRecoveryActions("chunk_write_error", true)).toEqual([
       "检查 PostgreSQL chunk 表和迁移状态",

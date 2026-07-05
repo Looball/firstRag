@@ -12,6 +12,17 @@ from app.main import app
 from app.services.file_service import FileTooLargeError
 
 
+PNG_BYTES = (
+    b"\x89PNG\r\n\x1a\n"
+    b"\x00\x00\x00\rIHDR"
+    b"\x00\x00\x00\x01\x00\x00\x00\x01"
+    b"\x08\x04\x00\x00\x00\xb5\x1c\x0c\x02"
+    b"\x00\x00\x00\x0bIDATx\xdac\xfc\xff\x1f"
+    b"\x00\x03\x03\x02\x00\xef\xbf\xa7\xdb"
+    b"\x00\x00\x00\x00IEND\xaeB`\x82"
+)
+
+
 class KnowledgeFileListTests(unittest.TestCase):
     """验证文件列表返回向量化任务状态。"""
 
@@ -85,7 +96,7 @@ class KnowledgeFileListTests(unittest.TestCase):
         self.assertEqual(latest_job["failure_type"], "parse_error")
         self.assertEqual(
             latest_job["failure_hint"],
-            "文件解析失败。请确认文件内容可读取，必要时转为 PDF、Markdown 或 TXT 后重新上传。",
+            "文件解析失败。请确认文件内容可读取，必要时转为 PDF、Markdown、TXT 或支持的图片格式后重新上传。",
         )
         self.assertTrue(latest_job["can_retry"])
         self.assertEqual(latest_job["attempts"], 3)
@@ -326,6 +337,33 @@ class KnowledgeFileListTests(unittest.TestCase):
         self.assertIn("不支持的文件类型", response.json()["detail"])
         calculate_file_hash.assert_not_called()
 
+    def test_upload_rejects_image_with_invalid_content(self) -> None:
+        """图片扩展名和 MIME 合法时，上传阶段仍应校验文件头。"""
+        knowledge_base_id = uuid4()
+        with patch(
+            "app.api.knowledge_files.knowledge_base_exists",
+            return_value=True,
+        ), patch(
+            "app.api.knowledge_files.calculate_file_hash",
+            return_value=("hash", 12),
+        ), patch(
+            "app.api.knowledge_files.create_file_with_relation",
+        ) as create_file:
+            response = self.client.post(
+                f"/chat/knowledge-base/{knowledge_base_id}/files",
+                files={
+                    "files": (
+                        "chart.png",
+                        b"not an image",
+                        "image/png",
+                    )
+                },
+            )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("无法识别图片格式", response.json()["detail"])
+        create_file.assert_not_called()
+
     def test_upload_rejects_oversized_supported_file(self) -> None:
         """超过大小限制的合法类型文件应稳定返回 413。"""
         knowledge_base_id = uuid4()
@@ -533,6 +571,49 @@ class KnowledgeFileListTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertTrue(response.json()["success"])
         self.assertTrue(response.json()["files"][0]["reused"])
+        calculate_file_hash.assert_called_once()
+
+    def test_upload_allows_supported_png_file(self) -> None:
+        """知识库上传入口应允许真实 PNG 图片文件。"""
+        knowledge_base_id = uuid4()
+        file_id = uuid4()
+        existing_file = {
+            "id": file_id,
+            "original_name": "chart.png",
+            "mime_type": "image/png",
+            "size_bytes": len(PNG_BYTES),
+            "status": "pending",
+            "index_version": 0,
+            "created_at": "2026-07-05T00:00:00+08:00",
+            "updated_at": "2026-07-05T00:00:00+08:00",
+        }
+        with patch(
+            "app.api.knowledge_files.knowledge_base_exists",
+            return_value=True,
+        ), patch(
+            "app.api.knowledge_files.calculate_file_hash",
+            return_value=("hash", len(PNG_BYTES)),
+        ) as calculate_file_hash, patch(
+            "app.api.knowledge_files.get_file_by_hash",
+            return_value=existing_file,
+        ), patch(
+            "app.api.knowledge_files.add_existing_file_relation",
+            return_value=True,
+        ):
+            response = self.client.post(
+                f"/chat/knowledge-base/{knowledge_base_id}/files",
+                files={
+                    "files": (
+                        "chart.png",
+                        PNG_BYTES,
+                        "image/png",
+                    )
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json()["success"])
+        self.assertEqual(response.json()["files"][0]["mime_type"], "image/png")
         calculate_file_hash.assert_called_once()
 
 

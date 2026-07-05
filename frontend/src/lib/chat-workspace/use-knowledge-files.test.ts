@@ -151,7 +151,7 @@ describe("useKnowledgeFiles helpers", () => {
         new Error("不支持的文件类型：demo.exe"),
       ),
     ).toBe(
-      "不支持的文件类型：demo.exe。当前支持 PDF、DOCX、Markdown 和 TXT 文件。",
+      "不支持的文件类型：demo.exe。当前支持 PDF、DOCX、Markdown、TXT、PNG、JPEG 和 WebP 文件。",
     );
     expect(
       buildKnowledgeFileUploadErrorMessage(

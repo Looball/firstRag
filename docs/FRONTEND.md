@@ -76,7 +76,7 @@ BACKEND_API_PREFIX=
 
 - `login/page.tsx`：登录并保存访问令牌。
 - `register/page.tsx`：注册新用户。
-- `page.tsx`：知识库、文件、会话和聊天主工作台。
+- `page.tsx`：知识库、文件、会话和聊天主工作台；知识文件上传支持 PDF、DOCX、Markdown、TXT、PNG、JPEG 和 WebP，图片入库向量化失败时展示 vision 模型配置恢复动作。
 - `settings/page.tsx`：模型厂商、个人 API Key、模型列表和生成参数设置。
 
 ## 安全约定

@@ -21,6 +21,15 @@ DEFAULT_REPORT_PATH = Path("docs/evals/latest_indexing_eval_report.md")
 DEFAULT_RUNS_DIR = Path("docs/evals/indexing_runs")
 SUCCESS_JOB_STATUSES = {"completed", "succeeded"}
 TERMINAL_JOB_STATUSES = {*SUCCESS_JOB_STATUSES, "failed", "cancelled"}
+MINIMAL_PNG_BYTES = (
+    b"\x89PNG\r\n\x1a\n"
+    b"\x00\x00\x00\rIHDR"
+    b"\x00\x00\x00\x01\x00\x00\x00\x01"
+    b"\x08\x04\x00\x00\x00\xb5\x1c\x0c\x02"
+    b"\x00\x00\x00\x0bIDATx\xdac\xfc\xff\x1f"
+    b"\x00\x03\x03\x02\x00\xef\xbf\xa7\xdb"
+    b"\x00\x00\x00\x00IEND\xaeB`\x82"
+)
 
 
 class EvalError(RuntimeError):
@@ -103,6 +112,15 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Keep the uploaded file associated with the knowledge base.",
     )
+    parser.add_argument(
+        "--file-kind",
+        choices=("markdown", "image"),
+        default=os.getenv("FIRSTRAG_INDEXING_EVAL_FILE_KIND", "markdown"),
+        help=(
+            "Temporary file kind. Use image to exercise PNG + vision parsing; "
+            "default: markdown."
+        ),
+    )
     return parser.parse_args()
 
 
@@ -156,25 +174,35 @@ def request_multipart_upload(
     path: str,
     token: str,
     filename: str,
-    content: str,
+    content: str | bytes,
+    content_type: str,
     timeout: int,
 ) -> dict[str, Any]:
-    """用 multipart/form-data 上传单个临时 Markdown 文件。"""
+    """用 multipart/form-data 上传单个临时文件。"""
     boundary = f"----FirstRAGIndexingEval{uuid.uuid4().hex}"
+    file_content = content.encode("utf-8") if isinstance(content, str) else content
     body_parts = [
-        f"--{boundary}\r\n"
-        'Content-Disposition: form-data; name="auto_index"\r\n\r\n'
-        "true\r\n",
-        f"--{boundary}\r\n"
-        'Content-Disposition: form-data; name="description"\r\n\r\n'
-        "indexing eval temporary file\r\n",
+        (
+            f"--{boundary}\r\n"
+            'Content-Disposition: form-data; name="auto_index"\r\n\r\n'
+            "true\r\n"
+        ),
+        (
+            f"--{boundary}\r\n"
+            'Content-Disposition: form-data; name="description"\r\n\r\n'
+            "indexing eval temporary file\r\n"
+        ),
         f"--{boundary}\r\n"
         f'Content-Disposition: form-data; name="files"; filename="{filename}"\r\n'
-        "Content-Type: text/markdown\r\n\r\n"
-        f"{content}\r\n",
+        f"Content-Type: {content_type}\r\n\r\n",
+        file_content,
+        "\r\n",
         f"--{boundary}--\r\n",
     ]
-    body = "".join(body_parts).encode("utf-8")
+    body = b"".join(
+        part.encode("utf-8") if isinstance(part, str) else part
+        for part in body_parts
+    )
     req = Request(
         f"{base_url}{path}",
         data=body,
@@ -437,7 +465,7 @@ def remove_file_relation(
     )
 
 
-def build_temp_file(run_id: str) -> tuple[str, str, str]:
+def build_temp_markdown_file(run_id: str) -> tuple[str, str, str, str]:
     """构建本轮评测专用的唯一 Markdown 文件名、正文和查询关键词。"""
     keyword = f"FirstRAGIndexingEval-{run_id}"
     filename = f"firstrag-indexing-eval-{run_id}.md"
@@ -448,7 +476,21 @@ def build_temp_file(run_id: str) -> tuple[str, str, str]:
         "向量检索和聊天引用链路。若系统被问到本轮索引验收标识，"
         f"应当引用本文件并回答标识是 {keyword}。\n"
     )
-    return filename, content, keyword
+    return filename, content, "text/markdown", keyword
+
+
+def build_temp_image_file(run_id: str) -> tuple[str, bytes, str, str]:
+    """构建本轮评测专用的最小 PNG 图片文件。"""
+    keyword = f"FirstRAGImageIndexingEval-{run_id}"
+    filename = f"firstrag-image-indexing-eval-{keyword}.png"
+    return filename, MINIMAL_PNG_BYTES, "image/png", keyword
+
+
+def build_temp_file(run_id: str, file_kind: str) -> tuple[str, str | bytes, str, str]:
+    """按评测类型构建临时文件。"""
+    if file_kind == "image":
+        return build_temp_image_file(run_id)
+    return build_temp_markdown_file(run_id)
 
 
 def compact_diagnostics(retrieval: dict[str, Any]) -> dict[str, Any]:
@@ -722,7 +764,10 @@ def main() -> int:
     generated_at = datetime.now()
     run_id = generated_at.strftime("%Y%m%d%H%M%S") + "-" + uuid.uuid4().hex[:8]
     base_url = normalize_base_url(args.base_url)
-    filename, file_content, keyword = build_temp_file(run_id)
+    filename, file_content, content_type, keyword = build_temp_file(
+        run_id,
+        args.file_kind,
+    )
     token = login(base_url, args.username, args.password, args.timeout)
 
     knowledge_base_data = request_json(
@@ -747,6 +792,7 @@ def main() -> int:
             token=token,
             filename=filename,
             content=file_content,
+            content_type=content_type,
             timeout=args.timeout,
         )
         uploaded_files = upload_response.get("files") or []

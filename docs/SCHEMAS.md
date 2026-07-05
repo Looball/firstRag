@@ -121,6 +121,15 @@
 `override_applied` 与 `override_reason` 表示后端规则是否覆盖了 LLM 判断，
 例如问题关键词命中当前知识库文件画像时强制检索。
 
+`knowledge_file_chunks.metadata` 会随文件类型保存解析上下文。文本文件常见字段包括
+`source`、`file_id`、`file_name`、`user_id` 和 `chunk_index`。图片知识文件还会包含：
+
+- `file_type`：当前为 `image`。
+- `content_format`：图片解析结果当前为 `markdown`。
+- `image_mime_type`：`image/png`、`image/jpeg` 或 `image/webp`。
+- `image_parse_method`：当前为 `vision_llm`。
+- `image_parse_provider` / `image_parse_model`：本次解析实际使用的聊天模型厂商和模型名，不包含 API Key。
+
 `message_attachments.status` 当前使用：
 
 - `uploaded`：图片已上传但尚未绑定到消息。

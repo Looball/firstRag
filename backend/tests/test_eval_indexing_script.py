@@ -108,6 +108,21 @@ class EvalIndexingScriptTests(unittest.TestCase):
             report,
         )
 
+    def test_build_temp_file_supports_image_kind(self) -> None:
+        """indexing eval 可生成小图片样例覆盖图片入库链路。"""
+        filename, content, content_type, keyword = eval_indexing.build_temp_file(
+            "run-id",
+            "image",
+        )
+
+        self.assertTrue(filename.endswith(".png"))
+        self.assertIn("FirstRAGImageIndexingEval-run-id", filename)
+        self.assertEqual(content_type, "image/png")
+        self.assertIsInstance(content, bytes)
+        self.assertTrue(content.startswith(b"\x89PNG\r\n\x1a\n"))
+        self.assertIn(b"IEND", content)
+        self.assertEqual(keyword, "FirstRAGImageIndexingEval-run-id")
+
 
 if __name__ == "__main__":
     unittest.main()

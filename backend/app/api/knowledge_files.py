@@ -38,8 +38,11 @@ from app.services.file_service import (
     calculate_file_hash,
 )
 from app.services.documents.document_service import (
+    UnsupportedDocumentTypeError,
     build_unsupported_document_type_message,
+    is_image_document_file_name,
     is_supported_document_file,
+    validate_supported_image_content,
 )
 from app.services.vectors.vector_index_queue_service import (
     enqueue_file_vector_index,
@@ -185,6 +188,18 @@ async def upload_knowledge_files(
         except FileTooLargeError as exc:
             await file.close()
             raise HTTPException(status_code=413, detail=str(exc)) from exc
+        if is_image_document_file_name(file.filename):
+            content_sample = await file.read(32)
+            await file.seek(0)
+            try:
+                validate_supported_image_content(
+                    file.filename,
+                    content_sample,
+                    file.content_type,
+                )
+            except UnsupportedDocumentTypeError as exc:
+                await file.close()
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
 
         # 同一用户上传过相同内容时，复用已有文件，只补充知识库关联
         existing_file = get_file_by_hash(user_id, file_hash)

@@ -68,8 +68,8 @@ ID 随聊天请求提交。当前支持 `image/png`、`image/jpeg` 和 `image/we
 `CHAT_IMAGE_MAX_TOTAL_BYTES`。当当前用户的聊天模型不支持 vision 输入时，`POST /chat`
 返回 `400`，不会创建本轮半成品消息。
 
-聊天图片附件只用于当前会话消息的多模态提问，不会进入知识库向量化或 OCR 检索链路。
-图片入知识库属于后续独立任务。
+聊天图片附件只用于当前会话消息的多模态提问，不会自动进入知识库向量化链路。
+如果需要把图片作为长期知识资料检索，请通过知识文件上传入口上传 PNG、JPEG 或 WebP 图片。
 
 附件上传响应：
 
@@ -126,7 +126,9 @@ ID 随聊天请求提交。当前支持 `image/png`、`image/jpeg` 和 `image/we
 | `description` | string | 可选说明。 |
 | `auto_index` | boolean | 是否上传后提交向量化任务。 |
 
-上传入口当前支持 `.pdf`、`.docx`、`.md`、`.txt`。不支持的扩展名或明显不匹配的 MIME 类型会返回 `400`，不会创建无效文件记录或向量化任务。
+上传入口当前支持 `.pdf`、`.docx`、`.md`、`.txt`、`.png`、`.jpg/.jpeg` 和 `.webp`。不支持的扩展名、明显不匹配的 MIME 类型或伪装成图片的无效文件头会返回 `400`，不会创建无效文件记录或向量化任务。
+
+图片知识文件上传成功后仍然走异步向量化。worker 会使用当前登录用户保存的 vision-capable 聊天模型把图片解析为可检索 Markdown，再切分为 chunk，写入 PostgreSQL full-text chunks 和 Chroma。若用户未配置聊天模型，或当前模型不支持 vision，单文件/整库向量化提交会返回 `400`；通过 `auto_index=true` 自动入队的任务会在 worker 阶段失败，并返回安全的恢复提示。
 
 上传同时受单文件大小、用户文件数量和用户总容量配额限制：
 
@@ -200,7 +202,7 @@ ID 随聊天请求提交。当前支持 `image/png`、`image/jpeg` 和 `image/we
   "status": "failed",
   "error_message": "文件解析失败",
   "failure_type": "parse_error",
-  "failure_hint": "文件解析失败。请确认文件内容可读取，必要时转为 PDF、Markdown 或 TXT 后重新上传。",
+  "failure_hint": "文件解析失败。请确认文件内容可读取，必要时转为 PDF、Markdown、TXT 或支持的图片格式后重新上传。",
   "can_retry": true
 }
 ```
@@ -215,6 +217,7 @@ ID 随聊天请求提交。当前支持 `image/png`、`image/jpeg` 和 `image/we
 | --- | --- |
 | `unsupported_file_type` | 文件类型不在当前解析链路支持范围内。 |
 | `empty_document` | 文件可读取，但没有解析出可入库文本。 |
+| `image_parse_error` | 图片知识文件无法通过当前用户的 vision 聊天模型解析。 |
 | `parse_error` | 文件解析、编码或文本分块失败。 |
 | `embedding_error` | Embedding provider 调用失败。 |
 | `vector_store_error` | Chroma/vector_db 写入或查询失败。 |
