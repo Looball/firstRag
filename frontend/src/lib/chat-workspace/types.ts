@@ -4,9 +4,20 @@ export type Message = {
   content: string;
   status?: string;
   errorMessage?: string | null;
+  attachments?: MessageAttachment[];
   sources?: ChatSource[];
   retrieval?: RetrievalState;
   feedback?: MessageFeedback | null;
+};
+
+export type MessageAttachment = {
+  id: string;
+  originalName: string;
+  mimeType: string;
+  sizeBytes: number;
+  contentUrl: string;
+  createdAt?: string;
+  localPreviewUrl?: string;
 };
 
 export type MessageFeedbackRating = "positive" | "negative";
@@ -351,6 +362,13 @@ export type CreateConversationResponse = {
 
 export type ListMessagesResponse = {
   messages?: unknown;
+  detail?: string;
+  error?: string;
+  message?: string;
+};
+
+export type UploadChatAttachmentsResponse = {
+  attachments?: unknown;
   detail?: string;
   error?: string;
   message?: string;

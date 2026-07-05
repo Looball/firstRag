@@ -1,5 +1,6 @@
 from typing import Any, cast
 
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.runnables import (
@@ -11,6 +12,7 @@ from langchain_core.runnables import (
 )
 
 from app.services.llm_service import create_openai_compatible_chat_model
+from app.services.chat_attachment_service import build_vision_image_content
 from app.services.rag.diagnostics import serialize_llm_diagnostics
 from app.services.rag.reference_serializer import get_res_doc
 from app.services.rag.retrieval_decision import (
@@ -128,17 +130,38 @@ def get_chain(user_id: int) -> RunnableSerializable:
         "检索上下文：\n"
         "{context}"
     )
-    qa_prompt = ChatPromptTemplate([
-        ("system", system_prompt),
-        ("placeholder", "{chat_history}"),
-        ("human", "{input}"),
-    ])
+    def build_qa_messages(inputs: ChainInput) -> list:
+        """构造最终回答用消息，支持本轮图片附件。"""
+        messages = [
+            SystemMessage(
+                content=system_prompt.format(
+                    route_info=format_route_info(inputs),
+                    context=get_res_doc(inputs),
+                )
+            )
+        ]
+        for role, content in inputs.get("chat_history") or []:
+            if role == "human":
+                messages.append(HumanMessage(content=content))
+            elif role == "ai":
+                messages.append(AIMessage(content=content))
+
+        image_attachments = inputs.get("image_attachments") or []
+        if image_attachments:
+            messages.append(
+                HumanMessage(
+                    content=[
+                        {"type": "text", "text": inputs["input"]},
+                        *build_vision_image_content(image_attachments),
+                    ]
+                )
+            )
+        else:
+            messages.append(HumanMessage(content=inputs["input"]))
+        return messages
+
     qa_chain = (
-        RunnablePassthrough.assign(
-            route_info=RunnableLambda(format_route_info),
-            context=RunnableLambda(get_res_doc)
-        )
-        | qa_prompt
+        RunnableLambda(build_qa_messages)
         | model
     )
 

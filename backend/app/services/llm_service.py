@@ -33,6 +33,23 @@ PROVIDER_DISPLAY_NAMES = {
     "minimax": "MiniMax",
 }
 
+VISION_MODEL_KEYWORDS = (
+    "vision",
+    "visual",
+    "vl",
+    "qvq",
+    "omni",
+    "gpt-4o",
+    "gpt-4.1",
+    "gpt-4-turbo",
+    "o3",
+    "o4",
+    "glm-4v",
+    "glm-4.1v",
+    "doubao-vision",
+    "moonshot-v1-vision",
+)
+
 
 @dataclass(frozen=True)
 class ChatModelSettings:
@@ -134,6 +151,28 @@ def create_openai_compatible_chat_model(
         streaming=True,
         stream_usage=True,
     )
+
+
+def chat_model_supports_images(provider: str, model: str) -> bool:
+    """根据 provider/model 名称保守判断当前聊天模型是否支持图片输入。"""
+    normalized_provider = provider.strip().lower()
+    normalized_model = model.strip().lower()
+    if normalized_provider == OPENAI_COMPATIBLE_PROVIDER:
+        return any(keyword in normalized_model for keyword in VISION_MODEL_KEYWORDS)
+    if normalized_provider == "qwen":
+        return any(
+            keyword in normalized_model
+            for keyword in ("vl", "qvq", "omni")
+        )
+    if normalized_provider == "zhipu":
+        return "glm" in normalized_model and "v" in normalized_model
+    if normalized_provider == "doubao":
+        return "vision" in normalized_model or "multimodal" in normalized_model
+    if normalized_provider == "kimi":
+        return "vision" in normalized_model
+    if normalized_provider == "minimax":
+        return "vision" in normalized_model or "image" in normalized_model
+    return any(keyword in normalized_model for keyword in VISION_MODEL_KEYWORDS)
 
 
 def create_system_chat_model() -> ChatOpenAI:

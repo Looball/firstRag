@@ -102,6 +102,7 @@ def get_user_conversation_messages(
             mf.metadata AS feedback_metadata,
             mf.created_at AS feedback_created_at,
             mf.updated_at AS feedback_updated_at,
+            COALESCE(ma.attachments, '[]'::jsonb) AS attachments,
             COALESCE(msf.source_feedbacks, '[]'::jsonb) AS source_feedbacks
         FROM messages AS m
         JOIN conversations AS c
@@ -109,6 +110,24 @@ def get_user_conversation_messages(
         LEFT JOIN message_feedback AS mf
           ON mf.message_id = m.id
          AND mf.user_id = %s
+        LEFT JOIN LATERAL (
+            SELECT jsonb_agg(
+                jsonb_build_object(
+                    'id', attachment.id::text,
+                    'original_name', attachment.original_name,
+                    'mime_type', attachment.mime_type,
+                    'size_bytes', attachment.size_bytes,
+                    'content_url',
+                        '/chat/attachments/' || attachment.id::text || '/content',
+                    'created_at', attachment.created_at
+                )
+                ORDER BY attachment.created_at ASC, attachment.id ASC
+            ) AS attachments
+            FROM message_attachments AS attachment
+            WHERE attachment.message_id = m.id
+              AND attachment.user_id = %s
+              AND attachment.status <> 'deleted'
+        ) AS ma ON TRUE
         LEFT JOIN LATERAL (
             SELECT jsonb_agg(
                 jsonb_build_object(
@@ -133,5 +152,5 @@ def get_user_conversation_messages(
           AND c.deleted_at IS NULL
         ORDER BY m.created_at ASC, m.id ASC;
         """,
-        (user_id, user_id, conversation_id, user_id),
+        (user_id, user_id, user_id, conversation_id, user_id),
     )

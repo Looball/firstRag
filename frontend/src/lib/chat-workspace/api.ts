@@ -19,12 +19,14 @@ import type {
   MessageFeedbackResponse,
   MessageFeedbackRating,
   MessageDiagnostic,
+  MessageAttachment,
   MessageSourceFeedback,
   MessageSourceFeedbackRating,
   MessageSourceFeedbackResponse,
   QualityDashboard,
   RetrievalSettingsResponse,
   UploadKnowledgeFilesResponse,
+  UploadChatAttachmentsResponse,
   VectorIndexHealthResponse,
   VectorIndexJob,
   VectorIndexResponse,
@@ -40,6 +42,7 @@ import {
   toKnowledgeBase,
   toKnowledgeFile,
   toMessageFeedback,
+  toMessageAttachment,
   toMessageSourceFeedback,
   toMessages,
   toQualityDashboard,
@@ -192,6 +195,35 @@ export async function uploadKnowledgeFiles(
   }
 
   return uploadedFiles;
+}
+
+export async function uploadChatAttachments(
+  conversationId: string,
+  selectedFiles: File[],
+) {
+  const formData = new FormData();
+  selectedFiles.forEach((file) => formData.append("files", file));
+
+  const data = await authenticatedJson<UploadChatAttachmentsResponse>(
+    `/api/chat/attachments?conversation_id=${encodeURIComponent(conversationId)}`,
+    {
+      method: "POST",
+      body: formData,
+    },
+    { fallbackMessage: "上传图片失败，请稍后再试。" },
+  );
+
+  const attachments = Array.isArray(data.attachments)
+    ? data.attachments
+        .map(toMessageAttachment)
+        .filter((attachment): attachment is MessageAttachment => attachment !== null)
+    : [];
+
+  if (attachments.length === 0) {
+    throw new Error("上传响应缺少有效的图片附件。");
+  }
+
+  return attachments;
 }
 
 export async function attachKnowledgeFile(knowledgeBaseId: string, fileId: string) {
@@ -478,6 +510,7 @@ export async function postChatMessage(
   conversationId: string,
   knowledgeBaseId: string,
   message: string,
+  attachmentIds: string[] = [],
 ) {
   return authenticatedFetch(
     "/api/chat",
@@ -488,6 +521,7 @@ export async function postChatMessage(
         conversation_id: conversationId,
         knowledge_base_id: knowledgeBaseId,
         message,
+        attachment_ids: attachmentIds,
       }),
     },
     { fallbackMessage: "请求失败了，请稍后再试。" },

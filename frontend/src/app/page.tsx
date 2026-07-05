@@ -17,6 +17,7 @@ import {
   parseAuthState,
 } from "@/lib/auth";
 import {
+  authenticatedFetch,
   redirectToLogin,
 } from "@/lib/frontend-api";
 import {
@@ -32,6 +33,7 @@ import * as chatApi from "@/lib/chat-workspace/api";
 import { useKnowledgeFiles } from "@/lib/chat-workspace/use-knowledge-files";
 import {
   buildSessionTitle,
+  formatFileSize,
 } from "@/lib/chat-workspace/utils";
 import { streamChatResponse } from "@/lib/chat-workspace/chat-stream";
 import type {
@@ -40,6 +42,7 @@ import type {
   KnowledgeBase,
   KnowledgeBaseRetrievalSettings,
   Message,
+  MessageAttachment,
   MessageFeedbackReason,
   MessageFeedbackRating,
   MessageDiagnostic,
@@ -48,6 +51,16 @@ import type {
   RetrievalMode,
   RetrievalState,
 } from "@/lib/chat-workspace/types";
+
+const CHAT_IMAGE_ACCEPT = "image/png,image/jpeg,image/webp";
+const CHAT_IMAGE_MAX_FILES = 3;
+const CHAT_IMAGE_MAX_FILE_SIZE_BYTES = 5 * 1024 * 1024;
+
+type PendingChatImage = {
+  id: string;
+  file: File;
+  previewUrl: string;
+};
 
 const MESSAGE_FEEDBACK_REASON_OPTIONS: Array<{
   value: MessageFeedbackReason;
@@ -354,10 +367,123 @@ function MarkdownContent({
   return <div className="space-y-3 leading-7 break-words">{blocks}</div>;
 }
 
+function AuthenticatedAttachmentImage({
+  attachment,
+}: {
+  attachment: MessageAttachment;
+}) {
+  const [remoteObjectUrl, setRemoteObjectUrl] = useState("");
+  const [hasError, setHasError] = useState(false);
+
+  useEffect(() => {
+    if (attachment.localPreviewUrl) {
+      return undefined;
+    }
+
+    let isCancelled = false;
+    let nextObjectUrl = "";
+
+    async function loadImage() {
+      try {
+        const response = await authenticatedFetch(
+          attachment.contentUrl,
+          { method: "GET" },
+          {
+            fallbackMessage: "读取图片失败，请稍后再试。",
+            skipAuthRedirect: true,
+          }
+        );
+        const blob = await response.blob();
+        if (isCancelled) {
+          return;
+        }
+        nextObjectUrl = URL.createObjectURL(blob);
+        setRemoteObjectUrl(nextObjectUrl);
+        setHasError(false);
+      } catch {
+        if (!isCancelled) {
+          setHasError(true);
+        }
+      }
+    }
+
+    void loadImage();
+
+    return () => {
+      isCancelled = true;
+      if (nextObjectUrl) {
+        URL.revokeObjectURL(nextObjectUrl);
+      }
+    };
+  }, [attachment.contentUrl, attachment.localPreviewUrl]);
+
+  if (hasError) {
+    return (
+      <div className="flex aspect-[4/3] items-center justify-center border border-[#cbd5d1] bg-[#eef3f0] px-3 text-center text-xs text-[#64716d]">
+        图片暂不可用
+      </div>
+    );
+  }
+
+  const imageUrl = attachment.localPreviewUrl || remoteObjectUrl;
+
+  return imageUrl ? (
+    <img
+      src={imageUrl}
+      alt={attachment.originalName}
+      className="aspect-[4/3] w-full object-cover"
+    />
+  ) : (
+    <div className="aspect-[4/3] animate-pulse bg-[#dfe8e4]" />
+  );
+}
+
+function MessageAttachmentGrid({
+  attachments,
+  isUserMessage,
+}: {
+  attachments: MessageAttachment[];
+  isUserMessage: boolean;
+}) {
+  if (attachments.length === 0) {
+    return null;
+  }
+
+  return (
+    <div className="mt-4 grid gap-2 sm:grid-cols-3">
+      {attachments.map((attachment) => (
+        <figure
+          key={attachment.id}
+          className={`overflow-hidden border ${
+            isUserMessage
+              ? "border-white/20 bg-white/10"
+              : "border-[#d5ded9] bg-[#fcfdfb]"
+          }`}
+        >
+          <AuthenticatedAttachmentImage attachment={attachment} />
+          <figcaption
+            className={`truncate px-2 py-1.5 text-[11px] ${
+              isUserMessage ? "text-white/75" : "text-[#64716d]"
+            }`}
+            title={attachment.originalName}
+          >
+            {attachment.originalName}
+          </figcaption>
+        </figure>
+      ))}
+    </div>
+  );
+}
+
 export default function Home() {
   const [sessions, setSessions] = useState<ChatSession[]>([]);
   const [currentSessionId, setCurrentSessionId] = useState("");
   const [input, setInput] = useState("");
+  const [pendingChatImages, setPendingChatImages] = useState<PendingChatImage[]>(
+    []
+  );
+  const [isUploadingChatImages, setIsUploadingChatImages] = useState(false);
+  const pendingChatImagesRef = useRef<PendingChatImage[]>([]);
   const [isAdvancedMode, setIsAdvancedMode] = useState(getAdvancedModeDefault);
   const [editingSessionId, setEditingSessionId] = useState("");
   const [editingTitle, setEditingTitle] = useState("");
@@ -386,6 +512,7 @@ export default function Home() {
     useState(false);
   const [pageError, setPageError] = useState("");
   const [currentUsername, setCurrentUsername] = useState("");
+  const chatImageInputRef = useRef<HTMLInputElement | null>(null);
   const [knowledgeBases, setKnowledgeBases] = useState<KnowledgeBase[]>([
     {
       id: DEFAULT_KNOWLEDGE_BASE_ID,
@@ -727,6 +854,18 @@ export default function Home() {
 
   useEffect(() => {
     setIsAdvancedMode(readAdvancedModePreference());
+  }, []);
+
+  useEffect(() => {
+    pendingChatImagesRef.current = pendingChatImages;
+  }, [pendingChatImages]);
+
+  useEffect(() => {
+    return () => {
+      pendingChatImagesRef.current.forEach((image) => {
+        URL.revokeObjectURL(image.previewUrl);
+      });
+    };
   }, []);
 
   useEffect(() => {
@@ -1282,6 +1421,74 @@ export default function Home() {
     }
   }
 
+  function clearPendingChatImages() {
+    pendingChatImagesRef.current.forEach((image) => {
+      URL.revokeObjectURL(image.previewUrl);
+    });
+    pendingChatImagesRef.current = [];
+    setPendingChatImages([]);
+    if (chatImageInputRef.current) {
+      chatImageInputRef.current.value = "";
+    }
+  }
+
+  function removePendingChatImage(imageId: string) {
+    setPendingChatImages((current) => {
+      const removedImage = current.find((image) => image.id === imageId);
+      if (removedImage) {
+        URL.revokeObjectURL(removedImage.previewUrl);
+      }
+      return current.filter((image) => image.id !== imageId);
+    });
+  }
+
+  function handleSelectChatImages(files: FileList | null) {
+    if (!files?.length) {
+      return;
+    }
+
+    const selectedFiles = Array.from(files);
+    const nextImages: PendingChatImage[] = [];
+
+    if (pendingChatImages.length + selectedFiles.length > CHAT_IMAGE_MAX_FILES) {
+      setPageError(`单轮最多只能附加 ${CHAT_IMAGE_MAX_FILES} 张图片。`);
+      if (chatImageInputRef.current) {
+        chatImageInputRef.current.value = "";
+      }
+      return;
+    }
+
+    for (const file of selectedFiles) {
+      if (!CHAT_IMAGE_ACCEPT.split(",").includes(file.type)) {
+        nextImages.forEach((image) => URL.revokeObjectURL(image.previewUrl));
+        setPageError("仅支持 PNG、JPEG 或 WebP 图片。");
+        if (chatImageInputRef.current) {
+          chatImageInputRef.current.value = "";
+        }
+        return;
+      }
+      if (file.size > CHAT_IMAGE_MAX_FILE_SIZE_BYTES) {
+        nextImages.forEach((image) => URL.revokeObjectURL(image.previewUrl));
+        setPageError("单张图片不能超过 5MB。");
+        if (chatImageInputRef.current) {
+          chatImageInputRef.current.value = "";
+        }
+        return;
+      }
+      nextImages.push({
+        id: `${file.name}-${file.size}-${file.lastModified}-${crypto.randomUUID()}`,
+        file,
+        previewUrl: URL.createObjectURL(file),
+      });
+    }
+
+    setPageError("");
+    setPendingChatImages((current) => [...current, ...nextImages]);
+    if (chatImageInputRef.current) {
+      chatImageInputRef.current.value = "";
+    }
+  }
+
   async function handleExportEvalDraft(messageKey: string, messageId?: string) {
     if (!isAdvancedMode) {
       return;
@@ -1450,7 +1657,7 @@ export default function Home() {
   }
 
   async function handleSubmit(overrideInput?: string) {
-    if (isCurrentSessionLoading || isCreatingSession) {
+    if (isCurrentSessionLoading || isCreatingSession || isUploadingChatImages) {
       return;
     }
 
@@ -1504,9 +1711,34 @@ export default function Home() {
 
     setPageError("");
 
+    const imagesToSend = [...pendingChatImages];
+    let uploadedAttachments: MessageAttachment[] = [];
+    if (imagesToSend.length > 0) {
+      setIsUploadingChatImages(true);
+      try {
+        uploadedAttachments = await chatApi.uploadChatAttachments(
+          activeSession.id,
+          imagesToSend.map((image) => image.file)
+        );
+      } catch (error) {
+        const message =
+          error instanceof Error ? error.message : "上传图片失败，请稍后再试。";
+        setSessionErrors((prev) => ({
+          ...prev,
+          [activeSession.id]: message,
+        }));
+        return;
+      } finally {
+        setIsUploadingChatImages(false);
+      }
+    }
+
     const userMessage: Message = {
       role: "user",
       content: messageContent,
+      ...(uploadedAttachments.length > 0
+        ? { attachments: uploadedAttachments }
+        : {}),
     };
 
     const updatedMessages = [...activeSession.messages, userMessage];
@@ -1529,6 +1761,9 @@ export default function Home() {
     );
 
     setInput("");
+    if (imagesToSend.length > 0) {
+      clearPendingChatImages();
+    }
     setSessionErrors((prev) => ({
       ...prev,
       [activeSessionId]: "",
@@ -1698,6 +1933,7 @@ export default function Home() {
         activeSessionId,
         activeKnowledgeBaseId,
         messageContent,
+        uploadedAttachments.map((attachment) => attachment.id),
       );
 
       await streamChatResponse(response, {
@@ -2307,6 +2543,13 @@ export default function Home() {
                         isUserMessage={message.role === "user"}
                       />
 
+                      {message.attachments && message.attachments.length > 0 && (
+                        <MessageAttachmentGrid
+                          attachments={message.attachments}
+                          isUserMessage={message.role === "user"}
+                        />
+                      )}
+
                       {shouldShowRetrievalEmptyHint && (
                         <div className="mt-4 border-t border-[#d6dedb] pt-3">
                           <p className="text-xs leading-5 text-[#64716d]">
@@ -2725,6 +2968,34 @@ export default function Home() {
                 Enter 发送 · Shift + Enter 换行
               </span>
             </div>
+            {pendingChatImages.length > 0 && (
+              <div className="mt-3 grid gap-2 sm:grid-cols-3">
+                {pendingChatImages.map((image) => (
+                  <figure
+                    key={image.id}
+                    className="overflow-hidden border border-[#cbd5d1] bg-[#fcfdfb]"
+                  >
+                    <img
+                      src={image.previewUrl}
+                      alt={image.file.name}
+                      className="aspect-[4/3] w-full object-cover"
+                    />
+                    <figcaption className="flex items-center justify-between gap-2 px-2 py-1.5 text-[11px] text-[#64716d]">
+                      <span className="min-w-0 truncate" title={image.file.name}>
+                        {image.file.name}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => removePendingChatImage(image.id)}
+                        className="shrink-0 font-semibold text-[#9b3c29] hover:text-[#e36b4f]"
+                      >
+                        移除
+                      </button>
+                    </figcaption>
+                  </figure>
+                ))}
+              </div>
+            )}
             <div className="mt-3 flex flex-col gap-3 md:flex-row md:items-end">
               <textarea
                 id="question"
@@ -2744,25 +3015,55 @@ export default function Home() {
                 className="research-focus min-h-[104px] min-w-0 flex-1 resize-y border border-[#aebdb7] bg-[#fcfdfb] px-4 py-3 text-[#17201f]"
               />
 
-              <button
-                onClick={() => {
-                  void handleSubmit();
-                }}
-                disabled={
-                  isCurrentSessionLoading ||
-                  isCreatingSession ||
-                  !selectedKnowledgeBaseId ||
-                  selectedKnowledgeBaseId === DEFAULT_KNOWLEDGE_BASE_ID
-                }
-                className="h-12 shrink-0 bg-[#176b62] px-6 text-sm font-semibold text-white transition hover:bg-[#105149] disabled:bg-[#91aaa4] md:h-[104px] md:w-32"
-              >
-                {isCreatingSession
-                  ? "创建中..."
-                  : isCurrentSessionLoading
-                    ? "思考中..."
-                    : "发送问题"}
-              </button>
+              <div className="flex shrink-0 gap-2 md:h-[104px] md:w-48 md:flex-col">
+                <input
+                  ref={chatImageInputRef}
+                  type="file"
+                  accept={CHAT_IMAGE_ACCEPT}
+                  multiple
+                  className="hidden"
+                  onChange={(event) => handleSelectChatImages(event.target.files)}
+                />
+                <button
+                  type="button"
+                  onClick={() => chatImageInputRef.current?.click()}
+                  disabled={
+                    isCurrentSessionLoading ||
+                    isCreatingSession ||
+                    isUploadingChatImages ||
+                    pendingChatImages.length >= CHAT_IMAGE_MAX_FILES
+                  }
+                  className="h-12 flex-1 border border-[#176b62] px-4 text-sm font-semibold text-[#176b62] transition hover:bg-[#dde8e4] disabled:border-[#91aaa4] disabled:text-[#91aaa4] md:h-auto"
+                >
+                  添加图片
+                </button>
+                <button
+                  onClick={() => {
+                    void handleSubmit();
+                  }}
+                  disabled={
+                    isCurrentSessionLoading ||
+                    isCreatingSession ||
+                    isUploadingChatImages ||
+                    !selectedKnowledgeBaseId ||
+                    selectedKnowledgeBaseId === DEFAULT_KNOWLEDGE_BASE_ID
+                  }
+                  className="h-12 flex-1 bg-[#176b62] px-4 text-sm font-semibold text-white transition hover:bg-[#105149] disabled:bg-[#91aaa4] md:h-auto"
+                >
+                  {isCreatingSession
+                    ? "创建中..."
+                    : isUploadingChatImages
+                      ? "上传中..."
+                      : isCurrentSessionLoading
+                        ? "思考中..."
+                        : "发送问题"}
+                </button>
+              </div>
             </div>
+            <p className="mt-2 text-xs text-[#7b8884]">
+              图片支持 PNG、JPEG、WebP，最多 {CHAT_IMAGE_MAX_FILES} 张，每张不超过{" "}
+              {formatFileSize(CHAT_IMAGE_MAX_FILE_SIZE_BYTES)}。
+            </p>
           </div>
         </section>
       </div>

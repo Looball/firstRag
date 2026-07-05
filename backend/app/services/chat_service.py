@@ -110,6 +110,7 @@ def stream_answer_and_save(
     assistant_message_id: UUID,
     user_id: int,
     knowledge_base_id: UUID,
+    image_attachments: list[dict] | None = None,
     request_id: str | None = None,
 ) -> Iterator[str]:
     """流式返回答案和引用文档，并更新助手消息的生成状态。
@@ -137,6 +138,7 @@ def stream_answer_and_save(
             chat_history=history,
             user_id=user_id,
             knowledge_base_id=knowledge_base_id,
+            image_attachments=image_attachments,
         ):
             if event["type"] == "retrieval":
                 retrieval = {

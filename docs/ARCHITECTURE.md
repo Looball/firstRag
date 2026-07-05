@@ -27,11 +27,18 @@ FirstRAG/
 用户提问
   -> Next.js API 代理
   -> FastAPI /chat
+  -> 可选校验并绑定聊天图片附件
   -> rag_service 构建 LCEL 链
   -> 混合检索：向量 + 全文 + RRF + rerank
-  -> LLM 流式生成
+  -> LLM 流式生成（带图片时使用多模态消息）
   -> SSE 返回 token、来源和检索诊断
   -> messages 持久化回答、sources、retrieval
+
+聊天图片附件
+  -> Next.js API 代理
+  -> FastAPI /chat/attachments
+  -> 文件落盘 + PostgreSQL message_attachments metadata
+  -> /chat 绑定到当前用户消息
 ```
 
 ## 分层边界
@@ -50,9 +57,9 @@ FirstRAG/
 
 ## 存储组件
 
-- PostgreSQL：用户、知识库、文件、会话、消息、文本分块、向量化任务队列。
+- PostgreSQL：用户、知识库、文件、会话、消息、聊天附件 metadata、文本分块、向量化任务队列。
 - Chroma：文档分块向量，默认持久化到根目录 `vector_db/chroma`。
-- 本地文件系统：上传文件默认保存到根目录 `uploads/users/...`。
+- 本地文件系统：知识文件默认保存到根目录 `uploads/users/...`，聊天图片附件默认保存到 `uploads/chat_attachments/users/...`。
 
 ## 认证与权限
 

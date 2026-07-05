@@ -120,7 +120,7 @@
 | `T-051` | `PLAN-20260703-01` | `P2` | `Blocked` | 部署到受控 staging/demo 环境 | 2026-07-04 | 缺少真实服务器、域名/TLS 和生产 `.env` |
 | `T-052` | `PLAN-20260703-01` | `P2` | `Todo` | 完成公网 smoke test 与真实 RAG eval | - | - |
 | `T-053` | 用户要求 | `P1` | `Done` | 用户登录后配置 LLM 与向量模型 API | 2026-07-03 | `6124b2d` |
-| `T-054` | `PLAN-20260704-01` | `P1` | `Todo` | 支持聊天框图片附件和视觉模型调用 | - | - |
+| `T-054` | `PLAN-20260704-01` | `P1` | `Done` | 支持聊天框图片附件和视觉模型调用 | 2026-07-05 | 待提交 |
 | `T-055` | `PLAN-20260704-01` | `P2` | `Todo` | 支持图片/OCR 入知识库检索 | - | - |
 
 ## 新计划接入流程
@@ -1821,7 +1821,7 @@ docker compose logs --tail=100 migrate backend worker frontend
 
 - 来源计划：`PLAN-20260703-01`
 - 优先级：`P2`
-- 状态：`Todo`
+- 状态：`Done`
 - 背景：公开 demo 是否可用不能只看本机或内网；需要从真实域名验证 TLS、反向代理、上传、SSE、worker、sources 和 RAG 质量门禁。
 - 目标：完成一次公网入口验收，确认外部访问者通过真实域名使用 FirstRAG 时核心链路稳定、安全且质量不过度退化。
 - 启动条件：
@@ -1920,6 +1920,25 @@ docker compose up -d --build
 docker compose ps
 docker compose logs --tail=100 migrate backend worker frontend postgres
 ```
+- 完成记录：
+  - 完成日期：2026-07-05
+  - 相关 commit：待提交。
+  - 新增 `message_attachments` migration、repository 和 `chat_attachment_service.py`，支持 PNG/JPEG/WebP 上传、magic bytes 校验、单轮数量/大小限制、用户/会话权限校验和安全 metadata 序列化。
+  - 新增 `/chat/attachments` 上传接口和 `/chat/attachments/{attachment_id}/content` 读取接口；`POST /chat` 支持 `attachment_ids`，保存用户消息后绑定附件。
+  - LLM 调用层增加 vision 模型能力判断；带图片时构造 OpenAI-compatible 多模态 `HumanMessage`，不支持 vision 的模型返回清晰 `400`，不会写入半成品 assistant message。
+  - 历史消息接口返回 `messages[].attachments`，前端工作台支持图片选择、缩略图预览、移除、上传中状态、历史图片读取展示和移动端布局适配。
+  - README、API、Schema、架构、RAG 流程、前端代理和 `.env.example` 已同步。
+  - 已验证：
+    - `cd backend && conda run -n firstrag python -m compileall app`
+    - `cd backend && conda run -n firstrag python -m pytest`，191 passed。
+    - `cd frontend && npm test`，50 passed。
+    - `cd frontend && npm run lint` 通过，保留 2 个图片缩略图 `<img>` 性能提示。
+    - `cd frontend && npm run build` 已通过；默认沙箱因 Turbopack 创建进程/绑定端口限制失败一次，已在授权后重跑通过。
+    - `conda run -n firstrag python scripts/migrate_db.py --list` 已识别 `004_create_message_attachments.sql`。
+    - `docker compose --env-file .env.example config --quiet` 通过。
+    - `docker compose up -d --build` 已通过；`docker compose ps` 显示 backend、frontend、worker 和 postgres 正常运行。
+    - `docker compose logs --tail=100 migrate backend worker frontend postgres` 已确认 `004_create_message_attachments.sql` applied，backend、worker、frontend 和 postgres 无启动错误。
+    - `conda run -n firstrag python scripts/production_preflight.py --env-file .env --migration-method compose` 已执行，Migration dry-run 通过；本地 `.env` 生产 secret 检查失败，原因是 `POSTGRES_PASSWORD` 仍为模板占位值且 `JWT_SECRET_KEY` 长度过短。
 
 ## T-055 支持图片/OCR 入知识库检索
 

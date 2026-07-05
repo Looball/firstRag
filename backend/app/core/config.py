@@ -38,6 +38,7 @@ def read_bool_env(name: str, default: bool) -> bool:
 
 # 设置文件存储路径
 UPLOAD_ROOT = PROJECT_ROOT / "uploads"
+CHAT_ATTACHMENT_ROOT = UPLOAD_ROOT / "chat_attachments"
 
 # 设置上传文件大小限制，默认 200MB，与前端限制保持一致
 MAX_UPLOAD_FILE_SIZE_BYTES = read_int_env(
@@ -82,6 +83,15 @@ VECTOR_INDEX_RATE_LIMIT_MAX_REQUESTS = read_int_env(
 MODEL_TEST_RATE_LIMIT_MAX_REQUESTS = read_int_env(
     "MODEL_TEST_RATE_LIMIT_MAX_REQUESTS",
     20,
+)
+CHAT_IMAGE_MAX_FILES = read_int_env("CHAT_IMAGE_MAX_FILES", 3)
+CHAT_IMAGE_MAX_FILE_SIZE_BYTES = read_int_env(
+    "CHAT_IMAGE_MAX_FILE_SIZE_BYTES",
+    5 * 1024 * 1024,
+)
+CHAT_IMAGE_MAX_TOTAL_BYTES = read_int_env(
+    "CHAT_IMAGE_MAX_TOTAL_BYTES",
+    15 * 1024 * 1024,
 )
 
 # 设置Chroma向量库存储路径和集合名称

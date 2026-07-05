@@ -15,6 +15,7 @@ import type {
   LatestIndexJob,
   LatestIndexJobStatus,
   Message,
+  MessageAttachment,
   MessageFeedback,
   MessageFeedbackRating,
   MessageFeedbackReason,
@@ -201,6 +202,72 @@ export function toMessageSourceFeedback(
   };
 }
 
+export function resolveChatAttachmentContentUrl(value: string) {
+  if (!value) {
+    return "";
+  }
+  if (value.startsWith("/api/")) {
+    return value;
+  }
+  if (value.startsWith("/chat/")) {
+    return `/api${value}`;
+  }
+  return value;
+}
+
+
+export function toMessageAttachment(value: unknown): MessageAttachment | null {
+  if (typeof value !== "object" || value === null) {
+    return null;
+  }
+
+  const candidate = value as Record<string, unknown>;
+  const id = typeof candidate.id === "string" ? candidate.id : "";
+  const originalName =
+    typeof candidate.original_name === "string"
+      ? candidate.original_name
+      : typeof candidate.originalName === "string"
+        ? candidate.originalName
+        : "";
+  const mimeType =
+    typeof candidate.mime_type === "string"
+      ? candidate.mime_type
+      : typeof candidate.mimeType === "string"
+        ? candidate.mimeType
+        : "";
+  const sizeBytes =
+    typeof candidate.size_bytes === "number"
+      ? candidate.size_bytes
+      : typeof candidate.sizeBytes === "number"
+        ? candidate.sizeBytes
+        : 0;
+  const contentUrl = resolveChatAttachmentContentUrl(
+    typeof candidate.content_url === "string"
+      ? candidate.content_url
+      : typeof candidate.contentUrl === "string"
+        ? candidate.contentUrl
+        : "",
+  );
+
+  if (!id || !mimeType || !contentUrl) {
+    return null;
+  }
+
+  return {
+    id,
+    originalName: originalName || "图片附件",
+    mimeType,
+    sizeBytes,
+    contentUrl,
+    createdAt:
+      typeof candidate.created_at === "string"
+        ? candidate.created_at
+        : typeof candidate.createdAt === "string"
+          ? candidate.createdAt
+          : undefined,
+  };
+}
+
 
 export function toMessage(value: unknown): Message | null {
   if (typeof value !== "object" || value === null) {
@@ -236,6 +303,11 @@ export function toMessage(value: unknown): Message | null {
         ? null
         : undefined;
   const feedback = toMessageFeedback(candidate.feedback);
+  const attachments = Array.isArray(candidate.attachments)
+    ? candidate.attachments
+        .map(toMessageAttachment)
+        .filter((attachment): attachment is MessageAttachment => attachment !== null)
+    : [];
 
   return {
     ...(id ? { id } : {}),
@@ -243,6 +315,7 @@ export function toMessage(value: unknown): Message | null {
     content: candidate.content,
     ...(status ? { status } : {}),
     ...(errorMessage !== undefined ? { errorMessage } : {}),
+    ...(attachments.length > 0 ? { attachments } : {}),
     ...(sources.length > 0 ? { sources } : {}),
     ...(retrieval ? { retrieval } : {}),
     ...(feedback ? { feedback } : {}),

@@ -537,6 +537,7 @@ def get_messages(
                 "status": row["status"],
                 "error_message": row["error_message"],
                 "sources": attach_source_feedbacks(row),
+                "attachments": row.get("attachments") or [],
                 "retrieval": serialize_message_retrieval(row),
                 "feedback": serialize_message_feedback(row),
                 "created_at": row["created_at"],

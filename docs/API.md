@@ -47,6 +47,8 @@ Authorization: Bearer <access_token>
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
 | `POST` | `/chat` | SSE 流式聊天回答。 |
+| `POST` | `/chat/attachments` | 上传当前会话的聊天图片附件，支持 `multipart/form-data`。 |
+| `GET` | `/chat/attachments/{attachment_id}/content` | 读取当前用户自己的聊天图片附件内容。 |
 
 请求体：
 
@@ -54,9 +56,40 @@ Authorization: Bearer <access_token>
 {
   "conversation_id": "uuid",
   "knowledge_base_id": "uuid",
-  "message": "问题内容"
+  "message": "问题内容",
+  "attachment_ids": ["uuid"]
 }
 ```
+
+`attachment_ids` 可省略或传空数组。发送图片时，前端先调用
+`POST /chat/attachments?conversation_id={conversation_id}` 上传图片，再把返回的附件
+ID 随聊天请求提交。当前支持 `image/png`、`image/jpeg` 和 `image/webp`；单轮最多
+`CHAT_IMAGE_MAX_FILES` 张，单张不超过 `CHAT_IMAGE_MAX_FILE_SIZE_BYTES`，总大小不超过
+`CHAT_IMAGE_MAX_TOTAL_BYTES`。当当前用户的聊天模型不支持 vision 输入时，`POST /chat`
+返回 `400`，不会创建本轮半成品消息。
+
+聊天图片附件只用于当前会话消息的多模态提问，不会进入知识库向量化或 OCR 检索链路。
+图片入知识库属于后续独立任务。
+
+附件上传响应：
+
+```json
+{
+  "success": true,
+  "attachments": [
+    {
+      "id": "uuid",
+      "original_name": "chart.png",
+      "mime_type": "image/png",
+      "size_bytes": 1024,
+      "content_url": "/chat/attachments/uuid/content",
+      "created_at": "2026-07-04T12:00:00+08:00"
+    }
+  ]
+}
+```
+
+附件响应只返回安全 metadata 和读取 URL，不返回服务器本地存储路径或图片 base64。
 
 ## 知识库
 

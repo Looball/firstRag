@@ -1,11 +1,12 @@
 import logging
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Request
-from fastapi.responses import StreamingResponse
+from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
+from fastapi.responses import FileResponse, StreamingResponse
 
 from app.core.config import (
     API_RATE_LIMIT_WINDOW_SECONDS,
+    CHAT_IMAGE_MAX_FILES,
     CHAT_RATE_LIMIT_MAX_REQUESTS,
 )
 from app.core.observability import get_request_context, log_exception_event
@@ -15,6 +16,9 @@ from app.core.security import get_current_user_id
 from app.repositories.conversation_repository import (
     conversation_belongs_base,
     conversation_exists,
+)
+from app.repositories.message_attachment_repository import (
+    get_user_message_attachment,
 )
 from app.repositories.retrieval_settings_repository import (
     DEFAULT_RETRIEVAL_SETTINGS,
@@ -28,14 +32,92 @@ from app.services.chat_service import (
     stream_answer_and_save,
     stream_local_answer_and_save,
 )
+from app.services.chat_attachment_service import (
+    ChatAttachmentError,
+    bind_attachments_to_user_message,
+    resolve_attachment_file_path,
+    save_chat_image_attachment,
+    validate_chat_attachments_for_message,
+)
+from app.services.llm_service import chat_model_supports_images
 from app.services.rag_service import get_chain
 from app.services.retrieval_settings_cache import (
     get_cached_knowledge_base_retrieval_settings,
 )
+from app.services.user_settings_service import get_effective_chat_model_config
 
 
 router = APIRouter(tags=["chat"])
 logger = logging.getLogger(__name__)
+
+
+@router.post("/chat/attachments")
+async def upload_chat_attachments(
+    request: Request,
+    conversation_id: UUID,
+    files: list[UploadFile] = File(...),
+    user_id: int = Depends(get_current_user_id),
+):
+    """上传当前会话的聊天图片附件。"""
+    if not conversation_exists(user_id, conversation_id):
+        raise HTTPException(status_code=404, detail="会话不存在")
+    if not files:
+        raise HTTPException(status_code=400, detail="请至少上传一张图片")
+    if len(files) > CHAT_IMAGE_MAX_FILES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"单轮最多只能附加 {CHAT_IMAGE_MAX_FILES} 张图片",
+        )
+
+    enforce_rate_limit(
+        "chat-image-upload",
+        build_rate_limit_identifier(request, "user", user_id),
+        CHAT_RATE_LIMIT_MAX_REQUESTS,
+        API_RATE_LIMIT_WINDOW_SECONDS,
+        "图片上传过于频繁，请稍后再试。",
+    )
+
+    uploaded_attachments = []
+    try:
+        for file in files:
+            uploaded_attachments.append(
+                await save_chat_image_attachment(
+                    user_id=user_id,
+                    conversation_id=conversation_id,
+                    file=file,
+                )
+            )
+    except ChatAttachmentError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    finally:
+        for file in files:
+            await file.close()
+
+    return {
+        "success": True,
+        "attachments": uploaded_attachments,
+    }
+
+
+@router.get("/chat/attachments/{attachment_id}/content")
+def get_chat_attachment_content(
+    attachment_id: UUID,
+    user_id: int = Depends(get_current_user_id),
+) -> FileResponse:
+    """读取当前用户可访问的聊天图片附件内容。"""
+    attachment = get_user_message_attachment(user_id, attachment_id)
+    if attachment is None:
+        raise HTTPException(status_code=404, detail="图片附件不存在")
+    try:
+        attachment_path = resolve_attachment_file_path(attachment)
+    except ChatAttachmentError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    return FileResponse(
+        attachment_path,
+        media_type=attachment["mime_type"],
+        filename=attachment["original_name"],
+    )
 
 
 def should_use_local_chat_response(
@@ -92,7 +174,45 @@ def chat(
     if not conversation_belongs_base(user_id, req.knowledge_base_id, req.conversation_id):
         raise HTTPException(status_code=404, detail="禁止跨知识库提问")
 
+    try:
+        chat_attachments = validate_chat_attachments_for_message(
+            user_id=user_id,
+            conversation_id=req.conversation_id,
+            attachment_ids=req.attachment_ids,
+        )
+    except ChatAttachmentError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    if chat_attachments:
+        try:
+            model_config = get_effective_chat_model_config(user_id)
+        except ValueError as exc:
+            log_exception_event(
+                logger,
+                "chat_model_settings_invalid",
+                exc,
+                default_source="llm_provider",
+                user_id=user_id,
+                conversation_id=str(req.conversation_id),
+                knowledge_base_id=str(req.knowledge_base_id),
+                message="模型配置无效",
+            )
+            raise HTTPException(
+                status_code=400,
+                detail=f"模型配置无效：{sanitize_sensitive_text(str(exc))}",
+            ) from exc
+        if not chat_model_supports_images(
+            model_config.settings.provider,
+            model_config.settings.model,
+        ):
+            raise HTTPException(
+                status_code=400,
+                detail="当前聊天模型不支持图片输入，请切换支持视觉能力的模型。",
+            )
+
     local_answer = get_local_chat_response(req.message)
+    if chat_attachments:
+        local_answer = None
     if local_answer is not None and not should_use_local_chat_response(
         user_id,
         req.knowledge_base_id,
@@ -100,7 +220,13 @@ def chat(
         local_answer = None
     if local_answer is not None:
         # 本地可确定的问候类消息不需要构建 RAG 链，避免额外模型调用。
-        save_message(req.conversation_id, "user", req.message)
+        user_message = save_message(req.conversation_id, "user", req.message)
+        bind_attachments_to_user_message(
+            user_id=user_id,
+            conversation_id=req.conversation_id,
+            message_id=user_message["id"],
+            attachment_ids=req.attachment_ids,
+        )
         assistant_message = save_message(
             req.conversation_id,
             "assistant",
@@ -142,7 +268,13 @@ def chat(
         ) from exc
 
     # 创建链成功后再持久化本轮消息，避免配置错误留下孤立用户消息。
-    save_message(req.conversation_id, "user", req.message)
+    user_message = save_message(req.conversation_id, "user", req.message)
+    bind_attachments_to_user_message(
+        user_id=user_id,
+        conversation_id=req.conversation_id,
+        message_id=user_message["id"],
+        attachment_ids=req.attachment_ids,
+    )
     assistant_message = save_message(
         req.conversation_id,
         "assistant",
@@ -160,6 +292,7 @@ def chat(
             assistant_message_id=assistant_message["id"],
             user_id=user_id,
             knowledge_base_id=req.knowledge_base_id,
+            image_attachments=chat_attachments,
             request_id=get_request_context().get("request_id"),
         ),
         media_type="text/event-stream; charset=utf-8",

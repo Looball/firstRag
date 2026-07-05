@@ -14,6 +14,7 @@
 | `knowledge_file_chunks` | 文本分块正文、metadata、全文检索索引和索引版本。 |
 | `conversations` | 会话，属于某个知识库。 |
 | `messages` | 会话消息，保存 role、content、status、sources、retrieval。 |
+| `message_attachments` | 聊天消息图片附件，保存用户、会话、消息绑定关系和文件 metadata。 |
 | `message_feedback` | 用户对 assistant message 的回答质量反馈，使用 `user_id + message_id` 唯一约束，不使用外键。 |
 | `message_source_feedback` | 用户对 assistant message 单个引用来源的有用性反馈，使用 `user_id + message_id + source_index` 唯一约束，不使用外键。 |
 | `vector_index_jobs` | 向量化任务队列，支持租约、重试、取消和并发 worker。 |
@@ -43,6 +44,7 @@
 | `knowledge_base_files` | `knowledge_base_id`, `knowledge_file_id`, `created_at` |
 | `conversations` | `id`, `user_id`, `title`, `created_at`, `updated_at`, `deleted_at`, `knowledge_base_id` |
 | `messages` | `id`, `conversation_id`, `role`, `content`, `created_at`, `status`, `error_message`, `completed_at`, `sources`, `retrieval` |
+| `message_attachments` | `id`, `user_id`, `conversation_id`, `message_id`, `original_name`, `storage_path`, `mime_type`, `size_bytes`, `file_hash`, `status`, `created_at`, `updated_at` |
 | `knowledge_file_chunks` | `chunk_id`, `user_id`, `knowledge_file_id`, `chunk_index`, `content`, `metadata`, `created_at`, `updated_at`, `index_version` |
 | `vector_index_jobs` | `id`, `user_id`, `knowledge_file_id`, `knowledge_base_id`, `status`, `priority`, `attempts`, `max_attempts`, `locked_by`, `locked_at`, `started_at`, `finished_at`, `error_message`, `result`, `created_at`, `updated_at`, `available_at`, `heartbeat_at`, `index_version` |
 | `user_llm_settings` | `user_id`, `credential_mode`, `provider`, `model`, `base_url`, `api_key_ciphertext`, `encryption_key_version`, `temperature`, `max_tokens`, `timeout_seconds`, `max_retries`, `created_at`, `updated_at`, `api_key_hint` |
@@ -61,7 +63,7 @@
 | --- | --- | --- |
 | `RegisterRequest` | `username`, `password` | 注册。 |
 | `LoginRequest` | `username`, `password` | 登录。 |
-| `ChatRequest` | `conversation_id`, `knowledge_base_id`, `message` | 聊天。 |
+| `ChatRequest` | `conversation_id`, `knowledge_base_id`, `message`, `attachment_ids` | 聊天，`attachment_ids` 可选。 |
 | `CreateConversationRequest` | `title` | 新建会话。 |
 | `RenameConversationRequest` | `title` | 重命名会话。 |
 | `MessageFeedbackRequest` | `rating`, `reason`, `note` | 创建或更新助手消息质量反馈。 |
@@ -118,6 +120,31 @@
 `llm_need_retrieval` 表示 Router LLM 的原始判断；
 `override_applied` 与 `override_reason` 表示后端规则是否覆盖了 LLM 判断，
 例如问题关键词命中当前知识库文件画像时强制检索。
+
+`message_attachments.status` 当前使用：
+
+- `uploaded`：图片已上传但尚未绑定到消息。
+- `attached`：图片已绑定到某条用户消息。
+- `deleted`：图片已逻辑删除或不再对前端展示。
+
+历史消息接口会把当前用户可访问的图片附件序列化到
+`messages[].attachments`。附件结构只包含安全 metadata：
+
+```json
+[
+  {
+    "id": "uuid",
+    "original_name": "chart.png",
+    "mime_type": "image/png",
+    "size_bytes": 1024,
+    "content_url": "/chat/attachments/uuid/content",
+    "created_at": "2026-07-04T12:00:00+08:00"
+  }
+]
+```
+
+`storage_path` 只保存在服务端数据库中，不会通过 API 返回。附件内容读取接口必须校验
+`user_id`，用户只能读取自己的图片。
 
 ## 消息反馈结构
 

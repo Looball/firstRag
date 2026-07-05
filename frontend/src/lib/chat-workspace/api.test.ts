@@ -15,6 +15,7 @@ import {
   postChatMessage,
   submitMessageFeedback,
   submitMessageSourceFeedback,
+  uploadChatAttachments,
 } from "./api";
 
 vi.mock("@/lib/frontend-api", () => ({
@@ -173,9 +174,43 @@ describe("chat workspace api", () => {
           conversation_id: "conversation-1",
           knowledge_base_id: "knowledge-base-1",
           message: "hello",
+          attachment_ids: [],
         }),
       },
       { fallbackMessage: "请求失败了，请稍后再试。" },
+    );
+  });
+
+  it("uploads chat image attachments through form data", async () => {
+    const file = new File(["image"], "chart.png", { type: "image/png" });
+    authenticatedJsonMock.mockResolvedValueOnce({
+      attachments: [
+        {
+          id: "attachment-1",
+          original_name: "chart.png",
+          mime_type: "image/png",
+          size_bytes: 5,
+          content_url: "/chat/attachments/attachment-1/content",
+        },
+      ],
+    });
+
+    await expect(
+      uploadChatAttachments("conversation-1", [file]),
+    ).resolves.toEqual([
+      expect.objectContaining({
+        id: "attachment-1",
+        originalName: "chart.png",
+        contentUrl: "/api/chat/attachments/attachment-1/content",
+      }),
+    ]);
+    expect(authenticatedJsonMock).toHaveBeenCalledWith(
+      "/api/chat/attachments?conversation_id=conversation-1",
+      expect.objectContaining({
+        method: "POST",
+        body: expect.any(FormData),
+      }),
+      { fallbackMessage: "上传图片失败，请稍后再试。" },
     );
   });
 

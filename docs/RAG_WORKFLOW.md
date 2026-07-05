@@ -26,16 +26,19 @@
 
 1. 前端发送 `POST /api/chat`，代理到后端 `POST /chat`。
 2. 后端校验会话属于当前用户和知识库。
-3. 问候类本地可回答内容直接走本地响应，避免额外模型调用。
-4. 普通问题加载历史消息，构建 RAG 链。
-5. `rag_service` 兼容入口委托 `app/services/rag/` 内部模块读取 retrieval settings、判断是否需要检索，并可改写多轮问题。
-6. 召回候选片段：
+3. 若本轮包含图片附件，后端校验附件属于当前用户和当前会话，并确认当前聊天模型支持 vision 输入。
+4. 问候类本地可回答内容直接走本地响应，避免额外模型调用；带图片的问题始终进入模型调用链路。
+5. 普通问题加载历史消息，构建 RAG 链。
+6. `rag_service` 兼容入口委托 `app/services/rag/` 内部模块读取 retrieval settings、判断是否需要检索，并可改写多轮问题。
+7. 召回候选片段：
    - Chroma 向量检索和 PostgreSQL 全文检索并行粗召回。
    - RRF 融合多路结果。
    - 可选 reranker 精排，默认本地 CrossEncoder；也可在用户设置中切换到 Qwen、Voyage、Cohere、Jina 或自定义 rerank API。
-7. 用户配置的 OpenAI 兼容聊天模型流式生成回答。
-8. SSE 返回 token、sources、retrieval 诊断。
-9. 回答完成后持久化到 `messages`。
+8. 用户配置的 OpenAI 兼容聊天模型流式生成回答；带图片时，最终用户消息按 OpenAI-compatible 多模态 payload 发送。
+9. SSE 返回 token、sources、retrieval 诊断。
+10. 回答完成后持久化到 `messages`，用户图片 metadata 通过 `message_attachments` 与用户消息关联。
+
+聊天图片附件通过 `POST /chat/attachments` 先上传到本地文件系统，后端只向前端返回安全 metadata 和读取 URL。附件用于当前会话消息的视觉问答，不进入 `knowledge_files`、`knowledge_file_chunks` 或 Chroma；图片/OCR 入知识库属于独立链路。
 
 知识库级 retrieval settings 可通过
 `GET/PATCH /chat/knowledge-base/{knowledge_base_id}/retrieval-settings`

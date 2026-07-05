@@ -45,6 +45,7 @@ def get_answer(
     chat_history: list,
     user_id: int,
     knowledge_base_id: UUID,
+    image_attachments: list[dict] | None = None,
 ) -> Iterator[str]:
     """流式返回 LCEL 链生成的答案。"""
     for event in stream_rag_response(
@@ -53,6 +54,7 @@ def get_answer(
         chat_history=chat_history,
         user_id=user_id,
         knowledge_base_id=knowledge_base_id,
+        image_attachments=image_attachments,
     ):
         if event["type"] == "answer":
             yield event["content"]
@@ -64,6 +66,7 @@ def stream_rag_response(
     chat_history: list,
     user_id: int,
     knowledge_base_id: UUID,
+    image_attachments: list[dict] | None = None,
 ) -> Iterator[RagStreamEvent]:
     """流式返回 RAG 事件，包括引用文档和答案片段。"""
     reset_knowledge_profile_cache_diagnostics()
@@ -95,6 +98,7 @@ def stream_rag_response(
         "chat_history": chat_history,
         "user_id": user_id,
         "knowledge_base_id": knowledge_base_id,
+        "image_attachments": image_attachments or [],
     })
 
     sources_sent = False
