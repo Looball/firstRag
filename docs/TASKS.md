@@ -123,7 +123,7 @@
 | `T-053` | 用户要求 | `P1` | `Done` | 用户登录后配置 LLM 与向量模型 API | 2026-07-03 | `6124b2d` |
 | `T-054` | `PLAN-20260704-01` | `P1` | `Done` | 支持聊天框图片附件和视觉模型调用 | 2026-07-05 | `42f206b` |
 | `T-055` | `PLAN-20260704-01` | `P2` | `Done` | 支持图片/OCR 入知识库检索 | 2026-07-05 | `d8cd9ce` |
-| `T-056` | `PLAN-20260705-01` | `P0` | `Blocked` | 引入 Redis 基础设施、配置和健康检查 | 2026-07-05 | `待提交`；Redis 镜像源 403，待完整 Compose 验证 |
+| `T-056` | `PLAN-20260705-01` | `P0` | `Blocked` | 引入 Redis 基础设施、配置和健康检查 | 2026-07-05 | `5e8c32c`；Redis 镜像源 403，待完整 Compose 验证 |
 | `T-057` | `PLAN-20260705-01` | `P1` | `Todo` | 抽象缓存层并迁移 RAG 热点缓存到 Redis | - | - |
 | `T-058` | `PLAN-20260705-01` | `P0` | `Todo` | 将登录和 API 限流升级为 Redis 分布式限流 | - | - |
 | `T-059` | `PLAN-20260705-01` | `P1` | `Todo` | 为 vector worker 增加 Redis 运行态、锁和队列观测 | - | - |
@@ -2040,7 +2040,7 @@ docker compose ps
 docker compose logs --tail=100 redis backend worker
 ```
 - 实现记录：
-  - 相关 commit：`待提交`。
+  - 相关 commit：`5e8c32c`。
   - 新增 `redis==5.2.1` 后端依赖。
   - 新增 Redis client/service 封装，支持 `REDIS_URL`、连接超时、命令超时、启用开关、健康检查和 Redis URL 脱敏。
   - 新增公开 `GET /health`，返回后端和 Redis 基础设施的安全健康摘要，不返回 Redis URL、密码、JWT 或数据库连接串。
