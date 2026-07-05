@@ -121,7 +121,7 @@
 | `T-052` | `PLAN-20260703-01` | `P2` | `Todo` | 完成公网 smoke test 与真实 RAG eval | - | - |
 | `T-053` | 用户要求 | `P1` | `Done` | 用户登录后配置 LLM 与向量模型 API | 2026-07-03 | `6124b2d` |
 | `T-054` | `PLAN-20260704-01` | `P1` | `Done` | 支持聊天框图片附件和视觉模型调用 | 2026-07-05 | `42f206b` |
-| `T-055` | `PLAN-20260704-01` | `P2` | `Done` | 支持图片/OCR 入知识库检索 | 2026-07-05 | 待提交 |
+| `T-055` | `PLAN-20260704-01` | `P2` | `Done` | 支持图片/OCR 入知识库检索 | 2026-07-05 | `d8cd9ce` |
 
 ## 新计划接入流程
 
@@ -1980,7 +1980,7 @@ docker compose ps
 docker compose logs --tail=100 migrate backend worker frontend postgres
 ```
 - 完成记录：
-  - 相关 commit：待提交。
+  - 相关 commit：`d8cd9ce`。
   - 扩展知识文件上传支持 PNG、JPEG 和 WebP，并在上传阶段校验图片文件头与 MIME/扩展名一致性。
   - `document_service` 新增图片知识文件解析路径：通过当前用户的 vision-capable 聊天模型把图片转为可检索 Markdown，再进入既有 chunk、embedding、PostgreSQL full-text 和 Chroma 链路。
   - 单文件和整库向量化提交会提前检查图片文件所需的 vision 模型配置；`auto_index=true` 入队后仍由 worker 兜底失败并返回 `image_parse_error` 恢复提示。
