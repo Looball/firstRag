@@ -62,6 +62,7 @@
 | `PLAN-20260701-02` | 2026-07-01 | `Done` | 正式生产上线补强专项，补齐部署安全、稳定性、风控、可观测性、评测质量和产品化分层。 | `T-042` - `T-047` |
 | `PLAN-20260703-01` | 2026-07-03 | `Todo` | 公开 Demo 上线试运行专项；暂不立即部署，先补齐不依赖真实服务器的上线阻塞项，并为后续公网验证留出明确步骤。 | `T-048` - `T-052` |
 | `PLAN-20260704-01` | 2026-07-04 | `Done` | 聊天图片能力专项；先支持聊天框图片附件和视觉模型调用，再扩展图片/OCR 入知识库。 | `T-054` - `T-055` |
+| `PLAN-20260705-01` | 2026-07-05 | `Todo` | Redis 基础设施专项；从进程内状态扩展为可多实例共享的缓存、限流、worker 运行态和部署健康检查。 | `T-056` - `T-061` |
 
 ## 任务总览
 
@@ -122,6 +123,12 @@
 | `T-053` | 用户要求 | `P1` | `Done` | 用户登录后配置 LLM 与向量模型 API | 2026-07-03 | `6124b2d` |
 | `T-054` | `PLAN-20260704-01` | `P1` | `Done` | 支持聊天框图片附件和视觉模型调用 | 2026-07-05 | `42f206b` |
 | `T-055` | `PLAN-20260704-01` | `P2` | `Done` | 支持图片/OCR 入知识库检索 | 2026-07-05 | `d8cd9ce` |
+| `T-056` | `PLAN-20260705-01` | `P0` | `Todo` | 引入 Redis 基础设施、配置和健康检查 | - | - |
+| `T-057` | `PLAN-20260705-01` | `P1` | `Todo` | 抽象缓存层并迁移 RAG 热点缓存到 Redis | - | - |
+| `T-058` | `PLAN-20260705-01` | `P0` | `Todo` | 将登录和 API 限流升级为 Redis 分布式限流 | - | - |
+| `T-059` | `PLAN-20260705-01` | `P1` | `Todo` | 为 vector worker 增加 Redis 运行态、锁和队列观测 | - | - |
+| `T-060` | `PLAN-20260705-01` | `P1` | `Todo` | 补齐 Redis 生产部署、preflight 和文档 | - | - |
+| `T-061` | `PLAN-20260705-01` | `P1` | `Todo` | 完成 Redis 场景 Docker 验证和核心链路回归 | - | - |
 
 ## 新计划接入流程
 
@@ -2001,6 +2008,189 @@ docker compose logs --tail=100 migrate backend worker frontend postgres
     - 后续重新执行 `docker compose up -d --build` 已通过，backend 和 frontend 镜像均完成构建，`migrate` 正常退出，backend、frontend、worker 和 postgres 均启动。
     - `docker compose ps` 显示 backend、frontend、worker 约 1 分钟前由新镜像启动，postgres 为 healthy。
     - `docker compose logs --tail=100 migrate backend worker frontend postgres` 已确认 migration `skipped=5`，backend、frontend 和 worker 无启动错误。
+
+## T-056 引入 Redis 基础设施、配置和健康检查
+
+- 来源计划：`PLAN-20260705-01`
+- 优先级：`P0`
+- 状态：`Todo`
+- 背景：当前缓存、限流和 worker 运行态主要使用进程内状态；单实例可以工作，但多实例部署时无法共享命中、限流计数和 worker 在线状态。
+- 目标：为后续缓存、限流和 worker 运行态提供统一 Redis 基础设施，默认 Docker Compose 内置 Redis，并允许生产环境通过 `REDIS_URL` 指向托管 Redis。
+- 范围：
+  - 新增 Python Redis 依赖和后端 Redis client/service 封装。
+  - 新增 `REDIS_URL`、连接超时、命令超时、启用开关和故障策略配置。
+  - Docker Compose 增加 `redis` 服务、healthcheck、backend/worker 依赖关系和必要环境变量。
+  - 后端暴露或复用健康检查，让 Redis 可用性进入部署诊断和日志。
+  - Redis 不可用时返回清晰诊断，不输出 Redis URL、密码或内部连接串。
+- 非目标：
+  - 本任务不迁移具体业务缓存、限流或 worker 状态；迁移由 `T-057`、`T-058`、`T-059` 承接。
+- 验收标准：
+  - 本地 Compose 可以启动 Redis，backend 和 worker 能读取 Redis 配置并完成 ping/health 检查。
+  - 未配置 Redis 或 Redis 不可用时，错误信息安全且可定位。
+  - 单元测试覆盖 Redis URL 脱敏、连接成功、连接失败和禁用配置。
+- 建议验证命令：
+
+```bash
+cd backend
+conda run -n firstrag python -m pytest tests/test_config.py tests/test_observability.py
+
+cd ..
+docker compose up -d --build
+docker compose ps
+docker compose logs --tail=100 redis backend worker
+```
+
+## T-057 抽象缓存层并迁移 RAG 热点缓存到 Redis
+
+- 来源计划：`PLAN-20260705-01`
+- 优先级：`P1`
+- 状态：`Todo`
+- 背景：当前 `knowledge_profile_cache`、`retrieval_settings_cache` 和 query embedding cache 使用进程内短 TTL 缓存；多实例时命中率不稳定，worker/backend 之间也无法共享。
+- 目标：建立统一 cache adapter，将 RAG 热点缓存迁移到 Redis，同时保留进程内 fallback，确保 Redis 故障不会直接中断核心问答链路。
+- 范围：
+  - 增加 Redis cache adapter，支持 JSON value、TTL、delete、prefix invalidation 和测试隔离。
+  - 迁移 knowledge profile cache，key 包含用户 ID 和 knowledge base ID。
+  - 迁移 retrieval settings cache，key 包含用户 ID 和 knowledge base ID，设置更新后主动失效。
+  - 迁移 query embedding cache，key 包含用户 ID、provider、model、dimensions 和 normalized query。
+  - 保留 diagnostics 字段，例如 cache hit、source、ttl、fallback reason，并继续进入 SSE retrieval diagnostics 和 eval 报告。
+- 验收标准：
+  - Redis 可用时重复 RAG 请求能跨进程命中缓存。
+  - Redis 不可用时自动回退到进程内缓存或数据库/provider 读取，错误被脱敏记录。
+  - 文件上传、知识库文件关系变化、索引状态变化、retrieval settings 更新后相关缓存会失效。
+  - 后端测试覆盖 miss、hit、TTL 过期、主动失效、Redis 故障 fallback 和用户隔离。
+- 建议验证命令：
+
+```bash
+cd backend
+conda run -n firstrag python -m pytest \
+  tests/test_rag_service.py \
+  tests/test_retrieval_settings_cache.py \
+  tests/services/test_embedding_model.py
+
+cd ..
+scripts/rag_eval_gate.sh
+```
+
+## T-058 将登录和 API 限流升级为 Redis 分布式限流
+
+- 来源计划：`PLAN-20260705-01`
+- 优先级：`P0`
+- 状态：`Todo`
+- 背景：当前登录失败、chat、upload、vector index 和 model test 限流使用进程内计数；多实例部署时用户可以绕过单实例限额。
+- 目标：把现有限流升级为 Redis 分布式窗口，在多 backend 实例下共享限流状态，并保留当前 `Retry-After` 与测试隔离能力。
+- 范围：
+  - 使用 Redis 实现固定窗口或滑动窗口限流，保留现有 `assert_rate_limit_available`、`consume_rate_limit`、`clear_rate_limit`、`reset_rate_limits` 调用语义。
+  - 登录失败、chat、upload、vector index、model test 全部接入 Redis 限流。
+  - 增加 Redis 故障策略配置：公开环境默认 fail-closed，本地开发可 fail-open。
+  - 429 响应继续带 `Retry-After`，错误文案保持安全可理解。
+- 验收标准：
+  - 多进程或重复 client 场景下共享限流计数。
+  - 登录成功后可清除对应失败计数。
+  - Redis 故障时按配置 fail-open 或 fail-closed，并输出脱敏结构化日志。
+  - 现有限流测试全部通过，并补充 Redis 分布式路径测试。
+- 建议验证命令：
+
+```bash
+cd backend
+conda run -n firstrag python -m pytest \
+  tests/test_auth_rate_limit.py \
+  tests/test_chat_settings.py \
+  tests/test_knowledge_files.py \
+  tests/test_vector_indexes.py \
+  tests/test_user_settings.py
+```
+
+## T-059 为 vector worker 增加 Redis 运行态、锁和队列观测
+
+- 来源计划：`PLAN-20260705-01`
+- 优先级：`P1`
+- 状态：`Todo`
+- 背景：当前 `vector_index_jobs` 使用 PostgreSQL 持久任务表和 `FOR UPDATE SKIP LOCKED` 领取任务，可靠性较好；但前端 health 主要来自任务表，缺少 worker 在线心跳和运行态细节。
+- 目标：保留 PostgreSQL 作为持久队列，用 Redis 增加 worker 心跳、短租约锁、运行指标和队列观测缓存，提升多 worker 部署时的可见性。
+- 范围：
+  - worker 启动和循环处理时写入 Redis 心跳，记录 worker id、hostname、最近活跃时间和当前任务 ID。
+  - 增加可选单文件或用户级短租约锁，避免高并发下重复索引同一文件的边界抖动；锁过期后自动释放。
+  - 队列 health 接口合并 PostgreSQL 任务统计和 Redis worker 在线状态。
+  - 前端任务队列面板展示 worker 在线数量、最近心跳和 Redis 运行态不可用提示。
+  - Redis 不可用时仍可依赖 PostgreSQL 队列继续处理任务。
+- 非目标：
+  - 本任务不把 `vector_index_jobs` 迁移到 Redis stream/list，不改变任务持久化、重试和历史查询语义。
+- 验收标准：
+  - worker 正常运行时 health 接口可看到在线 worker 和最近心跳。
+  - worker 停止或 Redis 重启后，前端能看到明确状态，任务表状态仍保持一致。
+  - 重复向量化同一文件时不会因为 Redis 锁导致永久卡住。
+  - 后端和前端测试覆盖 Redis 可用、Redis 不可用和 worker 离线场景。
+- 建议验证命令：
+
+```bash
+cd backend
+conda run -n firstrag python -m pytest \
+  tests/test_vector_index_worker.py \
+  tests/test_vector_indexes.py \
+  tests/test_vector_index_failure_recovery.py
+
+cd ../frontend
+npm test -- TaskQueuePanel
+```
+
+## T-060 补齐 Redis 生产部署、preflight 和文档
+
+- 来源计划：`PLAN-20260705-01`
+- 优先级：`P1`
+- 状态：`Todo`
+- 背景：Redis 成为基础设施后，部署文档、环境变量模板和 production preflight 必须明确本地 Compose Redis 与托管 Redis 的配置差异。
+- 目标：把 Redis 的配置、部署、安全检查、故障策略和运维边界写入项目文档和 preflight，避免真实部署时遗漏密码、端口暴露或健康检查。
+- 范围：
+  - 更新 `.env.example`，补充 Redis URL、开关、超时、故障策略和 Compose 覆盖说明。
+  - 更新 README、`docs/DEPLOYMENT.md`、`docs/ARCHITECTURE.md`、`docs/RAG_WORKFLOW.md`、`docs/BACKEND.md` 和 `docs/API.md` 中相关说明。
+  - production preflight 检查 Redis URL、默认密码、公开端口、连接可用性和日志脱敏。
+  - 明确生产建议：Redis 不直接公网暴露，优先使用内网地址或托管 Redis，开启密码/TLS 时不得记录完整连接串。
+- 验收标准：
+  - 文档准确区分 Redis 已实现能力、仍由 PostgreSQL 承担的持久队列能力和故障降级策略。
+  - preflight 能拦截明显不安全的 Redis 配置，并不输出真实 secret。
+  - `.env.example` 可用于 Compose 本地启动，生产覆盖项清晰。
+- 建议验证命令：
+
+```bash
+conda run -n firstrag python -m pytest backend/tests/test_production_preflight_script.py
+conda run -n firstrag python scripts/production_preflight.py --env-file .env --migration-method compose
+docker compose config --quiet
+```
+
+## T-061 完成 Redis 场景 Docker 验证和核心链路回归
+
+- 来源计划：`PLAN-20260705-01`
+- 优先级：`P1`
+- 状态：`Todo`
+- 背景：Redis 影响缓存、限流、worker 运行态和部署拓扑，必须在 Compose 环境下跑完整链路，而不能只依赖单元测试。
+- 目标：完成 Redis 场景的 Docker Compose 验证和核心业务 smoke test，确认新增基础设施没有破坏登录、上传、向量化、聊天和 sources 展示。
+- 范围：
+  - 构建并启动包含 Redis 的 Compose 环境。
+  - 验证登录限流、上传限流、重复 RAG 查询缓存命中、向量化 worker 心跳和 Redis health。
+  - 覆盖 Redis 重启或不可用时的降级路径，确认系统按配置 fail-open 或 fail-closed。
+  - 运行 RAG eval 和 indexing eval 基线，记录缓存命中、首 token、sources 和索引状态。
+- 验收标准：
+  - `redis`、`postgres`、`migrate`、`backend`、`worker`、`frontend` 均正常启动。
+  - 登录、上传小文件、向量化、提问、SSE streaming 和 sources 展示通过。
+  - Redis 故障场景有明确日志和用户可理解错误，不泄露 Redis URL、API Key、JWT 或数据库密码。
+  - RAG eval 和 indexing eval 通过，或清楚记录失败 case、原因和回滚建议。
+- 建议验证命令：
+
+```bash
+docker compose up -d --build
+docker compose ps
+docker compose logs --tail=100 redis migrate backend worker frontend postgres
+
+conda run -n firstrag python scripts/production_preflight.py --env-file .env --migration-method compose
+
+FIRSTRAG_EVAL_USERNAME=你的用户名 \
+FIRSTRAG_EVAL_PASSWORD=你的密码 \
+scripts/rag_eval_gate.sh
+
+conda run -n firstrag python scripts/eval_indexing.py \
+  --username 你的用户名 \
+  --password 你的密码
+```
 
 ## 更新规则
 
