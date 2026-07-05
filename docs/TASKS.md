@@ -1997,9 +1997,10 @@ docker compose logs --tail=100 migrate backend worker frontend postgres
     - `cd frontend && npm run build` 沙箱内因 Turbopack 创建进程/绑定端口限制失败一次，授权后重跑通过。
     - `git diff --check` 通过。
   - Docker Compose 验证：
-    - `docker compose up -d --build` 未完成，Docker registry mirror 对 `node:22-slim` 和 `python:3.12-slim` metadata 请求返回 `403 Forbidden`。
-    - `docker compose build --pull=false` 同样被上述镜像站 `403 Forbidden` 阻塞。
-    - `docker compose ps` 显示当前既有 backend、frontend、worker、postgres 容器仍在运行；`docker compose logs --tail=100 migrate backend worker frontend postgres` 未见启动错误。但由于新镜像未能构建，当前容器状态不计为 T-055 新代码的完整容器验证。
+    - 首次 `docker compose up -d --build` 曾因 Docker registry mirror 对 `node:22-slim` 和 `python:3.12-slim` metadata 请求返回 `403 Forbidden` 未完成。
+    - 后续重新执行 `docker compose up -d --build` 已通过，backend 和 frontend 镜像均完成构建，`migrate` 正常退出，backend、frontend、worker 和 postgres 均启动。
+    - `docker compose ps` 显示 backend、frontend、worker 约 1 分钟前由新镜像启动，postgres 为 healthy。
+    - `docker compose logs --tail=100 migrate backend worker frontend postgres` 已确认 migration `skipped=5`，backend、frontend 和 worker 无启动错误。
 
 ## 更新规则
 
