@@ -58,7 +58,7 @@ FirstRAG/
 ## 存储组件
 
 - PostgreSQL：用户、知识库、文件、会话、消息、聊天附件 metadata、文本/图片解析分块、向量化任务队列。
-- Redis：提供基础设施健康检查、RAG 热点共享缓存和后端分布式限流，包括知识库画像、retrieval settings、query embedding 和登录/业务 API sliding-window 计数；后续承接 worker 运行态，不作为 vector index job 的持久队列。
+- Redis：提供基础设施健康检查、RAG 热点共享缓存、后端分布式限流和 vector worker 运行态，包括知识库画像、retrieval settings、query embedding、登录/业务 API sliding-window 计数、worker 心跳、单文件短租约和运行指标；不作为 vector index job 的持久队列。
 - Chroma：文档分块向量，默认持久化到根目录 `vector_db/chroma`。
 - 本地文件系统：知识文件默认保存到根目录 `uploads/users/...`，聊天图片附件默认保存到 `uploads/chat_attachments/users/...`。
 

@@ -35,6 +35,9 @@ from app.services.vectors.embedding_settings_service import (
     get_effective_embedding_model_settings,
 )
 from app.services.vectors.vector_index_service import delete_file_vector_entries
+from app.services.vectors.vector_worker_runtime_service import (
+    get_vector_worker_runtime_summary,
+)
 from app.services.knowledge_profile_cache import (
     invalidate_file_knowledge_base_contexts,
 )
@@ -182,9 +185,10 @@ def get_vector_index_jobs_health(
 ):
     """查询当前用户向量化任务队列健康状态。"""
     health = get_user_vector_index_job_health(user_id)
+    worker_runtime = get_vector_worker_runtime_summary()
     return {
         "success": True,
-        **serialize_vector_index_job_health(health),
+        **serialize_vector_index_job_health(health, worker_runtime),
     }
 
 

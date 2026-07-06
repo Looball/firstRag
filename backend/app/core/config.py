@@ -160,8 +160,8 @@ ALLOW_USER_CUSTOM_LLM_BASE_URL = read_bool_env(
     False,
 )
 
-# Redis 基础设施配置。当前用于健康检查和 RAG 热点缓存；分布式限流
-# 和 worker 运行态迁移由后续任务接入。
+# Redis 基础设施配置。当前用于健康检查、RAG 热点缓存、分布式限流
+# 和 vector worker 运行态观测。
 REDIS_URL = os.environ.get("REDIS_URL", "").strip()
 REDIS_ENABLED = read_bool_env("REDIS_ENABLED", bool(REDIS_URL))
 REDIS_CONNECT_TIMEOUT_SECONDS = read_float_env(
@@ -171,4 +171,12 @@ REDIS_CONNECT_TIMEOUT_SECONDS = read_float_env(
 REDIS_COMMAND_TIMEOUT_SECONDS = read_float_env(
     "REDIS_COMMAND_TIMEOUT_SECONDS",
     1.0,
+)
+VECTOR_WORKER_HEARTBEAT_TTL_SECONDS = read_int_env(
+    "VECTOR_WORKER_HEARTBEAT_TTL_SECONDS",
+    30,
+)
+VECTOR_WORKER_FILE_LOCK_TTL_SECONDS = read_int_env(
+    "VECTOR_WORKER_FILE_LOCK_TTL_SECONDS",
+    15 * 60,
 )

@@ -16,8 +16,9 @@ cp .env.example .env
 | --- | --- |
 | `DATABASE_URL` | 本地 conda 方式运行时使用的 PostgreSQL 连接串。 |
 | `COMPOSE_DATABASE_URL` | Docker Compose 方式运行时可选覆盖的 PostgreSQL 连接串；不填时默认连接 compose 内的 `postgres` 服务。 |
-| `REDIS_ENABLED` / `REDIS_URL` | Redis 基础设施开关和连接地址；Compose 默认连接内置 `redis` 服务，当前用于健康检查、RAG 热点共享缓存和后端分布式限流，生产环境可指向托管 Redis 内网地址。 |
+| `REDIS_ENABLED` / `REDIS_URL` | Redis 基础设施开关和连接地址；Compose 默认连接内置 `redis` 服务，当前用于健康检查、RAG 热点共享缓存、后端分布式限流和 vector worker 运行态，生产环境可指向托管 Redis 内网地址。 |
 | `REDIS_CONNECT_TIMEOUT_SECONDS` / `REDIS_COMMAND_TIMEOUT_SECONDS` | Redis 连接和命令超时。 |
+| `VECTOR_WORKER_HEARTBEAT_TTL_SECONDS` / `VECTOR_WORKER_FILE_LOCK_TTL_SECONDS` | worker 运行态心跳 TTL 和单文件短租约 TTL；Redis 故障时不会替代或阻断 PostgreSQL 持久任务队列。 |
 | `RATE_LIMIT_BACKEND` / `RATE_LIMIT_REDIS_FAILURE_MODE` | 限流后端和 Redis 故障策略；Docker/生产默认 `redis` + `fail_closed`，本地调试可使用 `memory` 或 `fail_open`。 |
 | `POSTGRES_DB` / `POSTGRES_USER` / `POSTGRES_PASSWORD` | Docker Compose 中 PostgreSQL 容器的数据库、用户和密码。 |
 | `JWT_SECRET_KEY` | JWT 签名密钥。 |
@@ -275,7 +276,7 @@ compose 已为所有服务配置 Docker `json-file` 日志轮转，默认 `10m *
 | P95 接口耗时 | `http_request.duration_ms` | 持续高于平时基线 2 倍。 |
 | 平均首 token 时间 | `chat_first_answer_token.duration_ms` 或 `GET /chat/quality-dashboard` 的 `average_first_token_ms` | 连续窗口高于 8s。 |
 | 模型调用失败率 | `chat_stream_failed.error_source == "llm_provider"` / chat 请求数 | 连续窗口超过 10%。 |
-| 向量化队列长度和 worker 活动 | `GET /chat/vector-index-jobs/health` 的 `queue.active`、`worker.has_recent_activity` | 有 active 任务但 worker 长时间无活动。 |
+| 向量化队列长度和 worker 活动 | `GET /chat/vector-index-jobs/health` 的 `queue.active`、`worker.online_count`、`worker.last_heartbeat_at`、`worker.has_recent_activity` | 有 active 任务但没有在线 worker，或 worker 心跳长时间无更新。 |
 | 向量化任务失败率 | `vector_index_job_failed` / `vector_index_job_claimed` | 连续窗口超过 10%。 |
 | 检索降级次数 | `retrieval_embedding_failed`、`retrieval_vector_failed`、`retrieval_fulltext_failed`、`retrieval_rerank_failed` | 突然高于平时基线。 |
 

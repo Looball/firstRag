@@ -175,7 +175,7 @@ ID 随聊天请求提交。当前支持 `image/png`、`image/jpeg` 和 `image/we
 
 `POST /chat/knowledge-base/{knowledge_base_id}/vectors` 受 `VECTOR_INDEX_MAX_BATCH_FILES` 限制，超过单次批量提交上限时返回 `413`，避免一次性提交过多 vector index job。
 
-`GET /chat/vector-index-jobs/health` 会返回队列总览和 worker 提示，供前端判断任务是否可能卡住：
+`GET /chat/vector-index-jobs/health` 会合并 PostgreSQL 持久任务统计和 Redis worker 运行态，返回队列总览、在线 worker、最近心跳和提示，供前端判断任务是否可能卡住。Redis 不可用时仍会返回 PostgreSQL 队列状态，并在 `worker.redis_available` 和 `worker.hint` 中提示降级：
 
 ```json
 {
@@ -189,7 +189,15 @@ ID 随聊天请求提交。当前支持 `image/png`、`image/jpeg` 和 `image/we
     "stale_processing": 0,
     "oldest_active_seconds": 1200,
     "oldest_queued_seconds": 1200,
-    "oldest_processing_seconds": null
+    "oldest_processing_seconds": null,
+    "online_count": 0,
+    "redis_enabled": true,
+    "redis_available": true,
+    "redis_status": "healthy",
+    "last_heartbeat_at": null,
+    "last_heartbeat_age_seconds": null,
+    "heartbeat_ttl_seconds": 30,
+    "active_file_lock_count": 0
   },
   "queue": {
     "status": "stuck",

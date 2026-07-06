@@ -97,6 +97,12 @@ describe("chat workspace vector status parsing", () => {
         stale_queued: 1,
         stale_processing: 2,
         oldest_active_seconds: 120,
+        redis_available: true,
+        online_count: 0,
+        last_heartbeat_at: "2026-06-28T07:59:50",
+        last_heartbeat_age_seconds: 10,
+        heartbeat_ttl_seconds: 30,
+        active_file_lock_count: 0,
         checked_at: "2026-06-28T08:00:00",
       },
       queue: {
@@ -113,6 +119,7 @@ describe("chat workspace vector status parsing", () => {
 
     expect(health?.worker.status).toBe("attention_needed");
     expect(health?.worker.staleQueued).toBe(1);
+    expect(health?.worker.onlineCount).toBe(0);
     expect(health?.queue.status).toBe("stuck");
     expect(getWorkerHealthLabel(health, "")).toEqual({
       label: "任务可能卡住：排队 1 个，处理中 2 个",
@@ -126,6 +133,53 @@ describe("chat workspace vector status parsing", () => {
     expect(getWorkerHealthDetails(health, "").suggestedActions).toContain(
       "存在长时间未领取任务，优先启动或重启 vector index worker。"
     );
+    expect(getWorkerHealthDetails(health, "").details).toContainEqual({
+      label: "Redis 运行态",
+      value: "可用",
+      tone: "success",
+    });
+  });
+
+  it("reports active queue without online redis worker", () => {
+    const health = parseVectorIndexHealth({
+      success: true,
+      worker: {
+        status: "attention_needed",
+        is_healthy: false,
+        has_recent_activity: false,
+        hint: "没有检测到在线 vector worker，排队或处理中任务可能无法推进。",
+        stale_queued: 0,
+        stale_processing: 0,
+        redis_available: true,
+        online_count: 0,
+        checked_at: "2026-06-28T08:00:00",
+      },
+      queue: {
+        status: "stuck",
+        total: 2,
+        active: 2,
+        queued: 2,
+        processing: 0,
+        succeeded: 0,
+        failed: 0,
+        cancelled: 0,
+      },
+    });
+
+    const details = getWorkerHealthDetails(health, "");
+
+    expect(getWorkerHealthLabel(health, "")).toEqual({
+      label: "未检测到在线 Worker：2 个任务待处理",
+      tone: "danger",
+    });
+    expect(details.details).toContainEqual({
+      label: "在线 Worker",
+      value: "0 个",
+      tone: "danger",
+    });
+    expect(details.suggestedActions).toContain(
+      "未检测到在线 vector index worker，优先启动或重启 worker 容器。"
+    );
   });
 
   it("builds actionable worker health details for active and failed queues", () => {
@@ -138,6 +192,8 @@ describe("chat workspace vector status parsing", () => {
         hint: null,
         last_job_updated_at: "2026-06-28T08:01:02",
         last_processing_heartbeat_at: "2026-06-28T08:02:03",
+        redis_available: false,
+        redis_error_message: "connection refused",
         stale_queued: 0,
         stale_processing: 0,
         oldest_active_seconds: 45,
@@ -171,8 +227,16 @@ describe("chat workspace vector status parsing", () => {
       label: "最近处理心跳",
       value: "2026-06-28 08:02:03",
     });
+    expect(details.details).toContainEqual({
+      label: "Redis 运行态",
+      value: "不可用",
+      tone: "warning",
+    });
     expect(details.suggestedActions).toContain(
       "失败任务可在下方任务列表或文件卡片中按红色状态快速定位。"
+    );
+    expect(details.suggestedActions).toContain(
+      "Redis worker 运行态暂不可用；队列仍会按 PostgreSQL 状态判断，必要时检查 Redis 连接。"
     );
   });
 

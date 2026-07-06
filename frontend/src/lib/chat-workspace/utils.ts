@@ -1716,6 +1716,26 @@ export function parseVectorIndexHealth(value: unknown): VectorIndexHealthRespons
       staleQueued: getNumberField(worker, "stale_queued"),
       staleProcessing: getNumberField(worker, "stale_processing"),
       checkedAt: typeof worker.checked_at === "string" ? worker.checked_at : "",
+      onlineCount: getNumberField(worker, "online_count"),
+      redisEnabled: getNullableBooleanField(worker, ["redis_enabled"]),
+      redisAvailable: getNullableBooleanField(worker, ["redis_available"]),
+      redisStatus: getNullableStringField(worker, ["redis_status"]),
+      redisErrorMessage: getNullableStringField(worker, [
+        "redis_error_message",
+      ]),
+      lastHeartbeatAt:
+        typeof worker.last_heartbeat_at === "string"
+          ? worker.last_heartbeat_at
+          : null,
+      lastHeartbeatAgeSeconds: getNullableNumberField(worker, [
+        "last_heartbeat_age_seconds",
+      ]),
+      heartbeatTtlSeconds: getNullableNumberField(worker, [
+        "heartbeat_ttl_seconds",
+      ]),
+      activeFileLockCount: getNullableNumberField(worker, [
+        "active_file_lock_count",
+      ]),
     },
     queue: {
       status: getQueueStatus(queue.status),
@@ -1771,6 +1791,18 @@ export function getWorkerHealthLabel(
   }
 
   if (health.worker.status === "attention_needed") {
+    if (
+      health.queue.active > 0 &&
+      health.worker.redisAvailable === true &&
+      health.worker.onlineCount === 0 &&
+      health.worker.staleQueued + health.worker.staleProcessing === 0
+    ) {
+      return {
+        label: `未检测到在线 Worker：${health.queue.active} 个任务待处理`,
+        tone: "danger",
+      };
+    }
+
     return {
       label: `任务可能卡住：排队 ${health.worker.staleQueued} 个，处理中 ${health.worker.staleProcessing} 个`,
       tone: "danger",
@@ -1809,6 +1841,27 @@ function buildWorkerHealthDetails(
     },
   ];
 
+  if (health.worker.redisAvailable !== null) {
+    details.push({
+      label: "Redis 运行态",
+      value: health.worker.redisAvailable ? "可用" : "不可用",
+      tone: health.worker.redisAvailable ? "success" : "warning",
+    });
+  }
+
+  if (health.worker.redisAvailable === true) {
+    details.push({
+      label: "在线 Worker",
+      value: `${health.worker.onlineCount} 个`,
+      tone:
+        health.queue.active > 0 && health.worker.onlineCount === 0
+          ? "danger"
+          : health.worker.onlineCount > 0
+            ? "success"
+            : "muted",
+    });
+  }
+
   if (health.worker.staleQueued > 0 || health.worker.staleProcessing > 0) {
     details.push({
       label: "疑似卡住",
@@ -1836,6 +1889,33 @@ function buildWorkerHealthDetails(
     details.push({
       label: "最近处理心跳",
       value: formatDateTimeText(health.worker.lastProcessingHeartbeatAt),
+    });
+  }
+
+  if (health.worker.lastHeartbeatAt) {
+    details.push({
+      label: "最近 Worker 心跳",
+      value: formatDateTimeText(health.worker.lastHeartbeatAt),
+    });
+  }
+
+  if (health.worker.lastHeartbeatAgeSeconds !== null) {
+    details.push({
+      label: "心跳延迟",
+      value: formatDurationSeconds(health.worker.lastHeartbeatAgeSeconds),
+      tone:
+        health.worker.heartbeatTtlSeconds !== null &&
+        health.worker.lastHeartbeatAgeSeconds > health.worker.heartbeatTtlSeconds
+          ? "danger"
+          : "muted",
+    });
+  }
+
+  if (health.worker.activeFileLockCount !== null) {
+    details.push({
+      label: "活跃文件锁",
+      value: `${health.worker.activeFileLockCount} 个`,
+      tone: health.worker.activeFileLockCount > 0 ? "success" : "muted",
     });
   }
 
@@ -1891,6 +1971,20 @@ export function getWorkerHealthDetails(
 
   if (health.queue.failed > 0) {
     suggestedActions.push("失败任务可在下方任务列表或文件卡片中按红色状态快速定位。");
+  }
+
+  if (health.worker.redisAvailable === false) {
+    suggestedActions.push(
+      "Redis worker 运行态暂不可用；队列仍会按 PostgreSQL 状态判断，必要时检查 Redis 连接。"
+    );
+  }
+
+  if (
+    health.queue.active > 0 &&
+    health.worker.redisAvailable === true &&
+    health.worker.onlineCount === 0
+  ) {
+    suggestedActions.push("未检测到在线 vector index worker，优先启动或重启 worker 容器。");
   }
 
   if (health.worker.hint && !suggestedActions.includes(health.worker.hint)) {

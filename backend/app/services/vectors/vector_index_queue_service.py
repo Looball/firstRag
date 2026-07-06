@@ -281,6 +281,7 @@ def serialize_current_vector_index_job(
 
 def serialize_vector_index_job_health(
     health: Row | dict[str, Any],
+    worker_runtime: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """将向量化队列健康统计转换为接口响应结构。"""
     queued = int(health.get("queued") or 0)
@@ -291,9 +292,17 @@ def serialize_vector_index_job_health(
     stale_queued = int(health.get("stale_queued") or 0)
     stale_processing = int(health.get("stale_processing") or 0)
     active = queued + processing
+    runtime = worker_runtime or {}
+    redis_available = runtime.get("redis_available")
+    online_worker_count = int(runtime.get("online_worker_count") or 0)
+    has_runtime = redis_available is True
 
-    # 没有独立 worker 心跳表时，用任务是否长期停留在活跃态来判断是否需要关注。
+    # Redis worker runtime 可用时优先用在线 worker 判断；不可用时继续按
+    # PostgreSQL 队列中的活跃任务时长推断。
     if stale_queued > 0 or stale_processing > 0:
+        worker_status = "attention_needed"
+        queue_status = "stuck"
+    elif has_runtime and active > 0 and online_worker_count == 0:
         worker_status = "attention_needed"
         queue_status = "stuck"
     elif processing > 0:
@@ -313,16 +322,30 @@ def serialize_vector_index_job_health(
         worker_hint = "存在处理中的向量化任务长时间没有心跳，可能 worker 已停止或任务卡住。"
     elif stale_queued > 0:
         worker_hint = "存在排队任务长时间未被领取，可能 worker 未启动。"
+    elif has_runtime and active > 0 and online_worker_count == 0:
+        worker_hint = "没有检测到在线 vector worker，排队或处理中任务可能无法推进。"
     elif processing > 0:
         worker_hint = "worker 正在处理向量化任务。"
     elif queued > 0:
         worker_hint = "任务正在排队，等待 worker 领取。"
+    elif redis_available is False:
+        worker_hint = "Redis worker 运行态暂不可用，已退回 PostgreSQL 队列状态判断。"
+
+    has_recent_activity = (
+        processing > 0
+        and stale_processing == 0
+        and (
+            not has_runtime
+            or online_worker_count > 0
+            or runtime.get("last_heartbeat_at") is not None
+        )
+    )
 
     return {
         "worker": {
             "status": worker_status,
             "is_healthy": worker_status != "attention_needed",
-            "has_recent_activity": processing > 0 and stale_processing == 0,
+            "has_recent_activity": has_recent_activity,
             "hint": worker_hint,
             "last_job_updated_at": health.get("last_job_updated_at"),
             "last_processing_heartbeat_at": health.get(
@@ -341,6 +364,19 @@ def serialize_vector_index_job_health(
             "stale_queued": stale_queued,
             "stale_processing": stale_processing,
             "checked_at": health.get("checked_at"),
+            "online_count": online_worker_count,
+            "redis_enabled": runtime.get("redis_enabled"),
+            "redis_available": redis_available,
+            "redis_status": runtime.get("redis_status"),
+            "redis_error_message": runtime.get("redis_error_message"),
+            "last_heartbeat_at": runtime.get("last_heartbeat_at"),
+            "last_heartbeat_age_seconds": runtime.get(
+                "last_heartbeat_age_seconds",
+            ),
+            "heartbeat_ttl_seconds": runtime.get("heartbeat_ttl_seconds"),
+            "active_file_lock_count": runtime.get("active_file_lock_count"),
+            "runtime_workers": runtime.get("workers") or [],
+            "runtime_metrics": runtime.get("metrics") or {},
         },
         "queue": {
             "status": queue_status,

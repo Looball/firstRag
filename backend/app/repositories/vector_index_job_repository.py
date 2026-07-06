@@ -335,6 +335,39 @@ def reclaim_expired_vector_index_jobs(
             return cursor.rowcount
 
 
+def defer_vector_index_job(
+    job_id: UUID,
+    reason: str,
+    delay_seconds: int = 10,
+) -> Row | None:
+    """释放已领取任务并短暂延后重试，用于 Redis 短租约冲突。"""
+    with get_connection() as connection:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """
+                UPDATE vector_index_jobs
+                SET status = 'queued',
+                    error_message = %s,
+                    locked_by = NULL,
+                    locked_at = NULL,
+                    heartbeat_at = NULL,
+                    available_at = now() + make_interval(secs => %s),
+                    updated_at = now()
+                WHERE id = %s
+                  AND status = 'processing'
+                RETURNING
+                    id,
+                    status,
+                    error_message,
+                    available_at,
+                    updated_at;
+                """,
+                (reason[:2000], max(0, delay_seconds), job_id),
+            )
+            row = cursor.fetchone()
+            return dict(row) if row is not None else None
+
+
 def mark_vector_index_job_succeeded(
     job_id: UUID,
     result: dict[str, Any],

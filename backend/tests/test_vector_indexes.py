@@ -51,6 +51,20 @@ class VectorIndexJobHealthTests(unittest.TestCase):
                 "oldest_queued_seconds": 120,
                 "oldest_processing_seconds": 2,
             },
+        ), patch(
+            "app.api.vector_indexes.get_vector_worker_runtime_summary",
+            return_value={
+                "redis_enabled": True,
+                "redis_available": True,
+                "redis_status": "healthy",
+                "online_worker_count": 1,
+                "last_heartbeat_at": "2026-06-25T11:59:58+08:00",
+                "last_heartbeat_age_seconds": 2,
+                "heartbeat_ttl_seconds": 30,
+                "active_file_lock_count": 1,
+                "workers": [],
+                "metrics": {"claimed": 1},
+            },
         ):
             response = self.client.get("/chat/vector-index-jobs/health")
 
@@ -61,6 +75,9 @@ class VectorIndexJobHealthTests(unittest.TestCase):
         self.assertTrue(payload["worker"]["is_healthy"])
         self.assertTrue(payload["worker"]["has_recent_activity"])
         self.assertEqual(payload["worker"]["hint"], "worker 正在处理向量化任务。")
+        self.assertEqual(payload["worker"]["online_count"], 1)
+        self.assertTrue(payload["worker"]["redis_available"])
+        self.assertEqual(payload["worker"]["active_file_lock_count"], 1)
         self.assertEqual(payload["worker"]["oldest_active_seconds"], 120)
         self.assertEqual(payload["worker"]["oldest_processing_seconds"], 2)
         self.assertEqual(payload["queue"]["status"], "processing")
@@ -90,6 +107,20 @@ class VectorIndexJobHealthTests(unittest.TestCase):
                 "oldest_active_seconds": 2400,
                 "oldest_queued_seconds": 2400,
                 "oldest_processing_seconds": 1800,
+            },
+        ), patch(
+            "app.api.vector_indexes.get_vector_worker_runtime_summary",
+            return_value={
+                "redis_enabled": True,
+                "redis_available": True,
+                "redis_status": "healthy",
+                "online_worker_count": 0,
+                "last_heartbeat_at": None,
+                "last_heartbeat_age_seconds": None,
+                "heartbeat_ttl_seconds": 30,
+                "active_file_lock_count": 0,
+                "workers": [],
+                "metrics": {},
             },
         ):
             response = self.client.get("/chat/vector-index-jobs/health")

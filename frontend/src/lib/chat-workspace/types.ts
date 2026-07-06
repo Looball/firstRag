@@ -281,6 +281,15 @@ export type VectorIndexHealthResponse = {
     staleQueued: number;
     staleProcessing: number;
     checkedAt: string;
+    onlineCount: number;
+    redisEnabled: boolean | null;
+    redisAvailable: boolean | null;
+    redisStatus: string | null;
+    redisErrorMessage: string | null;
+    lastHeartbeatAt: string | null;
+    lastHeartbeatAgeSeconds: number | null;
+    heartbeatTtlSeconds: number | null;
+    activeFileLockCount: number | null;
   };
   queue: {
     status: "idle" | "waiting" | "processing" | "stuck" | "unknown";
