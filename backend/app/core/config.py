@@ -63,7 +63,8 @@ VECTOR_INDEX_MAX_BATCH_FILES = read_int_env(
     100,
 )
 
-# 进程内限流配置。单机部署直接生效，多实例公网部署仍建议叠加网关限流。
+# 限流配置。Docker/生产默认使用 Redis 分布式窗口；本地未显式配置时
+# Redis 故障会 fail-open 到进程内限流，避免开发环境被基础设施阻塞。
 LOGIN_FAILURE_RATE_LIMIT_MAX_ATTEMPTS = read_int_env(
     "LOGIN_FAILURE_RATE_LIMIT_MAX_ATTEMPTS",
     5,
@@ -92,6 +93,19 @@ MODEL_TEST_RATE_LIMIT_MAX_REQUESTS = read_int_env(
     "MODEL_TEST_RATE_LIMIT_MAX_REQUESTS",
     20,
 )
+_RATE_LIMIT_BACKEND_ENV = os.environ.get("RATE_LIMIT_BACKEND")
+RATE_LIMIT_BACKEND = (
+    _RATE_LIMIT_BACKEND_ENV
+    or (
+        "redis"
+        if read_bool_env("REDIS_ENABLED", bool(os.environ.get("REDIS_URL")))
+        else "memory"
+    )
+).strip().lower()
+RATE_LIMIT_REDIS_FAILURE_MODE = os.environ.get(
+    "RATE_LIMIT_REDIS_FAILURE_MODE",
+    "fail_closed" if _RATE_LIMIT_BACKEND_ENV else "fail_open",
+).strip().lower()
 CHAT_IMAGE_MAX_FILES = read_int_env("CHAT_IMAGE_MAX_FILES", 3)
 CHAT_IMAGE_MAX_FILE_SIZE_BYTES = read_int_env(
     "CHAT_IMAGE_MAX_FILE_SIZE_BYTES",

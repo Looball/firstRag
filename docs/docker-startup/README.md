@@ -70,8 +70,8 @@ POSTGRES_PORT=127.0.0.1:5432
 注意：`DATABASE_URL` 主要用于宿主机 conda 方式运行；Compose 内部默认使用 `POSTGRES_DB`、`POSTGRES_USER` 和 `POSTGRES_PASSWORD` 生成容器网络里的数据库连接。如果需要外部数据库，再设置 `COMPOSE_DATABASE_URL`。
 
 Redis 默认使用 Compose 内置 `redis` service，backend 和 worker 通过
-`REDIS_URL=redis://redis:6379/0` 访问。当前 Redis 已接入基础设施健康检查；
-业务缓存、分布式限流和 worker 运行态迁移会在后续 Redis 专项任务中继续推进。
+`REDIS_URL=redis://redis:6379/0` 访问。当前 Redis 已接入基础设施健康检查、
+RAG 热点共享缓存和后端分布式限流；worker 运行态迁移会在后续 Redis 专项任务中继续推进。
 
 ## 4. 可选：配置远程 rerank
 

@@ -16,8 +16,9 @@ cp .env.example .env
 | --- | --- |
 | `DATABASE_URL` | 本地 conda 方式运行时使用的 PostgreSQL 连接串。 |
 | `COMPOSE_DATABASE_URL` | Docker Compose 方式运行时可选覆盖的 PostgreSQL 连接串；不填时默认连接 compose 内的 `postgres` 服务。 |
-| `REDIS_ENABLED` / `REDIS_URL` | Redis 基础设施开关和连接地址；Compose 默认连接内置 `redis` 服务，当前用于健康检查和 RAG 热点共享缓存，生产环境可指向托管 Redis 内网地址。 |
+| `REDIS_ENABLED` / `REDIS_URL` | Redis 基础设施开关和连接地址；Compose 默认连接内置 `redis` 服务，当前用于健康检查、RAG 热点共享缓存和后端分布式限流，生产环境可指向托管 Redis 内网地址。 |
 | `REDIS_CONNECT_TIMEOUT_SECONDS` / `REDIS_COMMAND_TIMEOUT_SECONDS` | Redis 连接和命令超时。 |
+| `RATE_LIMIT_BACKEND` / `RATE_LIMIT_REDIS_FAILURE_MODE` | 限流后端和 Redis 故障策略；Docker/生产默认 `redis` + `fail_closed`，本地调试可使用 `memory` 或 `fail_open`。 |
 | `POSTGRES_DB` / `POSTGRES_USER` / `POSTGRES_PASSWORD` | Docker Compose 中 PostgreSQL 容器的数据库、用户和密码。 |
 | `JWT_SECRET_KEY` | JWT 签名密钥。 |
 | `ALLOW_PUBLIC_REGISTRATION` | 是否允许公开注册；本地默认 `true`，公开 demo 建议设为 `false` 并只使用预置账号。 |
@@ -454,7 +455,8 @@ MODELS_DIR=/srv/firstrag/models
 | `ALLOW_USER_CUSTOM_LLM_BASE_URL` | 公开 demo 保持 `false`，避免用户通过自定义模型地址访问服务器内网。 |
 | `MAX_UPLOAD_FILE_SIZE_BYTES` | 公开 demo 建议调低到 10-20 MB，并与反向代理 body size 一致。 |
 | `USER_UPLOAD_MAX_FILES` / `USER_UPLOAD_MAX_BYTES` | 设置用户级文件数量和总容量上限；公开 demo 建议保守配置。 |
-| `LOGIN_FAILURE_RATE_LIMIT_*` / `*_RATE_LIMIT_MAX_REQUESTS` | 后端进程内限流阈值；多实例部署还要叠加网关或 WAF。 |
+| `RATE_LIMIT_BACKEND` / `RATE_LIMIT_REDIS_FAILURE_MODE` | 公开 demo 使用 `redis` 和 `fail_closed`，确保多 backend 实例共享限流状态；本地调试可改为 `memory` 或 `fail_open`。 |
+| `LOGIN_FAILURE_RATE_LIMIT_*` / `*_RATE_LIMIT_MAX_REQUESTS` | 后端限流阈值；公网仍建议叠加网关或 WAF 做边缘 IP 级限流。 |
 | `VECTOR_INDEX_MAX_BATCH_FILES` | 单次知识库批量向量化可提交的最大文件数。 |
 | `FRONTEND_PORT` / `BACKEND_PORT` / `POSTGRES_PORT` | 建议设为 `127.0.0.1:3000`、`127.0.0.1:8000`、`127.0.0.1:5432`，由反向代理暴露 HTTPS。 |
 
@@ -468,6 +470,8 @@ MAX_UPLOAD_FILE_SIZE_BYTES=20971520
 USER_UPLOAD_MAX_FILES=100
 USER_UPLOAD_MAX_BYTES=1073741824
 VECTOR_INDEX_MAX_BATCH_FILES=50
+RATE_LIMIT_BACKEND=redis
+RATE_LIMIT_REDIS_FAILURE_MODE=fail_closed
 LOGIN_FAILURE_RATE_LIMIT_MAX_ATTEMPTS=5
 LOGIN_FAILURE_RATE_LIMIT_WINDOW_SECONDS=300
 API_RATE_LIMIT_WINDOW_SECONDS=60
@@ -487,7 +491,7 @@ MODELS_DIR=/srv/firstrag/models
 - 终止 TLS，强制 HTTP 跳转 HTTPS。
 - 将域名请求转发到 `http://127.0.0.1:3000`。
 - 上传 body size 不大于 `MAX_UPLOAD_FILE_SIZE_BYTES`。
-- 后端已提供进程内限流；反向代理仍建议对登录、注册、上传、聊天和模型设置接口做 IP 级限流，覆盖多进程、多实例和恶意突发流量。
+- 后端已提供 Redis 分布式限流；反向代理仍建议对登录、注册、上传、聊天和模型设置接口做 IP 级限流，在请求进入应用前吸收恶意突发流量。
 - 对 SSE streaming 关闭响应缓冲，避免聊天 token 被代理层攒批返回。
 
 仓库提供了 Nginx 配置模板，位于 `deploy/nginx/`：
@@ -520,7 +524,7 @@ docker run --rm -v "$PWD/deploy/nginx:/etc/nginx/conf.d:ro" nginx:alpine nginx -
 - 注册关闭后，`POST /register` 会返回“当前演示环境暂不开放注册，请使用已提供的账号登录。”，已有账号登录不受影响。
 - 不要求访客输入自己的真实 API Key；如果需要测试用户 Key 模式，必须提示只在可信 demo 环境使用，且前端不会持久化完整 Key。
 - 上传文件只用于演示，不接收私人、商业或敏感文档。公开 demo 应在页面说明上传数据会被定期清理。
-- 进程内限流状态不会跨多实例共享；公网访问仍应由反向代理、WAF 或 API 网关承担全局限流。
+- 后端 Redis 限流状态会跨多实例共享；公网访问仍建议由反向代理、WAF 或 API 网关承担更靠前的边缘限流。
 
 ### 数据清理策略
 

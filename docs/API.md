@@ -8,7 +8,7 @@ Authorization: Bearer <access_token>
 
 成功响应约定为 `{"success": true, ...}`。资源不存在或不属于当前用户时返回 `404`。
 
-请求超过后端进程内限流时返回 `429`，并携带 `Retry-After` 响应头。登录失败、聊天、上传、向量化提交和模型测试的阈值由 `.env` 中的 `LOGIN_FAILURE_RATE_LIMIT_*`、`*_RATE_LIMIT_MAX_REQUESTS` 和 `API_RATE_LIMIT_WINDOW_SECONDS` 配置控制。
+请求超过后端限流时返回 `429`，并携带 `Retry-After` 响应头。默认 Docker/生产环境使用 Redis 分布式 sliding-window 限流，多 backend 实例共享计数；登录失败、聊天、上传、向量化提交和模型测试的阈值由 `.env` 中的 `LOGIN_FAILURE_RATE_LIMIT_*`、`*_RATE_LIMIT_MAX_REQUESTS` 和 `API_RATE_LIMIT_WINDOW_SECONDS` 配置控制。
 
 ## 系统健康
 
@@ -16,7 +16,7 @@ Authorization: Bearer <access_token>
 | --- | --- | --- |
 | `GET` | `/health` | 返回后端进程和 Redis 基础设施的安全健康摘要。 |
 
-`GET /health` 不需要认证，只返回可公开的健康状态，不返回 Redis URL、密码、JWT、数据库连接串或用户数据。Redis 当前作为基础设施健康检查接入；业务缓存、分布式限流和 worker 运行态迁移由后续 Redis 专项任务承接。
+`GET /health` 不需要认证，只返回可公开的健康状态，不返回 Redis URL、密码、JWT、数据库连接串或用户数据。Redis 当前用于基础设施健康检查、RAG 热点缓存和后端分布式限流；worker 运行态迁移由后续 Redis 专项任务承接。
 
 ```json
 {

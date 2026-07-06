@@ -125,7 +125,7 @@
 | `T-055` | `PLAN-20260704-01` | `P2` | `Done` | 支持图片/OCR 入知识库检索 | 2026-07-05 | `d8cd9ce` |
 | `T-056` | `PLAN-20260705-01` | `P0` | `Done` | 引入 Redis 基础设施、配置和健康检查 | 2026-07-05 | `5e8c32c`、`d0aee38` |
 | `T-057` | `PLAN-20260705-01` | `P1` | `Done` | 抽象缓存层并迁移 RAG 热点缓存到 Redis | 2026-07-06 | `654899e` |
-| `T-058` | `PLAN-20260705-01` | `P0` | `Todo` | 将登录和 API 限流升级为 Redis 分布式限流 | - | - |
+| `T-058` | `PLAN-20260705-01` | `P0` | `Done` | 将登录和 API 限流升级为 Redis 分布式限流 | 2026-07-06 | `待提交` |
 | `T-059` | `PLAN-20260705-01` | `P1` | `Todo` | 为 vector worker 增加 Redis 运行态、锁和队列观测 | - | - |
 | `T-060` | `PLAN-20260705-01` | `P1` | `Todo` | 补齐 Redis 生产部署、preflight 和文档 | - | - |
 | `T-061` | `PLAN-20260705-01` | `P1` | `Todo` | 完成 Redis 场景 Docker 验证和核心链路回归 | - | - |
@@ -2144,6 +2144,25 @@ conda run -n firstrag python -m pytest \
   tests/test_vector_indexes.py \
   tests/test_user_settings.py
 ```
+- 实现记录：
+  - 相关 commit：`待提交`。
+  - `backend/app/core/rate_limit.py` 升级为 Redis 优先 sliding-window 限流，使用 Redis sorted set 和 Lua 脚本原子完成窗口清理、计数、消耗额度和 `Retry-After` 计算。
+  - 保留 `assert_rate_limit_available`、`consume_rate_limit`、`clear_rate_limit`、`reset_rate_limits` 和 `enforce_rate_limit` 调用语义，登录、chat、upload、vector index、model test 的 route 调用点无需改变。
+  - Redis 限流 key 使用 `scope + identifier sha256`，不在 Redis key 中暴露 username、IP、user_id 或完整业务 identifier。
+  - 新增 `RATE_LIMIT_BACKEND` 和 `RATE_LIMIT_REDIS_FAILURE_MODE` 配置；Docker Compose 默认 `redis + fail_closed`，本地未显式配置时 Redis 故障可 fail-open 到进程内限流，避免 conda 调试被容器 DNS 或 Redis 可用性阻塞。
+  - 登录成功后的 `clear_rate_limit` 会同时删除 Redis bucket；`reset_rate_limits` 会清理 Redis `firstrag:rate_limit:*` 命名空间，保留测试隔离能力。
+  - README、API、Architecture、Deployment 和 Docker 启动文档已同步 Redis 现在承接后端分布式限流；反向代理/WAF 仍建议保留边缘 IP 级限流。
+- 已验证：
+  - `cd backend && conda run -n firstrag python -m compileall app tests/test_rate_limit.py`
+  - `cd backend && conda run -n firstrag python -m pytest tests/test_rate_limit.py tests/test_auth_rate_limit.py tests/test_chat_settings.py tests/test_knowledge_files.py tests/test_vector_indexes.py tests/test_user_settings.py`，48 passed。
+  - `cd backend && conda run -n firstrag python -m pytest`，222 passed。
+  - `docker compose up -d --build` 已通过，backend 和 frontend 镜像完成构建并重建启动。
+  - `docker compose ps` 显示 backend、frontend、worker 均为 `Up`，postgres 和 redis 为 `healthy`。
+  - `docker compose logs --tail=100 redis migrate backend worker frontend postgres` 已确认 Redis Ready、migration `applied=0 skipped=5`，backend、frontend 和 worker 无新启动错误；PostgreSQL tail 中仍保留一条此前本地密码不匹配产生的历史认证失败日志，不属于本轮重建新增错误。
+  - `docker compose exec -T redis redis-cli ping` 输出 `PONG`。
+  - `curl -s http://127.0.0.1:8000/health` 返回 `status=healthy` 且 `dependencies.redis.status=healthy`。
+  - `docker compose exec -T backend python -c "from app.core.rate_limit import ..."` 已完成 Redis 限流 smoke；同一 key 第一次通过、第二次被阻断，输出 `blocked:60`。
+  - `conda run -n firstrag python scripts/production_preflight.py --env-file .env --migration-method compose` 已通过，包括 Docker Compose config 和 migration dry-run。
 
 ## T-059 为 vector worker 增加 Redis 运行态、锁和队列观测
 
