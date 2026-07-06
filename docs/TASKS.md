@@ -126,7 +126,7 @@
 | `T-056` | `PLAN-20260705-01` | `P0` | `Done` | 引入 Redis 基础设施、配置和健康检查 | 2026-07-05 | `5e8c32c`、`d0aee38` |
 | `T-057` | `PLAN-20260705-01` | `P1` | `Done` | 抽象缓存层并迁移 RAG 热点缓存到 Redis | 2026-07-06 | `654899e` |
 | `T-058` | `PLAN-20260705-01` | `P0` | `Done` | 将登录和 API 限流升级为 Redis 分布式限流 | 2026-07-06 | `8875eea` |
-| `T-059` | `PLAN-20260705-01` | `P1` | `Todo` | 为 vector worker 增加 Redis 运行态、锁和队列观测 | - | - |
+| `T-059` | `PLAN-20260705-01` | `P1` | `Done` | 为 vector worker 增加 Redis 运行态、锁和队列观测 | 2026-07-06 | `8f454ef` |
 | `T-060` | `PLAN-20260705-01` | `P1` | `Todo` | 补齐 Redis 生产部署、preflight 和文档 | - | - |
 | `T-061` | `PLAN-20260705-01` | `P1` | `Todo` | 完成 Redis 场景 Docker 验证和核心链路回归 | - | - |
 
@@ -2196,6 +2196,24 @@ conda run -n firstrag python -m pytest \
 cd ../frontend
 npm test -- TaskQueuePanel
 ```
+- 实现记录：
+  - 相关 commit：`8f454ef`。
+  - 新增 `backend/app/services/vectors/vector_worker_runtime_service.py`，Redis 保存短 TTL worker 心跳、在线 worker set、单文件短租约、运行指标和 health summary；Redis 故障会短熔断并降级到 PostgreSQL 队列状态。
+  - `vector_index_worker` 启动、轮询、空闲和处理任务时写入运行态心跳；长任务执行期间使用后台 heartbeat loop 定时续写，避免 Redis 心跳 TTL 过期。
+  - Redis 文件短租约按 `user_id + file_id` 隔离；锁冲突时通过 `defer_vector_index_job` 短暂退回 PostgreSQL 队列，避免重复索引且不会永久卡住；Redis 锁不可用时继续依赖 PostgreSQL `vector_index_jobs`。
+  - `GET /chat/vector-index-jobs/health` 合并 PostgreSQL 队列统计和 Redis runtime，新增 `worker.online_count`、`worker.redis_available`、`worker.last_heartbeat_at`、`worker.last_heartbeat_age_seconds`、`worker.active_file_lock_count` 等字段。
+  - 前端任务队列面板解析并展示 Redis 运行态、在线 worker 数、最近 worker 心跳、心跳延迟和活跃文件锁；当 active 任务存在但 Redis 未检测到在线 worker 时给出明确操作建议。
+  - `.env.example`、README、Architecture、Backend、Deployment 和 API 文档已同步 Redis worker runtime 现状；明确 Redis 不替代 PostgreSQL 持久任务队列。
+- 已验证：
+  - `cd backend && conda run -n firstrag python -m compileall app tests/test_vector_worker_runtime_service.py tests/test_vector_index_worker.py tests/test_vector_indexes.py`
+  - `cd backend && conda run -n firstrag python -m pytest tests/test_vector_worker_runtime_service.py tests/test_vector_index_worker.py tests/test_vector_indexes.py tests/test_vector_index_failure_recovery.py`，21 passed。
+  - `cd backend && conda run -n firstrag python -m pytest`，226 passed。
+  - `cd frontend && npm test -- utils.test.ts`，12 passed。
+  - `cd frontend && npm test`，51 passed。
+  - `git diff --check` 通过。
+  - `docker compose config --quiet` 通过。
+  - `docker compose up -d --build` 未完成：此前 Codex 沙箱无法访问 Docker socket；后续 Docker 场景完整回归由 `T-061` 继续覆盖。
+  - `conda run -n firstrag python scripts/production_preflight.py --env-file .env --migration-method compose` 中 secret、provider、database、port、persistent directories 和 Docker Compose config 检查通过；migration dry-run 未通过，原因是 compose migration 需要 Docker daemon，而当前环境无法访问 Docker socket。
 
 ## T-060 补齐 Redis 生产部署、preflight 和文档
 
