@@ -134,6 +134,88 @@ class ProductionPreflightScriptTests(unittest.TestCase):
         self.assertTrue(any("FRONTEND_PORT" in error for error in errors))
         self.assertTrue(any("BACKEND_PORT" in error for error in errors))
 
+    def test_validate_redis_settings_accepts_compose_defaults(self) -> None:
+        """Compose 内置 Redis 默认配置应通过生产 Redis 检查。"""
+        errors = production_preflight.validate_redis_settings(
+            {
+                "REDIS_ENABLED": "true",
+                "REDIS_URL": "redis://redis:6379/0",
+                "RATE_LIMIT_BACKEND": "redis",
+                "RATE_LIMIT_REDIS_FAILURE_MODE": "fail_closed",
+            }
+        )
+
+        self.assertEqual(errors, [])
+
+    def test_validate_redis_settings_rejects_external_url_without_auth(self) -> None:
+        """外部 Redis 连接串必须带认证信息。"""
+        errors = production_preflight.validate_redis_settings(
+            {
+                "REDIS_ENABLED": "true",
+                "REDIS_URL": "redis://cache.example.com:6379/0",
+                "RATE_LIMIT_BACKEND": "redis",
+                "RATE_LIMIT_REDIS_FAILURE_MODE": "fail_closed",
+            }
+        )
+
+        self.assertTrue(any("REDIS_URL" in error for error in errors))
+        self.assertTrue(any("认证" in error for error in errors))
+
+    def test_validate_redis_settings_rejects_default_password_without_leaking(self) -> None:
+        """Redis 默认密码应失败，错误信息不能泄露连接串密码。"""
+        errors = production_preflight.validate_redis_settings(
+            {
+                "REDIS_ENABLED": "true",
+                "REDIS_URL": "redis://default:password@cache.example.com:6379/0",
+                "RATE_LIMIT_BACKEND": "redis",
+                "RATE_LIMIT_REDIS_FAILURE_MODE": "fail_closed",
+            }
+        )
+
+        joined_errors = "\n".join(errors)
+        self.assertTrue(any("Redis 密码" in error for error in errors))
+        self.assertNotIn("password@cache.example.com", joined_errors)
+        self.assertNotIn("redis://", joined_errors)
+
+    def test_validate_redis_settings_rejects_fail_open_rate_limit(self) -> None:
+        """生产 Redis 限流不能配置 fail-open。"""
+        errors = production_preflight.validate_redis_settings(
+            {
+                "REDIS_ENABLED": "true",
+                "REDIS_URL": "redis://redis:6379/0",
+                "RATE_LIMIT_BACKEND": "redis",
+                "RATE_LIMIT_REDIS_FAILURE_MODE": "fail_open",
+            }
+        )
+
+        self.assertTrue(any("fail_closed" in error for error in errors))
+
+    def test_validate_compose_redis_service_requires_healthcheck_and_private_port(self) -> None:
+        """Compose Redis service 不能暴露 ports，且必须有 healthcheck。"""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            compose_file = Path(tmpdir) / "docker-compose.yml"
+            compose_file.write_text(
+                "\n".join(
+                    [
+                        "services:",
+                        "  redis:",
+                        "    image: redis:7-alpine",
+                        "    ports:",
+                        "      - \"6379:6379\"",
+                        "  backend:",
+                        "    image: backend",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            errors = production_preflight.validate_compose_redis_service(
+                compose_file,
+            )
+
+        self.assertTrue(any("ports" in error for error in errors))
+        self.assertTrue(any("healthcheck" in error for error in errors))
+
     def test_validate_runtime_paths_checks_required_directories(self) -> None:
         """持久化目录和模型目录缺失时应失败。"""
         with tempfile.TemporaryDirectory() as tmpdir:

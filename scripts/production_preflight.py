@@ -6,12 +6,15 @@ from __future__ import annotations
 import argparse
 import base64
 import binascii
+import ipaddress
 import os
+import re
 import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Mapping, Sequence
+from urllib.parse import urlsplit
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_ENV_FILE = PROJECT_ROOT / ".env"
@@ -36,6 +39,19 @@ PLACEHOLDER_VALUES = {
 }
 
 LOOPBACK_PREFIXES = ("127.0.0.1:", "localhost:")
+REDIS_ALLOWED_SCHEMES = {"redis", "rediss"}
+REDIS_INTERNAL_HOSTS = {"redis", "localhost"}
+REDIS_DEFAULT_PASSWORDS = {
+    "admin",
+    "changeme",
+    "default",
+    "firstrag",
+    "firstrag-password",
+    "password",
+    "redis",
+    "root",
+    "123456",
+}
 
 
 @dataclass(frozen=True)
@@ -273,6 +289,137 @@ def validate_database_settings(env: Mapping[str, str]) -> list[str]:
     return errors
 
 
+def parse_bool_env(value: str | None, default: bool = False) -> bool:
+    """解析 dotenv 布尔值，非法值回退到默认值。"""
+    if value is None:
+        return default
+
+    normalized = value.strip().lower()
+    if normalized in {"1", "true", "yes", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "off"}:
+        return False
+    return default
+
+
+def is_internal_redis_host(hostname: str | None) -> bool:
+    """判断 Redis host 是否看起来是 Compose/内网地址。"""
+    if not hostname:
+        return False
+
+    normalized = hostname.strip().strip("[]").lower()
+    if normalized in REDIS_INTERNAL_HOSTS:
+        return True
+    if normalized.endswith((".internal", ".local", ".lan")):
+        return True
+
+    try:
+        address = ipaddress.ip_address(normalized)
+    except ValueError:
+        return False
+
+    return address.is_private or address.is_loopback or address.is_link_local
+
+
+def validate_redis_settings(env: Mapping[str, str]) -> list[str]:
+    """校验 Redis 生产配置、安全边界和限流故障策略。"""
+    errors: list[str] = []
+    redis_url = (env.get("REDIS_URL") or "").strip()
+    redis_enabled = parse_bool_env(
+        env.get("REDIS_ENABLED"),
+        bool(redis_url),
+    )
+    rate_limit_backend = (env.get("RATE_LIMIT_BACKEND") or "").strip().lower()
+    if not rate_limit_backend:
+        rate_limit_backend = "redis" if redis_enabled else "memory"
+    failure_mode = (
+        env.get("RATE_LIMIT_REDIS_FAILURE_MODE") or "fail_closed"
+    ).strip().lower()
+
+    if rate_limit_backend not in {"redis", "memory"}:
+        errors.append("RATE_LIMIT_BACKEND 只能设置为 redis 或 memory。")
+    if failure_mode not in {"fail_open", "fail_closed"}:
+        errors.append("RATE_LIMIT_REDIS_FAILURE_MODE 只能设置为 fail_open 或 fail_closed。")
+    if rate_limit_backend == "redis" and not redis_enabled:
+        errors.append("RATE_LIMIT_BACKEND=redis 时必须启用 REDIS_ENABLED。")
+    if rate_limit_backend == "redis" and failure_mode != "fail_closed":
+        errors.append("生产环境使用 Redis 限流时 RATE_LIMIT_REDIS_FAILURE_MODE 必须为 fail_closed。")
+
+    if not redis_enabled:
+        return errors
+
+    if is_placeholder(redis_url) or "replace-with-" in redis_url.lower():
+        errors.append("REDIS_URL 不能使用模板占位值。")
+        return errors
+
+    try:
+        parsed_url = urlsplit(redis_url)
+    except ValueError:
+        errors.append("REDIS_URL 格式无效。")
+        return errors
+
+    if parsed_url.scheme not in REDIS_ALLOWED_SCHEMES:
+        errors.append("REDIS_URL 只支持 redis:// 或 rediss://。")
+    if not parsed_url.hostname:
+        errors.append("REDIS_URL 必须包含 Redis host。")
+
+    password = parsed_url.password or ""
+    if password:
+        normalized_password = password.strip().lower()
+        if is_placeholder(password) or normalized_password in REDIS_DEFAULT_PASSWORDS:
+            errors.append("REDIS_URL 不能使用默认、弱口令或模板 Redis 密码。")
+        elif len(password) < 12:
+            errors.append("REDIS_URL 中的 Redis 密码过短，请使用生产级随机值。")
+    elif parsed_url.hostname and not is_internal_redis_host(parsed_url.hostname):
+        errors.append("REDIS_URL 指向外部 Redis 时必须使用带认证的连接串。")
+
+    redis_port = (env.get("REDIS_PORT") or "").strip()
+    if redis_port:
+        if not redis_port.startswith(LOOPBACK_PREFIXES):
+            errors.append("REDIS_PORT 如需暴露只能绑定到 127.0.0.1 或 localhost；生产不应公网暴露 Redis。")
+
+    return errors
+
+
+def extract_compose_service_block(compose_text: str, service_name: str) -> str | None:
+    """从 docker-compose.yml 文本中提取指定 service 的缩进块。"""
+    pattern = re.compile(rf"^  {re.escape(service_name)}:\s*$", re.MULTILINE)
+    match = pattern.search(compose_text)
+    if match is None:
+        return None
+
+    start = match.start()
+    next_match = re.search(r"^  [A-Za-z0-9_-]+:\s*$", compose_text[match.end():], re.MULTILINE)
+    if next_match is None:
+        return compose_text[start:]
+    return compose_text[start:match.end() + next_match.start()]
+
+
+def validate_compose_redis_service(
+    compose_file: Path = PROJECT_ROOT / "docker-compose.yml",
+) -> list[str]:
+    """静态校验 Compose Redis service 不公网暴露并带 healthcheck。"""
+    errors: list[str] = []
+    if not compose_file.exists():
+        return ["docker-compose.yml 不存在，无法检查 Redis service。"]
+
+    compose_text = compose_file.read_text(encoding="utf-8")
+    redis_block = extract_compose_service_block(compose_text, "redis")
+    if redis_block is None:
+        return ["docker-compose.yml 缺少 redis service。"]
+
+    if "\n    ports:" in redis_block:
+        errors.append("redis service 不应配置 ports；生产 Redis 不应直接暴露到宿主机公网。")
+    if "\n    healthcheck:" not in redis_block:
+        errors.append("redis service 必须配置 healthcheck。")
+    if "redis-cli" not in redis_block or "ping" not in redis_block:
+        errors.append("redis healthcheck 应使用 redis-cli ping 这类轻量检查。")
+    if "\n    logging:" not in redis_block:
+        errors.append("redis service 应复用 Docker 日志轮转配置。")
+
+    return errors
+
+
 def validate_port_bindings(env: Mapping[str, str]) -> list[str]:
     """校验 compose 暴露端口默认只绑定 loopback。"""
     errors: list[str] = []
@@ -435,6 +582,8 @@ def run(args: argparse.Namespace) -> int:
             ),
         ),
         ("Database settings", validate_database_settings(env)),
+        ("Redis settings", validate_redis_settings(env)),
+        ("Redis Compose service", validate_compose_redis_service()),
         ("Port bindings", validate_port_bindings(env)),
     ]
     if not args.skip_path_check:

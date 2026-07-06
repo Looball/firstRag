@@ -125,6 +125,10 @@ query embedding 使用 Redis + 进程内短 TTL 缓存，key 由用户 ID、embe
 embedding provider 的重复调用。缓存只保存 query embedding；embedding 生成失败不会写入缓存，
 后续请求仍可重试。
 
+Redis 不保存会话记录、assistant 回答、sources 或最终检索结果，这些长期数据仍由
+PostgreSQL 的 `conversations`、`messages` 和相关 JSON 字段持久化。Redis 故障只影响缓存命中、
+限流和 worker 运行态可见性，不应导致已保存会话丢失。
+
 Rerank provider 由当前登录用户的 `user_rerank_settings` 决定；远程 provider 的 API Key
 按 `(user_id, provider)` 保存到 `user_rerank_provider_credentials`。本地 provider 不需要
 API Key；远程 provider 只在服务端调用时临时解密，前端只能看到 `has_api_key` 与

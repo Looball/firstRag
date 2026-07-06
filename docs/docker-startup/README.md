@@ -71,7 +71,9 @@ POSTGRES_PORT=127.0.0.1:5432
 
 Redis 默认使用 Compose 内置 `redis` service，backend 和 worker 通过
 `REDIS_URL=redis://redis:6379/0` 访问。当前 Redis 已接入基础设施健康检查、
-RAG 热点共享缓存和后端分布式限流；worker 运行态迁移会在后续 Redis 专项任务中继续推进。
+RAG 热点共享缓存、后端分布式限流和 vector worker 运行态。Compose 默认不把
+Redis 端口映射到宿主机；生产环境如切换托管 Redis，应在 `.env` 中把
+`REDIS_URL` 改为内网地址或带认证的 `rediss://` 连接串。
 
 ## 4. 可选：配置远程 rerank
 

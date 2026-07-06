@@ -16,7 +16,7 @@ cp .env.example .env
 | --- | --- |
 | `DATABASE_URL` | 本地 conda 方式运行时使用的 PostgreSQL 连接串。 |
 | `COMPOSE_DATABASE_URL` | Docker Compose 方式运行时可选覆盖的 PostgreSQL 连接串；不填时默认连接 compose 内的 `postgres` 服务。 |
-| `REDIS_ENABLED` / `REDIS_URL` | Redis 基础设施开关和连接地址；Compose 默认连接内置 `redis` 服务，当前用于健康检查、RAG 热点共享缓存、后端分布式限流和 vector worker 运行态，生产环境可指向托管 Redis 内网地址。 |
+| `REDIS_ENABLED` / `REDIS_URL` | Redis 基础设施开关和连接地址；Compose 默认连接内置 `redis` 服务且不映射宿主机端口，当前用于健康检查、RAG 热点共享缓存、后端分布式限流和 vector worker 运行态；生产环境优先指向托管 Redis 内网地址，外部 Redis 必须使用认证连接串，启用 TLS 时使用 `rediss://`。 |
 | `REDIS_CONNECT_TIMEOUT_SECONDS` / `REDIS_COMMAND_TIMEOUT_SECONDS` | Redis 连接和命令超时。 |
 | `VECTOR_WORKER_HEARTBEAT_TTL_SECONDS` / `VECTOR_WORKER_FILE_LOCK_TTL_SECONDS` | worker 运行态心跳 TTL 和单文件短租约 TTL；Redis 故障时不会替代或阻断 PostgreSQL 持久任务队列。 |
 | `RATE_LIMIT_BACKEND` / `RATE_LIMIT_REDIS_FAILURE_MODE` | 限流后端和 Redis 故障策略；Docker/生产默认 `redis` + `fail_closed`，本地调试可使用 `memory` 或 `fail_open`。 |
@@ -336,6 +336,10 @@ preflight 会拦截以下问题：
 - 已填写的 `RERANK_API_KEY`、`DASHSCOPE_API_KEY` 或 `QWEN_API_KEY` 仍是模板占位值；使用 `--require-provider-keys` 且旧全局 `RERANK_PROVIDER=qwen` 时，还会要求全局 rerank Key 和 `RERANK_BASE_URL` 已配置。
 - `USER_SETTINGS_ENCRYPTION_KEY` 不是 Fernet key，或与 `JWT_SECRET_KEY` 相同。
 - `DATABASE_URL` / `COMPOSE_DATABASE_URL` 仍含模板账号、密码或占位值。
+- `REDIS_ENABLED=true` 但 `REDIS_URL` 缺失、格式错误、仍是占位值，或外部 Redis 连接串没有认证信息。
+- `REDIS_URL` 使用默认、弱口令或过短 Redis 密码；preflight 只输出变量名和原因，不输出完整连接串。
+- `RATE_LIMIT_BACKEND=redis` 但 Redis 未启用，或生产 Redis 限流故障策略不是 `fail_closed`。
+- Compose `redis` service 缺少 healthcheck、日志轮转配置，或直接配置了 `ports` 暴露到宿主机。
 - `FRONTEND_PORT`、`BACKEND_PORT`、`POSTGRES_PORT` 未绑定到 `127.0.0.1` / `localhost`。
 - `UPLOADS_DIR`、`VECTOR_DB_DIR`、`MODELS_DIR` 缺失；使用 `--require-reranker` 时还会要求 reranker 模型目录存在。
 - `docker compose config --quiet` 失败。
@@ -423,10 +427,10 @@ MODELS_DIR=/srv/firstrag/models
   -> 反向代理（Caddy / Nginx / Cloudflare Tunnel）
   -> frontend:3000（Next.js 页面和 API proxy）
   -> backend:8000（FastAPI，仅内网或本机可达）
-  -> PostgreSQL / uploads / vector_db / worker
+  -> PostgreSQL / Redis / uploads / vector_db / worker
 ```
 
-公网只暴露 80/443。`frontend`、`backend` 和 `postgres` 的宿主机端口应绑定到 `127.0.0.1` 或通过防火墙限制访问，不直接暴露到公网。
+公网只暴露 80/443。`frontend`、`backend` 和 `postgres` 的宿主机端口应绑定到 `127.0.0.1` 或通过防火墙限制访问；Redis 默认不映射宿主机端口，生产不要直接公网暴露 Redis。
 
 ### 资源与持久化
 
@@ -435,6 +439,7 @@ MODELS_DIR=/srv/firstrag/models
 | 云服务器 | 2 vCPU / 4 GB RAM 起步，推荐 4 vCPU / 8 GB RAM | RAG、PDF 解析和 reranker 会占用 CPU 与内存；演示并发不宜过高。 |
 | 系统盘 | 30 GB 起步，推荐独立数据盘或快照 | `uploads/`、`vector_db/` 和 PostgreSQL volume 会增长；启用本地 reranker 时 `models/` 也会占用空间。 |
 | PostgreSQL | 使用 compose named volume `postgres_data` | 定期做卷快照或 `pg_dump`，避免误删演示数据。 |
+| Redis | 默认使用 Compose 内置 service 或托管 Redis 内网地址 | 只存缓存、限流和 worker 运行态，不作为会话、消息或 vector job 持久队列；外部 Redis 必须开启认证，公网不直接暴露。 |
 | 上传文件 | 通过 `UPLOADS_DIR` 挂载到 `/app/uploads` | 公开 demo 禁止上传私密文件，并需要清理策略。 |
 | Chroma 数据 | 通过 `VECTOR_DB_DIR` 挂载到 `/app/vector_db` | 可从上传文件重建，但保留备份能减少恢复时间。 |
 | reranker 模型 | 可选，通过 `MODELS_DIR` 只读挂载到 `/app/models` | 默认最小镜像可不准备；启用本地 reranker 前确认模型文件已存在。 |
@@ -454,6 +459,9 @@ MODELS_DIR=/srv/firstrag/models
 | 向量模型 provider / model / API Key / dimensions | 登录后在“模型设置”页按厂商配置并加密保存；切换 provider、model 或维度后需要重新向量化文件。 |
 | Rerank provider / model / API Key / base_url | 登录后在“模型设置”页按厂商配置并加密保存；本地 rerank 不需要 API Key。 |
 | `ALLOW_USER_CUSTOM_LLM_BASE_URL` | 公开 demo 保持 `false`，避免用户通过自定义模型地址访问服务器内网。 |
+| `REDIS_ENABLED` / `REDIS_URL` | 使用 Compose 内置 Redis 时保持 `redis://redis:6379/0`；使用托管 Redis 时填内网认证连接串，TLS 连接使用 `rediss://`。 |
+| `REDIS_CONNECT_TIMEOUT_SECONDS` / `REDIS_COMMAND_TIMEOUT_SECONDS` | 保持较短超时，避免 Redis 故障拖慢请求；默认 1 秒。 |
+| `VECTOR_WORKER_HEARTBEAT_TTL_SECONDS` / `VECTOR_WORKER_FILE_LOCK_TTL_SECONDS` | 控制 worker 在线状态和单文件短租约 TTL；不改变 PostgreSQL 持久任务队列。 |
 | `MAX_UPLOAD_FILE_SIZE_BYTES` | 公开 demo 建议调低到 10-20 MB，并与反向代理 body size 一致。 |
 | `USER_UPLOAD_MAX_FILES` / `USER_UPLOAD_MAX_BYTES` | 设置用户级文件数量和总容量上限；公开 demo 建议保守配置。 |
 | `RATE_LIMIT_BACKEND` / `RATE_LIMIT_REDIS_FAILURE_MODE` | 公开 demo 使用 `redis` 和 `fail_closed`，确保多 backend 实例共享限流状态；本地调试可改为 `memory` 或 `fail_open`。 |
@@ -471,6 +479,12 @@ MAX_UPLOAD_FILE_SIZE_BYTES=20971520
 USER_UPLOAD_MAX_FILES=100
 USER_UPLOAD_MAX_BYTES=1073741824
 VECTOR_INDEX_MAX_BATCH_FILES=50
+REDIS_ENABLED=true
+REDIS_URL=redis://redis:6379/0
+REDIS_CONNECT_TIMEOUT_SECONDS=1
+REDIS_COMMAND_TIMEOUT_SECONDS=1
+VECTOR_WORKER_HEARTBEAT_TTL_SECONDS=30
+VECTOR_WORKER_FILE_LOCK_TTL_SECONDS=900
 RATE_LIMIT_BACKEND=redis
 RATE_LIMIT_REDIS_FAILURE_MODE=fail_closed
 LOGIN_FAILURE_RATE_LIMIT_MAX_ATTEMPTS=5

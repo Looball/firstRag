@@ -106,7 +106,7 @@ cp .env.example .env
 docker compose up -d --build
 ```
 
-Compose 会启动 Redis、PostgreSQL、migration、FastAPI 后端、Next.js 前端和 worker，并挂载 `uploads/`、`vector_db/` 和 `models/`。查看状态：
+Compose 会启动 Redis、PostgreSQL、migration、FastAPI 后端、Next.js 前端和 worker，并挂载 `uploads/`、`vector_db/` 和 `models/`。Redis 默认只在 Compose 网络内提供缓存、限流和 worker 运行态，不映射公网端口；生产可通过 `REDIS_URL` 切到托管 Redis 内网或 `rediss://` 认证连接串。查看状态：
 
 ```bash
 docker compose ps
