@@ -125,7 +125,7 @@
 | `T-055` | `PLAN-20260704-01` | `P2` | `Done` | 支持图片/OCR 入知识库检索 | 2026-07-05 | `d8cd9ce` |
 | `T-056` | `PLAN-20260705-01` | `P0` | `Done` | 引入 Redis 基础设施、配置和健康检查 | 2026-07-05 | `5e8c32c`、`d0aee38` |
 | `T-057` | `PLAN-20260705-01` | `P1` | `Done` | 抽象缓存层并迁移 RAG 热点缓存到 Redis | 2026-07-06 | `654899e` |
-| `T-058` | `PLAN-20260705-01` | `P0` | `Done` | 将登录和 API 限流升级为 Redis 分布式限流 | 2026-07-06 | `待提交` |
+| `T-058` | `PLAN-20260705-01` | `P0` | `Done` | 将登录和 API 限流升级为 Redis 分布式限流 | 2026-07-06 | `8875eea` |
 | `T-059` | `PLAN-20260705-01` | `P1` | `Todo` | 为 vector worker 增加 Redis 运行态、锁和队列观测 | - | - |
 | `T-060` | `PLAN-20260705-01` | `P1` | `Todo` | 补齐 Redis 生产部署、preflight 和文档 | - | - |
 | `T-061` | `PLAN-20260705-01` | `P1` | `Todo` | 完成 Redis 场景 Docker 验证和核心链路回归 | - | - |
@@ -2145,7 +2145,7 @@ conda run -n firstrag python -m pytest \
   tests/test_user_settings.py
 ```
 - 实现记录：
-  - 相关 commit：`待提交`。
+  - 相关 commit：`8875eea`。
   - `backend/app/core/rate_limit.py` 升级为 Redis 优先 sliding-window 限流，使用 Redis sorted set 和 Lua 脚本原子完成窗口清理、计数、消耗额度和 `Retry-After` 计算。
   - 保留 `assert_rate_limit_available`、`consume_rate_limit`、`clear_rate_limit`、`reset_rate_limits` 和 `enforce_rate_limit` 调用语义，登录、chat、upload、vector index、model test 的 route 调用点无需改变。
   - Redis 限流 key 使用 `scope + identifier sha256`，不在 Redis key 中暴露 username、IP、user_id 或完整业务 identifier。
