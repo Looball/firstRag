@@ -124,7 +124,7 @@
 | `T-054` | `PLAN-20260704-01` | `P1` | `Done` | 支持聊天框图片附件和视觉模型调用 | 2026-07-05 | `42f206b` |
 | `T-055` | `PLAN-20260704-01` | `P2` | `Done` | 支持图片/OCR 入知识库检索 | 2026-07-05 | `d8cd9ce` |
 | `T-056` | `PLAN-20260705-01` | `P0` | `Done` | 引入 Redis 基础设施、配置和健康检查 | 2026-07-05 | `5e8c32c`、`d0aee38` |
-| `T-057` | `PLAN-20260705-01` | `P1` | `Todo` | 抽象缓存层并迁移 RAG 热点缓存到 Redis | - | - |
+| `T-057` | `PLAN-20260705-01` | `P1` | `Done` | 抽象缓存层并迁移 RAG 热点缓存到 Redis | 2026-07-06 | `待提交` |
 | `T-058` | `PLAN-20260705-01` | `P0` | `Todo` | 将登录和 API 限流升级为 Redis 分布式限流 | - | - |
 | `T-059` | `PLAN-20260705-01` | `P1` | `Todo` | 为 vector worker 增加 Redis 运行态、锁和队列观测 | - | - |
 | `T-060` | `PLAN-20260705-01` | `P1` | `Todo` | 补齐 Redis 生产部署、preflight 和文档 | - | - |
@@ -2095,6 +2095,26 @@ conda run -n firstrag python -m pytest \
 cd ..
 scripts/rag_eval_gate.sh
 ```
+- 实现记录：
+  - 相关 commit：`待提交`。
+  - 新增 `backend/app/services/cache_service.py`，统一封装 Redis JSON cache adapter，支持 TTL、单 key 删除、prefix invalidation、测试隔离和短熔断 fallback；Redis 错误会脱敏后进入 fallback diagnostics。
+  - `knowledge_profile_cache` 迁移为 Redis 优先、进程内缓存兜底；Redis key 按 `user_id + knowledge_base_id` 隔离，文件上传、知识库文件关系变化、索引状态变化和删除向量结果继续主动失效相关缓存。
+  - `retrieval_settings_cache` 迁移为 Redis 优先、进程内缓存兜底；Redis key 按 `user_id + knowledge_base_id` 隔离，设置更新后继续主动失效，缺失设置仍不缓存 `None`。
+  - query embedding cache 接入 Redis + 进程内双层缓存；key 仍按 `user_id + embedding provider + model + dimensions + normalized query` 隔离，Redis 实际 key 使用 normalized query 的 sha256 摘要，避免把用户原始问题直接放进 Redis key。
+  - retrieval diagnostics 保留原有 `*_cache_hit` 字段，并新增/透传 `knowledge_profile_cache_source`、`retrieval_settings_cache_backend`、`query_embedding_cache_source` 和 `*_cache_fallback_reason`，继续进入 SSE retrieval diagnostics 和 RAG eval 统计。
+  - README、Architecture、Backend、Deployment 和 RAG workflow 文档已同步 Redis 现在承接 RAG 热点共享缓存；分布式限流和 worker 运行态仍由 `T-058`、`T-059` 承接。
+- 已验证：
+  - `cd backend && conda run -n firstrag python -m compileall app`
+  - `cd backend && conda run -n firstrag python -m pytest tests/test_cache_service.py tests/test_knowledge_profile_cache.py tests/test_retrieval_settings_cache.py tests/test_retrieval_resilience.py tests/test_rag_service.py tests/test_redis_service.py tests/test_health.py`，57 passed。
+  - `cd backend && conda run -n firstrag python -m pytest`，215 passed。
+  - `docker compose up -d --build` 已通过，backend 和 frontend 镜像完成构建并重建启动。
+  - `docker compose ps` 显示 backend、frontend、worker 均为 `Up`，postgres 和 redis 为 `healthy`。
+  - `docker compose logs --tail=100 redis migrate backend worker frontend postgres` 已确认 Redis Ready、migration `applied=0 skipped=5`，backend、frontend 和 worker 无新启动错误；PostgreSQL tail 中仍保留一条此前本地密码不匹配产生的历史认证失败日志，不属于本轮重建新增错误。
+  - `docker compose exec -T redis redis-cli ping` 输出 `PONG`。
+  - `curl -s http://127.0.0.1:8000/health` 返回 `status=healthy` 且 `dependencies.redis.status=healthy`。
+  - `conda run -n firstrag python scripts/production_preflight.py --env-file .env --migration-method compose` 已通过，包括 Docker Compose config 和 migration dry-run。
+  - `docker compose exec -T backend python -c "from app.services import cache_service; ..."` 已完成临时 JSON key 写入、读取和删除，读取结果为 `{'ok': True}`。
+  - `git diff --check` 通过。
 
 ## T-058 将登录和 API 限流升级为 Redis 分布式限流
 

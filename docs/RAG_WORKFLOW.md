@@ -83,9 +83,9 @@
 | 召回排序 | `diagnostics.vector_count`、`fulltext_count`、`fused_count`、`reranked_count` | vector/fulltext 召回数量、RRF 融合后数量和 rerank 精排后数量。 |
 | 召回降级 | `vector_degraded`、`fulltext_degraded`、`vector_errors`、`fulltext_errors` | 单路粗召回失败时的降级状态和错误摘要，另一通道仍可兜底。 |
 | 阶段耗时 | `diagnostics.timing.*_ms` | 问题改写、Router、检索、RRF、rerank、首 token 和整体流式回答耗时，单位毫秒。 |
-| 画像缓存 | `knowledge_profile_cache_hit`、`knowledge_profile_indexed_file_count` | 本轮知识库画像是否命中进程内短 TTL 缓存，以及画像中的已索引文件数量。 |
-| 设置缓存 | `retrieval_settings_cache_hit`、`retrieval_settings_source` | 本轮知识库检索设置是否命中进程内短 TTL 缓存，以及设置来源。 |
-| Query embedding 缓存 | `query_embedding_cache_hit`、`query_embedding_cache_ttl_seconds` | 向量粗召回是否复用短 TTL 进程内 query embedding 缓存；仅缓存 query embedding，不缓存回答或最终检索结果。 |
+| 画像缓存 | `knowledge_profile_cache_hit`、`knowledge_profile_cache_source`、`knowledge_profile_indexed_file_count` | 本轮知识库画像是否命中 Redis 或进程内 fallback 短 TTL 缓存，以及画像中的已索引文件数量。 |
+| 设置缓存 | `retrieval_settings_cache_hit`、`retrieval_settings_source`、`retrieval_settings_cache_backend` | 本轮知识库检索设置是否命中缓存、设置来源，以及缓存后端是 Redis 还是进程内 fallback。 |
+| Query embedding 缓存 | `query_embedding_cache_hit`、`query_embedding_cache_source`、`query_embedding_cache_ttl_seconds` | 向量粗召回是否复用短 TTL query embedding 缓存；Redis 用于多实例共享，进程内缓存用于本实例快速命中，不缓存回答或最终检索结果。 |
 | LLM 配置 | `diagnostics.llm.provider`、`model`、`credential_mode`、`temperature`、`max_tokens` | 本轮实际使用的模型厂商、模型名、凭据来源和生成参数，不包含 API Key。 |
 | 最终引用 | `retrieval_sources`、`sources` | 最终展示给用户的引用片段及这些片段命中的召回通道。 |
 
@@ -112,17 +112,18 @@
 降级为空候选并写入对应 degraded/error diagnostics，另一通道的候选仍会进入 RRF 和后续
 rerank 流程。
 
-知识库文件画像和已索引文件 ID 使用进程内短 TTL 缓存，默认用于减少同一知识库在连续
-对话中的重复数据库查询。文件上传、知识库文件关联变化、向量化状态变化和删除向量结果
-会主动失效相关缓存；TTL 负责兜底处理未覆盖的边界场景。
+知识库文件画像和已索引文件 ID 使用 Redis 优先短 TTL 缓存，默认用于减少同一知识库在
+连续对话中的重复数据库查询；Redis 不可用时回退到进程内缓存。文件上传、知识库文件关联
+变化、向量化状态变化和删除向量结果会主动失效相关缓存；TTL 负责兜底处理未覆盖的边界场景。
 
-知识库 retrieval settings 也使用进程内短 TTL 缓存，默认用于减少聊天和本地问候短路
-判断中的重复设置查询。更新 retrieval settings 后会主动失效对应知识库缓存，下一轮聊天
-会立即读取新配置；TTL 负责兜底处理未覆盖的边界场景。
+知识库 retrieval settings 也使用 Redis 优先短 TTL 缓存，默认用于减少聊天和本地问候
+短路判断中的重复设置查询；Redis 不可用时回退到进程内缓存。更新 retrieval settings 后会
+主动失效对应知识库缓存，下一轮聊天会立即读取新配置；TTL 负责兜底处理未覆盖的边界场景。
 
-query embedding 使用进程内短 TTL 缓存，key 由用户 ID、embedding provider、model、维度和归一化后的
-query 组成，用于减少 eval 重跑、短时间重复问题和多轮相近测试对 embedding provider 的
-重复调用。缓存只保存 query embedding；embedding 生成失败不会写入缓存，后续请求仍可重试。
+query embedding 使用 Redis + 进程内短 TTL 缓存，key 由用户 ID、embedding provider、model、
+维度和归一化后的 query 组成，用于减少 eval 重跑、短时间重复问题和多轮相近测试对
+embedding provider 的重复调用。缓存只保存 query embedding；embedding 生成失败不会写入缓存，
+后续请求仍可重试。
 
 Rerank provider 由当前登录用户的 `user_rerank_settings` 决定；远程 provider 的 API Key
 按 `(user_id, provider)` 保存到 `user_rerank_provider_credentials`。本地 provider 不需要

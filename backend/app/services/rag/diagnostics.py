@@ -81,6 +81,14 @@ def merge_retrieval_settings_diagnostics(
         merged["retrieval_settings_source"] = cache_diagnostics.get(
             "retrieval_settings_source",
         )
+        merged["retrieval_settings_cache_backend"] = cache_diagnostics.get(
+            "retrieval_settings_cache_backend",
+        )
+        merged["retrieval_settings_cache_fallback_reason"] = (
+            cache_diagnostics.get(
+                "retrieval_settings_cache_fallback_reason",
+            )
+        )
         return merged
 
     merged["retrieval_settings_source"] = settings_diagnostics[

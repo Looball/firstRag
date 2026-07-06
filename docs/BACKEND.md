@@ -66,6 +66,7 @@ python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 | `rag/diagnostics.py` | RAG timing、retrieval settings diagnostics 和 LLM usage 合并。 |
 | `rag/streaming.py` | LCEL stream chunk 到 SSE 事件的转换。 |
 | `llm_service.py` | OpenAI 兼容模型厂商预设、用户/平台配置解析。 |
+| `cache_service.py` | Redis JSON cache adapter，提供 TTL、delete、prefix invalidation 和故障 fallback。 |
 | `redis_service.py` | Redis client 封装、连接健康检查和 Redis URL 脱敏。 |
 | `file_service.py` | 上传文件大小限制、SHA-256、落盘路径。 |
 | `documents/document_service.py` | 文档加载、图片知识文件 vision 解析、切分、向量库构建。 |

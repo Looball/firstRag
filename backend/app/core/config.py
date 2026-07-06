@@ -146,8 +146,8 @@ ALLOW_USER_CUSTOM_LLM_BASE_URL = read_bool_env(
     False,
 )
 
-# Redis 基础设施配置。当前 T-056 只建立连接与健康检查；业务缓存、
-# 分布式限流和 worker 运行态迁移由后续任务接入。
+# Redis 基础设施配置。当前用于健康检查和 RAG 热点缓存；分布式限流
+# 和 worker 运行态迁移由后续任务接入。
 REDIS_URL = os.environ.get("REDIS_URL", "").strip()
 REDIS_ENABLED = read_bool_env("REDIS_ENABLED", bool(REDIS_URL))
 REDIS_CONNECT_TIMEOUT_SECONDS = read_float_env(

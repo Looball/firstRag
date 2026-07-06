@@ -73,7 +73,7 @@ Docker 中的 `backend`、`migrate` 和 `worker` 复用精简后的 Python runti
 | 前端 | Next.js, React, TypeScript |
 | 后端 | FastAPI, Pydantic |
 | 数据库 | PostgreSQL |
-| 缓存基础设施 | Redis（当前用于连接健康检查，后续承接共享缓存、分布式限流和 worker 运行态） |
+| 缓存基础设施 | Redis（健康检查和 RAG 热点共享缓存；后续承接分布式限流和 worker 运行态） |
 | 向量库 | Chroma |
 | RAG 编排 | LangChain / LCEL |
 | 检索 | 向量检索、PostgreSQL 全文检索、RRF、可选本地 CrossEncoder 或用户级远程 rerank |

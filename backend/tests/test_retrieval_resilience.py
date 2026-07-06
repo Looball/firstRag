@@ -8,12 +8,15 @@ from unittest.mock import patch
 from langchain_core.documents import Document
 
 from app.repositories.knowledge_chunk_repository import build_search_terms
+from app.services.cache_service import CacheBackendResult
 from app.services.retrieval.hybrid_retriever import (
     QUERY_EMBEDDING_CACHE_TTL_SECONDS,
     clear_query_embedding_cache,
     get_hybrid_documents,
+    get_query_embedding,
     get_retrieval_diagnostics,
     get_vector_documents,
+    reset_retrieval_diagnostics,
 )
 from app.services.retrieval.reranker import (
     DashScopeQwenReranker,
@@ -448,6 +451,31 @@ class RetrievalResilienceTests(unittest.TestCase):
             diagnostics["query_embedding_cache_key"],
             "6:zhipuai:embedding-3::hello world",
         )
+
+    def test_query_embedding_cache_can_hit_redis(self) -> None:
+        """进程内缓存为空时，应能直接复用 Redis 中的 query embedding。"""
+        reset_retrieval_diagnostics()
+        with unittest.mock.patch(
+            "app.services.retrieval.hybrid_retriever.get_embedding_cache_identity",
+            return_value=("6", "zhipuai", "embedding-3", ""),
+        ), unittest.mock.patch(
+            "app.services.retrieval.hybrid_retriever.cache_service.get_json_cache",
+            return_value=CacheBackendResult(
+                hit=True,
+                value=[0.3, 0.4],
+            ),
+        ), unittest.mock.patch(
+            "app.services.retrieval.hybrid_retriever.create_embedding_model",
+        ) as embedding_cls:
+            embedding = get_query_embedding("Hello World", user_id=6)
+
+        diagnostics = get_retrieval_diagnostics()
+        self.assertEqual(embedding, [0.3, 0.4])
+        embedding_cls.assert_not_called()
+        self.assertIsNotNone(diagnostics)
+        assert diagnostics is not None
+        self.assertTrue(diagnostics["query_embedding_cache_hit"])
+        self.assertEqual(diagnostics["query_embedding_cache_source"], "redis")
 
     def test_query_embedding_cache_expires(self) -> None:
         """TTL 过期后应重新调用 embedding provider。"""

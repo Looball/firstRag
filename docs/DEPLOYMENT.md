@@ -16,7 +16,7 @@ cp .env.example .env
 | --- | --- |
 | `DATABASE_URL` | 本地 conda 方式运行时使用的 PostgreSQL 连接串。 |
 | `COMPOSE_DATABASE_URL` | Docker Compose 方式运行时可选覆盖的 PostgreSQL 连接串；不填时默认连接 compose 内的 `postgres` 服务。 |
-| `REDIS_ENABLED` / `REDIS_URL` | Redis 基础设施开关和连接地址；Compose 默认连接内置 `redis` 服务，生产环境可指向托管 Redis 内网地址。 |
+| `REDIS_ENABLED` / `REDIS_URL` | Redis 基础设施开关和连接地址；Compose 默认连接内置 `redis` 服务，当前用于健康检查和 RAG 热点共享缓存，生产环境可指向托管 Redis 内网地址。 |
 | `REDIS_CONNECT_TIMEOUT_SECONDS` / `REDIS_COMMAND_TIMEOUT_SECONDS` | Redis 连接和命令超时。 |
 | `POSTGRES_DB` / `POSTGRES_USER` / `POSTGRES_PASSWORD` | Docker Compose 中 PostgreSQL 容器的数据库、用户和密码。 |
 | `JWT_SECRET_KEY` | JWT 签名密钥。 |

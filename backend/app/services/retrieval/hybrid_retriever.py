@@ -19,6 +19,7 @@ import logging
 from collections.abc import Sequence
 from concurrent.futures import ThreadPoolExecutor
 from contextvars import ContextVar
+from hashlib import sha256
 from threading import RLock
 from time import monotonic
 from time import perf_counter
@@ -28,6 +29,7 @@ from uuid import UUID
 from langchain_core.documents import Document
 
 from app.core.observability import log_exception_event
+from app.services import cache_service
 from app.services.retrieval.fulltext_retriever import get_fulltext_documents
 from app.services.retrieval.reranker import (
     DEFAULT_RERANKER_MAX_LENGTH,
@@ -67,6 +69,8 @@ def reset_retrieval_diagnostics() -> None:
         "fulltext_errors": [],
         "query_embedding_cache_hit": False,
         "query_embedding_cache_key": "",
+        "query_embedding_cache_source": "provider",
+        "query_embedding_cache_fallback_reason": None,
         "query_embedding_cache_ttl_seconds": QUERY_EMBEDDING_CACHE_TTL_SECONDS,
         "vector_count": 0,
         "fulltext_count": 0,
@@ -142,40 +146,136 @@ def build_query_embedding_cache_key(
     )
 
 
+def build_query_embedding_redis_cache_key(
+    cache_key: tuple[str, str, str, str, str],
+) -> str:
+    """构造 query embedding 的 Redis cache key。"""
+    query_hash = sha256(cache_key[-1].encode("utf-8")).hexdigest()
+    return cache_service.build_cache_key(
+        "query_embedding",
+        cache_key[0],
+        cache_key[1],
+        cache_key[2],
+        cache_key[3],
+        query_hash,
+    )
+
+
+def normalize_cached_query_embedding(value: Any) -> list[float] | None:
+    """校验并规范化缓存中的 query embedding。"""
+    if not isinstance(value, list):
+        return None
+
+    embedding: list[float] = []
+    for item in value:
+        if isinstance(item, bool) or not isinstance(item, (int, float)):
+            return None
+        embedding.append(float(item))
+    return embedding
+
+
+def write_query_embedding_memory_cache(
+    cache_key: tuple[str, str, str, str, str],
+    embedding: list[float],
+    now: float,
+) -> None:
+    """写入进程内 query embedding fallback 缓存。"""
+    with _QUERY_EMBEDDING_CACHE_LOCK:
+        _QUERY_EMBEDDING_CACHE[cache_key] = (
+            now + QUERY_EMBEDDING_CACHE_TTL_SECONDS,
+            list(embedding),
+        )
+
+
+def update_query_embedding_cache_diagnostics(
+    *,
+    hit: bool,
+    cache_key: tuple[str, str, str, str, str],
+    source: str,
+    fallback_reason: str | None = None,
+) -> None:
+    """记录 query embedding 缓存诊断。"""
+    update_retrieval_diagnostics(
+        query_embedding_cache_hit=hit,
+        query_embedding_cache_key=":".join(cache_key),
+        query_embedding_cache_source=source,
+        query_embedding_cache_fallback_reason=fallback_reason,
+    )
+
+
 def clear_query_embedding_cache() -> None:
-    """清空 query embedding 进程内缓存，主要用于测试。"""
+    """清空 query embedding 进程内和 Redis 缓存，主要用于测试。"""
     with _QUERY_EMBEDDING_CACHE_LOCK:
         _QUERY_EMBEDDING_CACHE.clear()
+    cache_service.delete_cache_prefix(
+        cache_service.build_cache_prefix("query_embedding"),
+    )
 
 
 def get_query_embedding(query: str, user_id: int) -> list[float]:
-    """读取或生成 query embedding，成功结果写入短 TTL 进程内缓存。"""
+    """读取或生成 query embedding，成功结果写入短 TTL 缓存。"""
     cache_key = build_query_embedding_cache_key(query, user_id)
+    redis_key = build_query_embedding_redis_cache_key(cache_key)
     now = monotonic()
+    memory_expired = False
 
     with _QUERY_EMBEDDING_CACHE_LOCK:
         cached = _QUERY_EMBEDDING_CACHE.get(cache_key)
         if cached is not None:
             expires_at, embedding = cached
             if expires_at > now:
-                update_retrieval_diagnostics(
-                    query_embedding_cache_hit=True,
-                    query_embedding_cache_key=":".join(cache_key),
+                update_query_embedding_cache_diagnostics(
+                    hit=True,
+                    cache_key=cache_key,
+                    source="memory",
                 )
                 return list(embedding)
             _QUERY_EMBEDDING_CACHE.pop(cache_key, None)
+            memory_expired = True
 
-    update_retrieval_diagnostics(
-        query_embedding_cache_hit=False,
-        query_embedding_cache_key=":".join(cache_key),
+    if memory_expired:
+        cache_service.delete_cache_key(redis_key)
+    redis_result = cache_service.get_json_cache(redis_key)
+    if redis_result.hit:
+        cached_embedding = normalize_cached_query_embedding(
+            redis_result.value,
+        )
+        if cached_embedding is not None:
+            write_query_embedding_memory_cache(
+                cache_key,
+                cached_embedding,
+                now,
+            )
+            update_query_embedding_cache_diagnostics(
+                hit=True,
+                cache_key=cache_key,
+                source="redis",
+            )
+            return cached_embedding
+
+    fallback_reason = redis_result.fallback_reason
+
+    update_query_embedding_cache_diagnostics(
+        hit=False,
+        cache_key=cache_key,
+        source="provider",
+        fallback_reason=fallback_reason,
     )
     embedding_model = create_embedding_model(user_id)
     embedding = list(embedding_model.embed_query(query))
 
-    with _QUERY_EMBEDDING_CACHE_LOCK:
-        _QUERY_EMBEDDING_CACHE[cache_key] = (
-            now + QUERY_EMBEDDING_CACHE_TTL_SECONDS,
-            list(embedding),
+    write_query_embedding_memory_cache(cache_key, embedding, now)
+    set_result = cache_service.set_json_cache(
+        redis_key,
+        embedding,
+        QUERY_EMBEDDING_CACHE_TTL_SECONDS,
+    )
+    if set_result.fallback_reason and not fallback_reason:
+        update_query_embedding_cache_diagnostics(
+            hit=False,
+            cache_key=cache_key,
+            source="provider",
+            fallback_reason=set_result.fallback_reason,
         )
 
     return embedding
@@ -456,6 +556,12 @@ def merge_vector_diagnostics(diagnostics: dict[str, Any]) -> None:
         ),
         query_embedding_cache_key=str(
             diagnostics.get("query_embedding_cache_key") or "",
+        ),
+        query_embedding_cache_source=str(
+            diagnostics.get("query_embedding_cache_source") or "provider",
+        ),
+        query_embedding_cache_fallback_reason=diagnostics.get(
+            "query_embedding_cache_fallback_reason",
         ),
     )
 

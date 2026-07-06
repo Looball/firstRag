@@ -1,8 +1,10 @@
 """知识库检索设置缓存的回归测试。"""
 
 import unittest
+from unittest.mock import patch
 from uuid import uuid4
 
+from app.services.cache_service import CacheBackendResult
 from app.services.retrieval_settings_cache import (
     get_cached_knowledge_base_retrieval_settings,
     get_retrieval_settings_cache_diagnostics,
@@ -112,6 +114,84 @@ class RetrievalSettingsCacheTests(unittest.TestCase):
 
         self.assertEqual(settings, {"top_k": 2})
         self.assertEqual(calls, 2)
+
+    def test_redis_hit_reuses_shared_settings(self) -> None:
+        """Redis 命中时应直接返回共享缓存，不触发源数据加载。"""
+        knowledge_base_id = uuid4()
+
+        def load_settings() -> dict:
+            raise AssertionError("Redis hit should not load settings")
+
+        with patch(
+            "app.services.retrieval_settings_cache.cache_service.get_json_cache",
+            return_value=CacheBackendResult(
+                hit=True,
+                value={"top_k": 7},
+            ),
+        ):
+            settings = get_cached_knowledge_base_retrieval_settings(
+                user_id=1,
+                knowledge_base_id=knowledge_base_id,
+                load_settings=load_settings,
+            )
+
+        diagnostics = get_retrieval_settings_cache_diagnostics()
+        self.assertEqual(settings, {"top_k": 7})
+        self.assertIsNotNone(diagnostics)
+        assert diagnostics is not None
+        self.assertTrue(diagnostics["retrieval_settings_cache_hit"])
+        self.assertEqual(
+            diagnostics["retrieval_settings_cache_backend"],
+            "redis",
+        )
+
+    def test_redis_unavailable_falls_back_to_memory_cache(self) -> None:
+        """Redis 不可用时，TTL 内重复读取应复用进程内 fallback。"""
+        knowledge_base_id = uuid4()
+        calls = 0
+
+        def load_settings() -> dict:
+            nonlocal calls
+            calls += 1
+            return {"top_k": calls}
+
+        redis_unavailable = CacheBackendResult(
+            hit=False,
+            available=False,
+            fallback_reason="redis timeout",
+        )
+        with patch(
+            "app.services.retrieval_settings_cache.cache_service.get_json_cache",
+            return_value=redis_unavailable,
+        ), patch(
+            "app.services.retrieval_settings_cache.cache_service.set_json_cache",
+            return_value=redis_unavailable,
+        ):
+            first = get_cached_knowledge_base_retrieval_settings(
+                user_id=1,
+                knowledge_base_id=knowledge_base_id,
+                load_settings=load_settings,
+            )
+            second = get_cached_knowledge_base_retrieval_settings(
+                user_id=1,
+                knowledge_base_id=knowledge_base_id,
+                load_settings=load_settings,
+            )
+
+        diagnostics = get_retrieval_settings_cache_diagnostics()
+        self.assertEqual(first, {"top_k": 1})
+        self.assertEqual(second, {"top_k": 1})
+        self.assertEqual(calls, 1)
+        self.assertIsNotNone(diagnostics)
+        assert diagnostics is not None
+        self.assertEqual(
+            diagnostics["retrieval_settings_cache_backend"],
+            "memory",
+        )
+        self.assertEqual(
+            diagnostics["retrieval_settings_cache_fallback_reason"],
+            "redis timeout",
+        )
 
     def test_missing_settings_are_not_cached(self) -> None:
         """知识库不存在时不缓存 None，避免短 TTL 内隐藏新资源。"""
