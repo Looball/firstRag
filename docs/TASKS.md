@@ -124,7 +124,7 @@
 | `T-054` | `PLAN-20260704-01` | `P1` | `Done` | 支持聊天框图片附件和视觉模型调用 | 2026-07-05 | `42f206b` |
 | `T-055` | `PLAN-20260704-01` | `P2` | `Done` | 支持图片/OCR 入知识库检索 | 2026-07-05 | `d8cd9ce` |
 | `T-056` | `PLAN-20260705-01` | `P0` | `Done` | 引入 Redis 基础设施、配置和健康检查 | 2026-07-05 | `5e8c32c`、`d0aee38` |
-| `T-057` | `PLAN-20260705-01` | `P1` | `Done` | 抽象缓存层并迁移 RAG 热点缓存到 Redis | 2026-07-06 | `待提交` |
+| `T-057` | `PLAN-20260705-01` | `P1` | `Done` | 抽象缓存层并迁移 RAG 热点缓存到 Redis | 2026-07-06 | `654899e` |
 | `T-058` | `PLAN-20260705-01` | `P0` | `Todo` | 将登录和 API 限流升级为 Redis 分布式限流 | - | - |
 | `T-059` | `PLAN-20260705-01` | `P1` | `Todo` | 为 vector worker 增加 Redis 运行态、锁和队列观测 | - | - |
 | `T-060` | `PLAN-20260705-01` | `P1` | `Todo` | 补齐 Redis 生产部署、preflight 和文档 | - | - |
@@ -2096,7 +2096,7 @@ cd ..
 scripts/rag_eval_gate.sh
 ```
 - 实现记录：
-  - 相关 commit：`待提交`。
+  - 相关 commit：`654899e`。
   - 新增 `backend/app/services/cache_service.py`，统一封装 Redis JSON cache adapter，支持 TTL、单 key 删除、prefix invalidation、测试隔离和短熔断 fallback；Redis 错误会脱敏后进入 fallback diagnostics。
   - `knowledge_profile_cache` 迁移为 Redis 优先、进程内缓存兜底；Redis key 按 `user_id + knowledge_base_id` 隔离，文件上传、知识库文件关系变化、索引状态变化和删除向量结果继续主动失效相关缓存。
   - `retrieval_settings_cache` 迁移为 Redis 优先、进程内缓存兜底；Redis key 按 `user_id + knowledge_base_id` 隔离，设置更新后继续主动失效，缺失设置仍不缓存 `None`。
