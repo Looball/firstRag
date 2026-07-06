@@ -127,7 +127,7 @@
 | `T-057` | `PLAN-20260705-01` | `P1` | `Done` | 抽象缓存层并迁移 RAG 热点缓存到 Redis | 2026-07-06 | `654899e` |
 | `T-058` | `PLAN-20260705-01` | `P0` | `Done` | 将登录和 API 限流升级为 Redis 分布式限流 | 2026-07-06 | `8875eea` |
 | `T-059` | `PLAN-20260705-01` | `P1` | `Done` | 为 vector worker 增加 Redis 运行态、锁和队列观测 | 2026-07-06 | `8f454ef` |
-| `T-060` | `PLAN-20260705-01` | `P1` | `Todo` | 补齐 Redis 生产部署、preflight 和文档 | - | - |
+| `T-060` | `PLAN-20260705-01` | `P1` | `Done` | 补齐 Redis 生产部署、preflight 和文档 | 2026-07-06 | `f13f9a5` |
 | `T-061` | `PLAN-20260705-01` | `P1` | `Todo` | 完成 Redis 场景 Docker 验证和核心链路回归 | - | - |
 
 ## 新计划接入流程
@@ -2238,6 +2238,23 @@ conda run -n firstrag python -m pytest backend/tests/test_production_preflight_s
 conda run -n firstrag python scripts/production_preflight.py --env-file .env --migration-method compose
 docker compose config --quiet
 ```
+- 实现记录：
+  - 相关 commit：`f13f9a5`。
+  - `scripts/production_preflight.py` 新增 Redis 生产配置检查：`REDIS_URL` 格式、占位值、外部 Redis 认证、默认/弱密码、`RATE_LIMIT_REDIS_FAILURE_MODE=fail_closed`、`REDIS_PORT` 不公网暴露。
+  - preflight 新增 Compose Redis service 静态检查：必须存在 `redis` service、配置 healthcheck、复用日志轮转，并禁止在默认 compose 中给 Redis 配置 `ports`。
+  - `docker-compose.yml` 显式透传 `VECTOR_WORKER_HEARTBEAT_TTL_SECONDS` 和 `VECTOR_WORKER_FILE_LOCK_TTL_SECONDS` 到 backend/worker，便于生产覆盖。
+  - `.env.example`、README、Deployment、Architecture、RAG workflow 和 Docker 启动文档已明确 Compose Redis 与托管 Redis 的差异、认证/TLS 建议、限流 fail-closed、以及 Redis 不保存会话/消息和不替代 PostgreSQL 持久队列。
+- 已验证：
+  - `conda run -n firstrag python -m py_compile scripts/production_preflight.py`
+  - `conda run -n firstrag python -m pytest backend/tests/test_production_preflight_script.py`，15 passed。
+  - `cd backend && conda run -n firstrag python -m pytest`，231 passed。
+  - `docker compose config --quiet` 通过。
+  - `docker compose up -d --build` 通过，backend/frontend 镜像完成构建并重建启动。
+  - `docker compose ps` 显示 Redis/PostgreSQL healthy，backend、frontend、worker Up；Redis 未映射宿主机端口。
+  - `docker compose logs --tail=100 redis migrate backend worker frontend postgres` 确认 migration `applied=0 skipped=5`，backend/frontend/worker 启动正常；PostgreSQL tail 中仍保留一条此前本地密码不匹配的历史认证失败日志，不属于本轮新增错误。
+  - `docker compose exec -T redis redis-cli ping` 输出 `PONG`。
+  - `curl -s http://127.0.0.1:8000/health` 返回 `status=healthy` 且 `dependencies.redis.status=healthy`。
+  - `conda run -n firstrag python scripts/production_preflight.py --env-file .env --migration-method compose` 通过，包括 Redis settings、Redis Compose service、Docker Compose config 和 migration dry-run。
 
 ## T-061 完成 Redis 场景 Docker 验证和核心链路回归
 
