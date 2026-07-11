@@ -151,6 +151,13 @@ def _mark_redis_unavailable(exc: Exception) -> str:
     return reason
 
 
+def _runtime_fallback_reason(exc: Exception) -> str:
+    """Return fallback reason without extending an already-open circuit."""
+    if isinstance(exc, RedisServiceError):
+        return sanitize_redis_error_message(str(exc))
+    return _mark_redis_unavailable(exc)
+
+
 def _get_runtime_client() -> Any:
     """Return Redis client unless the worker runtime circuit is open."""
     reason = _read_open_circuit()
@@ -220,7 +227,7 @@ def record_worker_heartbeat(
     except Exception as exc:  # noqa: BLE001 - 运行态不可影响队列消费
         return {
             "available": False,
-            "fallback_reason": _mark_redis_unavailable(exc),
+            "fallback_reason": _runtime_fallback_reason(exc),
         }
 
     return {"available": True}
@@ -334,7 +341,7 @@ def acquire_file_processing_lock(
             value=value,
             acquired=False,
             available=False,
-            fallback_reason=_mark_redis_unavailable(exc),
+            fallback_reason=_runtime_fallback_reason(exc),
         )
 
 
@@ -350,7 +357,7 @@ def release_file_processing_lock(lock: VectorWorkerFileLock | None) -> None:
             lock.value,
         )
     except Exception as exc:  # noqa: BLE001 - lock release failure is self-healing by TTL
-        _mark_redis_unavailable(exc)
+        _runtime_fallback_reason(exc)
 
 
 def record_worker_job_event(event: str) -> dict[str, Any]:
@@ -371,7 +378,7 @@ def record_worker_job_event(event: str) -> dict[str, Any]:
     except Exception as exc:  # noqa: BLE001 - metrics must be best-effort
         return {
             "available": False,
-            "fallback_reason": _mark_redis_unavailable(exc),
+            "fallback_reason": _runtime_fallback_reason(exc),
         }
     return {"available": True}
 
@@ -494,7 +501,7 @@ def get_vector_worker_runtime_summary() -> dict[str, Any]:
             "metrics": _read_metrics(client),
         }
     except Exception as exc:  # noqa: BLE001 - health endpoint must degrade safely
-        reason = _mark_redis_unavailable(exc)
+        reason = _runtime_fallback_reason(exc)
         return {
             "redis_enabled": True,
             "redis_available": False,

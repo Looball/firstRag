@@ -191,6 +191,42 @@ class VectorWorkerRuntimeServiceTests(unittest.TestCase):
         self.assertEqual(summary["online_worker_count"], 0)
         self.assertNotIn("secret", summary["redis_error_message"])
 
+    def test_open_circuit_does_not_extend_on_frequent_heartbeats(self) -> None:
+        """Frequent worker heartbeats should not keep runtime circuit open forever."""
+        current_time = [100.0]
+
+        def fake_monotonic() -> float:
+            """Return controllable monotonic time."""
+            return current_time[0]
+
+        with patch.object(config, "REDIS_ENABLED", True), patch(
+            "app.services.vectors.vector_worker_runtime_service.monotonic",
+            side_effect=fake_monotonic,
+        ):
+            with patch(
+                "app.services.vectors.vector_worker_runtime_service.get_redis_client",
+                side_effect=RuntimeError("Redis timeout"),
+            ):
+                first = record_worker_heartbeat("worker-1", status="idle")
+
+            current_time[0] = 104.0
+            with patch(
+                "app.services.vectors.vector_worker_runtime_service.get_redis_client",
+                return_value=self.redis,
+            ):
+                second = record_worker_heartbeat("worker-1", status="idle")
+
+            current_time[0] = 106.0
+            with patch(
+                "app.services.vectors.vector_worker_runtime_service.get_redis_client",
+                return_value=self.redis,
+            ):
+                third = record_worker_heartbeat("worker-1", status="idle")
+
+        self.assertFalse(first["available"])
+        self.assertFalse(second["available"])
+        self.assertTrue(third["available"])
+
 
 if __name__ == "__main__":
     unittest.main()
