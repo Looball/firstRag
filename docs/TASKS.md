@@ -62,7 +62,7 @@
 | `PLAN-20260701-02` | 2026-07-01 | `Done` | 正式生产上线补强专项，补齐部署安全、稳定性、风控、可观测性、评测质量和产品化分层。 | `T-042` - `T-047` |
 | `PLAN-20260703-01` | 2026-07-03 | `Todo` | 公开 Demo 上线试运行专项；暂不立即部署，先补齐不依赖真实服务器的上线阻塞项，并为后续公网验证留出明确步骤。 | `T-048` - `T-052` |
 | `PLAN-20260704-01` | 2026-07-04 | `Done` | 聊天图片能力专项；先支持聊天框图片附件和视觉模型调用，再扩展图片/OCR 入知识库。 | `T-054` - `T-055` |
-| `PLAN-20260705-01` | 2026-07-05 | `Todo` | Redis 基础设施专项；从进程内状态扩展为可多实例共享的缓存、限流、worker 运行态和部署健康检查。 | `T-056` - `T-061` |
+| `PLAN-20260705-01` | 2026-07-05 | `Done` | Redis 基础设施专项；从进程内状态扩展为可多实例共享的缓存、限流、worker 运行态和部署健康检查。 | `T-056` - `T-061` |
 
 ## 任务总览
 
@@ -128,7 +128,7 @@
 | `T-058` | `PLAN-20260705-01` | `P0` | `Done` | 将登录和 API 限流升级为 Redis 分布式限流 | 2026-07-06 | `8875eea` |
 | `T-059` | `PLAN-20260705-01` | `P1` | `Done` | 为 vector worker 增加 Redis 运行态、锁和队列观测 | 2026-07-06 | `8f454ef` |
 | `T-060` | `PLAN-20260705-01` | `P1` | `Done` | 补齐 Redis 生产部署、preflight 和文档 | 2026-07-06 | `f13f9a5` |
-| `T-061` | `PLAN-20260705-01` | `P1` | `Done` | 完成 Redis 场景 Docker 验证和核心链路回归 | 2026-07-06 | 待提交 |
+| `T-061` | `PLAN-20260705-01` | `P1` | `Done` | 完成 Redis 场景 Docker 验证和核心链路回归 | 2026-07-06 | `858e27f` |
 
 ## 新计划接入流程
 
@@ -2291,7 +2291,7 @@ conda run -n firstrag python scripts/eval_indexing.py \
   --password 你的密码
 ```
 - 实现/验收记录：
-  - 相关 commit：待提交（当前 Codex 环境写入 `.git/index` 时触发自动审批额度限制，`git add` 被拒绝；代码和文档已在工作区完成）。
+  - 相关 commit：`858e27f`。
   - Redis 场景完整 Docker 验证过程中发现并修复 worker runtime 熔断恢复问题：Redis 停止后 worker 每 2 秒心跳会不断续期 5 秒短熔断，导致 Redis 重启后 `online_worker_count` 长期为 0。
   - 修复点：`vector_worker_runtime_service` 对已打开的 runtime circuit 只返回 fallback reason，不再重复调用 `_mark_redis_unavailable` 延长熔断；新增单测覆盖“频繁心跳不应让熔断永久打开”。
   - Compose Redis 场景覆盖：构建启动、服务 health、Redis ping、backend `/health`、worker runtime online、Redis 停止降级、Redis 重启恢复 worker 心跳。
