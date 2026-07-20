@@ -40,7 +40,7 @@
 
 ## 当前基线
 
-- 2026-07-20 已刷新静态回归验收：后端 240 个 pytest 用例通过、前端 lint 0 error（保留 2 个 `<img>` 性能 warning）、Vitest 52 个用例通过、Next production build 通过。
+- 2026-07-20 已刷新静态回归验收：后端 247 个 pytest 用例通过、前端 lint 0 error（保留 2 个 `<img>` 性能 warning）、Vitest 52 个用例通过、Next production build 通过。
 - 2026-07-20 已完成 Chroma 跨进程索引可见性真实回归：Compose 使用独立 `chroma` service，worker 重建文件向量后 backend 无需重启即可召回 16 条 vector 结果，`vector_degraded=false`、`vector_errors=[]`，目标资料同时包含 `fulltext` 和 `vector` 来源。
 - 当前默认验证路径为 `docker compose up -d --build` 后检查 `docker compose ps` 与 Redis、PostgreSQL、Chroma、migration、backend、worker、frontend 关键日志；`scripts/acceptance_check.sh` 作为补充验收脚本，静态补充检查可运行 `scripts/acceptance_check.sh --skip-real-eval`。
 - 当前阶段优先做“可维护性 + 可观测性 + 验收自动化”，避免在关键链路刚稳定后继续堆叠大功能；前端工作台已开始引入 React Query 和 Zod 做请求层集中化与轻量响应校验。
@@ -65,6 +65,7 @@
 | `PLAN-20260704-01` | 2026-07-04 | `Done` | 聊天图片能力专项；先支持聊天框图片附件和视觉模型调用，再扩展图片/OCR 入知识库。 | `T-054` - `T-055` |
 | `PLAN-20260705-01` | 2026-07-05 | `Done` | Redis 基础设施专项；从进程内状态扩展为可多实例共享的缓存、限流、worker 运行态和部署健康检查。 | `T-056` - `T-061` |
 | `PLAN-20260720-01` | 2026-07-20 | `Done` | 收口近期模型设置、聊天图片、RAG fixture/复验和 Chroma client-server 修复，刷新任务台账与当前验收基线。 | `T-062` |
+| `PLAN-20260720-02` | 2026-07-20 | `Done` | 将独立 Chroma server 纳入 production preflight 和 acceptance check，补齐部署拓扑与运行健康门禁。 | `T-063` |
 
 ## 任务总览
 
@@ -132,6 +133,7 @@
 | `T-060` | `PLAN-20260705-01` | `P1` | `Done` | 补齐 Redis 生产部署、preflight 和文档 | 2026-07-06 | `f13f9a5` |
 | `T-061` | `PLAN-20260705-01` | `P1` | `Done` | 完成 Redis 场景 Docker 验证和核心链路回归 | 2026-07-06 | `858e27f` |
 | `T-062` | `PLAN-20260720-01` | `P1` | `Done` | 收口近期功能、Chroma 架构和任务台账 | 2026-07-20 | 见任务详情 |
+| `T-063` | `PLAN-20260720-02` | `P1` | `Done` | 将独立 Chroma 纳入 production preflight 与 acceptance check | 2026-07-20 | 见任务详情 |
 
 ## 新计划接入流程
 
@@ -2366,6 +2368,46 @@ docker compose ps
 docker compose logs --tail=100 redis postgres chroma migrate backend worker frontend
 git diff --check
 ```
+
+## T-063 将独立 Chroma 纳入 production preflight 与 acceptance check
+
+- 来源计划：`PLAN-20260720-02`
+- 优先级：`P1`
+- 状态：`Done`
+- 目标：让生产前置检查和一键验收主动发现 Chroma server 配置、Compose 拓扑、端口暴露、持久化或运行健康异常，防止 backend/worker 回退为共享 embedded 目录或连接不可用的 Chroma。
+- 范围：
+  - production preflight 校验 `CHROMA_HOST`、`CHROMA_PORT`、`CHROMA_SSL`。
+  - 静态检查 Compose `chroma` service 的私网边界、healthcheck、日志轮转、`/data` 持久化，以及 backend/worker 的 HTTP client 与 `service_healthy` 依赖。
+  - 增加可显式启用的 Chroma runtime health 检查，并接入 acceptance check 默认流程。
+  - 为无 Docker 的纯静态场景保留明确 skip 开关。
+  - 补充单元测试和部署/验收文档。
+- 验收标准：
+  - preflight 能拦截 localhost、非法端口/SSL、Chroma 公网端口、缺失 healthcheck/持久化及 backend/worker 共享 embedded 目录。
+  - Chroma 容器未运行或非 healthy 时 runtime check 失败，正常运行时通过。
+  - acceptance check 默认执行基础设施 preflight，并可通过显式参数跳过。
+  - 后端相关测试、shell syntax、Compose、production preflight 和真实容器健康检查通过。
+- 建议验证命令：
+
+```bash
+conda run -n firstrag python -m pytest backend/tests/test_production_preflight_script.py
+bash -n scripts/acceptance_check.sh
+docker compose config --quiet
+conda run -n firstrag python scripts/production_preflight.py --env-file .env --migration-method compose --skip-migration-dry-run --check-runtime-health
+scripts/acceptance_check.sh --skip-real-eval --skip-frontend-build
+git diff --check
+```
+- 完成记录：
+  - 完成日期：2026-07-20。
+  - `scripts/production_preflight.py` 新增 Chroma 连接参数、Compose service/client-server 拓扑和可选 runtime health 检查；错误输出不包含连接 secret。
+  - `scripts/acceptance_check.sh` 默认执行 infrastructure preflight；无 Docker 的纯静态场景可显式使用 `--skip-infrastructure-check`。
+  - `conda run -n firstrag python -m pytest backend/tests/test_production_preflight_script.py`：22 passed。
+  - `cd backend && conda run -n firstrag python -m pytest`：247 passed。
+  - `bash -n scripts/acceptance_check.sh` 与 `docker compose config --quiet` 通过。
+  - `--skip-infrastructure-check` 与其它静态 skip 参数组合通过，确认无 Docker 场景仍可显式运行纯静态入口。
+  - 带 `--check-runtime-health` 的真实 production preflight 通过，输出 `Chroma settings`、`Chroma Compose service`、`Chroma runtime health` 全部 pass。
+  - `scripts/acceptance_check.sh --skip-real-eval --skip-frontend-build` 通过：infrastructure preflight、migration 文件、backend compileall、247 个 unittest、前端 lint 和 52 个 Vitest 用例均通过。
+  - `docker compose up -d --build` 重建通过；Redis、PostgreSQL、Chroma healthy，backend、worker、frontend Up，migration `applied=0 skipped=5`，最近启动日志无新增错误。
+  - README、Deployment、docker startup、eval 与 Agent 验收文档已同步新的 Chroma 门禁和 skip 边界。
 
 ## 更新规则
 

@@ -31,7 +31,7 @@
 ```bash
 docker compose up -d --build
 docker compose ps
-docker compose logs --tail=100 migrate backend worker frontend postgres
+docker compose logs --tail=100 redis postgres chroma migrate backend worker frontend
 ```
 
 需要补充真实链路验收时，再使用一键脚本串行运行主要检查：
@@ -44,20 +44,24 @@ scripts/acceptance_check.sh
 
 该脚本会在 Compose 服务可用的前提下依次执行：
 
-1. migration 文件检查，存在数据库连接时额外执行 dry-run。
-2. 后端 `compileall`。
-3. 后端 `unittest discover`。
-4. 前端 `npm run lint`。
-5. 前端 `npm run test`。
-6. 前端 `npm run build`。
-7. RAG eval gate。
-8. Indexing eval。
+1. infrastructure preflight，包括 Redis/Chroma 配置、Compose 拓扑和 Chroma runtime health。
+2. migration 文件检查，存在数据库连接时额外执行 dry-run。
+3. 后端 `compileall`。
+4. 后端 `unittest discover`。
+5. 前端 `npm run lint`。
+6. 前端 `npm run test`。
+7. 前端 `npm run build`。
+8. RAG eval gate。
+9. Indexing eval。
 
 只做补充静态检查、不访问真实后端时可跳过真实 eval：
 
 ```bash
 scripts/acceptance_check.sh --skip-real-eval
 ```
+
+无 Docker 服务、明确只做纯静态检查时使用
+`--skip-infrastructure-check`；常规验收不应跳过 Chroma runtime health。
 
 如果本地沙箱限制 Turbopack 创建辅助进程或绑定本地端口，`npm run build` 可能需要在非沙箱环境或提权环境中重跑确认。常规构建和启动验证仍以 Docker Compose 为准。
 

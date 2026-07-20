@@ -114,7 +114,7 @@ python -m app.workers.vector_index_worker
 
 1. 同步代码后检查 `.env` 是否仍符合本地环境。
 2. 运行 `docker compose up -d --build` 启动完整链路。
-3. 运行 `docker compose ps` 和 `docker compose logs --tail=100 redis migrate backend worker frontend postgres` 检查状态。
+3. 运行 `docker compose ps` 和 `docker compose logs --tail=100 redis postgres chroma migrate backend worker frontend` 检查状态。
 4. 完成代码或文档修改。
 5. 基于 Compose 容器完成相关 smoke test。
 6. 涉及真实链路时再运行 eval / acceptance 脚本作为补充验收。
@@ -127,10 +127,17 @@ python -m app.workers.vector_index_worker
 scripts/acceptance_check.sh --skip-real-eval
 ```
 
-该脚本会运行 migration 文件检查、后端 compileall、后端 unittest、前端
+该脚本会先运行 infrastructure preflight，检查 Redis/Chroma 配置、Compose 拓扑和
+Chroma runtime health，再运行 migration 文件检查、后端 compileall、后端 unittest、前端
 lint、前端单测和前端 build，作为 Compose 验证后的补充检查。如果当前环境配置了 `DATABASE_URL` 或
 `COMPOSE_DATABASE_URL`，脚本会额外执行 migration dry-run；如果没有数据库连接，
 则只检查本地 migration 文件列表并提示跳过 dry-run。
+
+只有在 Docker 服务不可用、明确只做纯静态检查时，才跳过基础设施门禁：
+
+```bash
+scripts/acceptance_check.sh --skip-real-eval --skip-infrastructure-check
+```
 
 补充真实链路验收命令：
 

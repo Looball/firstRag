@@ -7,6 +7,7 @@ import argparse
 import base64
 import binascii
 import ipaddress
+import json
 import os
 import re
 import subprocess
@@ -52,6 +53,18 @@ REDIS_DEFAULT_PASSWORDS = {
     "root",
     "123456",
 }
+BOOLEAN_ENV_VALUES = {
+    "0",
+    "1",
+    "false",
+    "true",
+    "no",
+    "yes",
+    "off",
+    "on",
+}
+CHROMA_COMPOSE_HOST = "chroma"
+CHROMA_DEFAULT_PORT = 8000
 
 
 @dataclass(frozen=True)
@@ -99,6 +112,11 @@ def build_arg_parser() -> argparse.ArgumentParser:
         "--skip-path-check",
         action="store_true",
         help="Skip persistent directory checks.",
+    )
+    parser.add_argument(
+        "--check-runtime-health",
+        action="store_true",
+        help="Require the Compose Chroma service to be running and healthy.",
     )
     parser.add_argument(
         "--require-provider-keys",
@@ -381,6 +399,58 @@ def validate_redis_settings(env: Mapping[str, str]) -> list[str]:
     return errors
 
 
+def is_internal_chroma_host(hostname: str) -> bool:
+    """判断 Chroma host 是否是 Compose service、内网域名或私网地址。"""
+    normalized = hostname.strip().strip("[]").lower()
+    if normalized == CHROMA_COMPOSE_HOST:
+        return True
+    if "." not in normalized and ":" not in normalized:
+        return True
+    if normalized.endswith((".internal", ".local", ".lan")):
+        return True
+
+    try:
+        address = ipaddress.ip_address(normalized)
+    except ValueError:
+        return False
+
+    return address.is_private or address.is_link_local
+
+
+def validate_chroma_settings(env: Mapping[str, str]) -> list[str]:
+    """校验 Chroma client-server 连接配置和生产传输边界。"""
+    errors: list[str] = []
+    host = (env.get("CHROMA_HOST") or CHROMA_COMPOSE_HOST).strip()
+    normalized_host = host.strip("[]").lower()
+    port_value = (env.get("CHROMA_PORT") or str(CHROMA_DEFAULT_PORT)).strip()
+    ssl_value = (env.get("CHROMA_SSL") or "false").strip().lower()
+
+    if "://" in host or "/" in host:
+        errors.append("CHROMA_HOST 只能填写 host，不能包含 URL scheme 或路径。")
+    elif normalized_host in {"localhost", "127.0.0.1", "::1"}:
+        errors.append(
+            "Compose 中 CHROMA_HOST 不能使用 localhost/loopback，"
+            "应使用 chroma service 名称。"
+        )
+
+    try:
+        port = int(port_value)
+    except ValueError:
+        errors.append("CHROMA_PORT 必须是 1-65535 的整数。")
+    else:
+        if port < 1 or port > 65535:
+            errors.append("CHROMA_PORT 必须是 1-65535 的整数。")
+
+    if ssl_value not in BOOLEAN_ENV_VALUES:
+        errors.append("CHROMA_SSL 只能设置为 true/false、1/0、yes/no 或 on/off。")
+    elif not is_internal_chroma_host(normalized_host) and not parse_bool_env(
+        ssl_value,
+    ):
+        errors.append("CHROMA_HOST 指向外部地址时必须启用 CHROMA_SSL。")
+
+    return errors
+
+
 def extract_compose_service_block(compose_text: str, service_name: str) -> str | None:
     """从 docker-compose.yml 文本中提取指定 service 的缩进块。"""
     pattern = re.compile(rf"^  {re.escape(service_name)}:\s*$", re.MULTILINE)
@@ -416,6 +486,60 @@ def validate_compose_redis_service(
         errors.append("redis healthcheck 应使用 redis-cli ping 这类轻量检查。")
     if "\n    logging:" not in redis_block:
         errors.append("redis service 应复用 Docker 日志轮转配置。")
+
+    return errors
+
+
+def validate_compose_chroma_service(
+    compose_file: Path = PROJECT_ROOT / "docker-compose.yml",
+) -> list[str]:
+    """静态校验 Compose Chroma service 和 backend/worker client-server 拓扑。"""
+    errors: list[str] = []
+    if not compose_file.exists():
+        return ["docker-compose.yml 不存在，无法检查 Chroma service。"]
+
+    compose_text = compose_file.read_text(encoding="utf-8")
+    chroma_block = extract_compose_service_block(compose_text, "chroma")
+    if chroma_block is None:
+        return ["docker-compose.yml 缺少 chroma service。"]
+
+    if "\n    ports:" in chroma_block:
+        errors.append("chroma service 不应配置 ports；生产 Chroma 只能通过 Compose 内网访问。")
+    if "\n    healthcheck:" not in chroma_block:
+        errors.append("chroma service 必须配置 healthcheck。")
+    if "8000" not in chroma_block:
+        errors.append("chroma healthcheck 应检查 server 的 8000 端口或 heartbeat。")
+    if "\n    logging:" not in chroma_block:
+        errors.append("chroma service 应复用 Docker 日志轮转配置。")
+    if "\n    volumes:" not in chroma_block or ":/data" not in chroma_block:
+        errors.append("chroma service 必须把持久化目录挂载到 /data。")
+    if (
+        "image: chromadb/chroma:" not in chroma_block
+        or "chromadb/chroma:latest" in chroma_block
+    ):
+        errors.append("chroma service 必须使用固定版本的 chromadb/chroma 镜像。")
+
+    for service_name in ("backend", "worker"):
+        service_block = extract_compose_service_block(compose_text, service_name)
+        if service_block is None:
+            errors.append(f"docker-compose.yml 缺少 {service_name} service。")
+            continue
+        if "CHROMA_HOST:" not in service_block:
+            errors.append(
+                f"{service_name} 必须配置 CHROMA_HOST，"
+                "通过 HTTP client 访问 Chroma。"
+            )
+        if re.search(
+            r"^\s+-\s+[^\n]*:/app/vector_db(?:\s|$)",
+            service_block,
+            re.MULTILINE,
+        ):
+            errors.append(
+                f"{service_name} 不应挂载 /app/vector_db，"
+                "避免回退为多进程 embedded Chroma。"
+            )
+        if "\n      chroma:\n        condition: service_healthy" not in service_block:
+            errors.append(f"{service_name} 必须等待 chroma service_healthy 后启动。")
 
     return errors
 
@@ -513,6 +637,84 @@ def run_compose_check(env: Mapping[str, str]) -> ExternalCheck:
     )
 
 
+def parse_compose_ps_records(output: str) -> list[Mapping[str, object]]:
+    """解析 docker compose ps --format json 的对象或逐行 JSON 输出。"""
+    stripped = output.strip()
+    if not stripped:
+        return []
+
+    try:
+        payload = json.loads(stripped)
+    except json.JSONDecodeError:
+        records: list[Mapping[str, object]] = []
+        for line in stripped.splitlines():
+            value = json.loads(line)
+            if isinstance(value, dict):
+                records.append(value)
+        return records
+
+    if isinstance(payload, dict):
+        return [payload]
+    if isinstance(payload, list):
+        return [value for value in payload if isinstance(value, dict)]
+    return []
+
+
+def run_chroma_runtime_health_check(env: Mapping[str, str]) -> ExternalCheck:
+    """确认 Compose Chroma 容器正在运行且 Docker health 为 healthy。"""
+    child_env = os.environ.copy()
+    child_env.update(env)
+    name = "Chroma runtime health"
+    try:
+        result = subprocess.run(
+            ["docker", "compose", "ps", "--format", "json", "chroma"],
+            cwd=PROJECT_ROOT,
+            env=child_env,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            check=True,
+        )
+    except FileNotFoundError:
+        return ExternalCheck(
+            name=name,
+            success=False,
+            message="Chroma runtime health 命令不可用，请确认 Docker 已安装。",
+        )
+    except subprocess.CalledProcessError:
+        return ExternalCheck(
+            name=name,
+            success=False,
+            message="Chroma runtime health 未通过，请检查 docker compose ps chroma。",
+        )
+
+    try:
+        records = parse_compose_ps_records(result.stdout)
+    except json.JSONDecodeError:
+        records = []
+    if not records:
+        return ExternalCheck(
+            name=name,
+            success=False,
+            message="Chroma service 未运行；请先执行 docker compose up -d --build。",
+        )
+
+    record = records[0]
+    state = str(record.get("State") or "").strip().lower()
+    health = str(record.get("Health") or "").strip().lower()
+    if state != "running" or health != "healthy":
+        return ExternalCheck(
+            name=name,
+            success=False,
+            message="Chroma service 未处于 running/healthy 状态，请检查容器日志。",
+        )
+    return ExternalCheck(
+        name=name,
+        success=True,
+        message="Chroma runtime health 已通过。",
+    )
+
+
 def run_migration_dry_run(
     env: Mapping[str, str],
     env_file: Path,
@@ -584,6 +786,8 @@ def run(args: argparse.Namespace) -> int:
         ("Database settings", validate_database_settings(env)),
         ("Redis settings", validate_redis_settings(env)),
         ("Redis Compose service", validate_compose_redis_service()),
+        ("Chroma settings", validate_chroma_settings(env)),
+        ("Chroma Compose service", validate_compose_chroma_service()),
         ("Port bindings", validate_port_bindings(env)),
     ]
     if not args.skip_path_check:
@@ -603,6 +807,8 @@ def run(args: argparse.Namespace) -> int:
     external_checks: list[ExternalCheck] = []
     if not args.skip_compose_check:
         external_checks.append(run_compose_check(env))
+    if args.check_runtime_health:
+        external_checks.append(run_chroma_runtime_health_check(env))
     if not args.skip_migration_dry_run:
         external_checks.append(
             run_migration_dry_run(

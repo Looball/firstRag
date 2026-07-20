@@ -5,6 +5,8 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from subprocess import CompletedProcess
+from unittest.mock import patch
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -215,6 +217,134 @@ class ProductionPreflightScriptTests(unittest.TestCase):
 
         self.assertTrue(any("ports" in error for error in errors))
         self.assertTrue(any("healthcheck" in error for error in errors))
+
+    def test_validate_chroma_settings_accepts_compose_defaults(self) -> None:
+        """Compose 默认 Chroma service 地址和端口应通过检查。"""
+        errors = production_preflight.validate_chroma_settings({})
+
+        self.assertEqual(errors, [])
+
+    def test_validate_chroma_settings_rejects_unsafe_values(self) -> None:
+        """Chroma loopback、非法端口和非法 SSL 值应被拦截。"""
+        errors = production_preflight.validate_chroma_settings(
+            {
+                "CHROMA_HOST": "localhost",
+                "CHROMA_PORT": "not-a-port",
+                "CHROMA_SSL": "sometimes",
+            }
+        )
+
+        self.assertTrue(any("loopback" in error for error in errors))
+        self.assertTrue(any("CHROMA_PORT" in error for error in errors))
+        self.assertTrue(any("CHROMA_SSL" in error for error in errors))
+
+    def test_validate_chroma_settings_requires_ssl_for_external_host(self) -> None:
+        """外部 Chroma 地址必须启用 TLS。"""
+        insecure_errors = production_preflight.validate_chroma_settings(
+            {
+                "CHROMA_HOST": "chroma.example.com",
+                "CHROMA_SSL": "false",
+            }
+        )
+        secure_errors = production_preflight.validate_chroma_settings(
+            {
+                "CHROMA_HOST": "chroma.example.com",
+                "CHROMA_SSL": "true",
+            }
+        )
+
+        self.assertTrue(
+            any("必须启用 CHROMA_SSL" in error for error in insecure_errors)
+        )
+        self.assertEqual(secure_errors, [])
+
+    def test_validate_compose_chroma_service_accepts_repository_topology(self) -> None:
+        """仓库默认 Compose 应满足独立 Chroma server 拓扑。"""
+        errors = production_preflight.validate_compose_chroma_service()
+
+        self.assertEqual(errors, [])
+
+    def test_validate_compose_chroma_service_rejects_embedded_fallback(self) -> None:
+        """公网端口、缺失健康检查和共享 embedded 目录应失败。"""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            compose_file = Path(tmpdir) / "docker-compose.yml"
+            compose_file.write_text(
+                "\n".join(
+                    [
+                        "services:",
+                        "  chroma:",
+                        "    image: chromadb/chroma:latest",
+                        "    ports:",
+                        "      - \"8000:8000\"",
+                        "  backend:",
+                        "    image: backend",
+                        "    volumes:",
+                        "      - ./vector_db:/app/vector_db",
+                        "  worker:",
+                        "    image: backend",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            errors = production_preflight.validate_compose_chroma_service(
+                compose_file,
+            )
+
+        self.assertTrue(any("ports" in error for error in errors))
+        self.assertTrue(any("healthcheck" in error for error in errors))
+        self.assertTrue(any("/data" in error for error in errors))
+        self.assertTrue(any("固定版本" in error for error in errors))
+        self.assertTrue(any("/app/vector_db" in error for error in errors))
+        self.assertTrue(any("service_healthy" in error for error in errors))
+
+    def test_parse_compose_ps_records_supports_object_and_json_lines(self) -> None:
+        """runtime health 兼容 Compose 的单对象和逐行 JSON 输出。"""
+        object_records = production_preflight.parse_compose_ps_records(
+            '{"Service":"chroma","State":"running","Health":"healthy"}'
+        )
+        line_records = production_preflight.parse_compose_ps_records(
+            "\n".join(
+                [
+                    '{"Service":"chroma","State":"running","Health":"healthy"}',
+                    '{"Service":"backend","State":"running","Health":""}',
+                ]
+            )
+        )
+
+        self.assertEqual(len(object_records), 1)
+        self.assertEqual(len(line_records), 2)
+
+    def test_run_chroma_runtime_health_check_requires_healthy_container(self) -> None:
+        """Chroma runtime check 只接受 running/healthy。"""
+        healthy_result = CompletedProcess(
+            args=[],
+            returncode=0,
+            stdout='{"Service":"chroma","State":"running","Health":"healthy"}\n',
+            stderr="",
+        )
+        unhealthy_result = CompletedProcess(
+            args=[],
+            returncode=0,
+            stdout='{"Service":"chroma","State":"running","Health":"unhealthy"}\n',
+            stderr="",
+        )
+
+        with patch.object(
+            production_preflight.subprocess,
+            "run",
+            return_value=healthy_result,
+        ):
+            healthy_check = production_preflight.run_chroma_runtime_health_check({})
+        with patch.object(
+            production_preflight.subprocess,
+            "run",
+            return_value=unhealthy_result,
+        ):
+            unhealthy_check = production_preflight.run_chroma_runtime_health_check({})
+
+        self.assertTrue(healthy_check.success)
+        self.assertFalse(unhealthy_check.success)
 
     def test_validate_runtime_paths_checks_required_directories(self) -> None:
         """持久化目录和模型目录缺失时应失败。"""

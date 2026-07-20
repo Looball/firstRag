@@ -236,16 +236,16 @@ docker compose up -d --build
 docker compose ps
 ```
 
-- 查看关键服务日志，确认 `migrate` 成功结束，`backend`、`worker`、`frontend` 和 `postgres` 没有启动错误：
+- 查看关键服务日志，确认 `migrate` 成功结束，`redis`、`postgres`、`chroma`、`backend`、`worker` 和 `frontend` 没有启动错误：
 
 ```bash
-docker compose logs --tail=100 migrate backend worker frontend postgres
+docker compose logs --tail=100 redis postgres chroma migrate backend worker frontend
 ```
 
 - 涉及数据库结构、部署配置或公开 demo 前置检查时，补充运行：
 
 ```bash
-conda run -n firstrag python scripts/production_preflight.py --env-file .env --migration-method compose
+conda run -n firstrag python scripts/production_preflight.py --env-file .env --migration-method compose --check-runtime-health
 ```
 
 - 涉及后端 API、前端页面、RAG、上传、向量化或认证改动时，应基于已启动的容器做 smoke test；至少覆盖相关服务健康、登录、上传小文件、向量化、提问和 sources 展示中受影响的链路。
@@ -260,13 +260,13 @@ conda run -n firstrag python scripts/production_preflight.py --env-file .env --m
 docker compose up -d --build
 ```
 
-默认访问 `http://localhost:3000`。FastAPI backend、Next.js frontend、PostgreSQL、migration 和 vector index worker 均由 Compose 管理。
+默认访问 `http://localhost:3000`。FastAPI backend、Next.js frontend、PostgreSQL、Redis、Chroma、migration 和 vector index worker 均由 Compose 管理。
 
 ### 查看服务状态和日志
 
 ```bash
 docker compose ps
-docker compose logs --tail=100 migrate backend worker frontend postgres
+docker compose logs --tail=100 redis postgres chroma migrate backend worker frontend
 ```
 
 ### 本地调试后端

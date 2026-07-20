@@ -149,7 +149,8 @@ docker compose up -d --build
 
 ```bash
 docker compose ps
-docker compose logs -f redis migrate backend worker frontend
+docker compose logs -f redis postgres chroma migrate backend worker frontend
+conda run -n firstrag python scripts/production_preflight.py --env-file .env --migration-method compose --skip-migration-dry-run --check-runtime-health
 ```
 
 常用访问地址：
@@ -176,7 +177,7 @@ docker compose logs -f redis migrate backend worker frontend
 docker compose ps
 
 # 查看日志
-docker compose logs -f redis backend worker frontend
+docker compose logs -f redis postgres chroma backend worker frontend
 
 # 只重启后端和 worker
 docker compose up -d --build backend worker

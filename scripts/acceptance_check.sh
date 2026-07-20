@@ -20,7 +20,7 @@ trap on_error ERR
 show_help() {
   cat <<'EOF'
 Usage:
-  scripts/acceptance_check.sh [--skip-real-eval] [--skip-migration-check] [--skip-frontend-tests] [--skip-frontend-build]
+  scripts/acceptance_check.sh [--skip-real-eval] [--skip-infrastructure-check] [--skip-migration-check] [--skip-frontend-tests] [--skip-frontend-build]
 
 Environment variables:
   FIRSTRAG_CONDA_ENV              Conda env name. Default: firstrag
@@ -32,6 +32,9 @@ Environment variables:
                                   Set to 1 to fail when DATABASE_URL is unavailable.
   DATABASE_URL                    Database URL used by migration dry-run.
   COMPOSE_DATABASE_URL            Compose database URL fallback for migration dry-run.
+  FIRSTRAG_PREFLIGHT_ENV_FILE     Env file used by infrastructure preflight. Default: .env
+  FIRSTRAG_SKIP_INFRASTRUCTURE_CHECK
+                                  Set to 1 only for static checks without Docker services.
   FIRSTRAG_SKIP_BACKEND_COMPILE   Set to 1 to skip backend compileall.
   FIRSTRAG_SKIP_BACKEND_TESTS     Set to 1 to skip backend unittest.
   FIRSTRAG_SKIP_FRONTEND_LINT     Set to 1 to skip frontend lint.
@@ -87,6 +90,14 @@ run_migration_check() {
 
   echo "Skipping migration dry-run because DATABASE_URL/COMPOSE_DATABASE_URL is not set."
   echo "Set FIRSTRAG_REQUIRE_MIGRATION_DRY_RUN=1 to require database dry-run."
+}
+
+run_infrastructure_preflight() {
+  conda run -n "${CONDA_ENV}" python "${SCRIPT_DIR}/production_preflight.py" \
+    --env-file "${PREFLIGHT_ENV_FILE}" \
+    --migration-method compose \
+    --skip-migration-dry-run \
+    --check-runtime-health
 }
 
 run_backend_compileall() {
@@ -149,6 +160,10 @@ while [[ $# -gt 0 ]]; do
       FIRSTRAG_SKIP_MIGRATION_CHECK=1
       shift
       ;;
+    --skip-infrastructure-check)
+      FIRSTRAG_SKIP_INFRASTRUCTURE_CHECK=1
+      shift
+      ;;
     --skip-frontend-build)
       FIRSTRAG_SKIP_FRONTEND_BUILD=1
       shift
@@ -169,8 +184,13 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 CONDA_ENV="${FIRSTRAG_CONDA_ENV:-firstrag}"
 BASE_URL="${FIRSTRAG_EVAL_BASE_URL:-http://127.0.0.1:8000}"
+PREFLIGHT_ENV_FILE="${FIRSTRAG_PREFLIGHT_ENV_FILE:-${REPO_ROOT}/.env}"
 
 cd "${REPO_ROOT}"
+
+if [[ "${FIRSTRAG_SKIP_INFRASTRUCTURE_CHECK:-0}" != "1" ]]; then
+  run_step "Infrastructure preflight" run_infrastructure_preflight
+fi
 
 if [[ "${FIRSTRAG_SKIP_MIGRATION_CHECK:-0}" != "1" ]]; then
   run_step "Migration check" run_migration_check

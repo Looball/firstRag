@@ -35,6 +35,12 @@
 - 不使用 `git reset --hard`、`git checkout --` 等破坏性命令，除非用户明确要求。
 - PR review 修复应提交到 PR 分支，让 PR 自动更新。
 
+## 验收约定
+
+- 默认先运行 `docker compose up -d --build`，再检查 `docker compose ps` 和 Redis、PostgreSQL、Chroma、migration、backend、worker、frontend 日志。
+- 涉及部署、RAG、上传或向量化时，运行 `scripts/production_preflight.py --check-runtime-health`，确认独立 Chroma server 的配置、Compose 拓扑和容器健康状态。
+- `scripts/acceptance_check.sh` 默认执行 infrastructure preflight；只有无 Docker、明确只做纯静态检查时才使用 `--skip-infrastructure-check`。
+
 ## 文档约定
 
 新增架构、接口、数据结构或流程变更时，同步更新 `docs/` 对应文档。专项细节可以放到 `docs/backend/`，顶层文档保持导航清晰。
