@@ -40,9 +40,10 @@
 
 ## 当前基线
 
-- 2026-07-20 已刷新静态回归验收：后端 266 个 pytest 用例和 28 个 subtests 通过、前端 lint 0 error（保留 2 个 `<img>` 性能 warning）、Vitest 58 个用例通过、Next 16.2.10 production build 通过。
+- 2026-07-20 已刷新静态回归验收：后端 272 个 pytest 用例和 28 个 subtests 通过、前端 lint 0 error（保留 2 个 `<img>` 性能 warning）、Vitest 58 个用例通过、Next 16.2.10 production build 通过。
 - 2026-07-20 已完成前端依赖安全审计：Next.js 从 16.2.2 升级到 16.2.10，已消除已确认的 high findings；Babel、brace-expansion 和 js-yaml 开发依赖补丁已更新。`npm audit` 仍报告 Next 内嵌 PostCSS 的 2 个 moderate 条目，当前项目没有用户可控 CSS 进入 stringify 的运行路径，且审计器只提供降级到 Next 9.3.3 的 breaking fix，因此保留为已 triage 的不可达例外。
 - 2026-07-20 已完成后端与镜像依赖安全审计：PyJWT、python-dotenv 和 python-multipart 已升级到安全补丁版本；`pip-audit` 只剩 ChromaDB 1.5.9 的 no-fix finding，由精确到版本且 2026-08-20 到期的内网不可达例外管理；Trivy 对当前 backend/frontend 镜像的可修复 high/critical OS finding 均为 0。
+- 2026-07-20 已完成 GitHub Actions supply chain 固化：7 个外部 Action 引用均固定到官方 release 的 40 位 commit SHA，CI 自动拒绝 tag/branch/短 SHA 和缺失版本注释；Dependabot 每周聚合提出 Action 更新 PR。
 - 2026-07-20 已完成 Chroma 跨进程索引可见性真实回归：Compose 使用独立 `chroma` service，worker 重建文件向量后 backend 无需重启即可召回 16 条 vector 结果，`vector_degraded=false`、`vector_errors=[]`，目标资料同时包含 `fulltext` 和 `vector` 来源。
 - 当前默认验证路径为 `docker compose up -d --build` 后检查 `docker compose ps` 与 Redis、PostgreSQL、Chroma、migration、backend、worker、frontend 关键日志；`scripts/acceptance_check.sh` 作为补充验收脚本，静态补充检查可运行 `scripts/acceptance_check.sh --skip-real-eval`。
 - 当前阶段优先做“可维护性 + 可观测性 + 验收自动化”，避免在关键链路刚稳定后继续堆叠大功能；前端工作台已开始引入 React Query 和 Zod 做请求层集中化与轻量响应校验。
@@ -72,7 +73,7 @@
 | `PLAN-20260720-04` | 2026-07-20 | `Done` | 补齐 Redis 限流命中与故障可观测性，让额度耗尽、fallback 和 fail-closed 阻断可聚合、可告警。 | `T-065` |
 | `PLAN-20260720-05` | 2026-07-20 | `Done` | 将前端依赖漏洞审计固化到 CI，并为已 triage finding 建立限时例外和自动到期复查。 | `T-066` |
 | `PLAN-20260720-06` | 2026-07-20 | `Done` | 将后端 Python 依赖和第一方 Docker 镜像的漏洞审计固化到 CI。 | `T-067` |
-| `PLAN-20260720-07` | 2026-07-20 | `Doing` | 固化 GitHub Actions 第三方依赖，使用完整 commit SHA 并由 Dependabot 持续更新。 | `T-068` |
+| `PLAN-20260720-07` | 2026-07-20 | `Done` | 固化 GitHub Actions 第三方依赖，使用完整 commit SHA 并由 Dependabot 持续更新。 | `T-068` |
 
 ## 任务总览
 
@@ -145,7 +146,7 @@
 | `T-065` | `PLAN-20260720-04` | `P1` | `Done` | 增加限流命中和 Redis 故障可观测性 | 2026-07-20 | `6328c3b` |
 | `T-066` | `PLAN-20260720-05` | `P1` | `Done` | 将依赖漏洞审计和例外复查固化到 CI | 2026-07-20 | `a948662` |
 | `T-067` | `PLAN-20260720-06` | `P1` | `Done` | 增加 Python 依赖和 Docker 镜像漏洞 CI 门禁 | 2026-07-20 | `fd18c44` |
-| `T-068` | `PLAN-20260720-07` | `P1` | `Doing` | 固定 GitHub Actions SHA 并启用 Dependabot 更新 | — | — |
+| `T-068` | `PLAN-20260720-07` | `P1` | `Done` | 固定 GitHub Actions SHA 并启用 Dependabot 更新 | 2026-07-20 | `06c9b61` |
 
 ## 新计划接入流程
 
@@ -2581,6 +2582,45 @@ trivy image --scanners vuln --pkg-types os --severity HIGH,CRITICAL --ignore-unf
 trivy image --scanners vuln --pkg-types os --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 firstrag-frontend:latest
 docker compose ps
 docker compose logs --tail=100 migrate backend worker frontend postgres redis chroma
+git diff --check
+```
+
+## T-068 固定 GitHub Actions SHA 并启用 Dependabot 更新
+
+- 来源计划：`PLAN-20260720-07`
+- 优先级：`P1`
+- 状态：`Done`
+- 目标：消除 GitHub Actions tag/branch 可移动引用带来的 workflow supply chain 风险，同时保留可审查、可持续更新的维护路径。
+- 范围：
+  - 将 checkout、setup-python、setup-node 和 Trivy Action 全部固定到官方稳定 release 对应的 40 位 commit SHA。
+  - 同一行保留精确 release tag 注释，供人工审查和 Dependabot 更新版本说明。
+  - 增加自动扫描所有 workflow/reusable workflow 引用的 SHA pin policy。
+  - 新增 `github-actions` Dependabot weekly update，将多个 Action 更新聚合为一个 PR，不自动合并。
+  - 同步 CI、deployment 与 security 维护文档。
+- 验收标准：
+  - 当前所有外部 `uses:` 均为完整 SHA，tag、branch、短 SHA 和缺失 release 注释会失败。
+  - Dependabot 配置能覆盖 `.github/workflows`，使用明确时区、频率和 PR 上限。
+  - actionlint、YAML 解析、策略测试、全量后端回归和 Docker Compose 验证通过。
+- 相关提交：`06c9b61`。
+- 完成记录：
+  - 完成日期：2026-07-20。
+  - 从官方 repository tag 解析并固定：checkout `v6.0.2 -> de0fac2e4500dabe0009e67214ff5f5447ce83dd`、setup-python `v6.3.0 -> ece7cb06caefa5fff74198d8649806c4678c61a1`、setup-node `v6.2.0 -> 6044e13b5dc448c55e2357c09f80417699197238`；Trivy 继续固定 `v0.36.0` 的完整 SHA。
+  - `scripts/check_github_actions_pins.py` 扫描 workflow 和 reusable workflow；当前输出 `PASS references=7`。6 个单元测试覆盖完整 SHA、tag、短 SHA、缺失版本注释、引号语法和本地 Action 边界。
+  - `.github/dependabot.yml` 每周一 09:00（Asia/Shanghai）检查 `github-actions`，最多保留 5 个 update PR，并将 Action updates 聚合为单个 PR。
+  - actionlint 1.7.12、CI/Dependabot YAML 解析、`docker compose config --quiet` 和 `git diff --check` 通过。
+  - `cd backend && conda run -n firstrag python -m pytest -q`：272 passed、28 subtests passed。
+  - `docker compose up -d --build` 通过；Redis、PostgreSQL、Chroma healthy，backend、worker、frontend Up，migration `applied=0 skipped=5`，最近启动日志无错误，`GET /health` 返回 healthy。
+- 建议验证命令：
+
+```bash
+conda run -n firstrag python scripts/check_github_actions_pins.py
+conda run -n firstrag python -m pytest backend/tests/test_github_actions_pins_script.py
+actionlint .github/workflows/ci.yml
+ruby -e 'require "yaml"; YAML.load_file(".github/workflows/ci.yml"); YAML.load_file(".github/dependabot.yml")'
+cd backend && conda run -n firstrag python -m pytest -q
+cd .. && docker compose up -d --build
+docker compose ps
+docker compose logs --since=10m migrate backend worker frontend postgres redis chroma
 git diff --check
 ```
 
