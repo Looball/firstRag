@@ -1161,6 +1161,10 @@ export function ModelSettingsForm() {
                 <input type="number" min="0" max="10" step="1" value={settings.maxRetries} onChange={(event) => setSettings((current) => ({ ...current, maxRetries: Number(event.target.value) }))} className="research-focus mt-2 w-full border border-[var(--line)] bg-white px-3 py-3 text-sm normal-case tracking-normal text-[var(--foreground)]" />
               </label>
             </div>
+            <div className="mt-4 flex flex-wrap gap-3">
+              <button type="button" onClick={() => void handleTest()} disabled={testState === "loading" || saveState === "loading" || !settings.model.trim()} className="border border-[var(--research)] px-5 py-3 text-sm font-semibold text-[var(--research)] transition hover:bg-[var(--paper-muted)] disabled:border-[var(--line)] disabled:text-[var(--ink-muted)]">{testState === "loading" ? "测试中..." : "测试聊天模型"}</button>
+              <button type="submit" disabled={saveState === "loading" || testState === "loading"} className="bg-[var(--research)] px-5 py-3 text-sm font-semibold text-white transition hover:bg-[var(--research-dark)] disabled:bg-[var(--line)]">{saveState === "loading" ? "保存中..." : "保存聊天模型"}</button>
+            </div>
           </section>
 
           <section className="border-t border-[var(--line)] pt-7" aria-labelledby="embedding-title">
@@ -1239,10 +1243,6 @@ export function ModelSettingsForm() {
 
           <div className="border-t border-[var(--line)] pt-6">
             <p role="status" className={`min-h-5 text-sm ${saveState === "error" || testState === "error" || embeddingSaveState === "error" || embeddingTestState === "error" || rerankSaveState === "error" || rerankTestState === "error" ? "text-[#9b3c29]" : "text-[var(--ink-muted)]"}`}>{notice || "保存后，工作台的下一次对话、向量化和检索精排会使用当前账号的模型设置。"}</p>
-            <div className="mt-4 flex flex-wrap gap-3">
-              <button type="button" onClick={() => void handleTest()} disabled={testState === "loading" || saveState === "loading" || !settings.model.trim()} className="border border-[var(--research)] px-5 py-3 text-sm font-semibold text-[var(--research)] transition hover:bg-[var(--paper-muted)] disabled:border-[var(--line)] disabled:text-[var(--ink-muted)]">{testState === "loading" ? "测试中..." : "测试聊天模型"}</button>
-              <button type="submit" disabled={saveState === "loading" || testState === "loading"} className="bg-[var(--research)] px-5 py-3 text-sm font-semibold text-white transition hover:bg-[var(--research-dark)] disabled:bg-[var(--line)]">{saveState === "loading" ? "保存中..." : "保存聊天模型"}</button>
-            </div>
           </div>
         </div>
       </form>
