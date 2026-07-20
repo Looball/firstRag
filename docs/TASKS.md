@@ -40,7 +40,8 @@
 
 ## 当前基线
 
-- 2026-07-20 已刷新静态回归验收：后端 247 个 pytest 用例通过、前端 lint 0 error（保留 2 个 `<img>` 性能 warning）、Vitest 52 个用例通过、Next production build 通过。
+- 2026-07-20 已刷新静态回归验收：后端 247 个 pytest 用例通过、前端 lint 0 error（保留 2 个 `<img>` 性能 warning）、Vitest 58 个用例通过、Next 16.2.10 production build 通过。
+- 2026-07-20 已完成前端依赖安全审计：Next.js 从 16.2.2 升级到 16.2.10，已消除已确认的 high findings；Babel、brace-expansion 和 js-yaml 开发依赖补丁已更新。`npm audit` 仍报告 Next 内嵌 PostCSS 的 2 个 moderate 条目，当前项目没有用户可控 CSS 进入 stringify 的运行路径，且审计器只提供降级到 Next 9.3.3 的 breaking fix，因此保留为已 triage 的不可达例外。
 - 2026-07-20 已完成 Chroma 跨进程索引可见性真实回归：Compose 使用独立 `chroma` service，worker 重建文件向量后 backend 无需重启即可召回 16 条 vector 结果，`vector_degraded=false`、`vector_errors=[]`，目标资料同时包含 `fulltext` 和 `vector` 来源。
 - 当前默认验证路径为 `docker compose up -d --build` 后检查 `docker compose ps` 与 Redis、PostgreSQL、Chroma、migration、backend、worker、frontend 关键日志；`scripts/acceptance_check.sh` 作为补充验收脚本，静态补充检查可运行 `scripts/acceptance_check.sh --skip-real-eval`。
 - 当前阶段优先做“可维护性 + 可观测性 + 验收自动化”，避免在关键链路刚稳定后继续堆叠大功能；前端工作台已开始引入 React Query 和 Zod 做请求层集中化与轻量响应校验。
@@ -67,6 +68,7 @@
 | `PLAN-20260720-01` | 2026-07-20 | `Done` | 收口近期模型设置、聊天图片、RAG fixture/复验和 Chroma client-server 修复，刷新任务台账与当前验收基线。 | `T-062` |
 | `PLAN-20260720-02` | 2026-07-20 | `Done` | 将独立 Chroma server 纳入 production preflight 和 acceptance check，补齐部署拓扑与运行健康门禁。 | `T-063` |
 | `PLAN-20260720-03` | 2026-07-20 | `Done` | 补齐 Redis 限流的前端反馈闭环，统一透传 Retry-After 并为受限操作显示重试倒计时。 | `T-064` |
+| `PLAN-20260720-04` | 2026-07-20 | `Done` | 补齐 Redis 限流命中与故障可观测性，让额度耗尽、fallback 和 fail-closed 阻断可聚合、可告警。 | `T-065` |
 
 ## 任务总览
 
@@ -136,6 +138,7 @@
 | `T-062` | `PLAN-20260720-01` | `P1` | `Done` | 收口近期功能、Chroma 架构和任务台账 | 2026-07-20 | 见任务详情 |
 | `T-063` | `PLAN-20260720-02` | `P1` | `Done` | 将独立 Chroma 纳入 production preflight 与 acceptance check | 2026-07-20 | 见任务详情 |
 | `T-064` | `PLAN-20260720-03` | `P1` | `Done` | 前端统一处理限流响应与重试倒计时 | 2026-07-20 | `0e2ec9d` |
+| `T-065` | `PLAN-20260720-04` | `P1` | `Done` | 增加限流命中和 Redis 故障可观测性 | 2026-07-20 | `6328c3b` |
 
 ## 新计划接入流程
 
@@ -2447,6 +2450,48 @@ cd frontend && npm run build
 docker compose up -d --build
 docker compose ps
 docker compose logs --tail=100 backend frontend redis
+git diff --check
+```
+
+## T-065 增加限流命中和 Redis 故障可观测性
+
+- 来源计划：`PLAN-20260720-04`
+- 优先级：`P1`
+- 状态：`Done`
+- 目标：让运维可以从统一结构化日志区分并聚合正常额度耗尽、Redis fail-open fallback 和 fail-closed 阻断，同时看见实际限额、窗口和重试时间。
+- 范围：
+  - 限流命中输出 `rate_limit_exceeded` 事件，包含安全且有界的 `scope`、`backend`、`reason`、`failure_mode`、`limit`、`window_seconds` 和 `retry_after_seconds`。
+  - Redis 调用失败的 `rate_limit_redis_failed` 事件补齐 `outcome`、`consume`、限额和窗口字段，区分 `memory_fallback` 与 `request_blocked`。
+  - 日志不记录限流 identifier，避免泄露 IP、username、user_id 或 Redis bucket hash。
+  - 文档补充事件字段、日志查询示例和建议告警阈值；不新增公开 metrics 接口。
+- 验收标准：
+  - Redis、memory 和 memory fallback 路径的真实阻断均产生单次可聚合命中事件。
+  - Redis 故障事件能区分 fail-open 与 fail-closed，且不会泄露 Redis URL、密码或 identifier。
+  - 后端限流、认证和 observability 回归测试通过；Compose 日志 smoke 能观察到结构化事件。
+- 相关提交：`6328c3b`。
+- 完成记录：
+  - 完成日期：2026-07-20。
+  - `rate_limit_exceeded` 统一记录 `scope`、`backend`、`outcome`、`reason`、`failure_mode`、`consume`、`limit`、`window_seconds` 和 `retry_after_seconds`，正常额度耗尽标记为 `quota_exceeded`，Redis fail-closed 阻断标记为 `redis_unavailable`。
+  - `rate_limit_redis_failed` 补齐 `memory_fallback` / `request_blocked` outcome 和当前限额配置；事件沿用 observability 脱敏规则，不记录 identifier、IP、username、user_id、Redis key 或连接串。
+  - `docs/DEPLOYMENT.md` 已补充事件字典、最小监控面板、告警建议和本地日志查询命令；不新增公网 metrics 接口。
+  - `cd backend && conda run -n firstrag python -m pytest tests/test_rate_limit.py tests/test_auth_rate_limit.py tests/test_chat_settings.py tests/test_knowledge_files.py tests/test_vector_indexes.py tests/test_user_settings.py tests/test_observability.py`：52 passed。
+  - `cd backend && conda run -n firstrag python -m pytest`：247 passed。
+  - `docker compose build frontend backend`、`docker compose up -d --force-recreate backend worker frontend` 通过；Redis、PostgreSQL、Chroma healthy，backend、worker、frontend Up，frontend 启动日志确认 Next.js 16.2.10。
+  - 真实额度命中 smoke：连续 6 次无效登录返回前 5 次 401、第 6 次 `429 + Retry-After: 300`；backend 生成 `rate_limit_exceeded`，字段为 `scope=login-failures`、`backend=redis`、`reason=quota_exceeded`、`limit=5`、`window_seconds=300`。
+  - 真实 Redis 故障 smoke：短暂停止 Redis 后登录返回 `429 + Retry-After: 60`；backend 同时生成 `rate_limit_redis_failed(outcome=request_blocked)` 和 `rate_limit_exceeded(reason=redis_unavailable)`，Redis 随后恢复 healthy，`GET /health` 返回 `status=healthy`。
+  - 安全前置审计提交：`49cfa9b` 将 Next.js / eslint-config-next 升级到 16.2.10；`e1c1b60` 修复可安全更新的开发依赖。前端 58 个 Vitest、lint（0 error，2 个既有 warning）和 production build 通过。
+- 建议验证命令：
+
+```bash
+cd backend
+conda run -n firstrag python -m pytest \
+  tests/test_rate_limit.py \
+  tests/test_auth_rate_limit.py \
+  tests/test_observability.py
+
+cd ..
+docker compose up -d --build
+docker compose logs backend | rg '"event":"rate_limit_exceeded"|"event":"rate_limit_redis_failed"'
 git diff --check
 ```
 
