@@ -40,7 +40,7 @@
 
 ## 当前基线
 
-- 2026-07-20 已刷新静态回归验收：后端 247 个 pytest 用例通过、前端 lint 0 error（保留 2 个 `<img>` 性能 warning）、Vitest 58 个用例通过、Next 16.2.10 production build 通过。
+- 2026-07-20 已刷新静态回归验收：后端 256 个 pytest 用例通过、前端 lint 0 error（保留 2 个 `<img>` 性能 warning）、Vitest 58 个用例通过、Next 16.2.10 production build 通过。
 - 2026-07-20 已完成前端依赖安全审计：Next.js 从 16.2.2 升级到 16.2.10，已消除已确认的 high findings；Babel、brace-expansion 和 js-yaml 开发依赖补丁已更新。`npm audit` 仍报告 Next 内嵌 PostCSS 的 2 个 moderate 条目，当前项目没有用户可控 CSS 进入 stringify 的运行路径，且审计器只提供降级到 Next 9.3.3 的 breaking fix，因此保留为已 triage 的不可达例外。
 - 2026-07-20 已完成 Chroma 跨进程索引可见性真实回归：Compose 使用独立 `chroma` service，worker 重建文件向量后 backend 无需重启即可召回 16 条 vector 结果，`vector_degraded=false`、`vector_errors=[]`，目标资料同时包含 `fulltext` 和 `vector` 来源。
 - 当前默认验证路径为 `docker compose up -d --build` 后检查 `docker compose ps` 与 Redis、PostgreSQL、Chroma、migration、backend、worker、frontend 关键日志；`scripts/acceptance_check.sh` 作为补充验收脚本，静态补充检查可运行 `scripts/acceptance_check.sh --skip-real-eval`。
@@ -69,6 +69,7 @@
 | `PLAN-20260720-02` | 2026-07-20 | `Done` | 将独立 Chroma server 纳入 production preflight 和 acceptance check，补齐部署拓扑与运行健康门禁。 | `T-063` |
 | `PLAN-20260720-03` | 2026-07-20 | `Done` | 补齐 Redis 限流的前端反馈闭环，统一透传 Retry-After 并为受限操作显示重试倒计时。 | `T-064` |
 | `PLAN-20260720-04` | 2026-07-20 | `Done` | 补齐 Redis 限流命中与故障可观测性，让额度耗尽、fallback 和 fail-closed 阻断可聚合、可告警。 | `T-065` |
+| `PLAN-20260720-05` | 2026-07-20 | `Done` | 将前端依赖漏洞审计固化到 CI，并为已 triage finding 建立限时例外和自动到期复查。 | `T-066` |
 
 ## 任务总览
 
@@ -139,6 +140,7 @@
 | `T-063` | `PLAN-20260720-02` | `P1` | `Done` | 将独立 Chroma 纳入 production preflight 与 acceptance check | 2026-07-20 | 见任务详情 |
 | `T-064` | `PLAN-20260720-03` | `P1` | `Done` | 前端统一处理限流响应与重试倒计时 | 2026-07-20 | `0e2ec9d` |
 | `T-065` | `PLAN-20260720-04` | `P1` | `Done` | 增加限流命中和 Redis 故障可观测性 | 2026-07-20 | `6328c3b` |
+| `T-066` | `PLAN-20260720-05` | `P1` | `Done` | 将依赖漏洞审计和例外复查固化到 CI | 2026-07-20 | `a948662` |
 
 ## 新计划接入流程
 
@@ -2492,6 +2494,47 @@ conda run -n firstrag python -m pytest \
 cd ..
 docker compose up -d --build
 docker compose logs backend | rg '"event":"rate_limit_exceeded"|"event":"rate_limit_redis_failed"'
+git diff --check
+```
+
+## T-066 将依赖漏洞审计和例外复查固化到 CI
+
+- 来源计划：`PLAN-20260720-05`
+- 优先级：`P1`
+- 状态：`Done`
+- 目标：让前端 production dependency 新漏洞在合并前被自动发现和阻断，同时避免已 triage 的 PostCSS finding 变成永久白名单。
+- 范围：
+  - CI 在 pull request、`main` push、手动触发和每周计划任务中运行 npm production dependency audit。
+  - `high` / `critical` 永远阻断；未登记的 `moderate` 阻断；`low` / `info` 只提示。
+  - 安全例外必须精确匹配 advisory ID、package 和 severity，记录 `reviewed_on`、`expires_on` 与原因，最长有效 31 天。
+  - 例外过期、severity 上升、上游修复后遗留无效例外、npm audit 网络/解析失败均阻断。
+  - 为策略解析、强阻断、到期和 stale exception 增加单元测试与维护文档。
+- 验收标准：
+  - 当前 Next.js 16.2.10 production audit 仅通过明确的 PostCSS 限时例外。
+  - 模拟 high、未登记 moderate、过期例外和 stale exception 时策略返回失败。
+  - CI workflow YAML、策略测试、前端 test/lint/build 和 Compose 验证通过。
+- 相关提交：`a948662`。
+- 完成记录：
+  - 完成日期：2026-07-20。
+  - 新增 `scripts/npm_audit_policy.py`，直接运行 `npm audit --omit=dev --json`；registry、命令或 JSON 异常返回错误，不会被误判为零 finding。
+  - 策略按实际 advisory 去重；`high` / `critical` 永远阻断，缺少 advisory 对象的 high/critical 传播节点也会保守阻断；未登记 moderate 阻断，low/info 只提示。
+  - 新增 `security/npm-audit-exceptions.json` 和维护说明；例外精确匹配 advisory ID、package、severity，最长有效 31 天，过期、severity 变化或 finding 消失后未清理均阻断。
+  - PostCSS `GHSA-QX2V-QP2M-JG93` 例外复查截止日为 2026-08-20；只覆盖 `postcss / moderate`，不能覆盖 Next.js 其它 finding。
+  - `.github/workflows/ci.yml` 在 PR、`main` push、手动触发和每周一 `01:17 UTC` 定时任务中执行 production dependency audit policy。
+  - `python3 scripts/npm_audit_policy.py` 真实在线审计通过，输出 `PASS findings=1 exceptions=1`，唯一 finding 由精确 PostCSS 限时例外放行。
+  - `conda run -n firstrag python -m pytest backend/tests/test_npm_audit_policy_script.py`：9 passed；覆盖有效/过期例外、不可豁免 high、字符串传播 high、未登记 moderate、stale exception、severity 变化和最长 31 天限制。
+  - `cd backend && conda run -n firstrag python -m pytest`：256 passed。
+  - `cd frontend && npm test`：58 passed；`npm run lint`：0 error、2 个既有 `<img>` warning；`npm run build`：Next.js 16.2.10 production build 通过。
+  - CI workflow YAML、`docker compose config --quiet` 和 `git diff --check` 通过。
+  - `docker compose up -d --build` 通过；Redis、PostgreSQL、Chroma healthy，backend、worker、frontend Up，migration `applied=0 skipped=5`，最近启动日志无新增错误，`GET /health` 返回 healthy。
+- 建议验证命令：
+
+```bash
+conda run -n firstrag python -m pytest backend/tests/test_npm_audit_policy_script.py
+conda run -n firstrag python scripts/npm_audit_policy.py
+ruby -e 'require "yaml"; YAML.load_file(".github/workflows/ci.yml"); puts "workflow yaml ok"'
+cd frontend && npm test && npm run lint && npm run build
+cd .. && docker compose up -d --build
 git diff --check
 ```
 
