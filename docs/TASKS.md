@@ -66,7 +66,7 @@
 | `PLAN-20260705-01` | 2026-07-05 | `Done` | Redis 基础设施专项；从进程内状态扩展为可多实例共享的缓存、限流、worker 运行态和部署健康检查。 | `T-056` - `T-061` |
 | `PLAN-20260720-01` | 2026-07-20 | `Done` | 收口近期模型设置、聊天图片、RAG fixture/复验和 Chroma client-server 修复，刷新任务台账与当前验收基线。 | `T-062` |
 | `PLAN-20260720-02` | 2026-07-20 | `Done` | 将独立 Chroma server 纳入 production preflight 和 acceptance check，补齐部署拓扑与运行健康门禁。 | `T-063` |
-| `PLAN-20260720-03` | 2026-07-20 | `Doing` | 补齐 Redis 限流的前端反馈闭环，统一透传 Retry-After 并为受限操作显示重试倒计时。 | `T-064` |
+| `PLAN-20260720-03` | 2026-07-20 | `Done` | 补齐 Redis 限流的前端反馈闭环，统一透传 Retry-After 并为受限操作显示重试倒计时。 | `T-064` |
 
 ## 任务总览
 
@@ -135,7 +135,7 @@
 | `T-061` | `PLAN-20260705-01` | `P1` | `Done` | 完成 Redis 场景 Docker 验证和核心链路回归 | 2026-07-06 | `858e27f` |
 | `T-062` | `PLAN-20260720-01` | `P1` | `Done` | 收口近期功能、Chroma 架构和任务台账 | 2026-07-20 | 见任务详情 |
 | `T-063` | `PLAN-20260720-02` | `P1` | `Done` | 将独立 Chroma 纳入 production preflight 与 acceptance check | 2026-07-20 | 见任务详情 |
-| `T-064` | `PLAN-20260720-03` | `P1` | `Doing` | 前端统一处理限流响应与重试倒计时 | — | — |
+| `T-064` | `PLAN-20260720-03` | `P1` | `Done` | 前端统一处理限流响应与重试倒计时 | 2026-07-20 | `0e2ec9d` |
 
 ## 新计划接入流程
 
@@ -2415,7 +2415,7 @@ git diff --check
 
 - 来源计划：`PLAN-20260720-03`
 - 优先级：`P1`
-- 状态：`Doing`
+- 状态：`Done`
 - 目标：把后端 Redis 限流的 `Retry-After` 反馈完整传递到浏览器，让用户清楚知道何时可以重试，并避免倒计时期间重复提交。
 - 范围：
   - Next.js API proxy 安全透传 `Retry-After`。
@@ -2429,6 +2429,15 @@ git diff --check
   - 模型列表与聊天模型测试共享倒计时，单文件与整库向量化共享倒计时，符合后端 scope 设计。
   - 倒计时不会自动重复发送请求，组件卸载后不会残留 timer。
   - 前端 test、lint、build 和 Docker Compose 相关验证通过。
+- 相关提交：`0e2ec9d`。
+- 完成记录：
+  - 完成日期：2026-07-20。
+  - `cd frontend && npm test`：10 个 test files、58 passed。
+  - `cd frontend && npm run lint`：0 error，保留 2 个既有 `<img>` 性能 warning。
+  - `cd frontend && npm run build`：沙箱内因 Turbopack 临时端口权限失败，沙箱外 production build 通过；Compose image build 同样通过 TypeScript 与 24 个静态页面生成。
+  - `docker compose up -d --build`、`docker compose config --quiet` 通过；Redis、PostgreSQL、Chroma healthy，backend、worker、frontend Up，migration `applied=0 skipped=5`。
+  - 真实 proxy smoke：随机不存在账号经 `http://127.0.0.1:3000/api/login` 连续失败，前 5 次为 401，第 6 次为 `429 + Retry-After: 300`。
+  - 浏览器 UI smoke：登录限流后错误文案显示剩余秒数，提交按钮显示倒计时并保持 disabled，随后秒数正常递减。
 - 建议验证命令：
 
 ```bash
