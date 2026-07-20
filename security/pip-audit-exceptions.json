@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "exceptions": [
+    {
+      "advisory_id": "GHSA-F4J7-R4Q5-QW2C",
+      "package": "chromadb",
+      "affected_version": "1.5.9",
+      "reviewed_on": "2026-07-20",
+      "expires_on": "2026-08-20",
+      "reason": "GHSA 需要攻击者直接访问 Chroma collection API 并提交恶意 model repository 与 trust_remote_code=true。FirstRAG Compose 不映射 Chroma 端口，Nginx 只代理 frontend，业务代码也不接收或转发这些 collection configuration 字段；当前上游没有修复版本。",
+      "follow_up": "保持 Chroma 仅 Compose 内网可达；上游发布修复版本后立即升级 backend package 和 chromadb/chroma image，并删除本例外。"
+    }
+  ]
+}
