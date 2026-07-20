@@ -20,6 +20,7 @@ from collections.abc import Sequence
 from concurrent.futures import ThreadPoolExecutor
 from contextvars import ContextVar
 from hashlib import sha256
+from math import sqrt
 from threading import RLock
 from time import monotonic
 from time import perf_counter
@@ -47,7 +48,7 @@ from app.services.vectors.vector_index_service import get_vector_store
 logger = logging.getLogger(__name__)
 
 QUERY_EMBEDDING_CACHE_TTL_SECONDS = 300.0
-MAX_VECTOR_FILTER_FALLBACK_CANDIDATES = 100
+MAX_VECTOR_FILTER_FALLBACK_CANDIDATES = 1000
 VECTOR_FILE_FILTER_RETRY_DELAY_SECONDS = 0.2
 
 _QUERY_EMBEDDING_CACHE: dict[
@@ -349,6 +350,87 @@ def retry_file_vector_search_without_file_filter(
     ][:k]
 
 
+def cosine_distance(left: Sequence[float], right: Sequence[float]) -> float:
+    """计算两个向量的 cosine distance，数值越小越相近。"""
+    dot_product = 0.0
+    left_norm = 0.0
+    right_norm = 0.0
+    for left_value, right_value in zip(left, right, strict=False):
+        dot_product += float(left_value) * float(right_value)
+        left_norm += float(left_value) * float(left_value)
+        right_norm += float(right_value) * float(right_value)
+    if left_norm == 0.0 or right_norm == 0.0:
+        return 1.0
+    return 1.0 - (dot_product / (sqrt(left_norm) * sqrt(right_norm)))
+
+
+def retry_file_vector_search_with_direct_embedding_scan(
+    *,
+    vectordb: Any,
+    query_embedding: list[float],
+    user_id: int,
+    file_id: UUID | str,
+    k: int,
+) -> list[tuple[Document, float]]:
+    """ANN 查询失败时，直接读取单文件 embedding 并在 Python 侧精确打分。"""
+    collection = getattr(vectordb, "_collection", None)
+    if collection is None:
+        return []
+
+    result = collection.get(
+        where=build_file_chroma_filter(user_id, file_id),
+        include=["documents", "metadatas", "embeddings"],
+    )
+    documents = result.get("documents")
+    metadatas = result.get("metadatas")
+    embeddings = result.get("embeddings")
+    if documents is None or metadatas is None or embeddings is None:
+        return []
+    scored_documents: list[tuple[Document, float]] = []
+    for content, metadata, embedding in zip(
+        documents,
+        metadatas,
+        embeddings,
+        strict=False,
+    ):
+        scored_documents.append(
+            (
+                Document(
+                    page_content=str(content or ""),
+                    metadata=dict(metadata or {}),
+                ),
+                cosine_distance(query_embedding, embedding),
+            )
+        )
+
+    scored_documents.sort(key=lambda item: item[1])
+    return scored_documents[:k]
+
+
+def retry_file_vector_search_without_metadata_filter(
+    *,
+    vectordb: Any,
+    query_embedding: list[float],
+    user_id: int,
+    file_id: UUID | str,
+    k: int,
+) -> list[tuple[Document, float]]:
+    """metadata filter 均失败时，退回无过滤检索并在 Python 侧严格过滤。"""
+    fallback_k = min(max(k * 10, k), MAX_VECTOR_FILTER_FALLBACK_CANDIDATES)
+    candidates = vectordb.similarity_search_by_vector_with_relevance_scores(
+        embedding=query_embedding,
+        k=fallback_k,
+    )
+    normalized_user_id = str(user_id)
+    normalized_file_id = str(file_id)
+    return [
+        (document, score)
+        for document, score in candidates
+        if str(document.metadata.get("user_id") or "") == normalized_user_id
+        and str(document.metadata.get("file_id") or "") == normalized_file_id
+    ][:k]
+
+
 def retry_file_vector_search_with_delay(
     *,
     vectordb: Any,
@@ -457,6 +539,40 @@ def get_vector_documents(
 
                     if fallback_candidates:
                         scored_candidates.extend(fallback_candidates)
+                        continue
+
+                    try:
+                        direct_scan_candidates = (
+                            retry_file_vector_search_with_direct_embedding_scan(
+                                vectordb=vectordb,
+                                query_embedding=query_embedding,
+                                user_id=user_id,
+                                file_id=file_id,
+                                k=k,
+                            )
+                        )
+                    except Exception:
+                        direct_scan_candidates = []
+
+                    if direct_scan_candidates:
+                        scored_candidates.extend(direct_scan_candidates)
+                        continue
+
+                    try:
+                        unfiltered_candidates = (
+                            retry_file_vector_search_without_metadata_filter(
+                                vectordb=vectordb,
+                                query_embedding=query_embedding,
+                                user_id=user_id,
+                                file_id=file_id,
+                                k=k,
+                            )
+                        )
+                    except Exception:
+                        unfiltered_candidates = []
+
+                    if unfiltered_candidates:
+                        scored_candidates.extend(unfiltered_candidates)
                         continue
 
                     # Chroma 删除/重建向量后偶发 HNSW 残留错误。

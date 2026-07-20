@@ -18,7 +18,8 @@
 3. `document_service` 加载 PDF、DOCX、Markdown、TXT 或图片知识文件。图片文件会使用当前用户配置的 vision 聊天模型解析为可检索 Markdown；聊天图片附件不走这条入库链路。
 4. 文本或图片解析结果切分为 chunk。
 5. 当前登录用户保存的 embedding provider 生成向量，支持 Qwen、智谱、OpenAI、Voyage、Cohere、Jina 和自定义 OpenAI-compatible embedding API。用户可按厂商保存多份 API Key，当前生效配置决定实际调用的 provider/model/base_url。
-6. Chroma 保存向量。
+6. Chroma 保存向量；Compose 中 worker 与 backend 均通过 HTTP client 访问独立
+   `chroma` service，避免多个 embedded 进程共享目录产生索引可见性问题。
 7. PostgreSQL `knowledge_file_chunks` 保存 chunk 正文和 metadata，用于全文检索。
 8. 更新文件状态和任务状态。
 

@@ -26,7 +26,8 @@ cp .env.example .env
 | `USER_SETTINGS_ENCRYPTION_KEY` | 用户聊天模型、向量模型和远程 rerank API Key 的加密主密钥。 |
 | `LLM_TEMPERATURE` / `LLM_MAX_TOKENS` / `LLM_TIMEOUT_SECONDS` / `LLM_MAX_RETRIES` | 聊天模型设置页的默认生成参数；provider、model 和 API Key 由用户登录后配置。 |
 | `RERANK_PROVIDER` / `RERANK_MODEL` / `RERANK_BASE_URL` / `RERANK_API_KEY` | 历史环境变量兼容；新版本远程 rerank 推荐在登录后的“模型设置”页按用户配置。 |
-| `VECTOR_STORE_PATH` | Chroma 持久化路径；本地默认 `./vector_db/chroma`，compose 默认 `/app/vector_db/chroma`。 |
+| `VECTOR_STORE_PATH` | 单进程 embedded Chroma 的持久化路径，本地默认 `./vector_db/chroma`。 |
+| `CHROMA_HOST` / `CHROMA_PORT` / `CHROMA_SSL` | Chroma server 连接；Compose 默认使用内置 `chroma:8000`，本地单进程调试留空 `CHROMA_HOST` 可继续 embedded。 |
 | `RERANKER_MODEL_PATH` | 本地 reranker 模型路径；compose 会把 `./models` 只读挂载到 `/app/models`。 |
 | `UPLOADS_DIR` / `VECTOR_DB_DIR` / `MODELS_DIR` | Docker Compose 宿主机持久化目录；生产环境建议指向独立数据盘。 |
 | `DOCKER_LOG_MAX_SIZE` / `DOCKER_LOG_MAX_FILE` | Docker stdout/stderr 日志轮转参数。 |
@@ -39,7 +40,7 @@ cp .env.example .env
 docker compose up -d --build
 ```
 
-Compose 会启动 Redis、PostgreSQL、migration、FastAPI backend、Next.js frontend 和 vector index worker。`migrate` service 会先初始化或升级当前完整 schema；后续数据库结构变化会从 `001_xxx.sql` 开始追加增量 migration。
+Compose 会启动 Redis、PostgreSQL、独立 Chroma server、migration、FastAPI backend、Next.js frontend 和 vector index worker。backend 与 worker 统一通过 HTTP client 访问 Chroma，避免两个进程直接打开同一 embedded 持久化目录。`migrate` service 会先初始化或升级当前完整 schema；后续数据库结构变化会从 `001_xxx.sql` 开始追加增量 migration。
 
 启动后检查服务状态和关键日志：
 
@@ -194,6 +195,7 @@ docker compose up -d --build
 | 服务 | 默认地址 | 说明 |
 | --- | --- | --- |
 | `postgres` | `localhost:5432` | PostgreSQL 16，数据保存在 named volume `postgres_data`。 |
+| `chroma` | 仅 Compose 内网 | Chroma 1.5.9 server，数据保存在 `${VECTOR_DB_DIR:-./vector_db}/chroma`。 |
 | `migrate` | 不暴露端口 | 执行 `scripts/migrate_db.py`，初始化或升级 PostgreSQL schema。 |
 | `backend` | `http://127.0.0.1:8000` | FastAPI 后端。 |
 | `frontend` | `http://localhost:3000` | Next.js 前端，容器内代理到 `http://backend:8000`。 |
@@ -206,7 +208,7 @@ docker compose up -d --build
 | 宿主路径 | 容器路径 | 说明 |
 | --- | --- | --- |
 | `${UPLOADS_DIR:-./uploads}` | `/app/uploads` | 上传文件。 |
-| `${VECTOR_DB_DIR:-./vector_db}` | `/app/vector_db` | Chroma 持久化数据。 |
+| `${VECTOR_DB_DIR:-./vector_db}/chroma` | `chroma:/data` | Chroma server 持久化数据；backend/worker 不直接挂载该目录。 |
 | `${MODELS_DIR:-./models}` | `/app/models` | 本地 reranker 模型，只读挂载；默认最小镜像可不准备。 |
 | `postgres_data` | `/var/lib/postgresql/data` | PostgreSQL 数据。 |
 
@@ -415,7 +417,7 @@ MODELS_DIR=/srv/firstrag/models
 
 ### 推荐目标
 
-第一阶段选择“单台云服务器 / VPS + Docker Compose + HTTPS 反向代理”的自托管方案。原因是当前应用由 PostgreSQL、FastAPI backend、Next.js frontend、vector index worker、uploads 和 Chroma 持久化目录共同组成；如启用本地 reranker，还需要共享 `models/`。单机 Compose 最容易保证 backend 与 worker 共享这些持久化目录。
+第一阶段选择“单台云服务器 / VPS + Docker Compose + HTTPS 反向代理”的自托管方案。原因是当前应用由 PostgreSQL、FastAPI backend、Next.js frontend、vector index worker、uploads 和独立 Chroma server 共同组成；如启用本地 reranker，还需要共享 `models/`。单机 Compose 可让 backend 与 worker 通过内网 HTTP 访问同一 Chroma 实例，同时保留持久化数据目录。
 
 暂不优先选择 Vercel + 独立 backend 或纯托管 PaaS。该路线更适合后续拆分静态前端、托管数据库、对象存储和独立 worker 后再推进；现在会额外引入跨服务文件持久化、worker 常驻、模型缓存和内网访问控制问题。
 
@@ -427,7 +429,7 @@ MODELS_DIR=/srv/firstrag/models
   -> 反向代理（Caddy / Nginx / Cloudflare Tunnel）
   -> frontend:3000（Next.js 页面和 API proxy）
   -> backend:8000（FastAPI，仅内网或本机可达）
-  -> PostgreSQL / Redis / uploads / vector_db / worker
+  -> PostgreSQL / Redis / Chroma / uploads / worker
 ```
 
 公网只暴露 80/443。`frontend`、`backend` 和 `postgres` 的宿主机端口应绑定到 `127.0.0.1` 或通过防火墙限制访问；Redis 默认不映射宿主机端口，生产不要直接公网暴露 Redis。
@@ -441,7 +443,7 @@ MODELS_DIR=/srv/firstrag/models
 | PostgreSQL | 使用 compose named volume `postgres_data` | 定期做卷快照或 `pg_dump`，避免误删演示数据。 |
 | Redis | 默认使用 Compose 内置 service 或托管 Redis 内网地址 | 只存缓存、限流和 worker 运行态，不作为会话、消息或 vector job 持久队列；外部 Redis 必须开启认证，公网不直接暴露。 |
 | 上传文件 | 通过 `UPLOADS_DIR` 挂载到 `/app/uploads` | 公开 demo 禁止上传私密文件，并需要清理策略。 |
-| Chroma 数据 | 通过 `VECTOR_DB_DIR` 挂载到 `/app/vector_db` | 可从上传文件重建，但保留备份能减少恢复时间。 |
+| Chroma 数据 | `${VECTOR_DB_DIR}/chroma` 只挂载到 Chroma server 的 `/data` | backend/worker 通过 HTTP client 访问；可从上传文件重建，但保留备份能减少恢复时间。 |
 | reranker 模型 | 可选，通过 `MODELS_DIR` 只读挂载到 `/app/models` | 默认最小镜像可不准备；启用本地 reranker 前确认模型文件已存在。 |
 | 日志 | 使用 Docker `json-file` 轮转，后续接入集中日志 | 日志不得包含 API Key、JWT、数据库密码或用户上传原文。 |
 
@@ -460,6 +462,7 @@ MODELS_DIR=/srv/firstrag/models
 | Rerank provider / model / API Key / base_url | 登录后在“模型设置”页按厂商配置并加密保存；本地 rerank 不需要 API Key。 |
 | `ALLOW_USER_CUSTOM_LLM_BASE_URL` | 公开 demo 保持 `false`，避免用户通过自定义模型地址访问服务器内网。 |
 | `REDIS_ENABLED` / `REDIS_URL` | 使用 Compose 内置 Redis 时保持 `redis://redis:6379/0`；使用托管 Redis 时填内网认证连接串，TLS 连接使用 `rediss://`。 |
+| `CHROMA_HOST` / `CHROMA_PORT` / `CHROMA_SSL` | Compose 内保持 `chroma` / `8000` / `false`；Chroma 不映射公网端口。 |
 | `REDIS_CONNECT_TIMEOUT_SECONDS` / `REDIS_COMMAND_TIMEOUT_SECONDS` | 保持较短超时，避免 Redis 故障拖慢请求；默认 1 秒。 |
 | `VECTOR_WORKER_HEARTBEAT_TTL_SECONDS` / `VECTOR_WORKER_FILE_LOCK_TTL_SECONDS` | 控制 worker 在线状态和单文件短租约 TTL；不改变 PostgreSQL 持久任务队列。 |
 | `MAX_UPLOAD_FILE_SIZE_BYTES` | 公开 demo 建议调低到 10-20 MB，并与反向代理 body size 一致。 |
@@ -625,7 +628,7 @@ conda run -n firstrag python scripts/demo_cleanup.py \
 | 前端 | `http://localhost:3000` |
 | 后端 | `http://127.0.0.1:8000` |
 | PostgreSQL | `localhost:5432` |
-| Chroma | 本地持久化目录，不单独暴露端口 |
+| Chroma | Compose 内网 `chroma:8000`，不映射宿主机端口 |
 
 ## 部署目录
 

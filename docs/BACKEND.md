@@ -83,4 +83,4 @@ conda activate firstrag
 python -m app.workers.vector_index_worker
 ```
 
-worker 从 PostgreSQL `vector_index_jobs` 领取任务，解析文件、切分文本、写 Chroma、写 PostgreSQL chunk，并更新任务状态。Redis 只保存短 TTL 运行态：worker 心跳、当前任务摘要、单文件短租约和运行指标；Redis 不可用时 worker 会继续依赖 PostgreSQL 队列处理任务。图片知识文件会在 worker 中通过当前用户的 vision 聊天模型解析为可检索 Markdown；解析失败只会标记当前任务失败，不阻塞后续队列。常规验证仍以 Docker Compose 中的 `worker` service 为准。
+worker 从 PostgreSQL `vector_index_jobs` 领取任务，解析文件、切分文本、写 Chroma、写 PostgreSQL chunk，并更新任务状态。Compose 中的 backend 与 worker 都通过 HTTP 访问独立 `chroma` service，避免多个 embedded Chroma 进程共享持久化目录导致 HNSW 视图不可见。Redis 只保存短 TTL 运行态：worker 心跳、当前任务摘要、单文件短租约和运行指标；Redis 不可用时 worker 会继续依赖 PostgreSQL 队列处理任务。图片知识文件会在 worker 中通过当前用户的 vision 聊天模型解析为可检索 Markdown；解析失败只会标记当前任务失败，不阻塞后续队列。常规验证仍以 Docker Compose 中的 `worker` service 为准。

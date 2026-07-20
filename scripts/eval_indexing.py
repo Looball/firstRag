@@ -21,6 +21,15 @@ DEFAULT_REPORT_PATH = Path("docs/evals/latest_indexing_eval_report.md")
 DEFAULT_RUNS_DIR = Path("docs/evals/indexing_runs")
 SUCCESS_JOB_STATUSES = {"completed", "succeeded"}
 TERMINAL_JOB_STATUSES = {*SUCCESS_JOB_STATUSES, "failed", "cancelled"}
+INDEXING_EVAL_RETRIEVAL_SETTINGS = {
+    "retrieval_mode": "always",
+    "enable_query_router": False,
+    "enable_rerank": False,
+    "top_k": 20,
+    "vector_top_k": 100,
+    "fulltext_top_k": 100,
+    "rrf_k": 60,
+}
 MINIMAL_PNG_BYTES = (
     b"\x89PNG\r\n\x1a\n"
     b"\x00\x00\x00\rIHDR"
@@ -465,6 +474,41 @@ def remove_file_relation(
     )
 
 
+def get_retrieval_settings(
+    base_url: str,
+    token: str,
+    knowledge_base_id: str,
+    timeout: int,
+) -> dict[str, Any]:
+    """读取知识库当前检索设置。"""
+    data = request_json(
+        "GET",
+        base_url,
+        f"/chat/knowledge-base/{knowledge_base_id}/retrieval-settings",
+        token=token,
+        timeout=timeout,
+    )
+    return dict(data.get("settings") or {})
+
+
+def update_retrieval_settings(
+    base_url: str,
+    token: str,
+    knowledge_base_id: str,
+    settings: dict[str, Any],
+    timeout: int,
+) -> None:
+    """更新知识库检索设置。"""
+    request_json(
+        "PATCH",
+        base_url,
+        f"/chat/knowledge-base/{knowledge_base_id}/retrieval-settings",
+        token=token,
+        payload=settings,
+        timeout=timeout,
+    )
+
+
 def build_temp_markdown_file(run_id: str) -> tuple[str, str, str, str]:
     """构建本轮评测专用的唯一 Markdown 文件名、正文和查询关键词。"""
     keyword = f"FirstRAGIndexingEval-{run_id}"
@@ -784,8 +828,22 @@ def main() -> int:
     knowledge_base_id = str(knowledge_base["id"])
 
     uploaded_file_id: str | None = None
+    original_retrieval_settings: dict[str, Any] | None = None
     cleanup_done = False
     try:
+        original_retrieval_settings = get_retrieval_settings(
+            base_url=base_url,
+            token=token,
+            knowledge_base_id=knowledge_base_id,
+            timeout=args.timeout,
+        )
+        update_retrieval_settings(
+            base_url=base_url,
+            token=token,
+            knowledge_base_id=knowledge_base_id,
+            settings=INDEXING_EVAL_RETRIEVAL_SETTINGS,
+            timeout=args.timeout,
+        )
         upload_response = request_multipart_upload(
             base_url=base_url,
             path=f"/chat/knowledge-base/{knowledge_base_id}/files",
@@ -848,6 +906,20 @@ def main() -> int:
             expected_keyword=keyword,
         )
     finally:
+        if original_retrieval_settings is not None:
+            try:
+                update_retrieval_settings(
+                    base_url=base_url,
+                    token=token,
+                    knowledge_base_id=knowledge_base_id,
+                    settings=original_retrieval_settings,
+                    timeout=args.timeout,
+                )
+            except Exception as exc:
+                print(
+                    f"Warning: failed to restore retrieval settings: {exc}",
+                    file=sys.stderr,
+                )
         if uploaded_file_id and not args.keep_file:
             try:
                 remove_file_relation(

@@ -125,6 +125,9 @@ CHROMA_COLLECTION_NAME = os.environ.get(
     "CHROMA_COLLECTION_NAME",
     "langchain",
 )
+CHROMA_HOST = os.environ.get("CHROMA_HOST", "").strip()
+CHROMA_PORT = read_int_env("CHROMA_PORT", 8000)
+CHROMA_SSL = read_bool_env("CHROMA_SSL", False)
 
 # Rerank provider 历史环境变量兼容。新版本远程 rerank 推荐在
 # 登录后的设置页按用户保存 provider/model/API Key。

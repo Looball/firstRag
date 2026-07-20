@@ -6,7 +6,10 @@ import unittest
 from unittest.mock import patch
 from uuid import uuid4
 
-from app.services.vectors.vector_index_service import index_file_vectors
+from app.services.vectors.vector_index_service import (
+    get_vector_store,
+    index_file_vectors,
+)
 
 
 class VectorIndexServiceTests(unittest.TestCase):
@@ -37,6 +40,51 @@ class VectorIndexServiceTests(unittest.TestCase):
             file_id=file_id,
             user_id=1,
             original_name="用户上传文件.txt",
+        )
+
+    def test_get_vector_store_uses_http_client_when_host_is_configured(
+        self,
+    ) -> None:
+        """Compose 配置 Chroma host 后应连接独立 server。"""
+        with patch(
+            "app.services.vectors.vector_index_service.CHROMA_HOST",
+            "chroma",
+        ), patch(
+            "app.services.vectors.vector_index_service.CHROMA_PORT",
+            8000,
+        ), patch(
+            "app.services.vectors.vector_index_service.CHROMA_SSL",
+            False,
+        ), patch(
+            "app.services.vectors.vector_index_service.Chroma",
+        ) as chroma:
+            get_vector_store(collection_name="test-collection")
+
+        chroma.assert_called_once_with(
+            collection_name="test-collection",
+            embedding_function=None,
+            host="chroma",
+            port=8000,
+            ssl=False,
+        )
+
+    def test_get_vector_store_keeps_embedded_mode_without_host(self) -> None:
+        """未配置 Chroma host 时应保留单进程本地持久化模式。"""
+        with patch(
+            "app.services.vectors.vector_index_service.CHROMA_HOST",
+            "",
+        ), patch(
+            "app.services.vectors.vector_index_service.Chroma",
+        ) as chroma:
+            get_vector_store(
+                persist_directory="/tmp/firstrag-test-chroma",
+                collection_name="test-collection",
+            )
+
+        chroma.assert_called_once_with(
+            collection_name="test-collection",
+            embedding_function=None,
+            persist_directory="/tmp/firstrag-test-chroma",
         )
 
 

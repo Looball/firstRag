@@ -59,7 +59,9 @@ FirstRAG/
 
 - PostgreSQL：用户、知识库、文件、会话、消息、聊天附件 metadata、文本/图片解析分块、向量化任务队列。
 - Redis：提供基础设施健康检查、RAG 热点共享缓存、后端分布式限流和 vector worker 运行态，包括知识库画像、retrieval settings、query embedding、登录/业务 API sliding-window 计数、worker 心跳、单文件短租约和运行指标；不作为会话、消息或 vector index job 的持久存储。
-- Chroma：文档分块向量，默认持久化到根目录 `vector_db/chroma`。
+- Chroma：文档分块向量。Docker Compose 使用独立 `chroma` service，backend 与
+  worker 通过 HTTP client 共享访问，数据持久化到根目录 `vector_db/chroma`；
+  单进程 conda 调试未配置 `CHROMA_HOST` 时仍可使用 embedded 模式。
 - 本地文件系统：知识文件默认保存到根目录 `uploads/users/...`，聊天图片附件默认保存到 `uploads/chat_attachments/users/...`。
 
 ## 认证与权限

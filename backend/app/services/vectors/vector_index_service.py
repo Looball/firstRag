@@ -8,7 +8,13 @@ from uuid import UUID
 from langchain_chroma import Chroma
 from langchain_core.documents import Document
 
-from app.core.config import CHROMA_COLLECTION_NAME, VECTOR_STORE_PATH
+from app.core.config import (
+    CHROMA_COLLECTION_NAME,
+    CHROMA_HOST,
+    CHROMA_PORT,
+    CHROMA_SSL,
+    VECTOR_STORE_PATH,
+)
 from app.db.locks import file_index_lock
 from app.db.executor import Row
 from app.repositories.knowledge_chunk_repository import (
@@ -64,7 +70,7 @@ def get_vector_store(
     persist_directory: str | Path = VECTOR_STORE_PATH,
     collection_name: str = CHROMA_COLLECTION_NAME,
 ) -> Chroma:
-    """创建或打开 Chroma 向量库。"""
+    """创建 Chroma 向量库连接；Compose 使用 HTTP，单进程本地可嵌入。"""
     resolved_collection_name = collection_name
     embedding_function = None
     if user_id is not None:
@@ -76,10 +82,21 @@ def get_vector_store(
         )
         embedding_function = create_embedding_model_from_settings(settings)
 
+    common_options = {
+        "collection_name": resolved_collection_name,
+        "embedding_function": embedding_function,
+    }
+    if CHROMA_HOST:
+        return Chroma(
+            **common_options,
+            host=CHROMA_HOST,
+            port=CHROMA_PORT,
+            ssl=CHROMA_SSL,
+        )
+
     return Chroma(
-        collection_name=resolved_collection_name,
+        **common_options,
         persist_directory=str(persist_directory),
-        embedding_function=embedding_function,
     )
 
 

@@ -60,7 +60,9 @@ Docker Compose 运行时还建议确认这些路径配置：
 MODELS_DIR=./models
 VECTOR_DB_DIR=./vector_db
 UPLOADS_DIR=./uploads
-VECTOR_STORE_PATH=/app/vector_db/chroma
+CHROMA_HOST=chroma
+CHROMA_PORT=8000
+CHROMA_SSL=false
 RERANKER_MODEL_PATH=/app/models/rerankers/bge-reranker-base
 FRONTEND_PORT=127.0.0.1:3000
 BACKEND_PORT=127.0.0.1:8000
@@ -193,7 +195,7 @@ docker compose down -v
 
 ## 9. 镜像体积与 worker
 
-`backend`、`migrate` 和 `worker` 都使用 `deploy/docker/backend.Dockerfile` 构建的 Python runtime 镜像。worker 的启动命令不同，但它仍需要文档解析、embedding、Chroma 入库和 PostgreSQL 队列依赖，因此不会比后端小很多。
+`backend`、`migrate` 和 `worker` 都使用 `deploy/docker/backend.Dockerfile` 构建的 Python runtime 镜像。worker 的启动命令不同，但它仍需要文档解析、embedding、Chroma HTTP client 和 PostgreSQL 队列依赖，因此不会比后端小很多。Compose 另启独立 `chroma` service，backend 与 worker 不再以两个 embedded 进程直接访问同一持久化目录。
 
 后端 Dockerfile 使用 multi-stage build：`builder` 阶段安装编译工具并构建 Python virtualenv，最终 `runtime` 镜像只保留运行依赖和 Chroma/ONNX 可能需要的 `libgomp1`。默认最小镜像不安装 `torch`、`transformers` 和本地 CrossEncoder rerank 依赖。
 
