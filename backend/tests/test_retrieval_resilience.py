@@ -93,6 +93,42 @@ class FakeFallbackVectorStore:
         ]
 
 
+class FakeTransientVectorStore:
+    """模拟 Chroma 刚写入后首次单文件过滤短暂失败。"""
+
+    def __init__(self) -> None:
+        """记录单文件过滤调用次数。"""
+        self.file_filter_calls = 0
+
+    def similarity_search_by_vector_with_relevance_scores(
+        self,
+        embedding: list[float],
+        k: int,
+        filter: dict,
+    ) -> list[tuple[Document, float]]:
+        """首次单文件过滤抛错，第二次返回目标文件候选。"""
+        if "$and" in filter:
+            self.file_filter_calls += 1
+            if self.file_filter_calls == 1:
+                raise RuntimeError("Error finding id")
+            file_filter = filter["$and"][1]["file_id"]
+            return [
+                (
+                    Document(
+                        page_content="目标文件向量候选",
+                        metadata={
+                            "user_id": "6",
+                            "file_id": file_filter,
+                            "chunk_index": 1,
+                        },
+                    ),
+                    0.1,
+                ),
+            ]
+
+        return []
+
+
 class FakeReranker:
     """模拟 CrossEncoder reranker，避免单元测试加载真实模型。"""
 
@@ -179,6 +215,41 @@ class RetrievalResilienceTests(unittest.TestCase):
         self.assertEqual(len(docs), 1)
         self.assertEqual(docs[0].metadata["file_id"], "target-file")
         self.assertEqual(docs[0].metadata["retrieval_source"], "vector")
+
+    def test_vector_search_retries_transient_file_filter_failure(self) -> None:
+        """单文件过滤瞬时失败后重试成功时不应标记向量降级。"""
+        vector_store = FakeTransientVectorStore()
+        reset_retrieval_diagnostics()
+
+        with unittest.mock.patch(
+            "app.services.retrieval.hybrid_retriever.create_embedding_model",
+        ) as embedding_cls, unittest.mock.patch(
+            "app.services.retrieval.hybrid_retriever.get_embedding_cache_identity",
+            return_value=("6", "zhipuai", "embedding-3", ""),
+        ), unittest.mock.patch(
+            "app.services.retrieval.hybrid_retriever.get_vector_store",
+            return_value=vector_store,
+        ), unittest.mock.patch(
+            "app.services.retrieval.hybrid_retriever.sleep",
+        ):
+            embedding_cls.return_value.embed_query.return_value = [0.1, 0.2]
+
+            docs = get_vector_documents(
+                query="索引验收标识是什么",
+                user_id=6,
+                file_ids=["target-file"],
+                k=5,
+            )
+
+        diagnostics = get_retrieval_diagnostics()
+
+        self.assertEqual(vector_store.file_filter_calls, 2)
+        self.assertEqual(len(docs), 1)
+        self.assertEqual(docs[0].metadata["file_id"], "target-file")
+        self.assertIsNotNone(diagnostics)
+        assert diagnostics is not None
+        self.assertFalse(diagnostics["vector_degraded"])
+        self.assertEqual(diagnostics["vector_errors"], [])
 
     def test_hybrid_retrieval_skips_rerank_when_candidates_fit_top_k(
         self,

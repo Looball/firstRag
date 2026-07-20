@@ -23,6 +23,7 @@ from hashlib import sha256
 from threading import RLock
 from time import monotonic
 from time import perf_counter
+from time import sleep
 from typing import Any
 from uuid import UUID
 
@@ -47,6 +48,7 @@ logger = logging.getLogger(__name__)
 
 QUERY_EMBEDDING_CACHE_TTL_SECONDS = 300.0
 MAX_VECTOR_FILTER_FALLBACK_CANDIDATES = 100
+VECTOR_FILE_FILTER_RETRY_DELAY_SECONDS = 0.2
 
 _QUERY_EMBEDDING_CACHE: dict[
     tuple[str, str, str, str, str],
@@ -347,6 +349,27 @@ def retry_file_vector_search_without_file_filter(
     ][:k]
 
 
+def retry_file_vector_search_with_delay(
+    *,
+    vectordb: Any,
+    query_embedding: list[float],
+    user_id: int,
+    file_id: UUID | str,
+    k: int,
+) -> list[tuple[Document, float]]:
+    """单文件 Chroma 查询瞬时失败时短暂等待后重试。
+
+    Chroma 刚完成写入后，HNSW/metadata 查询偶发短时间 `Error finding id`。
+    先重试同一单文件过滤，仍失败时再由调用方进入用户级 fallback。
+    """
+    sleep(VECTOR_FILE_FILTER_RETRY_DELAY_SECONDS)
+    return vectordb.similarity_search_by_vector_with_relevance_scores(
+        embedding=query_embedding,
+        k=k,
+        filter=build_file_chroma_filter(user_id, file_id),
+    )
+
+
 def get_vector_documents(
     query: str,
     user_id: int,
@@ -404,6 +427,21 @@ def get_vector_documents(
                         )
                     )
                 except Exception as exc:
+                    try:
+                        retry_candidates = retry_file_vector_search_with_delay(
+                            vectordb=vectordb,
+                            query_embedding=query_embedding,
+                            user_id=user_id,
+                            file_id=file_id,
+                            k=k,
+                        )
+                    except Exception:
+                        retry_candidates = []
+
+                    if retry_candidates:
+                        scored_candidates.extend(retry_candidates)
+                        continue
+
                     try:
                         fallback_candidates = (
                             retry_file_vector_search_without_file_filter(
