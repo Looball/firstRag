@@ -5,6 +5,8 @@ on:
   push:
     branches:
       - main
+  schedule:
+    - cron: "17 1 * * 1"
   workflow_dispatch:
 
 permissions:
@@ -69,6 +71,9 @@ jobs:
       - name: Install frontend dependencies
         working-directory: frontend
         run: npm ci
+
+      - name: Audit production dependencies
+        run: python3 scripts/npm_audit_policy.py
 
       - name: Lint frontend
         working-directory: frontend

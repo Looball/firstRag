@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "exceptions": [
+    {
+      "advisory_id": "GHSA-QX2V-QP2M-JG93",
+      "package": "postcss",
+      "severity": "moderate",
+      "reviewed_on": "2026-07-20",
+      "expires_on": "2026-08-20",
+      "reason": "Next.js 16.2.10 固定依赖 PostCSS 8.4.31；FirstRAG 不接受用户自定义 CSS，也不会把请求数据传给 PostCSS stringify，而 npm 仅提供降级到 Next.js 9.3.3 的 breaking fix。",
+      "follow_up": "上游 Next.js 包含 PostCSS 8.5.10 或更高版本后升级 Next.js，并删除本例外。"
+    }
+  ]
+}
