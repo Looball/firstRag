@@ -67,3 +67,25 @@ docker build --file deploy/docker/frontend.Dockerfile --tag firstrag-frontend:ci
 trivy image --scanners vuln --pkg-types os --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 firstrag-backend:ci
 trivy image --scanners vuln --pkg-types os --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 firstrag-frontend:ci
 ```
+
+## GitHub Actions supply chain 策略
+
+- 所有通过 `owner/repository@ref` 引用的外部 Action 必须固定到 40 位完整 commit SHA；tag、branch 和短 SHA 都会被 `scripts/check_github_actions_pins.py` 阻断。
+- SHA 必须来自对应 Action 官方仓库的稳定 release tag，同一行保留 `# vX.Y.Z` 注释，便于人工审查和 Dependabot 同步更新版本说明。
+- 当前固定版本：`actions/checkout v6.0.2`、`actions/setup-python v6.3.0`、`actions/setup-node v6.2.0`、`aquasecurity/trivy-action v0.36.0`。
+- `.github/dependabot.yml` 每周一 09:00（Asia/Shanghai）检查 `github-actions` ecosystem，并把 Action 更新聚合为单个 PR；PR 必须通过 SHA pin policy 和现有 CI 后再合并。
+- 本地 Action（`./...`）不依赖外部 Git repository，不适用外部 SHA 规则；`docker://` Action 由容器 digest 策略单独管理，当前 workflow 没有此类引用。
+
+本地复核：
+
+```bash
+conda run -n firstrag python scripts/check_github_actions_pins.py
+conda run -n firstrag python -m pytest backend/tests/test_github_actions_pins_script.py
+```
+
+更新 Action 时：
+
+1. 从官方 repository 的 release/tag 解析完整 commit SHA，不从 fork、issue 或第三方博客复制。
+2. 同时更新 SHA 与同一行版本注释。
+3. 审查 release notes 的 runner 最低版本、breaking changes、权限和 cache 行为。
+4. 不自动合并 Dependabot PR；先等待完整 CI 通过并人工核对来源。

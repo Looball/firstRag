@@ -186,8 +186,11 @@ CI 覆盖：
 - 后端：安装 `backend/requirements.txt`、Python production dependency audit policy、`python -m compileall app`、`python -m unittest discover tests -v`、`python scripts/migrate_db.py --list` 和 `docker compose config --quiet`。
 - 前端：`npm ci`、production dependency audit policy、`npm run lint`、`npm run test` 和 `npm run build`。
 - 容器：从当前 Dockerfile 构建 backend/frontend 第一方镜像，使用 Trivy 扫描 OS packages。
+- Workflow supply chain：检查所有外部 GitHub Action 都固定到官方 release 的 40 位 commit SHA，并保留同一行版本注释。
 
 dependency audit policy 在 PR、`main` push、手动触发和每周一计划任务中执行。npm 的 `high` / `critical` finding 永远阻断，未 triage 的 `moderate` 也会阻断；Python finding 有修复版本时必须升级，没有修复版本时也必须先 triage，才能登记精确到 advisory/package/version 且最长 31 天的例外。例外过期、finding 或版本变化、上游修复后遗留无效例外都会让 CI 失败。Trivy 对当前第一方镜像中已有修复的 `HIGH` / `CRITICAL` OS finding 执行强阻断。详细维护流程见 `security/README.md`。
+
+`.github/dependabot.yml` 每周检查 `github-actions` ecosystem，将 Action version update 聚合为一个 PR。Dependabot 只负责提出 SHA 更新；仓库不会自动合并，仍需核对官方 release、同一行版本注释和完整 CI 结果。GitHub repository settings 还可额外开启“Require actions to be pinned to a full-length commit SHA”，形成平台侧强制策略。
 
 默认 CI 不运行真实 RAG eval 和 indexing eval，因为它们需要后端服务、真实账号、
 外部模型 API Key 和可用数据库。发布前仍按本地验收流程显式运行真实评估。
