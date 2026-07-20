@@ -1638,6 +1638,7 @@ conda run -n firstrag python scripts/eval_summary.py
   - `docs/evals/README.md` 固化上线前基线口径、回滚/调参建议和 2026-07-02 真实链路结果。
   - 真实 RAG eval gate：14/14 PASS，通过率 1.00，平均 sources 2.00，平均首 token 2701.22ms，平均耗时 5.90s，失败 case 为 0，质量门禁全部 PASS；报告 `docs/evals/latest_rag_eval_report.md`，历史记录 `docs/evals/runs/20260702_082822.json`。
   - Indexing eval：通过，job `succeeded`，聊天耗时 9.25s，引用数 1；报告 `docs/evals/latest_indexing_eval_report.md`，历史记录 `docs/evals/indexing_runs/20260702_082957.json`。
+  - 2026-07-20 复验：补齐并导入 `RAG系统核心技术与实现.md`、`RAG检索策略全面解析.md` 两个 eval fixture，默认知识库最终仅保留这两个 Markdown fixture 和 `中华人民共和国民事诉讼法_20230901.pdf` 三个基线文件参与检索，已解除 `.codex-rerank-*` 历史 smoke 文件关联；真实 RAG eval gate 14/14 PASS，通过率 1.00，平均 sources 3.00，平均首 token 2483.11ms，平均耗时 4.80s，失败 case 为 0，质量门禁全部 PASS；报告 `docs/evals/latest_rag_eval_report.md`，历史记录 `docs/evals/runs/20260720_164813.json`。
   - 验证命令：`conda run -n firstrag python -c 'import json, pathlib; cases=[json.loads(line) for line in pathlib.Path("docs/evals/rag_eval_cases.jsonl").read_text(encoding="utf-8").splitlines() if line.strip()]; print(len(cases))'`；`cd backend && conda run -n firstrag python -m pytest tests/test_eval_rag_script.py`；`conda run -n firstrag python -m compileall scripts backend/tests/test_eval_rag_script.py`；`conda run -n firstrag python scripts/eval_summary.py`；`FIRSTRAG_EVAL_USERNAME=... FIRSTRAG_EVAL_PASSWORD=... scripts/rag_eval_gate.sh`；`FIRSTRAG_EVAL_USERNAME=... FIRSTRAG_EVAL_PASSWORD=... scripts/acceptance_check.sh`。
 
 ## T-047 区分普通用户模式和高级/开发模式
