@@ -40,8 +40,9 @@
 
 ## 当前基线
 
-- 2026-07-20 已刷新静态回归验收：后端 256 个 pytest 用例通过、前端 lint 0 error（保留 2 个 `<img>` 性能 warning）、Vitest 58 个用例通过、Next 16.2.10 production build 通过。
+- 2026-07-20 已刷新静态回归验收：后端 266 个 pytest 用例和 28 个 subtests 通过、前端 lint 0 error（保留 2 个 `<img>` 性能 warning）、Vitest 58 个用例通过、Next 16.2.10 production build 通过。
 - 2026-07-20 已完成前端依赖安全审计：Next.js 从 16.2.2 升级到 16.2.10，已消除已确认的 high findings；Babel、brace-expansion 和 js-yaml 开发依赖补丁已更新。`npm audit` 仍报告 Next 内嵌 PostCSS 的 2 个 moderate 条目，当前项目没有用户可控 CSS 进入 stringify 的运行路径，且审计器只提供降级到 Next 9.3.3 的 breaking fix，因此保留为已 triage 的不可达例外。
+- 2026-07-20 已完成后端与镜像依赖安全审计：PyJWT、python-dotenv 和 python-multipart 已升级到安全补丁版本；`pip-audit` 只剩 ChromaDB 1.5.9 的 no-fix finding，由精确到版本且 2026-08-20 到期的内网不可达例外管理；Trivy 对当前 backend/frontend 镜像的可修复 high/critical OS finding 均为 0。
 - 2026-07-20 已完成 Chroma 跨进程索引可见性真实回归：Compose 使用独立 `chroma` service，worker 重建文件向量后 backend 无需重启即可召回 16 条 vector 结果，`vector_degraded=false`、`vector_errors=[]`，目标资料同时包含 `fulltext` 和 `vector` 来源。
 - 当前默认验证路径为 `docker compose up -d --build` 后检查 `docker compose ps` 与 Redis、PostgreSQL、Chroma、migration、backend、worker、frontend 关键日志；`scripts/acceptance_check.sh` 作为补充验收脚本，静态补充检查可运行 `scripts/acceptance_check.sh --skip-real-eval`。
 - 当前阶段优先做“可维护性 + 可观测性 + 验收自动化”，避免在关键链路刚稳定后继续堆叠大功能；前端工作台已开始引入 React Query 和 Zod 做请求层集中化与轻量响应校验。
@@ -70,7 +71,7 @@
 | `PLAN-20260720-03` | 2026-07-20 | `Done` | 补齐 Redis 限流的前端反馈闭环，统一透传 Retry-After 并为受限操作显示重试倒计时。 | `T-064` |
 | `PLAN-20260720-04` | 2026-07-20 | `Done` | 补齐 Redis 限流命中与故障可观测性，让额度耗尽、fallback 和 fail-closed 阻断可聚合、可告警。 | `T-065` |
 | `PLAN-20260720-05` | 2026-07-20 | `Done` | 将前端依赖漏洞审计固化到 CI，并为已 triage finding 建立限时例外和自动到期复查。 | `T-066` |
-| `PLAN-20260720-06` | 2026-07-20 | `Doing` | 将后端 Python 依赖和第一方 Docker 镜像的漏洞审计固化到 CI。 | `T-067` |
+| `PLAN-20260720-06` | 2026-07-20 | `Done` | 将后端 Python 依赖和第一方 Docker 镜像的漏洞审计固化到 CI。 | `T-067` |
 
 ## 任务总览
 
@@ -142,7 +143,7 @@
 | `T-064` | `PLAN-20260720-03` | `P1` | `Done` | 前端统一处理限流响应与重试倒计时 | 2026-07-20 | `0e2ec9d` |
 | `T-065` | `PLAN-20260720-04` | `P1` | `Done` | 增加限流命中和 Redis 故障可观测性 | 2026-07-20 | `6328c3b` |
 | `T-066` | `PLAN-20260720-05` | `P1` | `Done` | 将依赖漏洞审计和例外复查固化到 CI | 2026-07-20 | `a948662` |
-| `T-067` | `PLAN-20260720-06` | `P1` | `Doing` | 增加 Python 依赖和 Docker 镜像漏洞 CI 门禁 | — | — |
+| `T-067` | `PLAN-20260720-06` | `P1` | `Done` | 增加 Python 依赖和 Docker 镜像漏洞 CI 门禁 | 2026-07-20 | `fd18c44` |
 
 ## 新计划接入流程
 
@@ -2537,6 +2538,47 @@ conda run -n firstrag python scripts/npm_audit_policy.py
 ruby -e 'require "yaml"; YAML.load_file(".github/workflows/ci.yml"); puts "workflow yaml ok"'
 cd frontend && npm test && npm run lint && npm run build
 cd .. && docker compose up -d --build
+git diff --check
+```
+
+## T-067 增加 Python 依赖和 Docker 镜像漏洞 CI 门禁
+
+- 来源计划：`PLAN-20260720-06`
+- 优先级：`P1`
+- 状态：`Done`
+- 目标：让后端 Python production dependencies 和第一方 Docker 镜像中的 OS package 漏洞在合并前自动阻断，并为当前上游无修复版本的 ChromaDB finding 建立可自动到期的审查边界。
+- 范围：
+  - 使用固定版本 `pip-audit` 严格审计 `backend/requirements.txt`。
+  - 有修复版本的 Python finding 禁止例外；no-fix finding 只有完成 triage 后才能登记精确到 advisory/package/version、最长 31 天的例外。
+  - 升级当前可修复的 PyJWT、python-dotenv 和 python-multipart 漏洞。
+  - 构建当前 backend/frontend Dockerfile，并用固定 SHA 的 Trivy Action 扫描 OS packages。
+  - Trivy 阻断有修复版本的 `HIGH` / `CRITICAL`，Python/npm library findings 继续由各自专用策略负责。
+- 验收标准：
+  - 真实 `pip-audit` 只保留已 triage、未过期且精确匹配的 ChromaDB no-fix finding。
+  - 可修复漏洞、未登记 no-fix、过期/版本不匹配/stale exception、scanner/resolver 失败都能阻断。
+  - backend/frontend 当前镜像没有可修复的 high/critical OS finding。
+  - CI workflow YAML、全量后端测试、Docker Compose build/health 和相关日志检查通过。
+- 相关提交：`fd18c44`。
+- 完成记录：
+  - 完成日期：2026-07-20。
+  - PyJWT `2.12.1 -> 2.13.0`、python-dotenv `1.2.1 -> 1.2.2`、python-multipart `0.0.30 -> 0.0.31`；对应可修复 finding 已从真实审计中消失。
+  - 新增 `scripts/pip_audit_policy.py` 和 10 个策略测试；`pip-audit==2.10.1 --strict` 的真实在线审计输出 `PASS findings=1 exceptions=1`。
+  - `GHSA-F4J7-R4Q5-QW2C / chromadb / 1.5.9` 当前没有修复版本。静态 triage 确认 FirstRAG Compose 不映射 Chroma 端口、Nginx 没有 Chroma upstream、业务代码不接收 `model repository + trust_remote_code` collection configuration，因此保留至 2026-08-20 的限时例外；部署若额外暴露 Chroma，例外立即失效。
+  - Trivy Action 使用 `v0.36.0` 完整 commit SHA，Trivy 固定 `v0.72.0`；真实扫描 backend Debian 13.6 和 frontend Debian 12.15，符合门禁范围的 finding 均为 0。
+  - `cd backend && conda run -n firstrag python -m pytest -q`：266 passed、28 subtests passed。
+  - `docker compose up -d --build` 通过；Redis、PostgreSQL、Chroma healthy，backend、worker、frontend Up，migration `applied=0 skipped=5`，`GET /health` 返回 healthy。
+  - CI workflow YAML、Python compileall、`docker compose config --quiet` 和 `git diff --check` 通过。
+- 建议验证命令：
+
+```bash
+conda run -n firstrag python -m pytest backend/tests/test_pip_audit_policy_script.py
+conda run -n firstrag python scripts/pip_audit_policy.py
+cd backend && conda run -n firstrag python -m pytest -q
+cd .. && docker compose up -d --build
+trivy image --scanners vuln --pkg-types os --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 firstrag-backend:latest
+trivy image --scanners vuln --pkg-types os --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 firstrag-frontend:latest
+docker compose ps
+docker compose logs --tail=100 migrate backend worker frontend postgres redis chroma
 git diff --check
 ```
 
