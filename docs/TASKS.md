@@ -40,8 +40,9 @@
 
 ## 当前基线
 
-- 2026-06-29 已完成静态回归验收：后端 107 个 unittest 通过、前端 lint 通过、Vitest 32 个用例通过、Next build 通过；真实 RAG eval 和 indexing eval 可在发布前按需运行。
-- 当前默认验证路径为 `docker compose up -d --build` 后检查 `docker compose ps` 与关键服务日志；`scripts/acceptance_check.sh` 作为补充验收脚本，静态补充检查可运行 `scripts/acceptance_check.sh --skip-real-eval`。
+- 2026-07-20 已刷新静态回归验收：后端 240 个 pytest 用例通过、前端 lint 0 error（保留 2 个 `<img>` 性能 warning）、Vitest 52 个用例通过、Next production build 通过。
+- 2026-07-20 已完成 Chroma 跨进程索引可见性真实回归：Compose 使用独立 `chroma` service，worker 重建文件向量后 backend 无需重启即可召回 16 条 vector 结果，`vector_degraded=false`、`vector_errors=[]`，目标资料同时包含 `fulltext` 和 `vector` 来源。
+- 当前默认验证路径为 `docker compose up -d --build` 后检查 `docker compose ps` 与 Redis、PostgreSQL、Chroma、migration、backend、worker、frontend 关键日志；`scripts/acceptance_check.sh` 作为补充验收脚本，静态补充检查可运行 `scripts/acceptance_check.sh --skip-real-eval`。
 - 当前阶段优先做“可维护性 + 可观测性 + 验收自动化”，避免在关键链路刚稳定后继续堆叠大功能；前端工作台已开始引入 React Query 和 Zod 做请求层集中化与轻量响应校验。
 - 修改项目文件后，继续遵守只暂存当前任务相关文件、不混入 unrelated refactor 的规则。
 
@@ -60,9 +61,10 @@
 | `PLAN-20260630-02` | 2026-06-30 | `Done` | 补强工程化交付闭环，优先解决数据库迁移、Docker Compose 初始化、CI 和发布前验收可运行性。 | `T-030` - `T-036` |
 | `PLAN-20260701-01` | 2026-07-01 | `Done` | 发布前收口专项，优先修正文档台账状态、继续降低前端工作台复杂度，并刷新真实链路验收基线。 | `T-037` - `T-041` |
 | `PLAN-20260701-02` | 2026-07-01 | `Done` | 正式生产上线补强专项，补齐部署安全、稳定性、风控、可观测性、评测质量和产品化分层。 | `T-042` - `T-047` |
-| `PLAN-20260703-01` | 2026-07-03 | `Todo` | 公开 Demo 上线试运行专项；暂不立即部署，先补齐不依赖真实服务器的上线阻塞项，并为后续公网验证留出明确步骤。 | `T-048` - `T-052` |
+| `PLAN-20260703-01` | 2026-07-03 | `Blocked` | 公开 Demo 上线试运行专项；代码侧前置项已完成，真实部署和公网验收仍等待服务器、域名、TLS 与生产配置。 | `T-048` - `T-052` |
 | `PLAN-20260704-01` | 2026-07-04 | `Done` | 聊天图片能力专项；先支持聊天框图片附件和视觉模型调用，再扩展图片/OCR 入知识库。 | `T-054` - `T-055` |
 | `PLAN-20260705-01` | 2026-07-05 | `Done` | Redis 基础设施专项；从进程内状态扩展为可多实例共享的缓存、限流、worker 运行态和部署健康检查。 | `T-056` - `T-061` |
+| `PLAN-20260720-01` | 2026-07-20 | `Done` | 收口近期模型设置、聊天图片、RAG fixture/复验和 Chroma client-server 修复，刷新任务台账与当前验收基线。 | `T-062` |
 
 ## 任务总览
 
@@ -118,8 +120,8 @@
 | `T-048` | `PLAN-20260703-01` | `P1` | `Done` | 补齐公网反向代理配置 | 2026-07-03 | `309ef7c` |
 | `T-049` | `PLAN-20260703-01` | `P0` | `Done` | 增加公开环境注册控制 | 2026-07-04 | `5ccc8a2` |
 | `T-050` | `PLAN-20260703-01` | `P0` | `Done` | 增加 demo 数据清理脚本 | `2026-07-04` | `scripts/demo_cleanup.py`、`docs/DEPLOYMENT.md` |
-| `T-051` | `PLAN-20260703-01` | `P2` | `Blocked` | 部署到受控 staging/demo 环境 | 2026-07-04 | 缺少真实服务器、域名/TLS 和生产 `.env` |
-| `T-052` | `PLAN-20260703-01` | `P2` | `Done` | 完成公网 smoke test 与真实 RAG eval | 2026-07-03 | 见任务详情 |
+| `T-051` | `PLAN-20260703-01` | `P2` | `Blocked` | 部署到受控 staging/demo 环境 | — | 缺少真实服务器、域名/TLS 和生产 `.env` |
+| `T-052` | `PLAN-20260703-01` | `P2` | `Blocked` | 完成公网 smoke test 与真实 RAG eval | — | 依赖 `T-051` 完成真实部署 |
 | `T-053` | 用户要求 | `P1` | `Done` | 用户登录后配置 LLM 与向量模型 API | 2026-07-03 | `6124b2d` |
 | `T-054` | `PLAN-20260704-01` | `P1` | `Done` | 支持聊天框图片附件和视觉模型调用 | 2026-07-05 | `42f206b` |
 | `T-055` | `PLAN-20260704-01` | `P2` | `Done` | 支持图片/OCR 入知识库检索 | 2026-07-05 | `d8cd9ce` |
@@ -129,6 +131,7 @@
 | `T-059` | `PLAN-20260705-01` | `P1` | `Done` | 为 vector worker 增加 Redis 运行态、锁和队列观测 | 2026-07-06 | `8f454ef` |
 | `T-060` | `PLAN-20260705-01` | `P1` | `Done` | 补齐 Redis 生产部署、preflight 和文档 | 2026-07-06 | `f13f9a5` |
 | `T-061` | `PLAN-20260705-01` | `P1` | `Done` | 完成 Redis 场景 Docker 验证和核心链路回归 | 2026-07-06 | `858e27f` |
+| `T-062` | `PLAN-20260720-01` | `P1` | `Done` | 收口近期功能、Chroma 架构和任务台账 | 2026-07-20 | 见任务详情 |
 
 ## 新计划接入流程
 
@@ -1792,15 +1795,15 @@ conda run -n firstrag python scripts/demo_cleanup.py --dry-run
 - 优先级：`P2`
 - 状态：`Blocked`
 - 背景：当前用户决策是暂不部署；本任务仅记录资源就绪后的执行步骤，不在没有服务器、域名和 TLS 方案前启动。
-- 目标：在真实服务器上完成受控 staging/demo 环境部署，并保持 backend、worker、PostgreSQL、uploads、vector_db 和 models 的持久化边界清晰。
+- 目标：在真实服务器上完成受控 staging/demo 环境部署，并保持 backend、worker、PostgreSQL、Redis、Chroma、uploads 和 models 的持久化边界清晰。
 - 执行尝试：`2026-07-04`
 - 当前阻塞：
   - 尚未提供真实云服务器、域名和 TLS 入口。
-  - 当前 `.env` 未达到生产要求，production preflight 已拦截模板数据库密码和过短 JWT secret。
-  - 当前本机 Compose 服务端口绑定为 `0.0.0.0:3000/8000/5432`，不满足公开 demo 只暴露 80/443、backend/PostgreSQL 不直接暴露的验收标准。
+  - 本机 `.env` 已通过 production preflight，但真实服务器上的生产 `.env`、provider Key 和持久化目录仍未准备。
+  - 当前本机 Compose 已将 frontend、backend 和 PostgreSQL 绑定到 `127.0.0.1`，但它仍是本地开发环境，不能替代真实服务器、域名、TLS 和公网入口验收。
 - 已验证：
   - `docker compose config --quiet` 通过。
-  - `conda run -n firstrag python scripts/production_preflight.py --env-file .env --migration-method compose --skip-migration-dry-run` 正确失败，未输出真实 secret。
+  - `conda run -n firstrag python scripts/production_preflight.py --env-file .env --migration-method compose --skip-migration-dry-run` 通过，未输出真实 secret。
   - `docker compose ps` 可读取当前本机服务状态，但当前服务不是合格的受控 staging/demo 部署。
 - 启动条件：
   - 已选择云服务器、域名和 TLS 入口。
@@ -1812,7 +1815,7 @@ conda run -n firstrag python scripts/demo_cleanup.py --dry-run
   - 确认公网只暴露 80/443，backend 和 PostgreSQL 不直接暴露。
   - 记录服务器资源、持久化目录、备份策略和部署命令，不提交真实 secret。
 - 验收标准：
-  - `migrate`、`backend`、`frontend`、`worker` 和 `postgres` 均正常启动。
+  - `redis`、`postgres`、`chroma`、`migrate`、`backend`、`frontend` 和 `worker` 均正常启动。
   - 生产 preflight 不输出真实 secret，且阻止默认密码、占位 Key 和公网数据库端口。
   - 演示账号可以登录，样例知识库可以完成一次向量化。
   - README 仍不公开账号密码，只说明 demo 访问限制和数据清理边界。
@@ -1822,16 +1825,17 @@ conda run -n firstrag python scripts/demo_cleanup.py --dry-run
 conda run -n firstrag python scripts/production_preflight.py --env-file .env --migration-method compose
 docker compose config --quiet
 docker compose ps
-docker compose logs --tail=100 migrate backend worker frontend
+docker compose logs --tail=100 redis postgres chroma migrate backend worker frontend
 ```
 
 ## T-052 完成公网 smoke test 与真实 RAG eval
 
 - 来源计划：`PLAN-20260703-01`
 - 优先级：`P2`
-- 状态：`Done`
+- 状态：`Blocked`
 - 背景：公开 demo 是否可用不能只看本机或内网；需要从真实域名验证 TLS、反向代理、上传、SSE、worker、sources 和 RAG 质量门禁。
 - 目标：完成一次公网入口验收，确认外部访问者通过真实域名使用 FirstRAG 时核心链路稳定、安全且质量不过度退化。
+- 当前阻塞：`T-051` 尚未完成真实 staging/demo 部署，因此当前只能完成本地真实 RAG/indexing eval，不能把它等同于公网 smoke test。2026-07-20 将此前不准确的 `Done` 修正为 `Blocked`。
 - 启动条件：
   - `T-051` 已完成 staging/demo 环境部署。
   - 已准备演示账号、脱敏样例知识库和可复跑 eval case。
@@ -2314,6 +2318,54 @@ conda run -n firstrag python scripts/eval_indexing.py \
   - `cd backend && conda run -n firstrag python -m pytest`，232 passed。
   - `cd frontend && npm test`，51 passed。
   - `git diff --check` 通过。
+
+## T-062 收口近期功能、Chroma 架构和任务台账
+
+- 来源计划：`PLAN-20260720-01`
+- 优先级：`P1`
+- 状态：`Done`
+- 目标：把 `T-061` 之后已经完成但尚未进入任务总览的功能、修复和真实验收结果收口到台账，并恢复计划、任务详情和当前代码基线的一致性。
+- 范围：
+  - 补录模型列表发现、LLM 生成控制/操作区布局、向量索引原文件名、聊天框图片粘贴、Chroma 短暂失败恢复、RAG fixture/真实复验和 Chroma client-server 架构修复。
+  - 刷新后端、前端和 Docker Compose 当前验收基线。
+  - 修正 `PLAN-20260703-01`、`T-051` 和 `T-052` 的状态关系；本地真实 eval 不再误记为已完成公网 smoke test。
+  - 同步 staging/demo 任务中的独立 Chroma service、持久化和日志检查口径。
+- 验收标准：
+  - `T-061` 之后的相关提交在任务详情中可追溯。
+  - 当前基线中的测试数量、Chroma 拓扑和真实索引回归结果与代码现状一致。
+  - 计划总览、任务总览和任务详情中的状态一致。
+  - 后端全量测试、前端测试/lint/build、Compose 配置和服务状态检查通过。
+- 相关提交：
+  - `663d769`：收口 Redis 计划状态。
+  - `990ffbc`：恢复模型列表发现。
+  - `0f8ef24`、`e4e2add`：将生成控制和聊天模型操作区归入 LLM 配置。
+  - `984ad18`：向量索引保留原始文件名。
+  - `daa16a7`：聊天输入框支持直接粘贴图片。
+  - `8e7ce12`：Chroma 单文件 filter 短暂失败恢复。
+  - `56b9294`、`666794a`：补充 RAG eval fixture 并记录 2026-07-20 真实复验。
+  - `60fb271`：Compose 改用独立 Chroma server，修复 backend/worker 跨进程索引可见性。
+- 完成记录：
+  - 完成日期：2026-07-20。
+  - `cd backend && conda run -n firstrag python -m pytest`：240 passed。
+  - `cd frontend && npm test`：9 个 test files、52 passed。
+  - `cd frontend && npm run lint`：0 error，保留 2 个 `<img>` 性能 warning。
+  - `cd frontend && npm run build`：沙箱内因 Turbopack 辅助进程端口权限失败，按既有验证规则在非沙箱环境补跑后 production build 通过。
+  - `docker compose config --quiet` 通过；`docker compose ps` 显示 Redis、PostgreSQL、Chroma healthy，backend、worker、frontend Up。
+  - `conda run -n firstrag python scripts/production_preflight.py --env-file .env --migration-method compose --skip-migration-dry-run` 通过。
+  - Chroma 真实回归：worker 重建索引后 backend 未重启即可召回 16 条 vector 结果，`vector_degraded=false`、`vector_errors=[]`，目标资料同时命中 `fulltext` 与 `vector`。
+- 验证命令：
+
+```bash
+git log --oneline --reverse 858e27f..HEAD
+cd backend && conda run -n firstrag python -m pytest
+cd frontend && npm test
+cd frontend && npm run lint
+cd frontend && npm run build
+docker compose config --quiet
+docker compose ps
+docker compose logs --tail=100 redis postgres chroma migrate backend worker frontend
+git diff --check
+```
 
 ## 更新规则
 
