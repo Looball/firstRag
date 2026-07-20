@@ -4,7 +4,12 @@ from decimal import Decimal
 import unittest
 from unittest.mock import MagicMock, patch
 
+import httpx
+from openai import AuthenticationError
+
+from app.services.llm_service import ChatModelSettings
 from app.services.user_settings_service import (
+    _list_available_models,
     _merge_settings_record,
     _validate_user_base_url,
     check_user_llm_settings,
@@ -353,6 +358,67 @@ class UserLLMSettingsServiceTests(unittest.TestCase):
         self.assertEqual(persisted_settings["model"], "")
         self.assertEqual(result["models"], ["deepseek-v4-flash"])
         create_model.assert_not_called()
+
+    def test_model_discovery_reports_invalid_api_key(self) -> None:
+        """鉴权失败不能被误报为厂商不支持模型列表接口。"""
+        with patch(
+            "app.services.user_settings_service.get_user_llm_settings",
+            return_value=None,
+        ), patch(
+            "app.services.user_settings_service.encrypt_secret",
+            return_value="encrypted-key",
+        ), patch(
+            "app.services.user_settings_service.decrypt_secret",
+            return_value="plain-key",
+        ), patch(
+            "app.services.user_settings_service.upsert_user_llm_settings",
+            return_value=build_user_record(),
+        ), patch(
+            "app.services.user_settings_service._list_available_models",
+            side_effect=ValueError("API Key 无效，请检查后重新输入"),
+        ), patch(
+            "app.services.user_settings_service.create_openai_compatible_chat_model",
+        ) as create_model:
+            with self.assertRaisesRegex(ValueError, "API Key 无效"):
+                check_user_llm_settings(
+                    1,
+                    {
+                        "credential_mode": "user",
+                        "provider": "deepseek",
+                        "api_key": "plain-key",
+                    },
+                )
+
+        create_model.assert_not_called()
+
+    def test_model_list_translates_provider_authentication_error(self) -> None:
+        """OpenAI-compatible 401 应转换为安全、可操作的中文提示。"""
+        client = MagicMock()
+        client.models.list.side_effect = AuthenticationError(
+            "invalid key",
+            response=httpx.Response(
+                401,
+                request=httpx.Request("GET", "https://api.example.com/models"),
+            ),
+            body={"error": "invalid key"},
+        )
+        settings = ChatModelSettings(
+            provider="deepseek",
+            model="",
+            api_key="plain-key",
+            base_url=None,
+            temperature=0.2,
+            max_tokens=8000,
+            timeout_seconds=60,
+            max_retries=2,
+        )
+
+        with patch(
+            "app.services.user_settings_service.OpenAI",
+            return_value=client,
+        ):
+            with self.assertRaisesRegex(ValueError, "API Key 无效"):
+                _list_available_models(settings)
 
     def test_selected_model_can_pass_when_models_endpoint_is_unavailable(self) -> None:
         """不支持 /models 的兼容服务仍应允许已选模型完成连通性测试。"""

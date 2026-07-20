@@ -29,6 +29,7 @@ import {
   parseProviderPresets,
   toUserEmbeddingSettingsPayload,
   toUserLLMSettingsPayload,
+  toUserLLMModelDiscoveryPayload,
   toUserRerankSettingsPayload,
   type EmbeddingProviderPreset,
   type ModelProviderPreset,
@@ -737,7 +738,7 @@ export function ModelSettingsForm() {
     );
   }
 
-  async function handleTest() {
+  async function requestChatModelTest(discoverModelsOnly: boolean) {
     setTestState("loading");
     setNotice("");
 
@@ -745,7 +746,18 @@ export function ModelSettingsForm() {
 
     try {
       invalidateProviderModelRequest();
-      const payload = getPayload(false);
+      if (discoverModelsOnly) {
+        // 复用保存/测试校验，但模型发现请求本身必须移除旧模型名。
+        getPayload(false);
+      }
+      const payload = discoverModelsOnly
+        ? toUserLLMModelDiscoveryPayload(
+            settings,
+            apiKey,
+            requiresBaseUrl
+          )
+        : getPayload(true);
+
       const authState = parseAuthState(localStorage.getItem(AUTH_STORAGE_KEY));
 
       if (!authState) {
@@ -778,13 +790,17 @@ export function ModelSettingsForm() {
 
       setModelCandidates(testResult.models);
       setIsCustomModel(
-        Boolean(settings.model.trim()) &&
+        !discoverModelsOnly &&
+          Boolean(settings.model.trim()) &&
           testResult.models.length > 0 &&
           !testResult.models.includes(settings.model)
       );
+      if (discoverModelsOnly) {
+        setSettings((current) => ({ ...current, model: "" }));
+      }
       setTestState("success");
       setNotice(
-        testResult.modelListAvailable && !settings.model.trim()
+        discoverModelsOnly && testResult.modelListAvailable
           ? `已获取 ${testResult.models.length} 个模型，请选择后再测试连接。`
           : testResult.message
       );
@@ -801,6 +817,14 @@ export function ModelSettingsForm() {
         await refreshSettingsAndProviders(authorization);
       }
     }
+  }
+
+  async function handleModelDiscovery() {
+    await requestChatModelTest(true);
+  }
+
+  async function handleTest() {
+    await requestChatModelTest(false);
   }
 
   async function handleEmbeddingTest() {
@@ -1118,6 +1142,7 @@ export function ModelSettingsForm() {
               <button type="button" onClick={() => setShowApiKey((current) => !current)} disabled={!apiKey} title={apiKey ? undefined : "已保存的 Key 不可查看"} className="border-l border-[var(--line)] px-4 text-xs font-semibold text-[var(--ink-muted)] hover:bg-[var(--paper-muted)] disabled:cursor-not-allowed disabled:text-[var(--line)]">{apiKey ? (showApiKey ? "隐藏" : "显示") : "不可查看"}</button>
             </div>
             <p className="mt-2 text-xs leading-5 text-[var(--ink-muted)]">密钥只会在保存或测试时发送到后端，页面不会回显或存入浏览器。</p>
+            <button type="button" onClick={() => void handleModelDiscovery()} disabled={testState === "loading" || saveState === "loading" || (!hasSavedApiKey && !apiKey.trim())} className="mt-4 border border-[var(--research)] px-5 py-3 text-sm font-semibold text-[var(--research)] transition hover:bg-white disabled:cursor-not-allowed disabled:border-[var(--line)] disabled:text-[var(--ink-muted)]">{testState === "loading" ? "正在获取模型列表..." : modelCandidates.length > 0 ? "重新获取模型列表" : "获取模型列表"}</button>
           </section>
 
           <section className="border-t border-[var(--line)] pt-7" aria-labelledby="embedding-title">
@@ -1215,7 +1240,7 @@ export function ModelSettingsForm() {
           <div className="border-t border-[var(--line)] pt-6">
             <p role="status" className={`min-h-5 text-sm ${saveState === "error" || testState === "error" || embeddingSaveState === "error" || embeddingTestState === "error" || rerankSaveState === "error" || rerankTestState === "error" ? "text-[#9b3c29]" : "text-[var(--ink-muted)]"}`}>{notice || "保存后，工作台的下一次对话、向量化和检索精排会使用当前账号的模型设置。"}</p>
             <div className="mt-4 flex flex-wrap gap-3">
-              <button type="button" onClick={() => void handleTest()} disabled={testState === "loading" || saveState === "loading"} className="border border-[var(--research)] px-5 py-3 text-sm font-semibold text-[var(--research)] transition hover:bg-[var(--paper-muted)] disabled:border-[var(--line)] disabled:text-[var(--ink-muted)]">{testState === "loading" ? "测试中..." : !settings.model.trim() ? "获取模型列表" : "测试聊天模型"}</button>
+              <button type="button" onClick={() => void handleTest()} disabled={testState === "loading" || saveState === "loading" || !settings.model.trim()} className="border border-[var(--research)] px-5 py-3 text-sm font-semibold text-[var(--research)] transition hover:bg-[var(--paper-muted)] disabled:border-[var(--line)] disabled:text-[var(--ink-muted)]">{testState === "loading" ? "测试中..." : "测试聊天模型"}</button>
               <button type="submit" disabled={saveState === "loading" || testState === "loading"} className="bg-[var(--research)] px-5 py-3 text-sm font-semibold text-white transition hover:bg-[var(--research-dark)] disabled:bg-[var(--line)]">{saveState === "loading" ? "保存中..." : "保存聊天模型"}</button>
             </div>
           </div>

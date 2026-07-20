@@ -7,7 +7,7 @@ import socket
 from typing import Any
 from urllib.parse import urlparse
 
-from openai import OpenAI
+from openai import AuthenticationError, OpenAI, PermissionDeniedError
 
 from app.core.config import ALLOW_USER_CUSTOM_LLM_BASE_URL
 from app.core.secret_cipher import (
@@ -529,6 +529,8 @@ def check_user_llm_settings(
     model_list_available = True
     try:
         models = _list_available_models(settings)
+    except ValueError:
+        raise
     except Exception:
         # 不是每个兼容厂商都实现 /models；已选模型仍可继续完成对话连通性测试。
         model_list_available = False
@@ -567,9 +569,12 @@ def _list_available_models(settings: ChatModelSettings) -> list[str]:
         timeout=settings.timeout_seconds,
         max_retries=settings.max_retries,
     )
-    model_ids = {
-        model.id
-        for model in client.models.list().data
-        if model.id
-    }
+    try:
+        available_models = client.models.list().data
+    except AuthenticationError as exc:
+        raise ValueError("API Key 无效，请检查后重新输入") from exc
+    except PermissionDeniedError as exc:
+        raise ValueError("API Key 无权访问该厂商的模型列表") from exc
+
+    model_ids = {model.id for model in available_models if model.id}
     return sorted(model_ids)

@@ -353,6 +353,19 @@ export function toUserLLMSettingsPayload(
   };
 }
 
+export function toUserLLMModelDiscoveryPayload(
+  settings: UserLLMSettings,
+  apiKey: string,
+  requiresBaseUrl: boolean
+) {
+  // 模型发现不能沿用页面中的旧模型名，否则后端会误执行聊天测试。
+  return toUserLLMSettingsPayload(
+    { ...settings, model: "" },
+    apiKey,
+    requiresBaseUrl
+  );
+}
+
 export function parseUserEmbeddingSettings(value: unknown): UserEmbeddingSettings | null {
   if (!isRecord(value)) {
     return null;
