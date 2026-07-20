@@ -1,5 +1,6 @@
 """Redis 分布式限流核心逻辑的回归测试。"""
 
+import json
 import unittest
 from unittest.mock import patch
 
@@ -105,56 +106,95 @@ class RateLimitTests(unittest.TestCase):
         """Redis 返回超限时，应抛出带 Retry-After 的限流异常。"""
         client = FakeRedisClient([[0, 17, 2]])
 
-        with patch.object(
-            rate_limit.config,
-            "RATE_LIMIT_BACKEND",
-            "redis",
-        ), patch.object(rate_limit, "get_redis_client", return_value=client):
-            with self.assertRaises(RateLimitExceededError) as context:
-                consume_rate_limit("upload", "user:1", 2, 60)
+        with self.assertLogs("app.core.rate_limit", level="WARNING") as logs:
+            with patch.object(
+                rate_limit.config,
+                "RATE_LIMIT_BACKEND",
+                "redis",
+            ), patch.object(
+                rate_limit,
+                "get_redis_client",
+                return_value=client,
+            ):
+                with self.assertRaises(RateLimitExceededError) as context:
+                    consume_rate_limit("upload", "user:1", 2, 60)
 
         self.assertEqual(context.exception.retry_after_seconds, 17)
         self.assertEqual(context.exception.limit, 2)
         self.assertEqual(context.exception.window_seconds, 60)
+        event = json.loads(logs.records[0].getMessage())
+        self.assertEqual(event["event"], "rate_limit_exceeded")
+        self.assertEqual(event["scope"], "upload")
+        self.assertEqual(event["backend"], "redis")
+        self.assertEqual(event["reason"], "quota_exceeded")
+        self.assertEqual(event["outcome"], "blocked")
+        self.assertEqual(event["retry_after_seconds"], 17)
+        self.assertNotIn("user:1", logs.records[0].getMessage())
 
     def test_redis_failure_fail_open_uses_memory_fallback(self) -> None:
         """fail-open 时 Redis 故障不应绕过本进程基础限流保护。"""
-        with patch.object(
-            rate_limit.config,
-            "RATE_LIMIT_BACKEND",
-            "redis",
-        ), patch.object(
-            rate_limit.config,
-            "RATE_LIMIT_REDIS_FAILURE_MODE",
-            "fail_open",
-        ), patch.object(
-            rate_limit,
-            "get_redis_client",
-            side_effect=RuntimeError("connect redis://:secret@redis:6379/0"),
-        ):
-            consume_rate_limit("chat", "user:1", 1, 60)
-            with self.assertRaises(RateLimitExceededError):
+        with self.assertLogs("app.core.rate_limit", level="WARNING") as logs:
+            with patch.object(
+                rate_limit.config,
+                "RATE_LIMIT_BACKEND",
+                "redis",
+            ), patch.object(
+                rate_limit.config,
+                "RATE_LIMIT_REDIS_FAILURE_MODE",
+                "fail_open",
+            ), patch.object(
+                rate_limit,
+                "get_redis_client",
+                side_effect=RuntimeError(
+                    "connect redis://:secret@redis:6379/0"
+                ),
+            ):
                 consume_rate_limit("chat", "user:1", 1, 60)
+                with self.assertRaises(RateLimitExceededError):
+                    consume_rate_limit("chat", "user:1", 1, 60)
+
+        events = [json.loads(record.getMessage()) for record in logs.records]
+        redis_failures = [
+            event
+            for event in events
+            if event["event"] == "rate_limit_redis_failed"
+        ]
+        self.assertEqual(len(redis_failures), 2)
+        self.assertEqual(redis_failures[0]["outcome"], "memory_fallback")
+        self.assertEqual(redis_failures[0]["limit"], 1)
+        self.assertEqual(redis_failures[0]["window_seconds"], 60)
+        self.assertNotIn("redis://", str(events))
+        blocked_event = events[-1]
+        self.assertEqual(blocked_event["event"], "rate_limit_exceeded")
+        self.assertEqual(blocked_event["backend"], "memory_fallback")
 
     def test_redis_failure_fail_closed_blocks_request(self) -> None:
         """fail-closed 时 Redis 故障应直接阻断请求并返回短 Retry-After。"""
-        with patch.object(
-            rate_limit.config,
-            "RATE_LIMIT_BACKEND",
-            "redis",
-        ), patch.object(
-            rate_limit.config,
-            "RATE_LIMIT_REDIS_FAILURE_MODE",
-            "fail_closed",
-        ), patch.object(
-            rate_limit,
-            "get_redis_client",
-            side_effect=RuntimeError("Redis timeout"),
-        ):
-            with self.assertRaises(RateLimitExceededError) as context:
-                consume_rate_limit("model-test", "user:1", 5, 300)
+        with self.assertLogs("app.core.rate_limit", level="WARNING") as logs:
+            with patch.object(
+                rate_limit.config,
+                "RATE_LIMIT_BACKEND",
+                "redis",
+            ), patch.object(
+                rate_limit.config,
+                "RATE_LIMIT_REDIS_FAILURE_MODE",
+                "fail_closed",
+            ), patch.object(
+                rate_limit,
+                "get_redis_client",
+                side_effect=RuntimeError("Redis timeout"),
+            ):
+                with self.assertRaises(RateLimitExceededError) as context:
+                    consume_rate_limit("model-test", "user:1", 5, 300)
 
         self.assertEqual(context.exception.retry_after_seconds, 60)
+        events = [json.loads(record.getMessage()) for record in logs.records]
+        self.assertEqual(events[0]["event"], "rate_limit_redis_failed")
+        self.assertEqual(events[0]["outcome"], "request_blocked")
+        self.assertEqual(events[1]["event"], "rate_limit_exceeded")
+        self.assertEqual(events[1]["reason"], "redis_unavailable")
+        self.assertEqual(events[1]["failure_mode"], "fail_closed")
+        self.assertNotIn("user:1", str(events))
 
     def test_clear_rate_limit_deletes_redis_bucket(self) -> None:
         """登录成功清理限流时应同时删除 Redis bucket。"""

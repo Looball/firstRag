@@ -14,7 +14,7 @@ from urllib.parse import quote
 from fastapi import HTTPException, Request
 
 from app.core import config
-from app.core.observability import log_exception_event
+from app.core.observability import log_exception_event, log_structured_event
 from app.services.redis_service import RedisServiceError, get_redis_client
 
 
@@ -75,6 +75,32 @@ class RateLimitExceededError(Exception):
 
 _RATE_LIMIT_BUCKETS: dict[str, deque[float]] = {}
 _RATE_LIMIT_LOCK = RLock()
+
+
+def _log_rate_limit_exceeded(
+    scope: str,
+    backend: str,
+    exc: RateLimitExceededError,
+    *,
+    consume: bool,
+    reason: str,
+    failure_mode: str | None = None,
+) -> None:
+    """记录可聚合且不包含限流 identifier 的命中事件。"""
+    log_structured_event(
+        logger,
+        logging.WARNING,
+        "rate_limit_exceeded",
+        scope=scope,
+        backend=backend,
+        outcome="blocked",
+        reason=reason,
+        failure_mode=failure_mode,
+        consume=consume,
+        limit=exc.limit,
+        window_seconds=exc.window_seconds,
+        retry_after_seconds=exc.retry_after_seconds,
+    )
 
 
 def get_client_host(request: Request) -> str:
@@ -208,6 +234,11 @@ def _handle_redis_rate_limit_failure(
 ) -> None:
     """按配置处理 Redis 限流故障。"""
     failure_mode = _normalize_redis_failure_mode()
+    failure_outcome = (
+        "memory_fallback"
+        if failure_mode == "fail_open"
+        else "request_blocked"
+    )
     log_exception_event(
         logger,
         "rate_limit_redis_failed",
@@ -216,24 +247,48 @@ def _handle_redis_rate_limit_failure(
         default_source="redis",
         scope=scope,
         failure_mode=failure_mode,
+        outcome=failure_outcome,
+        consume=consume,
+        limit=limit,
+        window_seconds=window_seconds,
     )
 
     if failure_mode == "fail_open":
-        _check_memory_rate_limit(
-            scope,
-            identifier,
-            limit,
-            window_seconds,
-            consume=consume,
-        )
+        try:
+            _check_memory_rate_limit(
+                scope,
+                identifier,
+                limit,
+                window_seconds,
+                consume=consume,
+            )
+        except RateLimitExceededError as fallback_exc:
+            _log_rate_limit_exceeded(
+                scope,
+                "memory_fallback",
+                fallback_exc,
+                consume=consume,
+                reason="quota_exceeded",
+                failure_mode=failure_mode,
+            )
+            raise
         return
 
     retry_after_seconds = max(1, min(window_seconds, 60))
-    raise RateLimitExceededError(
+    rate_limit_exc = RateLimitExceededError(
         retry_after_seconds=retry_after_seconds,
         limit=limit,
         window_seconds=window_seconds,
-    ) from exc
+    )
+    _log_rate_limit_exceeded(
+        scope,
+        "redis",
+        rate_limit_exc,
+        consume=consume,
+        reason="redis_unavailable",
+        failure_mode=failure_mode,
+    )
+    raise rate_limit_exc from exc
 
 
 def _check_rate_limit(
@@ -249,13 +304,23 @@ def _check_rate_limit(
         return
 
     if _normalize_backend() == "memory":
-        _check_memory_rate_limit(
-            scope,
-            identifier,
-            limit,
-            window_seconds,
-            consume=consume,
-        )
+        try:
+            _check_memory_rate_limit(
+                scope,
+                identifier,
+                limit,
+                window_seconds,
+                consume=consume,
+            )
+        except RateLimitExceededError as exc:
+            _log_rate_limit_exceeded(
+                scope,
+                "memory",
+                exc,
+                consume=consume,
+                reason="quota_exceeded",
+            )
+            raise
         return
 
     try:
@@ -266,7 +331,14 @@ def _check_rate_limit(
             window_seconds,
             consume=consume,
         )
-    except RateLimitExceededError:
+    except RateLimitExceededError as exc:
+        _log_rate_limit_exceeded(
+            scope,
+            "redis",
+            exc,
+            consume=consume,
+            reason="quota_exceeded",
+        )
         raise
     except Exception as exc:  # noqa: BLE001 - 限流故障按配置 fail-open/closed
         _handle_redis_rate_limit_failure(

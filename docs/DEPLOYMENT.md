@@ -274,6 +274,8 @@ compose 已为所有服务配置 Docker `json-file` 日志轮转，默认 `10m *
 | `retrieval_fulltext_failed` | PostgreSQL full-text retrieval | 定位 PostgreSQL 或全文检索异常。 |
 | `retrieval_rerank_failed` | rerank provider | 定位本地 reranker 模型、远程 rerank API 或运行时异常；当前会降级为 RRF 结果。 |
 | `vector_index_job_claimed` / `vector_index_job_succeeded` / `vector_index_job_failed` | vector worker | 统计任务吞吐、失败率、处理耗时和失败来源。 |
+| `rate_limit_exceeded` | backend rate limiter | 统计实际阻断次数，并按 `scope`、`backend`、`reason` 和 `failure_mode` 区分额度耗尽、memory fallback 耗尽或 Redis fail-closed 阻断。 |
+| `rate_limit_redis_failed` | backend rate limiter | 统计 Redis 限流调用故障；`outcome=memory_fallback` 表示 fail-open 降级，`outcome=request_blocked` 表示 fail-closed 阻断。 |
 
 错误日志统一包含 `error_type`、`error_source` 和 `retryable`。`error_source` 取值优先使用 `llm_provider`、`embedding`、`vector_store`、`postgres`、`rerank`、`document_parse`、`file_storage`、`worker`、`chat_stream` 或 `http`，便于在日志系统中按来源聚合。
 
@@ -288,12 +290,17 @@ compose 已为所有服务配置 Docker `json-file` 日志轮转，默认 `10m *
 | 向量化队列长度和 worker 活动 | `GET /chat/vector-index-jobs/health` 的 `queue.active`、`worker.online_count`、`worker.last_heartbeat_at`、`worker.has_recent_activity` | 有 active 任务但没有在线 worker，或 worker 心跳长时间无更新。 |
 | 向量化任务失败率 | `vector_index_job_failed` / `vector_index_job_claimed` | 连续窗口超过 10%。 |
 | 检索降级次数 | `retrieval_embedding_failed`、`retrieval_vector_failed`、`retrieval_fulltext_failed`、`retrieval_rerank_failed` | 突然高于平时基线。 |
+| 限流阻断次数 | `rate_limit_exceeded` 按 `scope`、`reason` 聚合 | 5 分钟内显著高于同时间段基线；`reason=redis_unavailable` 出现时立即检查 Redis。 |
+| Redis 限流故障 | `rate_limit_redis_failed` 按 `failure_mode`、`outcome` 聚合 | 任何连续窗口出现即告警；公开环境 `outcome=request_blocked` 应按基础设施故障处理。 |
+
+限流事件只记录内部固定 scope 和配置值，不记录 IP、username、user_id、完整 identifier 或 Redis key。`rate_limit_exceeded.reason=quota_exceeded` 表示正常达到额度；`reason=redis_unavailable` 表示请求因 Redis 故障和 fail-closed 策略被阻断。`limit`、`window_seconds` 与 `retry_after_seconds` 可用于核对当前生效阈值和客户端倒计时。
 
 本地排查示例：
 
 ```bash
 docker compose logs backend worker | rg '"event":"chat_stream_failed"|"event":"vector_index_job_failed"'
 docker compose logs backend | rg '"error_source":"llm_provider"|"error_source":"postgres"|"error_source":"vector_store"'
+docker compose logs backend | rg '"event":"rate_limit_exceeded"|"event":"rate_limit_redis_failed"'
 curl -s -H "Authorization: Bearer <access_token>" http://127.0.0.1:8000/chat/vector-index-jobs/health
 ```
 
