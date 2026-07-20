@@ -144,6 +144,7 @@ def index_file_vectors(
     file_id: UUID | str,
     storage_path: str | Path,
     index_version: int,
+    original_name: str | None = None,
     persist_directory: str | Path = VECTOR_STORE_PATH,
     collection_name: str = CHROMA_COLLECTION_NAME,
 ) -> dict[str, Any]:
@@ -156,7 +157,7 @@ def index_file_vectors(
         file_path=file_path,
         file_id=file_id,
         user_id=user_id,
-        original_name=str(file_record.get("original_name") or file_path.name),
+        original_name=original_name or file_path.name,
     )
     chunks = split_documents(documents)
     if not chunks:
@@ -240,6 +241,7 @@ def index_knowledge_file_record(
                 file_id=file_id,
                 storage_path=file_record["storage_path"],
                 index_version=index_version,
+                original_name=str(file_record["original_name"]),
             )
         except Exception:
             update_knowledge_file_status(
