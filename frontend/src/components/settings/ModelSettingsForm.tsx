@@ -1145,6 +1145,24 @@ export function ModelSettingsForm() {
             <button type="button" onClick={() => void handleModelDiscovery()} disabled={testState === "loading" || saveState === "loading" || (!hasSavedApiKey && !apiKey.trim())} className="mt-4 border border-[var(--research)] px-5 py-3 text-sm font-semibold text-[var(--research)] transition hover:bg-white disabled:cursor-not-allowed disabled:border-[var(--line)] disabled:text-[var(--ink-muted)]">{testState === "loading" ? "正在获取模型列表..." : modelCandidates.length > 0 ? "重新获取模型列表" : "获取模型列表"}</button>
           </section>
 
+          <section className="border-t border-[var(--line)] pt-7" aria-labelledby="generation-title">
+            <div className="flex items-baseline justify-between gap-4"><p id="generation-title" className="font-utility text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--ink-muted)]">生成控制</p></div>
+            <div className="mt-4 grid gap-4 sm:grid-cols-2">
+              <label className="font-utility text-[10px] font-semibold uppercase tracking-[0.1em] text-[var(--ink-muted)]">Temperature
+                <input type="number" min="0" max="2" step="0.1" value={settings.temperature} onChange={(event) => setSettings((current) => ({ ...current, temperature: Number(event.target.value) }))} className="research-focus mt-2 w-full border border-[var(--line)] bg-white px-3 py-3 text-sm normal-case tracking-normal text-[var(--foreground)]" />
+              </label>
+              <label className="font-utility text-[10px] font-semibold uppercase tracking-[0.1em] text-[var(--ink-muted)]">最大输出 Token
+                <input type="number" min="1" max="100000" step="1" value={settings.maxTokens} onChange={(event) => setSettings((current) => ({ ...current, maxTokens: Number(event.target.value) }))} className="research-focus mt-2 w-full border border-[var(--line)] bg-white px-3 py-3 text-sm normal-case tracking-normal text-[var(--foreground)]" />
+              </label>
+              <label className="font-utility text-[10px] font-semibold uppercase tracking-[0.1em] text-[var(--ink-muted)]">超时（秒）
+                <input type="number" min="1" max="600" step="1" value={settings.timeoutSeconds} onChange={(event) => setSettings((current) => ({ ...current, timeoutSeconds: Number(event.target.value) }))} className="research-focus mt-2 w-full border border-[var(--line)] bg-white px-3 py-3 text-sm normal-case tracking-normal text-[var(--foreground)]" />
+              </label>
+              <label className="font-utility text-[10px] font-semibold uppercase tracking-[0.1em] text-[var(--ink-muted)]">最大重试次数
+                <input type="number" min="0" max="10" step="1" value={settings.maxRetries} onChange={(event) => setSettings((current) => ({ ...current, maxRetries: Number(event.target.value) }))} className="research-focus mt-2 w-full border border-[var(--line)] bg-white px-3 py-3 text-sm normal-case tracking-normal text-[var(--foreground)]" />
+              </label>
+            </div>
+          </section>
+
           <section className="border-t border-[var(--line)] pt-7" aria-labelledby="embedding-title">
             <div className="flex items-baseline justify-between gap-4"><p id="embedding-title" className="font-utility text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--ink-muted)]">向量模型</p>{activeEmbeddingSettings?.hasApiKey && <span className="text-xs text-[var(--ink-muted)]">当前已配置</span>}</div>
             <div className="mt-4 grid gap-5 md:grid-cols-2">
@@ -1216,24 +1234,6 @@ export function ModelSettingsForm() {
             <div className="mt-4 flex flex-wrap gap-3">
               <button type="button" onClick={() => void handleRerankTest()} disabled={rerankTestState === "loading" || rerankSaveState === "loading"} className="border border-[var(--research)] px-5 py-3 text-sm font-semibold text-[var(--research)] transition hover:bg-[var(--paper-muted)] disabled:border-[var(--line)] disabled:text-[var(--ink-muted)]">{rerankTestState === "loading" ? "测试中..." : "测试 Rerank 模型"}</button>
               <button type="button" onClick={() => void handleRerankSubmit()} disabled={rerankSaveState === "loading" || rerankTestState === "loading"} className="bg-[var(--research)] px-5 py-3 text-sm font-semibold text-white transition hover:bg-[var(--research-dark)] disabled:bg-[var(--line)]">{rerankSaveState === "loading" ? "保存中..." : "保存 Rerank 模型"}</button>
-            </div>
-          </section>
-
-          <section className="border-t border-[var(--line)] pt-7" aria-labelledby="generation-title">
-            <div className="flex items-baseline justify-between gap-4"><p id="generation-title" className="font-utility text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--ink-muted)]">生成控制</p></div>
-            <div className="mt-4 grid gap-4 sm:grid-cols-2">
-              <label className="font-utility text-[10px] font-semibold uppercase tracking-[0.1em] text-[var(--ink-muted)]">Temperature
-                <input type="number" min="0" max="2" step="0.1" value={settings.temperature} onChange={(event) => setSettings((current) => ({ ...current, temperature: Number(event.target.value) }))} className="research-focus mt-2 w-full border border-[var(--line)] bg-white px-3 py-3 text-sm normal-case tracking-normal text-[var(--foreground)]" />
-              </label>
-              <label className="font-utility text-[10px] font-semibold uppercase tracking-[0.1em] text-[var(--ink-muted)]">最大输出 Token
-                <input type="number" min="1" max="100000" step="1" value={settings.maxTokens} onChange={(event) => setSettings((current) => ({ ...current, maxTokens: Number(event.target.value) }))} className="research-focus mt-2 w-full border border-[var(--line)] bg-white px-3 py-3 text-sm normal-case tracking-normal text-[var(--foreground)]" />
-              </label>
-              <label className="font-utility text-[10px] font-semibold uppercase tracking-[0.1em] text-[var(--ink-muted)]">超时（秒）
-                <input type="number" min="1" max="600" step="1" value={settings.timeoutSeconds} onChange={(event) => setSettings((current) => ({ ...current, timeoutSeconds: Number(event.target.value) }))} className="research-focus mt-2 w-full border border-[var(--line)] bg-white px-3 py-3 text-sm normal-case tracking-normal text-[var(--foreground)]" />
-              </label>
-              <label className="font-utility text-[10px] font-semibold uppercase tracking-[0.1em] text-[var(--ink-muted)]">最大重试次数
-                <input type="number" min="0" max="10" step="1" value={settings.maxRetries} onChange={(event) => setSettings((current) => ({ ...current, maxRetries: Number(event.target.value) }))} className="research-focus mt-2 w-full border border-[var(--line)] bg-white px-3 py-3 text-sm normal-case tracking-normal text-[var(--foreground)]" />
-              </label>
             </div>
           </section>
 
