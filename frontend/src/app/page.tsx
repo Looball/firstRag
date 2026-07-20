@@ -37,6 +37,7 @@ import {
   formatFileSize,
 } from "@/lib/chat-workspace/utils";
 import { streamChatResponse } from "@/lib/chat-workspace/chat-stream";
+import { useRetryAfterCountdown } from "@/lib/use-retry-after-countdown";
 import type {
   ChatSession,
   ChatSource,
@@ -484,6 +485,8 @@ export default function Home() {
     []
   );
   const [isUploadingChatImages, setIsUploadingChatImages] = useState(false);
+  const chatRateLimit = useRetryAfterCountdown();
+  const chatImageRateLimit = useRetryAfterCountdown();
   const pendingChatImagesRef = useRef<PendingChatImage[]>([]);
   const [isAdvancedMode, setIsAdvancedMode] = useState(getAdvancedModeDefault);
   const [editingSessionId, setEditingSessionId] = useState("");
@@ -664,6 +667,8 @@ export default function Home() {
     vectorIndexingFileIds,
     vectorIndexMessage,
     vectorIndexQueue,
+    uploadRetryAfterSeconds,
+    vectorIndexRetryAfterSeconds,
   } = useKnowledgeFiles({
     hasCheckedAuth,
     selectedKnowledgeBaseId,
@@ -1674,7 +1679,16 @@ export default function Home() {
   }
 
   async function handleSubmit(overrideInput?: string) {
-    if (isCurrentSessionLoading || isCreatingSession || isUploadingChatImages) {
+    const isImageUploadRateLimited =
+      pendingChatImages.length > 0 && chatImageRateLimit.isRateLimited;
+
+    if (
+      isCurrentSessionLoading ||
+      isCreatingSession ||
+      isUploadingChatImages ||
+      chatRateLimit.isRateLimited ||
+      isImageUploadRateLimited
+    ) {
       return;
     }
 
@@ -1738,6 +1752,7 @@ export default function Home() {
           imagesToSend.map((image) => image.file)
         );
       } catch (error) {
+        chatImageRateLimit.startCountdownFromError(error);
         const message =
           error instanceof Error ? error.message : "上传图片失败，请稍后再试。";
         setSessionErrors((prev) => ({
@@ -1967,6 +1982,7 @@ export default function Home() {
       });
     } catch (error) {
       console.error(error);
+      chatRateLimit.startCountdownFromError(error);
       setSessionErrors((prev) => ({
         ...prev,
         [activeSessionId]:
@@ -2231,11 +2247,17 @@ export default function Home() {
                 type="button"
                 onClick={() => fileInputRef.current?.click()}
                 disabled={
-                  !selectedKnowledgeBaseId || isUploadingKnowledgeFiles
+                  !selectedKnowledgeBaseId ||
+                  isUploadingKnowledgeFiles ||
+                  uploadRetryAfterSeconds > 0
                 }
                 className="bg-[#176b62] px-3 py-2.5 text-xs font-semibold text-white transition hover:bg-[#105149] disabled:bg-[#91aaa4]"
               >
-                {isUploadingKnowledgeFiles ? "上传中..." : "上传文件"}
+                {uploadRetryAfterSeconds > 0
+                  ? `${uploadRetryAfterSeconds} 秒后重试`
+                  : isUploadingKnowledgeFiles
+                    ? "上传中..."
+                    : "上传文件"}
               </button>
               <button
                 type="button"
@@ -3099,6 +3121,9 @@ export default function Home() {
                     isCurrentSessionLoading ||
                     isCreatingSession ||
                     isUploadingChatImages ||
+                    chatRateLimit.isRateLimited ||
+                    (pendingChatImages.length > 0 &&
+                      chatImageRateLimit.isRateLimited) ||
                     !selectedKnowledgeBaseId ||
                     selectedKnowledgeBaseId === DEFAULT_KNOWLEDGE_BASE_ID
                   }
@@ -3110,7 +3135,16 @@ export default function Home() {
                       ? "上传中..."
                       : isCurrentSessionLoading
                         ? "思考中..."
-                        : "发送问题"}
+                        : chatRateLimit.isRateLimited ||
+                            (pendingChatImages.length > 0 &&
+                              chatImageRateLimit.isRateLimited)
+                          ? `${Math.max(
+                              chatRateLimit.retryAfterSeconds,
+                              pendingChatImages.length > 0
+                                ? chatImageRateLimit.retryAfterSeconds
+                                : 0,
+                            )} 秒后可重试`
+                          : "发送问题"}
                 </button>
               </div>
             </div>
@@ -3427,6 +3461,8 @@ export default function Home() {
           reusableFileLoadError={reusableFileLoadError}
           vectorIndexMessage={vectorIndexMessage}
           vectorIndexError={vectorIndexError}
+          uploadRetryAfterSeconds={uploadRetryAfterSeconds}
+          vectorIndexRetryAfterSeconds={vectorIndexRetryAfterSeconds}
           onClose={() => setIsFileManagerOpen(false)}
           onUploadClick={() => fileInputRef.current?.click()}
           onIndexKnowledgeBase={handleIndexKnowledgeBase}

@@ -70,7 +70,7 @@ BACKEND_API_PREFIX=
 | `/api/chat/knowledge-files...` | `/chat/knowledge-files...` |
 | `/api/settings...` | `/user/settings...` |
 
-代理层应透传 `Authorization`，聊天接口应保持 SSE 流式响应。
+代理层应透传 `Authorization`，聊天接口应保持 SSE 流式响应。后端返回 `429` 时，代理必须保留 `Retry-After`；登录、聊天、图片/知识文件上传、向量化和模型测试会显示剩余等待秒数，并在倒计时结束前禁用对应操作，且不会自动重复提交。
 
 ## 页面职责
 
@@ -86,3 +86,4 @@ BACKEND_API_PREFIX=
 - 不把 API Key 写入 `localStorage`、`sessionStorage`、URL、日志或错误上报。
 - `localStorage` 仅保存登录态；设置页的 API Key 输入只保留在组件内存状态中，提交后立即清空。
 - 登录过期时清理本地认证状态并跳转登录页。
+- 限流错误只保存 `status` 和 `Retry-After` 秒数，不保存限流 identifier、用户名、IP 或 Redis key；不同业务 scope 使用独立倒计时。

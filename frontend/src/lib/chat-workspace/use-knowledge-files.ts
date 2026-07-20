@@ -1,5 +1,6 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { FrontendApiError } from "@/lib/frontend-api";
+import { useRetryAfterCountdown } from "../use-retry-after-countdown";
 import {
   type RefObject,
   useCallback,
@@ -187,6 +188,16 @@ export function useKnowledgeFiles({
     useState(false);
   const [vectorIndexMessage, setVectorIndexMessage] = useState("");
   const [vectorIndexError, setVectorIndexError] = useState("");
+  const {
+    isRateLimited: isUploadRateLimited,
+    retryAfterSeconds: uploadRetryAfterSeconds,
+    startCountdownFromError: startUploadCountdownFromError,
+  } = useRetryAfterCountdown();
+  const {
+    isRateLimited: isVectorIndexRateLimited,
+    retryAfterSeconds: vectorIndexRetryAfterSeconds,
+    startCountdownFromError: startVectorIndexCountdownFromError,
+  } = useRetryAfterCountdown();
 
   const queryClient = useQueryClient();
   const vectorIndexHealthQuery = useQuery({
@@ -415,7 +426,8 @@ export function useKnowledgeFiles({
       if (
         !files?.length ||
         !selectedKnowledgeBaseId ||
-        isUploadingKnowledgeFiles
+        isUploadingKnowledgeFiles ||
+        isUploadRateLimited
       ) {
         return;
       }
@@ -448,6 +460,7 @@ export function useKnowledgeFiles({
         setVectorIndexMessage(buildKnowledgeFileUploadMessage(uploadedFiles));
         await Promise.all([refreshKnowledgeFiles(), loadVectorIndexHealth()]);
       } catch (error) {
+        startUploadCountdownFromError(error);
         setKnowledgeFileUploadError(buildKnowledgeFileUploadErrorMessage(error));
       } finally {
         setIsUploadingKnowledgeFiles(false);
@@ -460,9 +473,11 @@ export function useKnowledgeFiles({
     [
       fileInputRef,
       isUploadingKnowledgeFiles,
+      isUploadRateLimited,
       loadVectorIndexHealth,
       refreshKnowledgeFiles,
       selectedKnowledgeBaseId,
+      startUploadCountdownFromError,
     ],
   );
 
@@ -518,7 +533,11 @@ export function useKnowledgeFiles({
 
   const handleIndexKnowledgeFile = useCallback(
     async (fileId: string) => {
-      if (!fileId || vectorIndexingFileIds[fileId]) {
+      if (
+        !fileId ||
+        vectorIndexingFileIds[fileId] ||
+        isVectorIndexRateLimited
+      ) {
         return;
       }
 
@@ -541,6 +560,7 @@ export function useKnowledgeFiles({
         setVectorIndexMessage("文件向量化任务已提交。");
         await Promise.all([refreshKnowledgeFiles(), loadVectorIndexHealth()]);
       } catch (error) {
+        startVectorIndexCountdownFromError(error);
         setVectorIndexError(
           error instanceof Error ? error.message : "文件向量化失败，请稍后再试。",
         );
@@ -554,8 +574,10 @@ export function useKnowledgeFiles({
     },
     [
       knowledgeFiles,
+      isVectorIndexRateLimited,
       loadVectorIndexHealth,
       refreshKnowledgeFiles,
+      startVectorIndexCountdownFromError,
       updateVectorIndexQueue,
       vectorIndexingFileIds,
     ],
@@ -592,7 +614,8 @@ export function useKnowledgeFiles({
     if (
       !selectedKnowledgeBaseId ||
       selectedKnowledgeBaseId === DEFAULT_KNOWLEDGE_BASE_ID ||
-      isIndexingKnowledgeBase
+      isIndexingKnowledgeBase ||
+      isVectorIndexRateLimited
     ) {
       return;
     }
@@ -626,6 +649,7 @@ export function useKnowledgeFiles({
 
       await Promise.all([refreshKnowledgeFiles(), loadVectorIndexHealth()]);
     } catch (error) {
+      startVectorIndexCountdownFromError(error);
       setVectorIndexError(
         error instanceof Error ? error.message : "知识库向量化失败，请稍后再试。",
       );
@@ -634,10 +658,12 @@ export function useKnowledgeFiles({
     }
   }, [
     isIndexingKnowledgeBase,
+    isVectorIndexRateLimited,
     loadVectorIndexHealth,
     refreshKnowledgeFiles,
     selectedKnowledgeBaseId,
     selectedKnowledgeBaseName,
+    startVectorIndexCountdownFromError,
     updateVectorIndexQueue,
     waitForVectorIndexJobs,
   ]);
@@ -742,5 +768,7 @@ export function useKnowledgeFiles({
     vectorIndexingFileIds,
     vectorIndexMessage,
     vectorIndexQueue,
+    uploadRetryAfterSeconds,
+    vectorIndexRetryAfterSeconds,
   };
 }

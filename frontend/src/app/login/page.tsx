@@ -9,6 +9,9 @@ import {
   isAuthState,
   readAuthResponse,
 } from "@/lib/auth";
+import { FrontendApiError } from "@/lib/frontend-api";
+import { getResponseRetryAfterSeconds } from "@/lib/rate-limit";
+import { useRetryAfterCountdown } from "@/lib/use-retry-after-countdown";
 
 const LEGACY_SESSION_STORAGE_KEY = "ai-learning-assistant-sessions";
 const LEGACY_CURRENT_SESSION_KEY =
@@ -20,9 +23,14 @@ export default function LoginPage() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const loginRateLimit = useRetryAfterCountdown();
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+
+    if (loginRateLimit.isRateLimited) {
+      return;
+    }
 
     const normalizedUsername = username.trim();
 
@@ -48,7 +56,13 @@ export default function LoginPage() {
       const data = await readAuthResponse(response);
 
       if (!response.ok) {
-        throw new Error(getAuthErrorMessage(data, "登录失败，请稍后再试。"));
+        const retryAfterSeconds = getResponseRetryAfterSeconds(response);
+        loginRateLimit.startCountdown(retryAfterSeconds);
+        throw new FrontendApiError(
+          getAuthErrorMessage(data, "登录失败，请稍后再试。"),
+          response.status,
+          retryAfterSeconds,
+        );
       }
 
       if (!isAuthState(data)) {
@@ -216,10 +230,14 @@ export default function LoginPage() {
 
           <button
             type="submit"
-            disabled={isSubmitting}
+            disabled={isSubmitting || loginRateLimit.isRateLimited}
             className="w-full bg-[#176b62] px-4 py-3.5 text-sm font-semibold text-white transition hover:bg-[#105149] disabled:bg-[#91aaa4]"
           >
-            {isSubmitting ? "登录中..." : "登录"}
+            {isSubmitting
+              ? "登录中..."
+              : loginRateLimit.isRateLimited
+                ? `${loginRateLimit.retryAfterSeconds} 秒后可重试`
+                : "登录"}
           </button>
 
           <p className="border-t border-[#dbe2df] pt-5 text-center text-sm text-[#64716d]">

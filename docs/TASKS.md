@@ -66,6 +66,7 @@
 | `PLAN-20260705-01` | 2026-07-05 | `Done` | Redis 基础设施专项；从进程内状态扩展为可多实例共享的缓存、限流、worker 运行态和部署健康检查。 | `T-056` - `T-061` |
 | `PLAN-20260720-01` | 2026-07-20 | `Done` | 收口近期模型设置、聊天图片、RAG fixture/复验和 Chroma client-server 修复，刷新任务台账与当前验收基线。 | `T-062` |
 | `PLAN-20260720-02` | 2026-07-20 | `Done` | 将独立 Chroma server 纳入 production preflight 和 acceptance check，补齐部署拓扑与运行健康门禁。 | `T-063` |
+| `PLAN-20260720-03` | 2026-07-20 | `Doing` | 补齐 Redis 限流的前端反馈闭环，统一透传 Retry-After 并为受限操作显示重试倒计时。 | `T-064` |
 
 ## 任务总览
 
@@ -134,6 +135,7 @@
 | `T-061` | `PLAN-20260705-01` | `P1` | `Done` | 完成 Redis 场景 Docker 验证和核心链路回归 | 2026-07-06 | `858e27f` |
 | `T-062` | `PLAN-20260720-01` | `P1` | `Done` | 收口近期功能、Chroma 架构和任务台账 | 2026-07-20 | 见任务详情 |
 | `T-063` | `PLAN-20260720-02` | `P1` | `Done` | 将独立 Chroma 纳入 production preflight 与 acceptance check | 2026-07-20 | 见任务详情 |
+| `T-064` | `PLAN-20260720-03` | `P1` | `Doing` | 前端统一处理限流响应与重试倒计时 | — | — |
 
 ## 新计划接入流程
 
@@ -2408,6 +2410,36 @@ git diff --check
   - `scripts/acceptance_check.sh --skip-real-eval --skip-frontend-build` 通过：infrastructure preflight、migration 文件、backend compileall、247 个 unittest、前端 lint 和 52 个 Vitest 用例均通过。
   - `docker compose up -d --build` 重建通过；Redis、PostgreSQL、Chroma healthy，backend、worker、frontend Up，migration `applied=0 skipped=5`，最近启动日志无新增错误。
   - README、Deployment、docker startup、eval 与 Agent 验收文档已同步新的 Chroma 门禁和 skip 边界。
+
+## T-064 前端统一处理限流响应与重试倒计时
+
+- 来源计划：`PLAN-20260720-03`
+- 优先级：`P1`
+- 状态：`Doing`
+- 目标：把后端 Redis 限流的 `Retry-After` 反馈完整传递到浏览器，让用户清楚知道何时可以重试，并避免倒计时期间重复提交。
+- 范围：
+  - Next.js API proxy 安全透传 `Retry-After`。
+  - `FrontendApiError` 统一保存 `status` 和 `retryAfterSeconds`，429 文案补充明确剩余时间。
+  - 增加按需启动、卸载时清理的共享倒计时 hook，不自动重放请求。
+  - 登录、聊天、聊天图片上传、知识文件上传、单文件/整库向量化、聊天模型列表/连接测试、Embedding 测试和 Rerank 测试接入对应 scope 的按钮禁用与秒数提示。
+  - 增加响应头透传、错误解析和 Retry-After 格式化测试，同步 API 与前端文档。
+- 验收标准：
+  - backend 返回 `429 + Retry-After` 后，浏览器响应保留该响应头。
+  - 对应操作显示剩余秒数并禁用，倒计时结束后自动恢复；其它独立 scope 不受影响。
+  - 模型列表与聊天模型测试共享倒计时，单文件与整库向量化共享倒计时，符合后端 scope 设计。
+  - 倒计时不会自动重复发送请求，组件卸载后不会残留 timer。
+  - 前端 test、lint、build 和 Docker Compose 相关验证通过。
+- 建议验证命令：
+
+```bash
+cd frontend && npm test
+cd frontend && npm run lint
+cd frontend && npm run build
+docker compose up -d --build
+docker compose ps
+docker compose logs --tail=100 backend frontend redis
+git diff --check
+```
 
 ## 更新规则
 

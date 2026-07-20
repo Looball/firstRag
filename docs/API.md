@@ -8,7 +8,7 @@ Authorization: Bearer <access_token>
 
 成功响应约定为 `{"success": true, ...}`。资源不存在或不属于当前用户时返回 `404`。
 
-请求超过后端限流时返回 `429`，并携带 `Retry-After` 响应头。默认 Docker/生产环境使用 Redis 分布式 sliding-window 限流，多 backend 实例共享计数；登录失败、聊天、上传、向量化提交和模型测试的阈值由 `.env` 中的 `LOGIN_FAILURE_RATE_LIMIT_*`、`*_RATE_LIMIT_MAX_REQUESTS` 和 `API_RATE_LIMIT_WINDOW_SECONDS` 配置控制。
+请求超过后端限流时返回 `429`，并携带 `Retry-After` 响应头。Next.js API proxy 会保留该响应头，前端按剩余秒数禁用对应操作并显示倒计时，不会自动重放请求。默认 Docker/生产环境使用 Redis 分布式 sliding-window 限流，多 backend 实例共享计数；登录失败、聊天、上传、向量化提交和模型测试的阈值由 `.env` 中的 `LOGIN_FAILURE_RATE_LIMIT_*`、`*_RATE_LIMIT_MAX_REQUESTS` 和 `API_RATE_LIMIT_WINDOW_SECONDS` 配置控制。
 
 ## 系统健康
 

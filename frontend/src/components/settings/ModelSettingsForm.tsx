@@ -38,12 +38,28 @@ import {
   type UserLLMSettings,
   type UserRerankSettings,
 } from "@/lib/user-settings";
+import { FrontendApiError } from "@/lib/frontend-api";
+import { getResponseRetryAfterSeconds } from "@/lib/rate-limit";
+import { useRetryAfterCountdown } from "@/lib/use-retry-after-countdown";
 
 type RequestState = "idle" | "loading" | "success" | "error";
 const CUSTOM_MODEL_VALUE = "__custom_model__";
 
 function getResponseData(response: Response) {
   return response.json().catch(() => null) as Promise<unknown>;
+}
+
+/** 将设置接口的失败响应转换为包含 Retry-After 的统一前端错误。 */
+function createSettingsResponseError(
+  response: Response,
+  data: unknown,
+  fallbackMessage: string,
+) {
+  return new FrontendApiError(
+    getSettingsMessage(data, fallbackMessage),
+    response.status,
+    getResponseRetryAfterSeconds(response),
+  );
 }
 
 function applyProviderCredentials(
@@ -141,6 +157,9 @@ export function ModelSettingsForm() {
     useState<RequestState>("idle");
   const [modelLoadState, setModelLoadState] = useState<RequestState>("idle");
   const [notice, setNotice] = useState("");
+  const chatModelRateLimit = useRetryAfterCountdown();
+  const embeddingRateLimit = useRetryAfterCountdown();
+  const rerankRateLimit = useRetryAfterCountdown();
   const modelRequestIdRef = useRef(0);
   const modelRequestAbortRef = useRef<AbortController | null>(null);
 
@@ -231,7 +250,15 @@ export function ModelSettingsForm() {
         return;
       }
 
-      const models = response.ok ? parseProviderModels(data) : null;
+      if (!response.ok) {
+        throw createSettingsResponseError(
+          response,
+          data,
+          "模型列表获取失败，请稍后重试。",
+        );
+      }
+
+      const models = parseProviderModels(data);
 
       if (modelRequestIdRef.current !== requestId) {
         return;
@@ -266,6 +293,7 @@ export function ModelSettingsForm() {
       );
     } catch (error) {
       if (!(error instanceof DOMException && error.name === "AbortError")) {
+        chatModelRateLimit.startCountdownFromError(error);
         if (modelRequestIdRef.current === requestId) {
           setModelCandidates([]);
           setIsCustomModel(false);
@@ -739,6 +767,10 @@ export function ModelSettingsForm() {
   }
 
   async function requestChatModelTest(discoverModelsOnly: boolean) {
+    if (chatModelRateLimit.isRateLimited) {
+      return;
+    }
+
     setTestState("loading");
     setNotice("");
 
@@ -784,7 +816,15 @@ export function ModelSettingsForm() {
 
       const testResult = parseSettingsTestResult(data);
 
-      if (!response.ok || !isSuccessfulResponse(data) || !testResult) {
+      if (!response.ok) {
+        throw createSettingsResponseError(
+          response,
+          data,
+          "连接测试失败，请检查配置。",
+        );
+      }
+
+      if (!isSuccessfulResponse(data) || !testResult) {
         throw new Error(getSettingsMessage(data, "连接测试失败，请检查配置。"));
       }
 
@@ -805,6 +845,7 @@ export function ModelSettingsForm() {
           : testResult.message
       );
     } catch (error) {
+      chatModelRateLimit.startCountdownFromError(error);
       setTestState("error");
       setNotice(
         error instanceof Error ? error.message : "连接测试失败，请检查配置。"
@@ -828,6 +869,10 @@ export function ModelSettingsForm() {
   }
 
   async function handleEmbeddingTest() {
+    if (embeddingRateLimit.isRateLimited) {
+      return;
+    }
+
     setEmbeddingTestState("loading");
     setNotice("");
 
@@ -858,7 +903,15 @@ export function ModelSettingsForm() {
 
       const testResult = parseEmbeddingSettingsTestResult(data);
 
-      if (!response.ok || !isSuccessfulResponse(data) || !testResult) {
+      if (!response.ok) {
+        throw createSettingsResponseError(
+          response,
+          data,
+          "向量模型连接测试失败，请检查配置。",
+        );
+      }
+
+      if (!isSuccessfulResponse(data) || !testResult) {
         throw new Error(getSettingsMessage(data, "向量模型连接测试失败，请检查配置。"));
       }
 
@@ -869,6 +922,7 @@ export function ModelSettingsForm() {
           : testResult.message
       );
     } catch (error) {
+      embeddingRateLimit.startCountdownFromError(error);
       setEmbeddingTestState("error");
       setNotice(
         error instanceof Error ? error.message : "向量模型连接测试失败，请检查配置。"
@@ -931,6 +985,10 @@ export function ModelSettingsForm() {
   }
 
   async function handleRerankTest() {
+    if (rerankRateLimit.isRateLimited) {
+      return;
+    }
+
     setRerankTestState("loading");
     setNotice("");
 
@@ -961,7 +1019,15 @@ export function ModelSettingsForm() {
 
       const testResult = parseRerankSettingsTestResult(data);
 
-      if (!response.ok || !isSuccessfulResponse(data) || !testResult) {
+      if (!response.ok) {
+        throw createSettingsResponseError(
+          response,
+          data,
+          "Rerank 模型连接测试失败，请检查配置。",
+        );
+      }
+
+      if (!isSuccessfulResponse(data) || !testResult) {
         throw new Error(getSettingsMessage(data, "Rerank 模型连接测试失败，请检查配置。"));
       }
 
@@ -972,6 +1038,7 @@ export function ModelSettingsForm() {
           : testResult.message
       );
     } catch (error) {
+      rerankRateLimit.startCountdownFromError(error);
       setRerankTestState("error");
       setNotice(
         error instanceof Error ? error.message : "Rerank 模型连接测试失败，请检查配置。"
@@ -1142,7 +1209,7 @@ export function ModelSettingsForm() {
               <button type="button" onClick={() => setShowApiKey((current) => !current)} disabled={!apiKey} title={apiKey ? undefined : "已保存的 Key 不可查看"} className="border-l border-[var(--line)] px-4 text-xs font-semibold text-[var(--ink-muted)] hover:bg-[var(--paper-muted)] disabled:cursor-not-allowed disabled:text-[var(--line)]">{apiKey ? (showApiKey ? "隐藏" : "显示") : "不可查看"}</button>
             </div>
             <p className="mt-2 text-xs leading-5 text-[var(--ink-muted)]">密钥只会在保存或测试时发送到后端，页面不会回显或存入浏览器。</p>
-            <button type="button" onClick={() => void handleModelDiscovery()} disabled={testState === "loading" || saveState === "loading" || (!hasSavedApiKey && !apiKey.trim())} className="mt-4 border border-[var(--research)] px-5 py-3 text-sm font-semibold text-[var(--research)] transition hover:bg-white disabled:cursor-not-allowed disabled:border-[var(--line)] disabled:text-[var(--ink-muted)]">{testState === "loading" ? "正在获取模型列表..." : modelCandidates.length > 0 ? "重新获取模型列表" : "获取模型列表"}</button>
+            <button type="button" onClick={() => void handleModelDiscovery()} disabled={testState === "loading" || saveState === "loading" || chatModelRateLimit.isRateLimited || (!hasSavedApiKey && !apiKey.trim())} className="mt-4 border border-[var(--research)] px-5 py-3 text-sm font-semibold text-[var(--research)] transition hover:bg-white disabled:cursor-not-allowed disabled:border-[var(--line)] disabled:text-[var(--ink-muted)]">{testState === "loading" ? "正在获取模型列表..." : chatModelRateLimit.isRateLimited ? `${chatModelRateLimit.retryAfterSeconds} 秒后可重试` : modelCandidates.length > 0 ? "重新获取模型列表" : "获取模型列表"}</button>
           </section>
 
           <section className="border-t border-[var(--line)] pt-7" aria-labelledby="generation-title">
@@ -1162,7 +1229,7 @@ export function ModelSettingsForm() {
               </label>
             </div>
             <div className="mt-4 flex flex-wrap gap-3">
-              <button type="button" onClick={() => void handleTest()} disabled={testState === "loading" || saveState === "loading" || !settings.model.trim()} className="border border-[var(--research)] px-5 py-3 text-sm font-semibold text-[var(--research)] transition hover:bg-[var(--paper-muted)] disabled:border-[var(--line)] disabled:text-[var(--ink-muted)]">{testState === "loading" ? "测试中..." : "测试聊天模型"}</button>
+              <button type="button" onClick={() => void handleTest()} disabled={testState === "loading" || saveState === "loading" || chatModelRateLimit.isRateLimited || !settings.model.trim()} className="border border-[var(--research)] px-5 py-3 text-sm font-semibold text-[var(--research)] transition hover:bg-[var(--paper-muted)] disabled:border-[var(--line)] disabled:text-[var(--ink-muted)]">{testState === "loading" ? "测试中..." : chatModelRateLimit.isRateLimited ? `${chatModelRateLimit.retryAfterSeconds} 秒后可重试` : "测试聊天模型"}</button>
               <button type="submit" disabled={saveState === "loading" || testState === "loading"} className="bg-[var(--research)] px-5 py-3 text-sm font-semibold text-white transition hover:bg-[var(--research-dark)] disabled:bg-[var(--line)]">{saveState === "loading" ? "保存中..." : "保存聊天模型"}</button>
             </div>
           </section>
@@ -1199,7 +1266,7 @@ export function ModelSettingsForm() {
               </div>
             </div>
             <div className="mt-4 flex flex-wrap gap-3">
-              <button type="button" onClick={() => void handleEmbeddingTest()} disabled={embeddingTestState === "loading" || embeddingSaveState === "loading"} className="border border-[var(--research)] px-5 py-3 text-sm font-semibold text-[var(--research)] transition hover:bg-[var(--paper-muted)] disabled:border-[var(--line)] disabled:text-[var(--ink-muted)]">{embeddingTestState === "loading" ? "测试中..." : "测试向量模型"}</button>
+              <button type="button" onClick={() => void handleEmbeddingTest()} disabled={embeddingTestState === "loading" || embeddingSaveState === "loading" || embeddingRateLimit.isRateLimited} className="border border-[var(--research)] px-5 py-3 text-sm font-semibold text-[var(--research)] transition hover:bg-[var(--paper-muted)] disabled:border-[var(--line)] disabled:text-[var(--ink-muted)]">{embeddingTestState === "loading" ? "测试中..." : embeddingRateLimit.isRateLimited ? `${embeddingRateLimit.retryAfterSeconds} 秒后可重试` : "测试向量模型"}</button>
               <button type="button" onClick={() => void handleEmbeddingSubmit()} disabled={embeddingSaveState === "loading" || embeddingTestState === "loading"} className="bg-[var(--research)] px-5 py-3 text-sm font-semibold text-white transition hover:bg-[var(--research-dark)] disabled:bg-[var(--line)]">{embeddingSaveState === "loading" ? "保存中..." : "保存向量模型"}</button>
             </div>
           </section>
@@ -1236,7 +1303,7 @@ export function ModelSettingsForm() {
               </div>
             </div>}
             <div className="mt-4 flex flex-wrap gap-3">
-              <button type="button" onClick={() => void handleRerankTest()} disabled={rerankTestState === "loading" || rerankSaveState === "loading"} className="border border-[var(--research)] px-5 py-3 text-sm font-semibold text-[var(--research)] transition hover:bg-[var(--paper-muted)] disabled:border-[var(--line)] disabled:text-[var(--ink-muted)]">{rerankTestState === "loading" ? "测试中..." : "测试 Rerank 模型"}</button>
+              <button type="button" onClick={() => void handleRerankTest()} disabled={rerankTestState === "loading" || rerankSaveState === "loading" || rerankRateLimit.isRateLimited} className="border border-[var(--research)] px-5 py-3 text-sm font-semibold text-[var(--research)] transition hover:bg-[var(--paper-muted)] disabled:border-[var(--line)] disabled:text-[var(--ink-muted)]">{rerankTestState === "loading" ? "测试中..." : rerankRateLimit.isRateLimited ? `${rerankRateLimit.retryAfterSeconds} 秒后可重试` : "测试 Rerank 模型"}</button>
               <button type="button" onClick={() => void handleRerankSubmit()} disabled={rerankSaveState === "loading" || rerankTestState === "loading"} className="bg-[var(--research)] px-5 py-3 text-sm font-semibold text-white transition hover:bg-[var(--research-dark)] disabled:bg-[var(--line)]">{rerankSaveState === "loading" ? "保存中..." : "保存 Rerank 模型"}</button>
             </div>
           </section>

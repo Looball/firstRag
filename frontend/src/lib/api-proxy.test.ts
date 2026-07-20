@@ -143,4 +143,26 @@ describe("api proxy helpers", () => {
     expect(headers.has("Content-Type")).toBe(false);
     expect(init.body).toBeInstanceOf(FormData);
   });
+
+  it("preserves Retry-After on rate-limited responses", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response('{"detail":"请求过于频繁"}', {
+        status: 429,
+        headers: {
+          "Content-Type": "application/json",
+          "Retry-After": "42",
+        },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await proxyToBackend({
+      request: new Request("http://localhost/api/chat", { method: "POST" }),
+      method: "POST",
+      path: "/chat",
+    });
+
+    expect(response.status).toBe(429);
+    expect(response.headers.get("Retry-After")).toBe("42");
+  });
 });

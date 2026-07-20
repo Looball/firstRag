@@ -15,6 +15,7 @@ type TaskQueuePanelProps = {
   health: VectorIndexHealthResponse | null;
   healthError: string;
   queue: VectorIndexQueueItem[];
+  retryAfterSeconds: number;
   onRefreshHealth: () => void | Promise<void>;
   onClearCompletedJobs: () => void;
   onRetryFile: (fileId: string) => void | Promise<void>;
@@ -26,6 +27,7 @@ export function TaskQueuePanel({
   health,
   healthError,
   queue,
+  retryAfterSeconds,
   onRefreshHealth,
   onClearCompletedJobs,
   onRetryFile,
@@ -175,9 +177,12 @@ export function TaskQueuePanel({
                           onClick={() =>
                             void onRetryFile(job.knowledgeFileId || "")
                           }
-                          className="text-xs font-semibold text-[#176b62] underline decoration-[#176b62] underline-offset-4 transition hover:text-[#105149]"
+                          disabled={retryAfterSeconds > 0}
+                          className="text-xs font-semibold text-[#176b62] underline decoration-[#176b62] underline-offset-4 transition hover:text-[#105149] disabled:cursor-not-allowed disabled:text-[#9aa5a0]"
                         >
-                          重试
+                          {retryAfterSeconds > 0
+                            ? `${retryAfterSeconds} 秒后重试`
+                            : "重试"}
                         </button>
                       )}
                       <button

@@ -31,6 +31,8 @@ type FileManagerDialogProps = {
   reusableFileLoadError: string;
   vectorIndexMessage: string;
   vectorIndexError: string;
+  uploadRetryAfterSeconds: number;
+  vectorIndexRetryAfterSeconds: number;
   onClose: () => void;
   onUploadClick: () => void;
   onIndexKnowledgeBase: () => void | Promise<void>;
@@ -55,6 +57,7 @@ type KnowledgeFileListProps = {
   deletingVectorFileId: string;
   detachingKnowledgeFileId: string;
   attachingKnowledgeFileId: string;
+  vectorIndexRetryAfterSeconds: number;
   onIndexFile: (fileId: string) => void | Promise<void>;
   onDeleteFileVectors: (fileId: string) => void | Promise<void>;
   onRemoveFile: (fileId: string) => void | Promise<void>;
@@ -91,6 +94,7 @@ function KnowledgeFileRow({
   deletingVectorFileId,
   detachingKnowledgeFileId,
   attachingKnowledgeFileId,
+  vectorIndexRetryAfterSeconds,
   onIndexFile,
   onDeleteFileVectors,
   onRemoveFile,
@@ -103,6 +107,7 @@ function KnowledgeFileRow({
   deletingVectorFileId: string;
   detachingKnowledgeFileId: string;
   attachingKnowledgeFileId: string;
+  vectorIndexRetryAfterSeconds: number;
   onIndexFile: (fileId: string) => void | Promise<void>;
   onDeleteFileVectors: (fileId: string) => void | Promise<void>;
   onRemoveFile: (fileId: string) => void | Promise<void>;
@@ -165,12 +170,15 @@ function KnowledgeFileRow({
           onClick={() => void onIndexFile(file.id)}
           disabled={
             isFileIndexing ||
-            !vectorStatus.canVectorize ||
-            isIndexingKnowledgeBase
+              !vectorStatus.canVectorize ||
+              isIndexingKnowledgeBase ||
+              vectorIndexRetryAfterSeconds > 0
           }
           className="px-2 py-1 text-xs font-semibold text-[#176b62] transition hover:bg-[#e4f0ec] disabled:cursor-not-allowed disabled:text-[#aab3b0]"
         >
-          {isFileIndexing || vectorStatus.canPoll
+          {vectorIndexRetryAfterSeconds > 0
+            ? `${vectorIndexRetryAfterSeconds} 秒后重试`
+            : isFileIndexing || vectorStatus.canPoll
             ? "向量化中..."
             : vectorStatus.type === "failed"
               ? "重新向量化"
@@ -213,6 +221,7 @@ function KnowledgeFileList({
   deletingVectorFileId,
   detachingKnowledgeFileId,
   attachingKnowledgeFileId,
+  vectorIndexRetryAfterSeconds,
   onIndexFile,
   onDeleteFileVectors,
   onRemoveFile,
@@ -250,6 +259,7 @@ function KnowledgeFileList({
               deletingVectorFileId={deletingVectorFileId}
               detachingKnowledgeFileId={detachingKnowledgeFileId}
               attachingKnowledgeFileId={attachingKnowledgeFileId}
+              vectorIndexRetryAfterSeconds={vectorIndexRetryAfterSeconds}
               onIndexFile={onIndexFile}
               onDeleteFileVectors={onDeleteFileVectors}
               onRemoveFile={onRemoveFile}
@@ -288,6 +298,8 @@ export function FileManagerDialog({
   reusableFileLoadError,
   vectorIndexMessage,
   vectorIndexError,
+  uploadRetryAfterSeconds,
+  vectorIndexRetryAfterSeconds,
   onClose,
   onUploadClick,
   onIndexKnowledgeBase,
@@ -344,10 +356,16 @@ export function FileManagerDialog({
           <button
             type="button"
             onClick={onUploadClick}
-            disabled={!selectedKnowledgeBaseId || isUploadingKnowledgeFiles}
+            disabled={
+              !selectedKnowledgeBaseId ||
+              isUploadingKnowledgeFiles ||
+              uploadRetryAfterSeconds > 0
+            }
             className="w-full border border-dashed border-[#9bada6] bg-[#eef3f0] px-4 py-5 text-sm font-semibold text-[#46514e] transition hover:border-[#176b62] hover:text-[#176b62] disabled:border-[#cbd5d1] disabled:text-[#9ba8a3]"
           >
-            {isUploadingKnowledgeFiles
+            {uploadRetryAfterSeconds > 0
+              ? `${uploadRetryAfterSeconds} 秒后可重试`
+              : isUploadingKnowledgeFiles
               ? "正在上传并登记文件..."
               : selectedKnowledgeBaseId
                 ? "选择文件上传"
@@ -360,11 +378,16 @@ export function FileManagerDialog({
             disabled={
               selectedFiles.length === 0 ||
               isIndexingKnowledgeBase ||
-              isUploadingKnowledgeFiles
+              isUploadingKnowledgeFiles ||
+              vectorIndexRetryAfterSeconds > 0
             }
             className="mt-3 w-full border border-[#176b62] bg-[#fcfdfb] px-4 py-3 text-sm font-semibold text-[#176b62] transition hover:bg-[#e4f0ec] disabled:border-[#cbd5d1] disabled:text-[#9ba8a3]"
           >
-            {isIndexingKnowledgeBase ? "知识库向量化中..." : "向量化当前知识库"}
+            {vectorIndexRetryAfterSeconds > 0
+              ? `${vectorIndexRetryAfterSeconds} 秒后可重试`
+              : isIndexingKnowledgeBase
+                ? "知识库向量化中..."
+                : "向量化当前知识库"}
           </button>
 
           {knowledgeFileUploadError && (
@@ -394,6 +417,7 @@ export function FileManagerDialog({
             health={vectorIndexHealth}
             healthError={vectorIndexHealthError}
             queue={vectorIndexQueue}
+            retryAfterSeconds={vectorIndexRetryAfterSeconds}
             onRefreshHealth={onRefreshVectorHealth}
             onClearCompletedJobs={onClearCompletedJobs}
             onRetryFile={onIndexFile}
@@ -420,6 +444,7 @@ export function FileManagerDialog({
             deletingVectorFileId={deletingVectorFileId}
             detachingKnowledgeFileId={detachingKnowledgeFileId}
             attachingKnowledgeFileId={attachingKnowledgeFileId}
+            vectorIndexRetryAfterSeconds={vectorIndexRetryAfterSeconds}
             onIndexFile={onIndexFile}
             onDeleteFileVectors={onDeleteFileVectors}
             onRemoveFile={onRemoveFile}
@@ -443,6 +468,7 @@ export function FileManagerDialog({
             deletingVectorFileId={deletingVectorFileId}
             detachingKnowledgeFileId={detachingKnowledgeFileId}
             attachingKnowledgeFileId={attachingKnowledgeFileId}
+            vectorIndexRetryAfterSeconds={vectorIndexRetryAfterSeconds}
             onIndexFile={onIndexFile}
             onDeleteFileVectors={onDeleteFileVectors}
             onRemoveFile={onRemoveFile}

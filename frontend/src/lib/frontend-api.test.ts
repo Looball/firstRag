@@ -128,4 +128,38 @@ describe("frontend api helpers", () => {
     );
     expect(getResponseErrorMessage("", "fallback", 502)).toBe("fallback");
   });
+
+  it("keeps Retry-After seconds on rate-limited API errors", async () => {
+    stubBrowserState(
+      JSON.stringify({
+        access_token: "token-1",
+        token_type: "bearer",
+      }),
+    );
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response('{"detail":"聊天请求过于频繁，请稍后再试。"}', {
+          status: 429,
+          headers: {
+            "Content-Type": "application/json",
+            "Retry-After": "18",
+          },
+        }),
+      ),
+    );
+
+    await expect(
+      authenticatedJson(
+        "/api/chat",
+        { method: "POST" },
+        { fallbackMessage: "请求失败" },
+      ),
+    ).rejects.toMatchObject<Partial<FrontendApiError>>({
+      name: "FrontendApiError",
+      status: 429,
+      retryAfterSeconds: 18,
+      message: "聊天请求过于频繁。请在 18 秒后重试。",
+    });
+  });
 });

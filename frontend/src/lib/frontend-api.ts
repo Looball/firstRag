@@ -9,6 +9,10 @@ import {
   STORAGE_KEY,
 } from "./chat-workspace/constants";
 import { isAuthExpiredMessage } from "./chat-workspace/utils";
+import {
+  formatRateLimitMessage,
+  getResponseRetryAfterSeconds,
+} from "./rate-limit";
 
 const errorDetailItemSchema = z
   .object({
@@ -34,11 +38,21 @@ type AuthenticatedRequestOptions = {
 
 export class FrontendApiError extends Error {
   status: number;
+  retryAfterSeconds: number | null;
 
-  constructor(message: string, status: number) {
-    super(message);
+  constructor(
+    message: string,
+    status: number,
+    retryAfterSeconds: number | null = null,
+  ) {
+    super(
+      status === 429
+        ? formatRateLimitMessage(message, retryAfterSeconds)
+        : message,
+    );
     this.name = "FrontendApiError";
     this.status = status;
+    this.retryAfterSeconds = retryAfterSeconds;
   }
 }
 
@@ -158,6 +172,7 @@ export async function authenticatedFetch(
 
   if (!response.ok) {
     const errorText = await response.text();
+    const retryAfterSeconds = getResponseRetryAfterSeconds(response);
 
     if (!options.skipAuthRedirect && (response.status === 401 || response.status === 403)) {
       redirectToLogin();
@@ -166,6 +181,7 @@ export async function authenticatedFetch(
     throw new FrontendApiError(
       getResponseErrorMessage(errorText, options.fallbackMessage, response.status),
       response.status,
+      retryAfterSeconds,
     );
   }
 

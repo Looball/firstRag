@@ -121,6 +121,11 @@ export async function proxyToBackend({
     responseHeaders.set("Set-Cookie", setCookie);
   }
 
+  const retryAfter = upstreamResponse.headers.get("Retry-After");
+  if (retryAfter) {
+    responseHeaders.set("Retry-After", retryAfter);
+  }
+
   return new Response(upstreamResponse.body, {
     status: upstreamResponse.status,
     headers: responseHeaders,
