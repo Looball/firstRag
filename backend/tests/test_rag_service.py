@@ -70,6 +70,11 @@ class RagReferenceFilteringTests(unittest.TestCase):
                     "fulltext_score": 3.45,
                     "rerank_score": 1.25,
                     "index_version": 4,
+                    "page_index": 1,
+                    "page_number": 2,
+                    "page_count": 3,
+                    "paragraph_start": 4,
+                    "paragraph_end": 5,
                 },
             ),
         ]
@@ -82,6 +87,11 @@ class RagReferenceFilteringTests(unittest.TestCase):
         self.assertEqual(references[0]["vector_score"], 0.12)
         self.assertEqual(references[0]["fulltext_score"], 3.45)
         self.assertEqual(references[0]["index_version"], 4)
+        self.assertEqual(references[0]["page_index"], 1)
+        self.assertEqual(references[0]["page_number"], 2)
+        self.assertEqual(references[0]["page_count"], 3)
+        self.assertEqual(references[0]["paragraph_start"], 4)
+        self.assertEqual(references[0]["paragraph_end"], 5)
 
     def test_get_res_doc_excludes_low_relevance_context(self) -> None:
         """低相关片段不应进入最终提示词上下文。"""

@@ -2,7 +2,10 @@ import base64
 import logging
 import os
 from pathlib import Path
+import re
 from uuid import UUID
+from xml.etree import ElementTree
+from zipfile import BadZipFile, ZipFile
 
 from langchain_chroma import Chroma
 from langchain_core.messages import HumanMessage
@@ -65,6 +68,16 @@ MARKDOWN_HEADERS_TO_SPLIT_ON = [
     ("######", "h6"),
 ]
 TEXT_SEPARATORS = ["\n\n", "\n", "。", "！", "？", "；", "，", " ", ""]
+DOCX_BLOCK_MAX_CHARACTERS = 900
+WORDPROCESSINGML_NAMESPACE = (
+    "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+)
+WORDPROCESSINGML_NAMESPACES = {"w": WORDPROCESSINGML_NAMESPACE}
+WORD_PARAGRAPH_TAG = f"{{{WORDPROCESSINGML_NAMESPACE}}}p"
+WORD_TEXT_TAG = f"{{{WORDPROCESSINGML_NAMESPACE}}}t"
+WORD_TAB_TAG = f"{{{WORDPROCESSINGML_NAMESPACE}}}tab"
+WORD_BREAK_TAG = f"{{{WORDPROCESSINGML_NAMESPACE}}}br"
+WORD_VALUE_ATTRIBUTE = f"{{{WORDPROCESSINGML_NAMESPACE}}}val"
 
 
 class UnsupportedDocumentTypeError(ValueError):
@@ -204,6 +217,159 @@ def convert_docx2md(docx_path) -> str:
         )
 
     return markdownify(result.value, heading_style="ATX")
+
+
+def get_docx_heading_level(paragraph: ElementTree.Element) -> int | None:
+    """从 OOXML paragraph style 读取 1-6 级标题。"""
+    style = paragraph.find("./w:pPr/w:pStyle", WORDPROCESSINGML_NAMESPACES)
+    if style is None:
+        return None
+
+    style_name = str(style.get(WORD_VALUE_ATTRIBUTE) or "").strip()
+    match = re.search(r"(?:heading|标题)\s*([1-6])", style_name, re.IGNORECASE)
+    return int(match.group(1)) if match else None
+
+
+def get_docx_paragraph_text(paragraph: ElementTree.Element) -> str:
+    """按 OOXML 节点顺序提取单个 paragraph 的文本、制表符和换行。"""
+    parts: list[str] = []
+    for element in paragraph.iter():
+        if element.tag == WORD_TEXT_TAG and element.text:
+            parts.append(element.text)
+        elif element.tag == WORD_TAB_TAG:
+            parts.append("\t")
+        elif element.tag == WORD_BREAK_TAG:
+            parts.append("\n")
+    return "".join(parts).strip()
+
+
+def extract_docx_paragraphs(file_path: Path) -> list[dict[str, object]]:
+    """从 DOCX 主文档 XML 提取保留原始序号的非空段落。"""
+    try:
+        with ZipFile(file_path) as archive:
+            document_xml = archive.read("word/document.xml")
+    except (BadZipFile, KeyError, OSError) as exc:
+        raise EmptyDocumentError("DOCX 文件结构无效或缺少正文") from exc
+
+    try:
+        root = ElementTree.fromstring(document_xml)
+    except ElementTree.ParseError as exc:
+        raise EmptyDocumentError("DOCX 正文 XML 无法解析") from exc
+
+    paragraphs = []
+    for paragraph_number, paragraph in enumerate(
+        root.iter(WORD_PARAGRAPH_TAG),
+        start=1,
+    ):
+        text = get_docx_paragraph_text(paragraph)
+        if not text:
+            continue
+        paragraphs.append({
+            "paragraph_number": paragraph_number,
+            "text": text,
+            "heading_level": get_docx_heading_level(paragraph),
+        })
+    return paragraphs
+
+
+def build_docx_block_documents(
+    file_path: Path,
+    base_metadata: dict[str, str],
+) -> list[Document]:
+    """按标题和字符上限将 DOCX 段落组合为带位置范围的 Documents。"""
+    paragraphs = extract_docx_paragraphs(file_path)
+    if not paragraphs:
+        raise EmptyDocumentError("DOCX 文件没有可索引正文")
+
+    documents: list[Document] = []
+    block_parts: list[str] = []
+    block_start = 0
+    block_end = 0
+
+    def flush_block() -> None:
+        """把当前段落块写成一个带准确范围的 Document。"""
+        nonlocal block_parts, block_start, block_end
+        if not block_parts:
+            return
+        documents.append(
+            Document(
+                page_content="\n\n".join(block_parts),
+                metadata={
+                    **base_metadata,
+                    "content_format": "markdown",
+                    "location_type": "docx_paragraphs",
+                    "paragraph_start": block_start,
+                    "paragraph_end": block_end,
+                },
+            )
+        )
+        block_parts = []
+        block_start = 0
+        block_end = 0
+
+    for paragraph in paragraphs:
+        paragraph_number = int(paragraph["paragraph_number"])
+        paragraph_text = str(paragraph["text"])
+        heading_level = paragraph.get("heading_level")
+        formatted_text = (
+            f"{'#' * int(heading_level)} {paragraph_text}"
+            if isinstance(heading_level, int)
+            else paragraph_text
+        )
+        candidate_length = sum(len(part) for part in block_parts)
+        candidate_length += len(formatted_text) + (2 if block_parts else 0)
+        if block_parts and (
+            isinstance(heading_level, int)
+            or candidate_length > DOCX_BLOCK_MAX_CHARACTERS
+        ):
+            flush_block()
+
+        if not block_parts:
+            block_start = paragraph_number
+        block_parts.append(formatted_text)
+        block_end = paragraph_number
+
+    flush_block()
+    return documents
+
+
+def build_pdf_page_documents(
+    file_path: Path,
+    base_metadata: dict[str, str],
+) -> list[Document]:
+    """逐页解析 PDF，并把真实 1-based 页码写入 Document metadata。"""
+    page_chunks = pymupdf4llm.to_markdown(
+        str(file_path),
+        page_chunks=True,
+    )
+    if not isinstance(page_chunks, list):
+        raise EmptyDocumentError("PDF 解析器没有返回逐页结果")
+
+    documents = []
+    page_count = len(page_chunks)
+    for page_index, page_chunk in enumerate(page_chunks):
+        if not isinstance(page_chunk, dict):
+            continue
+        markdown_text = str(page_chunk.get("text") or "").strip()
+        if not markdown_text:
+            continue
+        documents.append(
+            Document(
+                page_content=markdown_text,
+                metadata={
+                    **base_metadata,
+                    "content_format": "markdown",
+                    "location_type": "pdf_page",
+                    "page_index": page_index,
+                    "page_number": page_index + 1,
+                    "page_count": page_count,
+                },
+            )
+        )
+
+    if not documents:
+        raise EmptyDocumentError("PDF 文件没有可索引正文")
+    return documents
 
 
 def extract_chat_message_text(content: object) -> str:
@@ -358,28 +524,10 @@ def load_document(
         ]
 
     if suffix == ".pdf":
-        markdown_text = pymupdf4llm.to_markdown(str(file_path))
-        return [
-            Document(
-                page_content=markdown_text,
-                metadata={
-                    **base_metadata,
-                    "content_format": "markdown",
-                },
-            )
-        ]
+        return build_pdf_page_documents(file_path, base_metadata)
 
     if suffix == ".docx":
-        markdown_text = convert_docx2md(str(file_path))
-        return [
-            Document(
-                page_content=markdown_text,
-                metadata={
-                    **base_metadata,
-                    "content_format": "markdown",
-                },
-            )
-        ]
+        return build_docx_block_documents(file_path, base_metadata)
 
     if suffix == ".md":
         return [
@@ -439,12 +587,22 @@ def split_document(document: Document) -> list[Document]:
 
 
 def split_documents(documents: list[Document]) -> list[Document]:
-    """批量切分文档，并为每个源文档生成独立的分块序号。"""
+    """批量切分文档，并按用户和文件生成全局连续分块序号。"""
     chunks: list[Document] = []
+    next_chunk_index_by_file: dict[tuple[str, str], int] = {}
     for document in documents:
         document_chunks = split_document(document)
-        for chunk_index, chunk in enumerate(document_chunks):
+        metadata = document.metadata
+        sequence_key = (
+            str(metadata.get("user_id") or ""),
+            str(metadata.get("file_id") or metadata.get("source") or ""),
+        )
+        next_chunk_index = next_chunk_index_by_file.get(sequence_key, 0)
+        for chunk in document_chunks:
+            chunk_index = next_chunk_index
             chunk.metadata["chunk_index"] = chunk_index
+            next_chunk_index += 1
+        next_chunk_index_by_file[sequence_key] = next_chunk_index
         chunks.extend(document_chunks)
 
     return chunks

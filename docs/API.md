@@ -162,7 +162,7 @@ ID 随聊天请求提交。当前支持 `image/png`、`image/jpeg` 和 `image/we
 
 图片知识文件上传成功后仍然走异步向量化。worker 会使用当前登录用户保存的 vision-capable 聊天模型把图片解析为可检索 Markdown，再切分为 chunk，写入 PostgreSQL full-text chunks 和 Chroma。若用户未配置聊天模型，或当前模型不支持 vision，单文件/整库向量化提交会返回 `400`；通过 `auto_index=true` 自动入队的任务会在 worker 阶段失败，并返回安全的恢复提示。
 
-引用原文定位使用 `knowledge_file_id + chunk_index + index_version`；新生成的 source 会持久化其索引版本，旧 source 未携带版本时回退到最新可用 chunk 版本。chunk 上下文接口只返回完整正文和白名单位置 metadata（`h1`-`h6`、可用页码），不返回 `storage_path`。当前解析链路没有稳定页码时，前端只展示精确 chunk，不生成推测页码。原始文件接口不信任上传时的 Content-Type，而是按受支持扩展名设置安全 MIME，并返回 `nosniff` 和 sandbox 响应头；跨用户、路径越界、文件缺失或已重新索引后目标 chunk 不存在时返回 `404`。
+引用原文定位使用 `knowledge_file_id + chunk_index + index_version`；新生成的 source 会持久化其索引版本，旧 source 未携带版本时回退到最新可用 chunk 版本。chunk 上下文接口只返回完整正文和白名单位置 metadata（`h1`-`h6`、PDF 的 `page_index/page_number/page_count`、DOCX 的 `paragraph_start/paragraph_end`），不返回 `storage_path`。PDF 页码来自逐页解析结果，使用 1-based `page_number`；DOCX 段落号来自 `word/document.xml` 的原始文档顺序，同样从 1 开始。其他格式没有稳定位置时，前端只展示精确 chunk，不生成推测页码。原始文件接口不信任上传时的 Content-Type，而是按受支持扩展名设置安全 MIME，并返回 `nosniff` 和 sandbox 响应头；跨用户、路径越界、文件缺失或已重新索引后目标 chunk 不存在时返回 `404`。
 
 上传同时受单文件大小、用户文件数量和用户总容量配额限制：
 

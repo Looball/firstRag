@@ -36,6 +36,7 @@ class KnowledgeChunkContextRepositoryTests(unittest.TestCase):
         self.assertEqual(result, [])
         sql, params = fetch_all.call_args.args
         self.assertIn("chunk.index_version = %s", sql)
+        self.assertIn("%s::integer IS NULL", sql)
         self.assertIn("ORDER BY chunk.index_version DESC", sql)
         self.assertIn("context.user_id = %s", sql)
         self.assertEqual(params, (7, str(file_id), 4, 5, 5, 7, 2, 2))
@@ -74,7 +75,16 @@ class SourcePreviewApiTests(unittest.TestCase):
                 "target_chunk_index": 2,
                 "chunk_index": 2,
                 "content": "target",
-                "metadata": {"h1": "指南", "h2": "安装"},
+                "metadata": {
+                    "h1": "指南",
+                    "h2": "安装",
+                    "location_type": "pdf_page",
+                    "page_index": 1,
+                    "page_number": 2,
+                    "page_count": 3,
+                    "paragraph_start": 4,
+                    "paragraph_end": 5,
+                },
             },
         ]
         with patch(
@@ -98,6 +108,14 @@ class SourcePreviewApiTests(unittest.TestCase):
         self.assertFalse(payload["chunks"][0]["is_target"])
         self.assertTrue(payload["chunks"][1]["is_target"])
         self.assertEqual(payload["chunks"][1]["location"]["h2"], "安装")
+        self.assertEqual(payload["chunks"][1]["location"]["page_number"], 2)
+        self.assertEqual(payload["chunks"][1]["location"]["page_index"], 1)
+        self.assertEqual(payload["chunks"][1]["location"]["page_count"], 3)
+        self.assertEqual(
+            payload["chunks"][1]["location"]["paragraph_start"],
+            4,
+        )
+        self.assertEqual(payload["chunks"][1]["location"]["paragraph_end"], 5)
         self.assertNotIn("source", payload["chunks"][0]["location"])
 
     def test_chunk_preview_hides_missing_or_cross_user_resource(self) -> None:

@@ -76,6 +76,7 @@
 | `PLAN-20260720-07` | 2026-07-20 | `Done` | 固化 GitHub Actions 第三方依赖，使用完整 commit SHA 并由 Dependabot 持续更新。 | `T-068` |
 | `PLAN-20260721-01` | 2026-07-21 | `Done` | 补齐知识库与知识文件的用户可见生命周期，支持安全删除、恢复和跨存储清理。 | `T-069` |
 | `PLAN-20260721-02` | 2026-07-21 | `Done` | 增强回答引用的可核验性，支持按 chunk 查看前后文并安全打开原始文件。 | `T-070` |
+| `PLAN-20260721-03` | 2026-07-21 | `Doing` | 为 PDF/DOCX 引用补充可验证的位置 metadata，并增强原文定位展示。 | `T-071` |
 
 ## 任务总览
 
@@ -151,6 +152,7 @@
 | `T-068` | `PLAN-20260720-07` | `P1` | `Done` | 固定 GitHub Actions SHA 并启用 Dependabot 更新 | 2026-07-20 | `06c9b61` |
 | `T-069` | `PLAN-20260721-01` | `P1` | `Done` | 补齐知识库和知识文件完整生命周期 | 2026-07-21 | `ac4397b` |
 | `T-070` | `PLAN-20260721-02` | `P1` | `Done` | 实现来源原文预览与精确引用跳转 | 2026-07-21 | `11ed2e4` |
+| `T-071` | `PLAN-20260721-03` | `P1` | `Doing` | 持久化 PDF 页码和 DOCX 段落位置 | — | — |
 
 ## 新计划接入流程
 
@@ -2701,6 +2703,41 @@ git diff --check
   - `cd frontend && npm test -- --run`：10 个 test files、63 tests passed；`npm run lint`：0 error、保留 2 个既有 `<img>` performance warnings；Next 16.2.10 production build 通过。
   - `docker compose up -d --build` 通过；Redis、PostgreSQL、Chroma healthy，backend、worker、frontend Up，migration `applied=0 skipped=5`，最近日志只有预期 smoke 请求和跨用户 `404`。
   - production preflight、Docker Compose config、Chroma runtime health、migration dry-run 和 `git diff --check` 全部通过。
+- 建议验证命令：
+
+```bash
+cd backend && conda run -n firstrag python -m pytest -q
+cd ../frontend && npm test -- --run && npm run lint && npm run build
+cd .. && docker compose up -d --build
+docker compose ps -a
+docker compose logs --since=10m redis postgres chroma migrate backend worker frontend
+conda run -n firstrag python scripts/production_preflight.py --env-file .env --migration-method compose --check-runtime-health
+git diff --check
+```
+
+## T-071 持久化 PDF 页码和 DOCX 段落位置
+
+- 来源计划：`PLAN-20260721-03`
+- 优先级：`P1`
+- 状态：`Doing`
+- 目标：让新索引的 PDF/DOCX source 携带可验证的位置 metadata，使引用弹窗能展示真实页码或段落范围，并在打开 PDF 时跳到对应页面。
+- 位置语义：
+  - PDF 使用解析器逐页输出的 1-based `page_number`，并保留 0-based `page_index` 供内部诊断。
+  - DOCX 从 OOXML 文档顺序提取 1-based `paragraph_start` / `paragraph_end`；空段落不进入正文，但原始序号保持不变。
+  - PDF 原始文件可使用 `#page=N` 打开到目标页；DOCX 浏览器无法可靠控制 Word 内部光标，只在内置弹窗高亮目标 chunk 并展示段落范围。
+- 范围：
+  - PDF 改为 `page_chunks=True` 逐页加载，页码 metadata 随 split、PostgreSQL chunks、Chroma vectors 和 sources 持久化。
+  - DOCX 从 `word/document.xml` 提取正文段落和 heading style，在不拆散普通短段落的前提下按段落边界组块。
+  - 多页/多 block 文档按 `user_id + file_id` 分配全局稳定 chunk index，避免页内 chunk index 重复。
+  - source serializer、chunk preview API 和前端类型扩展页码、页索引与段落范围字段。
+  - 引用卡片和原文弹窗展示真实位置；打开 PDF 时附加页码 fragment，DOCX 保持安全下载/打开行为。
+  - 同步更新 API、Schema、Frontend、RAG workflow、Architecture 文档和回归测试。
+- 验收标准：
+  - 3 页 PDF 的每个 chunk 保留正确页码，来源定位到第 2 页时打开 URL 包含 `#page=2`。
+  - DOCX chunks 的段落范围单调、无越界，目标正文能对应到实际 OOXML 段落序号。
+  - 同一 PDF/DOCX 文件的 chunk index 全局唯一且连续，不因 page/block 重置。
+  - 现有 Markdown、TXT、图片解析与索引行为保持兼容。
+  - 测试、production build、Docker Compose 真实 PDF/DOCX indexing smoke 和 production preflight 通过。
 - 建议验证命令：
 
 ```bash

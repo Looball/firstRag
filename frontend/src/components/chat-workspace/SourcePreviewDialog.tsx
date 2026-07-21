@@ -5,6 +5,10 @@ import { useEffect, useRef, useState } from "react";
 
 import * as chatApi from "@/lib/chat-workspace/api";
 import type { ChatSource } from "@/lib/chat-workspace/types";
+import {
+  buildOriginalFilePreviewUrl,
+  formatSourcePosition,
+} from "@/lib/chat-workspace/utils";
 
 type SourcePreviewDialogProps = {
   source: ChatSource;
@@ -18,10 +22,27 @@ function formatChunkLocation(location: Record<string, string | number>) {
   const headings = LOCATION_KEYS.map((key) => location[key])
     .filter((value): value is string | number => value !== undefined)
     .map(String);
-  const page = location.page_number ?? location.page;
+  const position = formatSourcePosition({
+    pageNumber:
+      typeof (location.page_number ?? location.page) === "number"
+        ? Number(location.page_number ?? location.page)
+        : undefined,
+    pageCount:
+      typeof location.page_count === "number"
+        ? location.page_count
+        : undefined,
+    paragraphStart:
+      typeof location.paragraph_start === "number"
+        ? location.paragraph_start
+        : undefined,
+    paragraphEnd:
+      typeof location.paragraph_end === "number"
+        ? location.paragraph_end
+        : undefined,
+  });
 
-  if (page !== undefined) {
-    headings.push(`第 ${page} 页`);
+  if (position) {
+    headings.push(position);
   }
 
   return headings.join(" / ");
@@ -56,6 +77,30 @@ export function SourcePreviewDialog({
     enabled: canLoadPreview,
     staleTime: 5 * 60 * 1000,
     retry: 1,
+  });
+  const targetChunk = previewQuery.data?.chunks.find((chunk) => chunk.isTarget);
+  const targetPageNumber =
+    source.pageNumber ??
+    (typeof targetChunk?.location.page_number === "number"
+      ? targetChunk.location.page_number
+      : undefined);
+  const sourcePosition = formatSourcePosition({
+    pageNumber: targetPageNumber,
+    pageCount:
+      source.pageCount ??
+      (typeof targetChunk?.location.page_count === "number"
+        ? targetChunk.location.page_count
+        : undefined),
+    paragraphStart:
+      source.paragraphStart ??
+      (typeof targetChunk?.location.paragraph_start === "number"
+        ? targetChunk.location.paragraph_start
+        : undefined),
+    paragraphEnd:
+      source.paragraphEnd ??
+      (typeof targetChunk?.location.paragraph_end === "number"
+        ? targetChunk.location.paragraph_end
+        : undefined),
   });
 
   useEffect(() => {
@@ -96,7 +141,11 @@ export function SourcePreviewDialog({
     try {
       const blob = await chatApi.loadKnowledgeFileContent(fileId);
       const objectUrl = URL.createObjectURL(blob);
-      fileWindow.location.href = objectUrl;
+      fileWindow.location.href = buildOriginalFilePreviewUrl(
+        objectUrl,
+        blob.type || previewQuery.data?.mimeType || "",
+        targetPageNumber,
+      );
       window.setTimeout(() => URL.revokeObjectURL(objectUrl), 60_000);
     } catch (error) {
       fileWindow.close();
@@ -128,6 +177,7 @@ export function SourcePreviewDialog({
               {previewQuery.data?.fileName || source.fileName || source.title}
             </h2>
             <p className="mt-1 text-xs text-[#64716d]">
+              {sourcePosition ? `${sourcePosition} · ` : ""}
               精确定位 Chunk #{chunkIndex ?? "未知"}，并展示相邻上下文
             </p>
           </div>

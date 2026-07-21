@@ -17,8 +17,8 @@
 
 1. `vector_index_worker` 领取 `queued` 任务。
 2. 使用 PostgreSQL advisory lock 避免同一文件并发索引。
-3. `document_service` 加载 PDF、DOCX、Markdown、TXT 或图片知识文件。图片文件会使用当前用户配置的 vision 聊天模型解析为可检索 Markdown；聊天图片附件不走这条入库链路。
-4. 文本或图片解析结果切分为 chunk。
+3. `document_service` 加载 PDF、DOCX、Markdown、TXT 或图片知识文件。PDF 按真实页面加载并写入页码 metadata；DOCX 从 OOXML 主文档按标题和段落边界加载，保留原始段落范围。图片文件会使用当前用户配置的 vision 聊天模型解析为可检索 Markdown；聊天图片附件不走这条入库链路。
+4. 文本或图片解析结果切分为 chunk；同一文件跨 PDF page 或 DOCX block 使用全局连续的 `chunk_index`。
 5. 当前登录用户保存的 embedding provider 生成向量，支持 Qwen、智谱、OpenAI、Voyage、Cohere、Jina 和自定义 OpenAI-compatible embedding API。用户可按厂商保存多份 API Key，当前生效配置决定实际调用的 provider/model/base_url。
 6. Chroma 保存向量；Compose 中 worker 与 backend 均通过 HTTP client 访问独立
    `chroma` service，避免多个 embedded 进程共享目录产生索引可见性问题。
@@ -76,7 +76,7 @@
 - `sources`：回答引用的文件、chunk、分数和检索来源。
 - `retrieval`：最终是否检索、Router LLM 原始判断、规则覆盖原因、改写问题、召回数量、降级状态和诊断信息。
 
-前端可使用 source 中持久化的 `file_id + chunk_index + index_version` 调用 chunk 上下文 API，从 PostgreSQL 精确读取目标 chunk 和相邻正文；旧 source 缺少 `index_version` 时回退到最新可用 chunk 版本。该能力用于引用核验，不重新执行 embedding、全文检索或 rerank；旧 source 缺少文件/chunk 定位字段、文件已永久删除或重新索引后指定版本不再存在时安全返回不可用状态。
+前端可使用 source 中持久化的 `file_id + chunk_index + index_version` 调用 chunk 上下文 API，从 PostgreSQL 精确读取目标 chunk 和相邻正文；source 同时携带 PDF 页码或 DOCX 段落范围。旧 source 缺少 `index_version` 时回退到最新可用 chunk 版本。该能力用于引用核验，不重新执行 embedding、全文检索或 rerank；旧 source 缺少文件/chunk 定位字段、文件已永久删除或重新索引后指定版本不再存在时安全返回不可用状态。
 
 诊断展示应区分三类信息：
 

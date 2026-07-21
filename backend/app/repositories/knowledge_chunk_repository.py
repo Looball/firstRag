@@ -172,7 +172,7 @@ def get_user_knowledge_file_chunk_context(
             WHERE chunk.user_id = %s
               AND chunk.knowledge_file_id = %s
               AND chunk.chunk_index = %s
-              AND (%s IS NULL OR chunk.index_version = %s)
+              AND (%s::integer IS NULL OR chunk.index_version = %s)
               AND file.deleted_at IS NULL
             ORDER BY chunk.index_version DESC
             LIMIT 1

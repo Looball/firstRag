@@ -36,6 +36,7 @@ import { useKnowledgeFiles } from "@/lib/chat-workspace/use-knowledge-files";
 import {
   buildSessionTitle,
   formatFileSize,
+  formatSourcePosition,
 } from "@/lib/chat-workspace/utils";
 import { streamChatResponse } from "@/lib/chat-workspace/chat-stream";
 import { useRetryAfterCountdown } from "@/lib/use-retry-after-countdown";
@@ -2845,6 +2846,7 @@ export default function Home() {
                                     ? "已标记：引用无关"
                                     : "";
                               const sourceFileMeta = [
+                                formatSourcePosition(source),
                                 source.fileName !== source.title
                                   ? source.fileName
                                   : "",

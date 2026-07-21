@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  buildOriginalFilePreviewUrl,
   formatDiagnosticTiming,
+  formatSourcePosition,
   getChatSources,
   getRetrievalState,
   getVectorStatus,
@@ -64,6 +66,9 @@ describe("chat workspace source parsing", () => {
           file_name: "source.md",
           chunk_index: "2",
           index_version: "4",
+          page_index: 1,
+          page_number: 2,
+          page_count: 3,
           rerank_score: "1.25",
           retrieval_sources: ["fulltext", "vector"],
           content: "matched chunk",
@@ -75,15 +80,65 @@ describe("chat workspace source parsing", () => {
       {
         title: "source.md",
         content: "matched chunk",
-        metadata: "fulltext / vector",
+        metadata: "第 2 / 3 页",
         fileId: "file-1",
         fileName: "source.md",
         chunkIndex: 2,
         indexVersion: 4,
+        pageIndex: 1,
+        pageNumber: 2,
+        pageCount: 3,
         rerankScore: 1.25,
         retrievalSources: ["fulltext", "vector"],
       },
     ]);
+  });
+
+  it("normalizes DOCX paragraph locations from nested metadata", () => {
+    const sources = getChatSources({
+      sources: [
+        {
+          file_name: "contract.docx",
+          content: "target paragraph",
+          metadata: {
+            paragraph_start: "4",
+            paragraph_end: 5,
+          },
+        },
+      ],
+    });
+
+    expect(sources[0]).toEqual(
+      expect.objectContaining({
+        metadata: "第 4–5 段",
+        paragraphStart: 4,
+        paragraphEnd: 5,
+      }),
+    );
+  });
+});
+
+describe("source position helpers", () => {
+  it("formats pages and paragraph ranges", () => {
+    expect(formatSourcePosition({ pageNumber: 2, pageCount: 3 })).toBe(
+      "第 2 / 3 页",
+    );
+    expect(formatSourcePosition({ paragraphStart: 4, paragraphEnd: 5 })).toBe(
+      "第 4–5 段",
+    );
+  });
+
+  it("adds PDF page fragments without changing other file URLs", () => {
+    expect(
+      buildOriginalFilePreviewUrl("blob:test", "application/pdf", 2),
+    ).toBe("blob:test#page=2");
+    expect(
+      buildOriginalFilePreviewUrl(
+        "blob:test",
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        2,
+      ),
+    ).toBe("blob:test");
   });
 });
 

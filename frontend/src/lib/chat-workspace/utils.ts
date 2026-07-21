@@ -85,6 +85,45 @@ export function formatDurationSeconds(seconds: number | null) {
 }
 
 
+export function formatSourcePosition(
+  position: Pick<
+    ChatSource,
+    "pageNumber" | "pageCount" | "paragraphStart" | "paragraphEnd"
+  >,
+) {
+  if (position.pageNumber !== undefined) {
+    const pageCount = position.pageCount;
+    return pageCount !== undefined
+      ? `第 ${position.pageNumber} / ${pageCount} 页`
+      : `第 ${position.pageNumber} 页`;
+  }
+
+  if (position.paragraphStart !== undefined) {
+    const paragraphEnd = position.paragraphEnd ?? position.paragraphStart;
+    return paragraphEnd === position.paragraphStart
+      ? `第 ${position.paragraphStart} 段`
+      : `第 ${position.paragraphStart}–${paragraphEnd} 段`;
+  }
+
+  return "";
+}
+
+
+export function buildOriginalFilePreviewUrl(
+  objectUrl: string,
+  mimeType: string,
+  pageNumber?: number,
+) {
+  const isPdf =
+    mimeType.split(";", 1)[0].trim().toLowerCase() === "application/pdf";
+  if (!isPdf || pageNumber === undefined || !Number.isFinite(pageNumber)) {
+    return objectUrl;
+  }
+
+  return `${objectUrl}#page=${Math.max(1, Math.floor(pageNumber))}`;
+}
+
+
 export function formatDateTimeText(value: string | null) {
   if (!value) {
     return "未知";
@@ -904,6 +943,31 @@ export function toChatSource(value: unknown, index: number): ChatSource | null {
     "chunk_id",
   ]);
   const indexVersion = getOptionalNumberField(source, ["index_version"]);
+  const pageIndex =
+    getOptionalNumberField(source, ["page_index"]) ??
+    (metadataRecord
+      ? getOptionalNumberField(metadataRecord, ["page_index"])
+      : undefined);
+  const pageNumber =
+    getOptionalNumberField(source, ["page_number", "page"]) ??
+    (metadataRecord
+      ? getOptionalNumberField(metadataRecord, ["page_number", "page"])
+      : undefined);
+  const pageCount =
+    getOptionalNumberField(source, ["page_count"]) ??
+    (metadataRecord
+      ? getOptionalNumberField(metadataRecord, ["page_count"])
+      : undefined);
+  const paragraphStart =
+    getOptionalNumberField(source, ["paragraph_start"]) ??
+    (metadataRecord
+      ? getOptionalNumberField(metadataRecord, ["paragraph_start"])
+      : undefined);
+  const paragraphEnd =
+    getOptionalNumberField(source, ["paragraph_end"]) ??
+    (metadataRecord
+      ? getOptionalNumberField(metadataRecord, ["paragraph_end"])
+      : undefined);
   const rerankScore = getOptionalNumberField(source, [
     "rerank_score",
     "score",
@@ -997,19 +1061,14 @@ export function toChatSource(value: unknown, index: number): ChatSource | null {
 
   const metadataParts: string[] = [];
   const createdAt = source["created_at"];
-  const pageNumber =
-    source["page"] ??
-    source["page_number"] ??
-    source["page_index"] ??
-    metadataRecord?.page ??
-    metadataRecord?.page_number ??
-    metadataRecord?.page_index;
-
-  if (
-    (typeof pageNumber === "number" && Number.isFinite(pageNumber)) ||
-    (typeof pageNumber === "string" && pageNumber.trim())
-  ) {
-    metadataParts.push(`页码 ${pageNumber}`);
+  const sourcePosition = formatSourcePosition({
+    pageNumber,
+    pageCount,
+    paragraphStart,
+    paragraphEnd,
+  });
+  if (sourcePosition) {
+    metadataParts.push(sourcePosition);
   }
 
   if (typeof createdAt === "string" && createdAt.trim()) {
@@ -1040,6 +1099,11 @@ export function toChatSource(value: unknown, index: number): ChatSource | null {
     ...(fileType ? { fileType } : {}),
     ...(chunkIndex !== undefined ? { chunkIndex } : {}),
     ...(indexVersion !== undefined ? { indexVersion } : {}),
+    ...(pageIndex !== undefined ? { pageIndex } : {}),
+    ...(pageNumber !== undefined ? { pageNumber } : {}),
+    ...(pageCount !== undefined ? { pageCount } : {}),
+    ...(paragraphStart !== undefined ? { paragraphStart } : {}),
+    ...(paragraphEnd !== undefined ? { paragraphEnd } : {}),
     ...(vectorScore !== undefined ? { vectorScore } : {}),
     ...(fulltextScore !== undefined ? { fulltextScore } : {}),
     ...(rerankScore !== undefined ? { rerankScore } : {}),
@@ -1067,6 +1131,11 @@ export function hasSourceShape(value: Record<string, unknown>) {
     "index",
     "chunk_index",
     "index_version",
+    "page_index",
+    "page_number",
+    "page_count",
+    "paragraph_start",
+    "paragraph_end",
     "vector_score",
     "fulltext_score",
     "rerank_score",

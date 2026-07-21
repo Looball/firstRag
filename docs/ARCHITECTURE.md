@@ -48,11 +48,11 @@ FirstRAG/
   -> 删除 uploads 下的磁盘文件并失效知识库画像缓存
 
 回答引用原文预览
-  -> source.file_id + source.chunk_index
+  -> source.file_id + source.chunk_index + source.index_version
   -> 当前用户 JWT 权限校验
   -> PostgreSQL knowledge_file_chunks 当前 index_version
-  -> 返回目标 chunk 与相邻上下文，不暴露 storage_path
-  -> 可选读取 uploads 边界内的原始文件
+  -> 返回目标 chunk、相邻上下文及 PDF 页码或 DOCX 段落范围
+  -> 可选读取 uploads 边界内的原始文件；PDF 使用 #page=N 跳页
 ```
 
 ## 分层边界

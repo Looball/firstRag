@@ -48,6 +48,11 @@ export type ChatSource = {
   fileType?: string;
   chunkIndex?: number;
   indexVersion?: number;
+  pageIndex?: number;
+  pageNumber?: number;
+  pageCount?: number;
+  paragraphStart?: number;
+  paragraphEnd?: number;
   vectorScore?: number;
   fulltextScore?: number;
   rerankScore?: number;

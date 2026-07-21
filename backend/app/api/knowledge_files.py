@@ -68,6 +68,7 @@ from app.services.knowledge_file_lifecycle_service import (
 router = APIRouter(prefix="/chat", tags=["knowledge-files"])
 logger = logging.getLogger(__name__)
 CHUNK_LOCATION_METADATA_KEYS = (
+    "location_type",
     "h1",
     "h2",
     "h3",
@@ -75,7 +76,11 @@ CHUNK_LOCATION_METADATA_KEYS = (
     "h5",
     "h6",
     "page",
+    "page_index",
     "page_number",
+    "page_count",
+    "paragraph_start",
+    "paragraph_end",
 )
 SAFE_INLINE_MEDIA_TYPES = {
     ".pdf": "application/pdf",
@@ -93,7 +98,7 @@ SAFE_INLINE_MEDIA_TYPES = {
 
 
 def serialize_chunk_location_metadata(metadata: object) -> dict[str, object]:
-    """仅返回可展示的标题或页码元数据，不暴露内部存储路径。"""
+    """仅返回可展示的位置元数据，不暴露内部存储路径。"""
     if not isinstance(metadata, dict):
         return {}
 

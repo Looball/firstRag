@@ -1,17 +1,22 @@
 """文档发现与切分服务的单元测试。"""
 
 from contextlib import redirect_stdout
+from html import escape
 from io import StringIO
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
 from unittest.mock import Mock, patch
+from zipfile import ZIP_DEFLATED, ZipFile
+
+import pymupdf
 
 from app.services.documents.document_service import (
     ImageDocumentParseError,
     build_vector_store,
     get_document_paths,
     load_document,
+    split_documents,
 )
 from app.services.llm_service import ChatModelSettings
 from app.services.user_settings_service import EffectiveChatModelConfig
@@ -26,6 +31,47 @@ PNG_BYTES = (
     b"\x00\x03\x03\x02\x00\xef\xbf\xa7\xdb"
     b"\x00\x00\x00\x00IEND\xaeB`\x82"
 )
+
+
+def create_pdf_fixture(path: Path, page_texts: list[str]) -> None:
+    """创建包含指定逐页文本的真实 PDF 测试文件。"""
+    document = pymupdf.open()
+    try:
+        for page_text in page_texts:
+            page = document.new_page()
+            page.insert_text((72, 72), page_text, fontsize=12)
+        document.save(path)
+    finally:
+        document.close()
+
+
+def create_docx_fixture(
+    path: Path,
+    paragraphs: list[tuple[str, str | None]],
+) -> None:
+    """创建只含主文档 XML 的最小 DOCX 测试文件。"""
+    paragraph_xml = []
+    for text, style in paragraphs:
+        style_xml = (
+            f'<w:pPr><w:pStyle w:val="{escape(style)}"/></w:pPr>'
+            if style
+            else ""
+        )
+        text_xml = (
+            f'<w:r><w:t xml:space="preserve">{escape(text)}</w:t></w:r>'
+            if text
+            else ""
+        )
+        paragraph_xml.append(f"<w:p>{style_xml}{text_xml}</w:p>")
+
+    document_xml = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<w:document xmlns:w="http://schemas.openxmlformats.org/'
+        'wordprocessingml/2006/main"><w:body>'
+        f'{"".join(paragraph_xml)}<w:sectPr/></w:body></w:document>'
+    )
+    with ZipFile(path, "w", compression=ZIP_DEFLATED) as archive:
+        archive.writestr("word/document.xml", document_xml)
 
 
 class FakeVisionModel:
@@ -102,6 +148,89 @@ class DocumentServiceTests(unittest.TestCase):
         self.assertIs(result, mock_vector_store)
         self.assertEqual(stdout.getvalue(), "")
         mock_create_embedding_model.assert_called_once_with(42)
+
+    def test_pdf_chunks_keep_real_page_numbers_and_global_indexes(self) -> None:
+        """PDF 分块应保留真实页码，并在跨页后继续递增 chunk index。"""
+        with TemporaryDirectory() as temporary_directory:
+            pdf_path = Path(temporary_directory) / "three-pages.pdf"
+            create_pdf_fixture(
+                pdf_path,
+                [
+                    "T071 PDF PAGE ONE UNIQUE",
+                    "T071 PDF PAGE TWO TARGET",
+                    "T071 PDF PAGE THREE UNIQUE",
+                ],
+            )
+
+            documents = load_document(
+                pdf_path,
+                file_id="pdf-file",
+                user_id=7,
+            )
+            chunks = split_documents(documents)
+
+        self.assertEqual(len(documents), 3)
+        self.assertEqual(
+            [document.metadata["page_number"] for document in documents],
+            [1, 2, 3],
+        )
+        self.assertEqual(
+            [document.metadata["page_index"] for document in documents],
+            [0, 1, 2],
+        )
+        self.assertTrue(
+            all(document.metadata["page_count"] == 3 for document in documents),
+        )
+        self.assertEqual(
+            [chunk.metadata["chunk_index"] for chunk in chunks],
+            list(range(len(chunks))),
+        )
+        target_chunk = next(
+            chunk for chunk in chunks if "PAGE TWO TARGET" in chunk.page_content
+        )
+        self.assertEqual(target_chunk.metadata["page_number"], 2)
+
+    def test_docx_chunks_keep_original_paragraph_ranges(self) -> None:
+        """DOCX 分块应保留含空段落间隔的原始 OOXML 段落范围。"""
+        with TemporaryDirectory() as temporary_directory:
+            docx_path = Path(temporary_directory) / "paragraphs.docx"
+            create_docx_fixture(
+                docx_path,
+                [
+                    ("第一章", "Heading1"),
+                    ("第一章正文", None),
+                    ("", None),
+                    ("第二章目标", "标题2"),
+                    ("目标段落正文 T071-DOCX-TARGET", None),
+                ],
+            )
+
+            documents = load_document(
+                docx_path,
+                file_id="docx-file",
+                user_id=7,
+            )
+            chunks = split_documents(documents)
+
+        self.assertEqual(
+            [
+                (
+                    document.metadata["paragraph_start"],
+                    document.metadata["paragraph_end"],
+                )
+                for document in documents
+            ],
+            [(1, 2), (4, 5)],
+        )
+        self.assertEqual(
+            [chunk.metadata["chunk_index"] for chunk in chunks],
+            list(range(len(chunks))),
+        )
+        target_chunk = next(
+            chunk for chunk in chunks if "T071-DOCX-TARGET" in chunk.page_content
+        )
+        self.assertEqual(target_chunk.metadata["paragraph_start"], 4)
+        self.assertEqual(target_chunk.metadata["paragraph_end"], 5)
 
     def test_load_image_document_uses_user_vision_model(self) -> None:
         """图片文件应通过当前用户 vision 模型解析为可检索 Markdown。"""
