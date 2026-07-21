@@ -40,7 +40,7 @@
 
 ## 当前基线
 
-- 2026-07-21 已刷新静态回归验收：后端 282 个 pytest 用例和 28 个 subtests 通过、前端 lint 0 error（保留 2 个 `<img>` 性能 warning）、Vitest 61 个用例通过、Next 16.2.10 production build 通过。
+- 2026-07-21 已刷新静态回归验收：后端 287 个 pytest 用例和 28 个 subtests 通过、前端 lint 0 error（保留 2 个 `<img>` 性能 warning）、Vitest 63 个用例通过、Next 16.2.10 production build 通过。
 - 2026-07-20 已完成前端依赖安全审计：Next.js 从 16.2.2 升级到 16.2.10，已消除已确认的 high findings；Babel、brace-expansion 和 js-yaml 开发依赖补丁已更新。`npm audit` 仍报告 Next 内嵌 PostCSS 的 2 个 moderate 条目，当前项目没有用户可控 CSS 进入 stringify 的运行路径，且审计器只提供降级到 Next 9.3.3 的 breaking fix，因此保留为已 triage 的不可达例外。
 - 2026-07-20 已完成后端与镜像依赖安全审计：PyJWT、python-dotenv 和 python-multipart 已升级到安全补丁版本；`pip-audit` 只剩 ChromaDB 1.5.9 的 no-fix finding，由精确到版本且 2026-08-20 到期的内网不可达例外管理；Trivy 对当前 backend/frontend 镜像的可修复 high/critical OS finding 均为 0。
 - 2026-07-20 已完成 GitHub Actions supply chain 固化：7 个外部 Action 引用均固定到官方 release 的 40 位 commit SHA，CI 自动拒绝 tag/branch/短 SHA 和缺失版本注释；Dependabot 每周聚合提出 Action 更新 PR。
@@ -75,7 +75,7 @@
 | `PLAN-20260720-06` | 2026-07-20 | `Done` | 将后端 Python 依赖和第一方 Docker 镜像的漏洞审计固化到 CI。 | `T-067` |
 | `PLAN-20260720-07` | 2026-07-20 | `Done` | 固化 GitHub Actions 第三方依赖，使用完整 commit SHA 并由 Dependabot 持续更新。 | `T-068` |
 | `PLAN-20260721-01` | 2026-07-21 | `Done` | 补齐知识库与知识文件的用户可见生命周期，支持安全删除、恢复和跨存储清理。 | `T-069` |
-| `PLAN-20260721-02` | 2026-07-21 | `Doing` | 增强回答引用的可核验性，支持按 chunk 查看前后文并安全打开原始文件。 | `T-070` |
+| `PLAN-20260721-02` | 2026-07-21 | `Done` | 增强回答引用的可核验性，支持按 chunk 查看前后文并安全打开原始文件。 | `T-070` |
 
 ## 任务总览
 
@@ -150,7 +150,7 @@
 | `T-067` | `PLAN-20260720-06` | `P1` | `Done` | 增加 Python 依赖和 Docker 镜像漏洞 CI 门禁 | 2026-07-20 | `fd18c44` |
 | `T-068` | `PLAN-20260720-07` | `P1` | `Done` | 固定 GitHub Actions SHA 并启用 Dependabot 更新 | 2026-07-20 | `06c9b61` |
 | `T-069` | `PLAN-20260721-01` | `P1` | `Done` | 补齐知识库和知识文件完整生命周期 | 2026-07-21 | `ac4397b` |
-| `T-070` | `PLAN-20260721-02` | `P1` | `Doing` | 实现来源原文预览与精确引用跳转 | — | — |
+| `T-070` | `PLAN-20260721-02` | `P1` | `Done` | 实现来源原文预览与精确引用跳转 | 2026-07-21 | `11ed2e4` |
 
 ## 新计划接入流程
 
@@ -2672,7 +2672,7 @@ git diff --check
 
 - 来源计划：`PLAN-20260721-02`
 - 优先级：`P1`
-- 状态：`Doing`
+- 状态：`Done`
 - 目标：让用户可以从回答引用直接核验目标 chunk 的完整正文和相邻上下文，并在权限校验后打开原始知识文件。
 - 定位边界：当前索引数据没有稳定的 PDF 页码或字符 offset，本任务以 `file_id + chunk_index + index_version` 作为可验证的精确定位键，不展示无法保证准确的页码；旧 source 缺少版本时回退到最新可用 chunk 版本。
 - 范围：
@@ -2688,6 +2688,19 @@ git diff --check
   - 点击引用后准确高亮 source 对应的 `chunk_index`，并展示至少一个相邻 chunk（存在时）。
   - 历史引用缺少 `file_id` 或 `chunk_index` 时不展示不可用操作，保留现有引用内容。
   - 后端、前端测试和 production build 通过，Docker Compose 真实 smoke 能读取目标 chunk、拒绝跨用户访问并打开原始文件。
+- 相关提交：`11ed2e4`。
+- 完成记录：
+  - 完成日期：2026-07-21。
+  - 新生成的 source 现在持久化 `index_version`；后端 chunk context API 使用 `file_id + chunk_index + index_version` 查询目标及相邻 chunks，旧 source 缺少版本时回退到最新可用 chunk 版本。
+  - chunk API 只返回正文、目标标记和 `h1`-`h6`/可用页码白名单 metadata，不暴露 `storage_path`；跨用户、文件不存在或指定版本不可用统一返回 `404`。
+  - 原始文件 API 复用 uploads 路径边界校验，不信任上传 Content-Type，按扩展名返回安全 MIME，并设置 `Content-Security-Policy: sandbox` 与 `X-Content-Type-Options: nosniff`。
+  - 前端引用卡片增加“查看原文”，`SourcePreviewDialog` 使用 dynamic import 按需加载，并通过 React Query 缓存和去重；弹窗自动定位、高亮目标 chunk、展示相邻正文和标题层级，可使用带 Authorization 的 blob 请求打开原始文件。
+  - 真实 Compose smoke 使用一次性 Markdown、知识库和第二用户完成异步向量化，目标定位为 Chunk #1 / index version 0；backend context、Next proxy、原始文件安全响应均通过，第二用户访问 context/content 均返回 `404`。
+  - smoke 诊断阶段产生的一次性用户和知识库已精确清理；最终测试用户、知识库和文件残留计数均为 0。
+  - `cd backend && conda run -n firstrag python -m pytest -q`：287 passed、8 warnings、28 subtests passed；Python compileall 通过。
+  - `cd frontend && npm test -- --run`：10 个 test files、63 tests passed；`npm run lint`：0 error、保留 2 个既有 `<img>` performance warnings；Next 16.2.10 production build 通过。
+  - `docker compose up -d --build` 通过；Redis、PostgreSQL、Chroma healthy，backend、worker、frontend Up，migration `applied=0 skipped=5`，最近日志只有预期 smoke 请求和跨用户 `404`。
+  - production preflight、Docker Compose config、Chroma runtime health、migration dry-run 和 `git diff --check` 全部通过。
 - 建议验证命令：
 
 ```bash
