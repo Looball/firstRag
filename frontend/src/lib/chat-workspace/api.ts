@@ -9,6 +9,7 @@ import type {
   ChatSession,
   CreateConversationResponse,
   CreateKnowledgeBaseResponse,
+  DeletedKnowledgeBase,
   EvalCaseDraftResponse,
   KnowledgeBase,
   KnowledgeBaseRetrievalSettings,
@@ -134,6 +135,93 @@ export async function createKnowledgeBase(name: string) {
 
   if (!knowledgeBase) {
     throw new Error("创建知识库响应缺少有效的 knowledge_base。");
+  }
+
+  return knowledgeBase;
+}
+
+export async function renameKnowledgeBase(
+  knowledgeBaseId: string,
+  name: string,
+) {
+  const data = await authenticatedJson<CreateKnowledgeBaseResponse>(
+    `/api/chat/knowledge-base/${encodeURIComponent(knowledgeBaseId)}`,
+    {
+      method: "PATCH",
+      headers: jsonHeaders(),
+      body: JSON.stringify({ name }),
+    },
+    { fallbackMessage: "重命名知识库失败，请稍后再试。" },
+  );
+  const knowledgeBase = toKnowledgeBase(data.knowledge_base);
+
+  if (!knowledgeBase) {
+    throw new Error("重命名响应缺少有效的 knowledge_base。");
+  }
+
+  return knowledgeBase;
+}
+
+export async function deleteKnowledgeBase(knowledgeBaseId: string) {
+  await authenticatedText(
+    `/api/chat/knowledge-base/${encodeURIComponent(knowledgeBaseId)}`,
+    { method: "DELETE" },
+    { fallbackMessage: "删除知识库失败，请稍后再试。" },
+  );
+}
+
+export async function listDeletedKnowledgeBases() {
+  const data = await authenticatedJson<unknown>(
+    "/api/chat/knowledge-bases/trash",
+    { method: "GET" },
+    { fallbackMessage: "读取知识库回收站失败，请稍后再试。" },
+  );
+  const parsed = knowledgeBasesResponseSchema.safeParse(data);
+
+  if (!parsed.success) {
+    throw new Error("知识库回收站响应格式异常。");
+  }
+
+  return parsed.data.knowledge_bases
+    .map((value): DeletedKnowledgeBase | null => {
+      const knowledgeBase = toKnowledgeBase(value);
+      const backendKnowledgeBase = value as BackendKnowledgeBase;
+      const conversationCount = Number(
+        backendKnowledgeBase.conversation_count,
+      );
+
+      if (
+        !knowledgeBase ||
+        typeof backendKnowledgeBase.deleted_at !== "string" ||
+        !backendKnowledgeBase.deleted_at
+      ) {
+        return null;
+      }
+
+      return {
+        ...knowledgeBase,
+        conversationCount: Number.isFinite(conversationCount)
+          ? conversationCount
+          : 0,
+        deletedAt: backendKnowledgeBase.deleted_at,
+      };
+    })
+    .filter(
+      (knowledgeBase): knowledgeBase is DeletedKnowledgeBase =>
+        knowledgeBase !== null,
+    );
+}
+
+export async function restoreKnowledgeBase(knowledgeBaseId: string) {
+  const data = await authenticatedJson<CreateKnowledgeBaseResponse>(
+    `/api/chat/knowledge-base/${encodeURIComponent(knowledgeBaseId)}/restore`,
+    { method: "POST" },
+    { fallbackMessage: "恢复知识库失败，请稍后再试。" },
+  );
+  const knowledgeBase = toKnowledgeBase(data.knowledge_base);
+
+  if (!knowledgeBase) {
+    throw new Error("恢复响应缺少有效的 knowledge_base。");
   }
 
   return knowledgeBase;
@@ -271,6 +359,14 @@ export async function deleteKnowledgeFileVectors(fileId: string) {
     `/api/chat/knowledge-files/${encodeURIComponent(fileId)}/vectors`,
     { method: "DELETE" },
     { fallbackMessage: "删除文件向量失败，请稍后再试。" },
+  );
+}
+
+export async function permanentlyDeleteKnowledgeFile(fileId: string) {
+  await authenticatedText(
+    `/api/chat/knowledge-files/${encodeURIComponent(fileId)}`,
+    { method: "DELETE" },
+    { fallbackMessage: "永久删除知识文件失败，请稍后再试。" },
   );
 }
 

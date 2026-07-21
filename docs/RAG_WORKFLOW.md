@@ -8,6 +8,8 @@
 2. Next.js API Route 代理到 `POST /chat/knowledge-base/{knowledge_base_id}/files`。
 3. 后端计算 SHA-256 和文件大小。
 4. 若同一用户已上传过相同内容，则复用 `knowledge_files` 记录，只补充知识库关联。
+
+知识库移入回收站只隐藏知识库及其会话，不删除可复用文件或索引；恢复后原关联重新生效。永久删除知识文件会使用与 indexing 相同的单文件 advisory lock，取消 active jobs，并清理 Chroma、PostgreSQL 和磁盘内容，避免旧 worker 在删除后写回数据。
 5. 新文件保存到根目录 `uploads/users/{user_id}/{hash_prefix}/{file_id}/source.ext`。
 6. `auto_index=true` 时创建 `vector_index_jobs` 任务。
 

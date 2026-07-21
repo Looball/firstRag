@@ -48,8 +48,8 @@ python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 | `chat.py` | SSE 聊天接口和 RAG 链调用。 |
 | `conversations.py` | 会话列表、创建、重命名、删除、消息和诊断读取。 |
 | `health.py` | 后端和 Redis 基础设施健康检查，不返回敏感连接串。 |
-| `knowledge_bases.py` | 知识库列表、创建、文件关联管理。 |
-| `knowledge_files.py` | 文件上传、复用、知识文件列表。 |
+| `knowledge_bases.py` | 知识库列表、创建、重命名、回收站删除/恢复和文件关联管理。 |
+| `knowledge_files.py` | 文件上传、复用、知识文件列表和永久删除入口。 |
 | `user_settings.py` | 用户模型厂商、凭据、测试连接和设置保存。 |
 | `vector_indexes.py` | 文件/知识库向量化任务、任务状态和向量删除。 |
 
@@ -71,6 +71,7 @@ python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 | `core/rate_limit.py` | Redis 优先 sliding-window 限流；输出不含 identifier 的命中、fallback 和 fail-closed 结构化事件。 |
 | `file_service.py` | 上传文件大小限制、SHA-256、落盘路径。 |
 | `documents/document_service.py` | 文档加载、图片知识文件 vision 解析、切分、向量库构建。 |
+| `knowledge_file_lifecycle_service.py` | 在单文件 advisory lock 下编排 Chroma、PostgreSQL 与磁盘的永久删除。 |
 | `retrieval/*` | 向量检索、全文检索、RRF 融合、本地 CrossEncoder 或用户级远程 rerank 精排。 |
 | `vectors/*` | embedding 模型、向量化队列、索引生命周期和 Redis worker 运行态。 |
 

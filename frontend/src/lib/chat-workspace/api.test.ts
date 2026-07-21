@@ -3,16 +3,22 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   authenticatedFetch,
   authenticatedJson,
+  authenticatedText,
 } from "@/lib/frontend-api";
 import {
   createConversation,
+  deleteKnowledgeBase,
   exportEvalCaseDraft,
   listAllKnowledgeFiles,
   listConversationMessages,
   listKnowledgeBasesAndSessions,
+  listDeletedKnowledgeBases,
   loadQualityDashboard,
   loadVectorIndexHealth,
   postChatMessage,
+  permanentlyDeleteKnowledgeFile,
+  renameKnowledgeBase,
+  restoreKnowledgeBase,
   submitMessageFeedback,
   submitMessageSourceFeedback,
   uploadChatAttachments,
@@ -26,6 +32,7 @@ vi.mock("@/lib/frontend-api", () => ({
 
 const authenticatedJsonMock = vi.mocked(authenticatedJson);
 const authenticatedFetchMock = vi.mocked(authenticatedFetch);
+const authenticatedTextMock = vi.mocked(authenticatedText);
 
 describe("chat workspace api", () => {
   beforeEach(() => {
@@ -117,6 +124,80 @@ describe("chat workspace api", () => {
 
     await expect(listKnowledgeBasesAndSessions()).rejects.toThrow(
       "知识库列表响应格式异常。",
+    );
+  });
+
+  it("normalizes deleted knowledge bases", async () => {
+    const knowledgeBaseId = "22222222-2222-4222-8222-222222222222";
+    authenticatedJsonMock.mockResolvedValueOnce({
+      knowledge_bases: [
+        {
+          id: knowledgeBaseId,
+          name: "归档资料",
+          is_default: false,
+          file_count: 2,
+          conversation_count: 3,
+          deleted_at: "2026-07-21T00:00:00+08:00",
+        },
+      ],
+    });
+
+    await expect(listDeletedKnowledgeBases()).resolves.toEqual([
+      {
+        id: knowledgeBaseId,
+        name: "归档资料",
+        isDefault: false,
+        fileCount: 2,
+        conversationCount: 3,
+        deletedAt: "2026-07-21T00:00:00+08:00",
+      },
+    ]);
+  });
+
+  it("renames, deletes and restores knowledge bases", async () => {
+    const knowledgeBaseId = "22222222-2222-4222-8222-222222222222";
+    authenticatedJsonMock
+      .mockResolvedValueOnce({
+        knowledge_base: {
+          id: knowledgeBaseId,
+          name: "新名称",
+          is_default: false,
+          file_count: 2,
+        },
+      })
+      .mockResolvedValueOnce({
+        knowledge_base: {
+          id: knowledgeBaseId,
+          name: "新名称",
+          is_default: false,
+          file_count: 2,
+        },
+      });
+    authenticatedTextMock.mockResolvedValueOnce("");
+
+    await expect(renameKnowledgeBase(knowledgeBaseId, "新名称")).resolves.toEqual(
+      expect.objectContaining({ id: knowledgeBaseId, name: "新名称" }),
+    );
+    await expect(deleteKnowledgeBase(knowledgeBaseId)).resolves.toBeUndefined();
+    await expect(restoreKnowledgeBase(knowledgeBaseId)).resolves.toEqual(
+      expect.objectContaining({ id: knowledgeBaseId, name: "新名称" }),
+    );
+    expect(authenticatedTextMock).toHaveBeenCalledWith(
+      `/api/chat/knowledge-base/${knowledgeBaseId}`,
+      { method: "DELETE" },
+      { fallbackMessage: "删除知识库失败，请稍后再试。" },
+    );
+  });
+
+  it("permanently deletes knowledge files", async () => {
+    const fileId = "11111111-1111-4111-8111-111111111111";
+    authenticatedTextMock.mockResolvedValueOnce("");
+
+    await expect(permanentlyDeleteKnowledgeFile(fileId)).resolves.toBeUndefined();
+    expect(authenticatedTextMock).toHaveBeenCalledWith(
+      `/api/chat/knowledge-files/${fileId}`,
+      { method: "DELETE" },
+      { fallbackMessage: "永久删除知识文件失败，请稍后再试。" },
     );
   });
 

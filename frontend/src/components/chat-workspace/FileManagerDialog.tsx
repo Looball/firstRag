@@ -22,11 +22,13 @@ type FileManagerDialogProps = {
   isLoadingKnowledgeFiles: boolean;
   isLoadingReusableFiles: boolean;
   deletingVectorFileId: string;
+  permanentlyDeletingFileId: string;
   detachingKnowledgeFileId: string;
   attachingKnowledgeFileId: string;
   knowledgeFileUploadError: string;
   knowledgeFileDetachError: string;
   knowledgeFileAttachError: string;
+  knowledgeFileDeleteError: string;
   knowledgeFileLoadError: string;
   reusableFileLoadError: string;
   vectorIndexMessage: string;
@@ -40,6 +42,7 @@ type FileManagerDialogProps = {
   onClearCompletedJobs: () => void;
   onIndexFile: (fileId: string) => void | Promise<void>;
   onDeleteFileVectors: (fileId: string) => void | Promise<void>;
+  onPermanentlyDeleteFile: (fileId: string) => void | Promise<void>;
   onRemoveFile: (fileId: string) => void | Promise<void>;
   onAttachFile: (fileId: string) => void | Promise<void>;
 };
@@ -55,11 +58,13 @@ type KnowledgeFileListProps = {
   vectorIndexingFileIds: Record<string, boolean>;
   isIndexingKnowledgeBase: boolean;
   deletingVectorFileId: string;
+  permanentlyDeletingFileId: string;
   detachingKnowledgeFileId: string;
   attachingKnowledgeFileId: string;
   vectorIndexRetryAfterSeconds: number;
   onIndexFile: (fileId: string) => void | Promise<void>;
   onDeleteFileVectors: (fileId: string) => void | Promise<void>;
+  onPermanentlyDeleteFile: (fileId: string) => void | Promise<void>;
   onRemoveFile: (fileId: string) => void | Promise<void>;
   onAttachFile: (fileId: string) => void | Promise<void>;
 };
@@ -92,11 +97,13 @@ function KnowledgeFileRow({
   isFileIndexing,
   isIndexingKnowledgeBase,
   deletingVectorFileId,
+  permanentlyDeletingFileId,
   detachingKnowledgeFileId,
   attachingKnowledgeFileId,
   vectorIndexRetryAfterSeconds,
   onIndexFile,
   onDeleteFileVectors,
+  onPermanentlyDeleteFile,
   onRemoveFile,
   onAttachFile,
 }: {
@@ -105,11 +112,13 @@ function KnowledgeFileRow({
   isFileIndexing: boolean;
   isIndexingKnowledgeBase: boolean;
   deletingVectorFileId: string;
+  permanentlyDeletingFileId: string;
   detachingKnowledgeFileId: string;
   attachingKnowledgeFileId: string;
   vectorIndexRetryAfterSeconds: number;
   onIndexFile: (fileId: string) => void | Promise<void>;
   onDeleteFileVectors: (fileId: string) => void | Promise<void>;
+  onPermanentlyDeleteFile: (fileId: string) => void | Promise<void>;
   onRemoveFile: (fileId: string) => void | Promise<void>;
   onAttachFile: (fileId: string) => void | Promise<void>;
 }) {
@@ -203,6 +212,30 @@ function KnowledgeFileRow({
             {attachingKnowledgeFileId === file.id ? "添加中..." : "添加"}
           </button>
         )}
+        <button
+          type="button"
+          onClick={() => {
+            const usageWarning =
+              typeof file.usageCount === "number" && file.usageCount > 0
+                ? `该文件当前被 ${file.usageCount} 个知识库使用。`
+                : "该文件的所有知识库关联都会被移除。";
+            if (
+              window.confirm(
+                `确认永久删除“${file.name}”吗？${usageWarning}向量、检索分块和磁盘文件也会删除，且无法恢复。`,
+              )
+            ) {
+              void onPermanentlyDeleteFile(file.id);
+            }
+          }}
+          disabled={
+            Boolean(permanentlyDeletingFileId) ||
+            isFileIndexing ||
+            isIndexingKnowledgeBase
+          }
+          className="px-2 py-1 text-xs font-semibold text-[#9b3c29] transition hover:bg-[#fff1ed] disabled:cursor-not-allowed disabled:text-[#aab3b0]"
+        >
+          {permanentlyDeletingFileId === file.id ? "删除中..." : "永久删除"}
+        </button>
       </div>
     </div>
   );
@@ -219,11 +252,13 @@ function KnowledgeFileList({
   vectorIndexingFileIds,
   isIndexingKnowledgeBase,
   deletingVectorFileId,
+  permanentlyDeletingFileId,
   detachingKnowledgeFileId,
   attachingKnowledgeFileId,
   vectorIndexRetryAfterSeconds,
   onIndexFile,
   onDeleteFileVectors,
+  onPermanentlyDeleteFile,
   onRemoveFile,
   onAttachFile,
 }: KnowledgeFileListProps) {
@@ -257,11 +292,13 @@ function KnowledgeFileList({
               isFileIndexing={Boolean(vectorIndexingFileIds[file.id])}
               isIndexingKnowledgeBase={isIndexingKnowledgeBase}
               deletingVectorFileId={deletingVectorFileId}
+              permanentlyDeletingFileId={permanentlyDeletingFileId}
               detachingKnowledgeFileId={detachingKnowledgeFileId}
               attachingKnowledgeFileId={attachingKnowledgeFileId}
               vectorIndexRetryAfterSeconds={vectorIndexRetryAfterSeconds}
               onIndexFile={onIndexFile}
               onDeleteFileVectors={onDeleteFileVectors}
+              onPermanentlyDeleteFile={onPermanentlyDeleteFile}
               onRemoveFile={onRemoveFile}
               onAttachFile={onAttachFile}
             />
@@ -289,11 +326,13 @@ export function FileManagerDialog({
   isLoadingKnowledgeFiles,
   isLoadingReusableFiles,
   deletingVectorFileId,
+  permanentlyDeletingFileId,
   detachingKnowledgeFileId,
   attachingKnowledgeFileId,
   knowledgeFileUploadError,
   knowledgeFileDetachError,
   knowledgeFileAttachError,
+  knowledgeFileDeleteError,
   knowledgeFileLoadError,
   reusableFileLoadError,
   vectorIndexMessage,
@@ -307,6 +346,7 @@ export function FileManagerDialog({
   onClearCompletedJobs,
   onIndexFile,
   onDeleteFileVectors,
+  onPermanentlyDeleteFile,
   onRemoveFile,
   onAttachFile,
 }: FileManagerDialogProps) {
@@ -399,6 +439,9 @@ export function FileManagerDialog({
           {knowledgeFileAttachError && (
             <StatusMessage tone="danger">{knowledgeFileAttachError}</StatusMessage>
           )}
+          {knowledgeFileDeleteError && (
+            <StatusMessage tone="danger">{knowledgeFileDeleteError}</StatusMessage>
+          )}
           {knowledgeFileLoadError && (
             <StatusMessage tone="danger">{knowledgeFileLoadError}</StatusMessage>
           )}
@@ -442,11 +485,13 @@ export function FileManagerDialog({
             vectorIndexingFileIds={vectorIndexingFileIds}
             isIndexingKnowledgeBase={isIndexingKnowledgeBase}
             deletingVectorFileId={deletingVectorFileId}
+            permanentlyDeletingFileId={permanentlyDeletingFileId}
             detachingKnowledgeFileId={detachingKnowledgeFileId}
             attachingKnowledgeFileId={attachingKnowledgeFileId}
             vectorIndexRetryAfterSeconds={vectorIndexRetryAfterSeconds}
             onIndexFile={onIndexFile}
             onDeleteFileVectors={onDeleteFileVectors}
+            onPermanentlyDeleteFile={onPermanentlyDeleteFile}
             onRemoveFile={onRemoveFile}
             onAttachFile={onAttachFile}
           />
@@ -466,11 +511,13 @@ export function FileManagerDialog({
             vectorIndexingFileIds={vectorIndexingFileIds}
             isIndexingKnowledgeBase={isIndexingKnowledgeBase}
             deletingVectorFileId={deletingVectorFileId}
+            permanentlyDeletingFileId={permanentlyDeletingFileId}
             detachingKnowledgeFileId={detachingKnowledgeFileId}
             attachingKnowledgeFileId={attachingKnowledgeFileId}
             vectorIndexRetryAfterSeconds={vectorIndexRetryAfterSeconds}
             onIndexFile={onIndexFile}
             onDeleteFileVectors={onDeleteFileVectors}
+            onPermanentlyDeleteFile={onPermanentlyDeleteFile}
             onRemoveFile={onRemoveFile}
             onAttachFile={onAttachFile}
           />

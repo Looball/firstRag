@@ -1,3 +1,4 @@
+import logging
 from uuid import UUID, uuid4
 
 from fastapi import (
@@ -51,9 +52,13 @@ from app.services.vectors.vector_index_queue_service import (
 from app.services.knowledge_profile_cache import (
     invalidate_knowledge_base_context,
 )
+from app.services.knowledge_file_lifecycle_service import (
+    permanently_delete_knowledge_file,
+)
 
 
 router = APIRouter(prefix="/chat", tags=["knowledge-files"])
+logger = logging.getLogger(__name__)
 
 
 def format_quota_size(size_bytes: int) -> str:
@@ -336,4 +341,33 @@ def get_all_knowledge_files(user_id: int = Depends(get_current_user_id)):
             }
             for row in rows
         ],
+    }
+
+
+@router.delete("/knowledge-files/{knowledge_file_id}")
+def delete_knowledge_file(
+    knowledge_file_id: UUID,
+    user_id: int = Depends(get_current_user_id),
+):
+    """永久删除知识文件及其所有索引、关联和磁盘内容。"""
+    try:
+        result = permanently_delete_knowledge_file(user_id, knowledge_file_id)
+    except Exception as exc:
+        logger.exception(
+            "永久删除知识文件失败 user_id=%s file_id=%s",
+            user_id,
+            knowledge_file_id,
+        )
+        raise HTTPException(
+            status_code=500,
+            detail="永久删除知识文件失败，请稍后重试或检查存储服务状态。",
+        ) from exc
+
+    if result is None:
+        raise HTTPException(status_code=404, detail="文件不存在")
+
+    return {
+        "success": True,
+        "message": "知识文件及其索引数据已永久删除",
+        **result,
     }

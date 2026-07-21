@@ -8,8 +8,13 @@ from app.repositories.knowledge_base_repository import (
     create_knowledge_base as create_knowledge_base_record,
     file_relation_exists,
     get_knowledge_base_files as get_knowledge_base_file_records,
+    get_user_deleted_knowledge_bases,
+    get_user_knowledge_base_lifecycle_record,
     get_user_knowledge_bases,
     remove_file_relation,
+    rename_knowledge_base as rename_knowledge_base_record,
+    restore_knowledge_base as restore_knowledge_base_record,
+    soft_delete_knowledge_base,
 )
 from app.repositories.retrieval_settings_repository import (
     DEFAULT_RETRIEVAL_SETTINGS,
@@ -21,6 +26,7 @@ from app.repositories.vector_index_job_repository import (
 )
 from app.schemas.knowledge import (
     CreateKnowledgeBaseRequest,
+    RenameKnowledgeBaseRequest,
     UpdateRetrievalSettingsRequest,
 )
 from app.services.vectors.vector_index_queue_service import (
@@ -35,6 +41,18 @@ from app.services.retrieval_settings_cache import (
 
 
 router = APIRouter(prefix="/chat", tags=["knowledge-bases"])
+
+
+def serialize_knowledge_base_lifecycle_record(record: dict) -> dict:
+    """序列化知识库生命周期接口的公共字段。"""
+    return {
+        "id": str(record["id"]),
+        "name": record["name"],
+        "is_default": record["is_default"],
+        "created_at": record["created_at"],
+        "updated_at": record["updated_at"],
+        "deleted_at": record.get("deleted_at"),
+    }
 
 
 # 获取用户的知识库
@@ -69,6 +87,25 @@ def get_knowledge_bases(user_id: int = Depends(get_current_user_id)):
     }
 
 
+@router.get("/knowledge-bases/trash")
+def get_deleted_knowledge_bases(
+    user_id: int = Depends(get_current_user_id),
+):
+    """查询当前用户已移入回收站的知识库。"""
+    rows = get_user_deleted_knowledge_bases(user_id)
+    return {
+        "success": True,
+        "knowledge_bases": [
+            {
+                **serialize_knowledge_base_lifecycle_record(dict(row)),
+                "file_count": row["file_count"],
+                "conversation_count": row["conversation_count"],
+            }
+            for row in rows
+        ],
+    }
+
+
 # 新建知识库
 @router.post("/knowledge-base")
 def create_knowledge_base(
@@ -95,6 +132,84 @@ def create_knowledge_base(
             "created_at": knowledge_base["created_at"],
             "updated_at": knowledge_base["updated_at"],
         },
+    }
+
+
+@router.patch("/knowledge-base/{knowledge_base_id}")
+def rename_knowledge_base(
+    knowledge_base_id: UUID,
+    req: RenameKnowledgeBaseRequest,
+    user_id: int = Depends(get_current_user_id),
+):
+    """重命名当前用户的活动知识库。"""
+    name = req.name.strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="知识库名称不能为空")
+
+    knowledge_base = rename_knowledge_base_record(
+        user_id,
+        knowledge_base_id,
+        name,
+    )
+    if knowledge_base is None:
+        raise HTTPException(status_code=404, detail="知识库不存在")
+
+    invalidate_knowledge_base_context(user_id, knowledge_base_id)
+    return {
+        "success": True,
+        "knowledge_base": serialize_knowledge_base_lifecycle_record(
+            dict(knowledge_base),
+        ),
+    }
+
+
+@router.delete("/knowledge-base/{knowledge_base_id}")
+def delete_knowledge_base(
+    knowledge_base_id: UUID,
+    user_id: int = Depends(get_current_user_id),
+):
+    """将非默认知识库移入回收站，不删除其可复用文件。"""
+    current_record = get_user_knowledge_base_lifecycle_record(
+        user_id,
+        knowledge_base_id,
+    )
+    if current_record is None or current_record.get("deleted_at") is not None:
+        raise HTTPException(status_code=404, detail="知识库不存在")
+    if current_record["is_default"]:
+        raise HTTPException(status_code=400, detail="默认知识库不能删除")
+
+    knowledge_base = soft_delete_knowledge_base(user_id, knowledge_base_id)
+    if knowledge_base is None:
+        raise HTTPException(status_code=404, detail="知识库不存在")
+
+    invalidate_knowledge_base_context(user_id, knowledge_base_id)
+    invalidate_retrieval_settings_cache(user_id, knowledge_base_id)
+    return {
+        "success": True,
+        "message": "知识库已移入回收站，文件仍保留在文件库中",
+        "knowledge_base": serialize_knowledge_base_lifecycle_record(
+            dict(knowledge_base),
+        ),
+    }
+
+
+@router.post("/knowledge-base/{knowledge_base_id}/restore")
+def restore_knowledge_base(
+    knowledge_base_id: UUID,
+    user_id: int = Depends(get_current_user_id),
+):
+    """恢复当前用户回收站中的知识库。"""
+    knowledge_base = restore_knowledge_base_record(user_id, knowledge_base_id)
+    if knowledge_base is None:
+        raise HTTPException(status_code=404, detail="回收站中不存在该知识库")
+
+    invalidate_knowledge_base_context(user_id, knowledge_base_id)
+    invalidate_retrieval_settings_cache(user_id, knowledge_base_id)
+    return {
+        "success": True,
+        "knowledge_base": serialize_knowledge_base_lifecycle_record(
+            dict(knowledge_base),
+        ),
     }
 
 

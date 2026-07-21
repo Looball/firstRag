@@ -1,5 +1,6 @@
 from uuid import UUID
 
+from app.db.connection import get_connection
 from app.db.executor import Row, execute, fetch_all, fetch_one
 
 
@@ -161,6 +162,124 @@ def get_user_knowledge_file(
         """,
         (knowledge_file_id, user_id),
     )
+
+
+def purge_user_knowledge_file_records(
+    user_id: int,
+    knowledge_file_id: UUID,
+) -> dict[str, int] | None:
+    """事务性删除知识文件及其 PostgreSQL 关联数据。"""
+    normalized_file_id = str(knowledge_file_id)
+    with get_connection() as connection:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT id
+                FROM knowledge_files
+                WHERE id = %s
+                  AND user_id = %s
+                  AND deleted_at IS NULL
+                FOR UPDATE;
+                """,
+                (knowledge_file_id, user_id),
+            )
+            if cursor.fetchone() is None:
+                return None
+
+            cursor.execute(
+                """
+                DELETE FROM message_source_feedback
+                WHERE user_id = %s
+                  AND knowledge_file_id = %s;
+                """,
+                (user_id, knowledge_file_id),
+            )
+            source_feedback_deleted = cursor.rowcount
+
+            cursor.execute(
+                """
+                UPDATE messages AS message
+                SET sources = COALESCE(
+                    (
+                        SELECT jsonb_agg(source_item.source)
+                        FROM jsonb_array_elements(message.sources)
+                            AS source_item(source)
+                        WHERE COALESCE(
+                            source_item.source ->> 'file_id',
+                            source_item.source ->> 'knowledge_file_id',
+                            ''
+                        ) <> %s
+                    ),
+                    '[]'::jsonb
+                )
+                FROM conversations AS conversation
+                WHERE message.conversation_id = conversation.id
+                  AND conversation.user_id = %s
+                  AND EXISTS (
+                      SELECT 1
+                      FROM jsonb_array_elements(message.sources)
+                          AS matched_source(source)
+                      WHERE COALESCE(
+                          matched_source.source ->> 'file_id',
+                          matched_source.source ->> 'knowledge_file_id',
+                          ''
+                      ) = %s
+                  );
+                """,
+                (normalized_file_id, user_id, normalized_file_id),
+            )
+            messages_scrubbed = cursor.rowcount
+
+            cursor.execute(
+                """
+                DELETE FROM knowledge_base_files
+                WHERE knowledge_file_id = %s;
+                """,
+                (knowledge_file_id,),
+            )
+            relations_deleted = cursor.rowcount
+
+            cursor.execute(
+                """
+                DELETE FROM knowledge_file_chunks
+                WHERE knowledge_file_id = %s
+                  AND user_id = %s;
+                """,
+                (knowledge_file_id, user_id),
+            )
+            chunks_deleted = cursor.rowcount
+
+            cursor.execute(
+                """
+                DELETE FROM vector_index_jobs
+                WHERE knowledge_file_id = %s
+                  AND user_id = %s;
+                """,
+                (knowledge_file_id, user_id),
+            )
+            jobs_deleted = cursor.rowcount
+
+            cursor.execute(
+                """
+                DELETE FROM knowledge_files
+                WHERE id = %s
+                  AND user_id = %s
+                RETURNING id;
+                """,
+                (knowledge_file_id, user_id),
+            )
+            files_deleted = cursor.rowcount
+            if cursor.fetchone() is None:
+                return None
+
+    return {
+        "files_deleted": files_deleted,
+        "relations_deleted": relations_deleted,
+        "chunks_deleted": chunks_deleted,
+        "jobs_deleted": jobs_deleted,
+        "source_feedback_deleted": source_feedback_deleted,
+        "messages_scrubbed": messages_scrubbed,
+    }
 
 
 def get_knowledge_base_files_for_indexing(

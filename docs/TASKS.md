@@ -74,6 +74,7 @@
 | `PLAN-20260720-05` | 2026-07-20 | `Done` | 将前端依赖漏洞审计固化到 CI，并为已 triage finding 建立限时例外和自动到期复查。 | `T-066` |
 | `PLAN-20260720-06` | 2026-07-20 | `Done` | 将后端 Python 依赖和第一方 Docker 镜像的漏洞审计固化到 CI。 | `T-067` |
 | `PLAN-20260720-07` | 2026-07-20 | `Done` | 固化 GitHub Actions 第三方依赖，使用完整 commit SHA 并由 Dependabot 持续更新。 | `T-068` |
+| `PLAN-20260721-01` | 2026-07-21 | `Doing` | 补齐知识库与知识文件的用户可见生命周期，支持安全删除、恢复和跨存储清理。 | `T-069` |
 
 ## 任务总览
 
@@ -147,6 +148,7 @@
 | `T-066` | `PLAN-20260720-05` | `P1` | `Done` | 将依赖漏洞审计和例外复查固化到 CI | 2026-07-20 | `a948662` |
 | `T-067` | `PLAN-20260720-06` | `P1` | `Done` | 增加 Python 依赖和 Docker 镜像漏洞 CI 门禁 | 2026-07-20 | `fd18c44` |
 | `T-068` | `PLAN-20260720-07` | `P1` | `Done` | 固定 GitHub Actions SHA 并启用 Dependabot 更新 | 2026-07-20 | `06c9b61` |
+| `T-069` | `PLAN-20260721-01` | `P1` | `Doing` | 补齐知识库和知识文件完整生命周期 | — | — |
 
 ## 新计划接入流程
 
@@ -2621,6 +2623,35 @@ cd backend && conda run -n firstrag python -m pytest -q
 cd .. && docker compose up -d --build
 docker compose ps
 docker compose logs --since=10m migrate backend worker frontend postgres redis chroma
+git diff --check
+```
+
+## T-069 补齐知识库和知识文件完整生命周期
+
+- 来源计划：`PLAN-20260721-01`
+- 优先级：`P1`
+- 状态：`Doing`
+- 目标：让用户能够安全地管理知识库和全局知识文件，补齐重命名、回收站恢复与永久删除能力，并避免删除后遗留向量、全文分块、任务或磁盘文件。
+- 范围：
+  - 支持知识库重命名、软删除、回收站列表和恢复；默认知识库禁止删除。
+  - 删除知识库只隐藏知识库及其会话，不连带删除仍可复用的用户文件。
+  - 支持用户永久删除知识文件，并同步清理知识库关联、active jobs、PostgreSQL chunks、Chroma vectors、历史 source 引用和磁盘文件。
+  - 前端知识库管理和文件管理弹窗提供对应操作、影响范围提示、二次确认和错误反馈。
+  - 同步更新 API、Schema、Frontend 文档和回归测试。
+- 验收标准：
+  - 跨用户资源统一返回 `404`；默认知识库删除返回清晰 `400`。
+  - 已删除知识库不会出现在活动列表，恢复后原会话和文件关联重新可见。
+  - 永久删除文件后无法再查询或复用，相关向量、chunks、jobs、source feedback 和磁盘文件均已清理。
+  - 后端、前端测试和 build 通过，Docker Compose 服务健康，production preflight 通过。
+- 建议验证命令：
+
+```bash
+cd backend && conda run -n firstrag python -m pytest -q
+cd ../frontend && npm test && npm run lint && npm run build
+cd .. && docker compose up -d --build
+docker compose ps
+docker compose logs --tail=100 redis postgres chroma migrate backend worker frontend
+conda run -n firstrag python scripts/production_preflight.py --env-file .env --migration-method compose --check-runtime-health
 git diff --check
 ```
 

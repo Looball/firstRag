@@ -5,6 +5,14 @@ from pydantic import BaseModel, Field
 
 # 定义新建知识库请求体数据类型
 class CreateKnowledgeBaseRequest(BaseModel):
+    """创建知识库请求。"""
+
+    name: str = Field(min_length=1, max_length=50)
+
+
+class RenameKnowledgeBaseRequest(BaseModel):
+    """重命名知识库请求。"""
+
     name: str = Field(min_length=1, max_length=50)
 
 

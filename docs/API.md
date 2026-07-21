@@ -119,7 +119,11 @@ ID 随聊天请求提交。当前支持 `image/png`、`image/jpeg` 和 `image/we
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
 | `GET` | `/chat/knowledge-bases` | 当前用户知识库列表。 |
+| `GET` | `/chat/knowledge-bases/trash` | 当前用户知识库回收站。 |
 | `POST` | `/chat/knowledge-base` | 新建知识库。 |
+| `PATCH` | `/chat/knowledge-base/{knowledge_base_id}` | 重命名活动知识库。 |
+| `DELETE` | `/chat/knowledge-base/{knowledge_base_id}` | 将非默认知识库移入回收站。 |
+| `POST` | `/chat/knowledge-base/{knowledge_base_id}/restore` | 恢复回收站中的知识库。 |
 | `GET` | `/chat/knowledge-base/{knowledge_base_id}/retrieval-settings` | 获取知识库检索策略设置。 |
 | `PATCH` | `/chat/knowledge-base/{knowledge_base_id}/retrieval-settings` | 保存知识库检索策略设置。 |
 | `GET` | `/chat/knowledge-base/{knowledge_base_id}/files` | 知识库文件列表。 |
@@ -134,12 +138,15 @@ ID 随聊天请求提交。当前支持 `image/png`、`image/jpeg` 和 `image/we
 }
 ```
 
+知识库删除采用软删除：知识库及其原会话会从活动列表隐藏，但文件记录、磁盘文件和索引仍保留，恢复后原会话和文件关联重新可见。默认知识库不能删除；跨用户、已删除或不存在资源返回 `404`。
+
 ## 知识文件
 
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
 | `POST` | `/chat/knowledge-base/{knowledge_base_id}/files` | 上传文件，支持 `multipart/form-data`。 |
 | `GET` | `/chat/knowledge-files` | 当前用户所有知识文件。 |
+| `DELETE` | `/chat/knowledge-files/{knowledge_file_id}` | 永久删除用户知识文件及其全部索引数据。 |
 
 上传字段：
 
@@ -162,6 +169,8 @@ ID 随聊天请求提交。当前支持 `image/png`、`image/jpeg` 和 `image/we
 | `USER_UPLOAD_MAX_BYTES` | 当前用户未删除文件总容量上限，`0` 表示关闭。 |
 
 超过单文件或用户配额时返回 `413`，`detail` 会说明当前占用、上限或建议删除不需要的文件后重试。同一用户重复上传相同内容时会复用已有文件，不重复计入全局文件数量和容量。
+
+`DELETE /chat/knowledge-files/{knowledge_file_id}` 是不可恢复操作。后端使用单文件 advisory lock 与正在执行的 indexing 串行化，取消 active jobs，并清理所有知识库关联、Chroma vectors、PostgreSQL chunks、历史消息中的对应 source、source feedback、任务记录和 `uploads/` 下的磁盘文件。删除接口会拒绝不在允许上传目录内的异常存储路径。
 
 ## 向量化
 

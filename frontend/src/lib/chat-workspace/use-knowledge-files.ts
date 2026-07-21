@@ -166,6 +166,10 @@ export function useKnowledgeFiles({
   const [attachingKnowledgeFileId, setAttachingKnowledgeFileId] =
     useState("");
   const [deletingVectorFileId, setDeletingVectorFileId] = useState("");
+  const [permanentlyDeletingFileId, setPermanentlyDeletingFileId] =
+    useState("");
+  const [knowledgeFileDeleteError, setKnowledgeFileDeleteError] =
+    useState("");
   const [knowledgeFileAttachError, setKnowledgeFileAttachError] =
     useState("");
   const [isLoadingKnowledgeFiles, setIsLoadingKnowledgeFiles] =
@@ -610,6 +614,40 @@ export function useKnowledgeFiles({
     [deletingVectorFileId, loadVectorIndexHealth, refreshKnowledgeFiles],
   );
 
+  const handlePermanentlyDeleteKnowledgeFile = useCallback(
+    async (fileId: string) => {
+      if (!fileId || permanentlyDeletingFileId) {
+        return;
+      }
+
+      setPermanentlyDeletingFileId(fileId);
+      setKnowledgeFileDeleteError("");
+      setVectorIndexMessage("");
+
+      try {
+        await chatApi.permanentlyDeleteKnowledgeFile(fileId);
+        setVectorIndexQueue((previousJobs) =>
+          previousJobs.filter((job) => job.knowledgeFileId !== fileId),
+        );
+        setVectorIndexMessage("知识文件及其索引数据已永久删除。");
+        await Promise.all([refreshKnowledgeFiles(), loadVectorIndexHealth()]);
+      } catch (error) {
+        setKnowledgeFileDeleteError(
+          error instanceof Error
+            ? error.message
+            : "永久删除知识文件失败，请稍后再试。",
+        );
+      } finally {
+        setPermanentlyDeletingFileId("");
+      }
+    },
+    [
+      loadVectorIndexHealth,
+      permanentlyDeletingFileId,
+      refreshKnowledgeFiles,
+    ],
+  );
+
   const handleIndexKnowledgeBase = useCallback(async () => {
     if (
       !selectedKnowledgeBaseId ||
@@ -740,6 +778,7 @@ export function useKnowledgeFiles({
     detachingKnowledgeFileId,
     handleAttachKnowledgeFile,
     handleDeleteKnowledgeFileVectors,
+    handlePermanentlyDeleteKnowledgeFile,
     handleIndexKnowledgeBase,
     handleIndexKnowledgeFile,
     handleOpenFileManager,
@@ -753,10 +792,12 @@ export function useKnowledgeFiles({
     isUploadingKnowledgeFiles,
     knowledgeBaseFiles,
     knowledgeFileAttachError,
+    knowledgeFileDeleteError,
     knowledgeFileDetachError,
     knowledgeFileLoadError,
     knowledgeFileUploadError,
     loadVectorIndexHealth,
+    permanentlyDeletingFileId,
     reusableFileLoadError,
     reusableKnowledgeFiles,
     selectedKnowledgeBaseFileCount,

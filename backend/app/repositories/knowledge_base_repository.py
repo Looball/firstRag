@@ -52,6 +52,110 @@ def create_knowledge_base(user_id: int, name: str) -> Row | None:
     )
 
 
+def get_user_deleted_knowledge_bases(user_id: int) -> list[Row]:
+    """查询当前用户回收站中的知识库。"""
+    return fetch_all(
+        """
+        SELECT
+            kb.id,
+            kb.name,
+            kb.is_default,
+            kb.created_at,
+            kb.updated_at,
+            kb.deleted_at,
+            COUNT(DISTINCT kbf.knowledge_file_id)::int AS file_count,
+            COUNT(DISTINCT c.id)::int AS conversation_count
+        FROM knowledge_bases AS kb
+        LEFT JOIN knowledge_base_files AS kbf
+          ON kbf.knowledge_base_id = kb.id
+        LEFT JOIN conversations AS c
+          ON c.knowledge_base_id = kb.id
+         AND c.user_id = kb.user_id
+         AND c.deleted_at IS NULL
+        WHERE kb.user_id = %s
+          AND kb.deleted_at IS NOT NULL
+        GROUP BY kb.id
+        ORDER BY kb.deleted_at DESC;
+        """,
+        (user_id,),
+    )
+
+
+def get_user_knowledge_base_lifecycle_record(
+    user_id: int,
+    knowledge_base_id: UUID,
+) -> Row | None:
+    """查询知识库生命周期操作所需记录，包含已软删除知识库。"""
+    return fetch_one(
+        """
+        SELECT id, name, is_default, created_at, updated_at, deleted_at
+        FROM knowledge_bases
+        WHERE id = %s
+          AND user_id = %s;
+        """,
+        (knowledge_base_id, user_id),
+    )
+
+
+def rename_knowledge_base(
+    user_id: int,
+    knowledge_base_id: UUID,
+    name: str,
+) -> Row | None:
+    """重命名当前用户未删除的知识库。"""
+    return fetch_one(
+        """
+        UPDATE knowledge_bases
+        SET name = %s,
+            updated_at = now()
+        WHERE id = %s
+          AND user_id = %s
+          AND deleted_at IS NULL
+        RETURNING id, name, is_default, created_at, updated_at;
+        """,
+        (name, knowledge_base_id, user_id),
+    )
+
+
+def soft_delete_knowledge_base(
+    user_id: int,
+    knowledge_base_id: UUID,
+) -> Row | None:
+    """将当前用户的非默认知识库移入回收站。"""
+    return fetch_one(
+        """
+        UPDATE knowledge_bases
+        SET deleted_at = now(),
+            updated_at = now()
+        WHERE id = %s
+          AND user_id = %s
+          AND is_default = FALSE
+          AND deleted_at IS NULL
+        RETURNING id, name, is_default, created_at, updated_at, deleted_at;
+        """,
+        (knowledge_base_id, user_id),
+    )
+
+
+def restore_knowledge_base(
+    user_id: int,
+    knowledge_base_id: UUID,
+) -> Row | None:
+    """从回收站恢复当前用户的知识库。"""
+    return fetch_one(
+        """
+        UPDATE knowledge_bases
+        SET deleted_at = NULL,
+            updated_at = now()
+        WHERE id = %s
+          AND user_id = %s
+          AND deleted_at IS NOT NULL
+        RETURNING id, name, is_default, created_at, updated_at;
+        """,
+        (knowledge_base_id, user_id),
+    )
+
+
 def knowledge_base_exists(knowledge_base_id: UUID, user_id: int) -> bool:
     """检查知识库是否存在且属于当前用户。"""
     row = fetch_one(

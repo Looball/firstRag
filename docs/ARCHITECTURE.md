@@ -39,6 +39,13 @@ FirstRAG/
   -> FastAPI /chat/attachments
   -> 文件落盘 + PostgreSQL message_attachments metadata
   -> /chat 绑定到当前用户消息
+
+永久删除知识文件
+  -> 单文件 PostgreSQL advisory lock
+  -> 取消 active vector index jobs
+  -> 删除 Chroma vectors
+  -> 事务清理文件关联、chunks、jobs、历史 sources/feedback 和文件记录
+  -> 删除 uploads 下的磁盘文件并失效知识库画像缓存
 ```
 
 ## 分层边界

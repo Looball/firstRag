@@ -41,6 +41,7 @@ import { useRetryAfterCountdown } from "@/lib/use-retry-after-countdown";
 import type {
   ChatSession,
   ChatSource,
+  DeletedKnowledgeBase,
   KnowledgeBase,
   KnowledgeBaseRetrievalSettings,
   Message,
@@ -542,6 +543,20 @@ export default function Home() {
   const [isKnowledgeBaseManagerOpen, setIsKnowledgeBaseManagerOpen] =
     useState(false);
   const [newKnowledgeBaseName, setNewKnowledgeBaseName] = useState("");
+  const [deletedKnowledgeBases, setDeletedKnowledgeBases] = useState<
+    DeletedKnowledgeBase[]
+  >([]);
+  const [isLoadingDeletedKnowledgeBases, setIsLoadingDeletedKnowledgeBases] =
+    useState(false);
+  const [knowledgeBaseLifecycleError, setKnowledgeBaseLifecycleError] =
+    useState("");
+  const [knowledgeBaseLifecycleMessage, setKnowledgeBaseLifecycleMessage] =
+    useState("");
+  const [editingKnowledgeBaseId, setEditingKnowledgeBaseId] = useState("");
+  const [editingKnowledgeBaseName, setEditingKnowledgeBaseName] = useState("");
+  const [renamingKnowledgeBaseId, setRenamingKnowledgeBaseId] = useState("");
+  const [deletingKnowledgeBaseId, setDeletingKnowledgeBaseId] = useState("");
+  const [restoringKnowledgeBaseId, setRestoringKnowledgeBaseId] = useState("");
   const [activeFeedbackMessageKey, setActiveFeedbackMessageKey] = useState("");
   const [feedbackReasonDrafts, setFeedbackReasonDrafts] = useState<
     Record<string, MessageFeedbackReason>
@@ -639,6 +654,7 @@ export default function Home() {
     detachingKnowledgeFileId,
     handleAttachKnowledgeFile,
     handleDeleteKnowledgeFileVectors,
+    handlePermanentlyDeleteKnowledgeFile,
     handleIndexKnowledgeBase,
     handleIndexKnowledgeFile,
     handleOpenFileManager,
@@ -652,10 +668,12 @@ export default function Home() {
     isUploadingKnowledgeFiles,
     knowledgeBaseFiles,
     knowledgeFileAttachError,
+    knowledgeFileDeleteError,
     knowledgeFileDetachError,
     knowledgeFileLoadError,
     knowledgeFileUploadError,
     loadVectorIndexHealth,
+    permanentlyDeletingFileId,
     reusableFileLoadError,
     reusableKnowledgeFiles,
     selectedKnowledgeBaseFileCount,
@@ -708,6 +726,152 @@ export default function Home() {
       );
     } finally {
       setIsCreatingKnowledgeBase(false);
+    }
+  }
+
+  /** 重新加载活动知识库、会话和回收站数据。 */
+  async function refreshKnowledgeBaseCollections(
+    preferredKnowledgeBaseId?: string,
+  ) {
+    const {
+      knowledgeBases: nextKnowledgeBases,
+      sessions: nextSessions,
+    } = await loadBackendKnowledgeBases();
+    const preferredKnowledgeBase = nextKnowledgeBases.find(
+      (knowledgeBase) => knowledgeBase.id === preferredKnowledgeBaseId,
+    );
+    const currentKnowledgeBase = nextKnowledgeBases.find(
+      (knowledgeBase) => knowledgeBase.id === selectedKnowledgeBaseId,
+    );
+    const nextSelectedKnowledgeBaseId =
+      preferredKnowledgeBase?.id ||
+      currentKnowledgeBase?.id ||
+      nextKnowledgeBases.find((knowledgeBase) => knowledgeBase.isDefault)?.id ||
+      nextKnowledgeBases[0]?.id ||
+      "";
+
+    setKnowledgeBases(nextKnowledgeBases);
+    setSessions(nextSessions);
+    setSelectedKnowledgeBaseId(nextSelectedKnowledgeBaseId);
+    setCurrentSessionId((previousSessionId) => {
+      const previousSessionStillVisible = nextSessions.some(
+        (session) =>
+          session.id === previousSessionId &&
+          session.knowledgeBaseId === nextSelectedKnowledgeBaseId,
+      );
+      if (previousSessionStillVisible) {
+        return previousSessionId;
+      }
+      return (
+        nextSessions.find(
+          (session) => session.knowledgeBaseId === nextSelectedKnowledgeBaseId,
+        )?.id || ""
+      );
+    });
+    setDeletedKnowledgeBases(await chatApi.listDeletedKnowledgeBases());
+  }
+
+  /** 进入知识库名称编辑状态。 */
+  function handleStartKnowledgeBaseRename(knowledgeBase: KnowledgeBase) {
+    setEditingKnowledgeBaseId(knowledgeBase.id);
+    setEditingKnowledgeBaseName(knowledgeBase.name);
+    setKnowledgeBaseLifecycleError("");
+    setKnowledgeBaseLifecycleMessage("");
+  }
+
+  /** 保存知识库新名称并更新当前工作台状态。 */
+  async function handleSaveKnowledgeBaseRename() {
+    const normalizedName = editingKnowledgeBaseName.trim();
+    if (!editingKnowledgeBaseId || !normalizedName || renamingKnowledgeBaseId) {
+      return;
+    }
+
+    setRenamingKnowledgeBaseId(editingKnowledgeBaseId);
+    setKnowledgeBaseLifecycleError("");
+    setKnowledgeBaseLifecycleMessage("");
+    try {
+      const renamedKnowledgeBase = await chatApi.renameKnowledgeBase(
+        editingKnowledgeBaseId,
+        normalizedName,
+      );
+      setKnowledgeBases((previousKnowledgeBases) =>
+        previousKnowledgeBases.map((knowledgeBase) =>
+          knowledgeBase.id === renamedKnowledgeBase.id
+            ? { ...knowledgeBase, name: renamedKnowledgeBase.name }
+            : knowledgeBase,
+        ),
+      );
+      setEditingKnowledgeBaseId("");
+      setEditingKnowledgeBaseName("");
+      setKnowledgeBaseLifecycleMessage("知识库名称已更新。");
+    } catch (error) {
+      setKnowledgeBaseLifecycleError(
+        error instanceof Error
+          ? error.message
+          : "重命名知识库失败，请稍后再试。",
+      );
+    } finally {
+      setRenamingKnowledgeBaseId("");
+    }
+  }
+
+  /** 确认后将非默认知识库移入回收站。 */
+  async function handleDeleteKnowledgeBase(knowledgeBase: KnowledgeBase) {
+    if (knowledgeBase.isDefault || deletingKnowledgeBaseId) {
+      return;
+    }
+    const conversationCount = sessions.filter(
+      (session) => session.knowledgeBaseId === knowledgeBase.id,
+    ).length;
+    if (
+      !window.confirm(
+        `确认删除知识库“${knowledgeBase.name}”吗？${conversationCount} 个会话会暂时隐藏，但文件仍保留在文件库中，可从回收站恢复。`,
+      )
+    ) {
+      return;
+    }
+
+    setDeletingKnowledgeBaseId(knowledgeBase.id);
+    setKnowledgeBaseLifecycleError("");
+    setKnowledgeBaseLifecycleMessage("");
+    try {
+      await chatApi.deleteKnowledgeBase(knowledgeBase.id);
+      await refreshKnowledgeBaseCollections();
+      setEditingKnowledgeBaseId("");
+      setEditingKnowledgeBaseName("");
+      setKnowledgeBaseLifecycleMessage("知识库已移入回收站，文件仍保留。");
+    } catch (error) {
+      setKnowledgeBaseLifecycleError(
+        error instanceof Error
+          ? error.message
+          : "删除知识库失败，请稍后再试。",
+      );
+    } finally {
+      setDeletingKnowledgeBaseId("");
+    }
+  }
+
+  /** 恢复回收站知识库并重新加载原会话。 */
+  async function handleRestoreKnowledgeBase(knowledgeBaseId: string) {
+    if (!knowledgeBaseId || restoringKnowledgeBaseId) {
+      return;
+    }
+
+    setRestoringKnowledgeBaseId(knowledgeBaseId);
+    setKnowledgeBaseLifecycleError("");
+    setKnowledgeBaseLifecycleMessage("");
+    try {
+      await chatApi.restoreKnowledgeBase(knowledgeBaseId);
+      await refreshKnowledgeBaseCollections(knowledgeBaseId);
+      setKnowledgeBaseLifecycleMessage("知识库及其原会话已恢复。");
+    } catch (error) {
+      setKnowledgeBaseLifecycleError(
+        error instanceof Error
+          ? error.message
+          : "恢复知识库失败，请稍后再试。",
+      );
+    } finally {
+      setRestoringKnowledgeBaseId("");
     }
   }
 
@@ -902,6 +1066,42 @@ export default function Home() {
     isKnowledgeBaseManagerOpen,
     selectedKnowledgeBaseId,
   ]);
+
+  useEffect(() => {
+    if (!hasCheckedAuth || !isKnowledgeBaseManagerOpen) {
+      return;
+    }
+
+    let isCancelled = false;
+    setIsLoadingDeletedKnowledgeBases(true);
+    setKnowledgeBaseLifecycleError("");
+
+    void chatApi
+      .listDeletedKnowledgeBases()
+      .then((knowledgeBases) => {
+        if (!isCancelled) {
+          setDeletedKnowledgeBases(knowledgeBases);
+        }
+      })
+      .catch((error) => {
+        if (!isCancelled) {
+          setKnowledgeBaseLifecycleError(
+            error instanceof Error
+              ? error.message
+              : "读取知识库回收站失败，请稍后再试。",
+          );
+        }
+      })
+      .finally(() => {
+        if (!isCancelled) {
+          setIsLoadingDeletedKnowledgeBases(false);
+        }
+      });
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [hasCheckedAuth, isKnowledgeBaseManagerOpen]);
 
   useEffect(() => {
     let isCancelled = false;
@@ -3198,6 +3398,17 @@ export default function Home() {
             </div>
 
             <div className="px-6 py-5">
+              {knowledgeBaseLifecycleMessage && (
+                <p className="mb-4 border-l-4 border-[#176b62] bg-[#edf7f3] px-3 py-2 text-xs text-[#176b62]">
+                  {knowledgeBaseLifecycleMessage}
+                </p>
+              )}
+              {knowledgeBaseLifecycleError && (
+                <p className="mb-4 border-l-4 border-[#e36b4f] bg-[#fff1ed] px-3 py-2 text-xs text-[#9b3c29]">
+                  {knowledgeBaseLifecycleError}
+                </p>
+              )}
+
               <div className="divide-y divide-[#d5ded9] border-y border-[#cbd5d1]">
                 {knowledgeBases.map((knowledgeBase) => {
                   const localFileCount = knowledgeBaseFiles.filter(
@@ -3212,17 +3423,62 @@ export default function Home() {
                         session.knowledgeBaseId === knowledgeBase.id
                     ).length;
 
+                  const isEditing = editingKnowledgeBaseId === knowledgeBase.id;
                   return (
-                    <button
+                    <div
                       key={knowledgeBase.id}
-                      type="button"
-                      onClick={() => {
-                        setSelectedKnowledgeBaseId(knowledgeBase.id);
-                        setIsKnowledgeBaseManagerOpen(false);
-                      }}
-                      className="flex w-full items-center justify-between gap-4 px-2 py-4 text-left transition hover:bg-[#eef3f0]"
+                      className="px-2 py-4"
                     >
-                      <div className="min-w-0">
+                      {isEditing ? (
+                        <div className="flex flex-wrap items-center gap-2">
+                          <input
+                            value={editingKnowledgeBaseName}
+                            onChange={(event) =>
+                              setEditingKnowledgeBaseName(event.target.value)
+                            }
+                            onKeyDown={(event) => {
+                              if (event.key === "Enter") {
+                                event.preventDefault();
+                                void handleSaveKnowledgeBaseRename();
+                              }
+                            }}
+                            className="research-focus min-w-0 flex-1 border border-[#b7c4bf] bg-white px-3 py-2 text-sm text-[#17201f]"
+                            aria-label={`重命名 ${knowledgeBase.name}`}
+                          />
+                          <button
+                            type="button"
+                            onClick={() => void handleSaveKnowledgeBaseRename()}
+                            disabled={
+                              !editingKnowledgeBaseName.trim() ||
+                              renamingKnowledgeBaseId === knowledgeBase.id
+                            }
+                            className="bg-[#176b62] px-3 py-2 text-xs font-semibold text-white disabled:bg-[#a7b8b2]"
+                          >
+                            {renamingKnowledgeBaseId === knowledgeBase.id
+                              ? "保存中..."
+                              : "保存"}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setEditingKnowledgeBaseId("");
+                              setEditingKnowledgeBaseName("");
+                            }}
+                            className="px-2 py-2 text-xs font-semibold text-[#64716d]"
+                          >
+                            取消
+                          </button>
+                        </div>
+                      ) : (
+                      <div className="flex items-center justify-between gap-4">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setSelectedKnowledgeBaseId(knowledgeBase.id);
+                            setIsKnowledgeBaseManagerOpen(false);
+                          }}
+                          className="min-w-0 flex-1 text-left"
+                        >
                         <div className="flex items-center gap-2">
                           <p className="truncate text-sm font-semibold text-[#17201f]">
                             {knowledgeBase.name}
@@ -3236,13 +3492,100 @@ export default function Home() {
                         <p className="mt-1 text-xs text-[#72807b]">
                           {fileCount} 个文件 · {conversationCount} 个会话
                         </p>
+                        </button>
+                        <div className="flex shrink-0 items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() =>
+                              handleStartKnowledgeBaseRename(knowledgeBase)
+                            }
+                            className="px-2 py-1 text-xs font-semibold text-[#64716d] hover:bg-[#eef3f0] hover:text-[#176b62]"
+                          >
+                            重命名
+                          </button>
+                          {!knowledgeBase.isDefault && (
+                            <button
+                              type="button"
+                              onClick={() =>
+                                void handleDeleteKnowledgeBase(knowledgeBase)
+                              }
+                              disabled={deletingKnowledgeBaseId === knowledgeBase.id}
+                              className="px-2 py-1 text-xs font-semibold text-[#9b3c29] hover:bg-[#fff1ed] disabled:text-[#aab3b0]"
+                            >
+                              {deletingKnowledgeBaseId === knowledgeBase.id
+                                ? "删除中..."
+                                : "删除"}
+                            </button>
+                          )}
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setSelectedKnowledgeBaseId(knowledgeBase.id);
+                              setIsKnowledgeBaseManagerOpen(false);
+                            }}
+                            className="px-2 py-1 text-xs font-semibold text-[#176b62] hover:bg-[#e4f0ec]"
+                          >
+                            选择
+                          </button>
+                        </div>
                       </div>
-                      <span className="text-sm font-semibold text-[#176b62]">
-                        选择
-                      </span>
-                    </button>
+                      )}
+                    </div>
                   );
                 })}
+              </div>
+
+              <div className="mt-6">
+                <div className="flex items-center justify-between gap-4">
+                  <div>
+                    <p className="font-utility text-[10px] font-semibold uppercase text-[#72807b]">
+                      Trash
+                    </p>
+                    <h3 className="mt-1 text-sm font-semibold text-[#17201f]">
+                      知识库回收站
+                    </h3>
+                  </div>
+                  <span className="text-xs text-[#72807b]">
+                    {isLoadingDeletedKnowledgeBases
+                      ? "读取中..."
+                      : `${deletedKnowledgeBases.length} 项`}
+                  </span>
+                </div>
+                <div className="mt-2 divide-y divide-[#e0e7e3] border-y border-[#d5ded9]">
+                  {!isLoadingDeletedKnowledgeBases &&
+                    deletedKnowledgeBases.length === 0 && (
+                      <p className="py-5 text-center text-xs text-[#8a9692]">
+                        回收站为空
+                      </p>
+                    )}
+                  {deletedKnowledgeBases.map((knowledgeBase) => (
+                    <div
+                      key={knowledgeBase.id}
+                      className="flex items-center justify-between gap-4 px-2 py-3"
+                    >
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-semibold text-[#46514e]">
+                          {knowledgeBase.name}
+                        </p>
+                        <p className="mt-1 text-xs text-[#8a9692]">
+                          {knowledgeBase.fileCount} 个文件 · {knowledgeBase.conversationCount} 个会话
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          void handleRestoreKnowledgeBase(knowledgeBase.id)
+                        }
+                        disabled={restoringKnowledgeBaseId === knowledgeBase.id}
+                        className="shrink-0 border border-[#176b62] px-3 py-1.5 text-xs font-semibold text-[#176b62] hover:bg-[#e4f0ec] disabled:border-[#aab3b0] disabled:text-[#aab3b0]"
+                      >
+                        {restoringKnowledgeBaseId === knowledgeBase.id
+                          ? "恢复中..."
+                          : "恢复"}
+                      </button>
+                    </div>
+                  ))}
+                </div>
               </div>
 
               {isAdvancedMode && (
@@ -3452,11 +3795,13 @@ export default function Home() {
           isLoadingKnowledgeFiles={isLoadingKnowledgeFiles}
           isLoadingReusableFiles={isLoadingReusableFiles}
           deletingVectorFileId={deletingVectorFileId}
+          permanentlyDeletingFileId={permanentlyDeletingFileId}
           detachingKnowledgeFileId={detachingKnowledgeFileId}
           attachingKnowledgeFileId={attachingKnowledgeFileId}
           knowledgeFileUploadError={knowledgeFileUploadError}
           knowledgeFileDetachError={knowledgeFileDetachError}
           knowledgeFileAttachError={knowledgeFileAttachError}
+          knowledgeFileDeleteError={knowledgeFileDeleteError}
           knowledgeFileLoadError={knowledgeFileLoadError}
           reusableFileLoadError={reusableFileLoadError}
           vectorIndexMessage={vectorIndexMessage}
@@ -3470,6 +3815,7 @@ export default function Home() {
           onClearCompletedJobs={clearCompletedVectorIndexJobs}
           onIndexFile={handleIndexKnowledgeFile}
           onDeleteFileVectors={handleDeleteKnowledgeFileVectors}
+          onPermanentlyDeleteFile={handlePermanentlyDeleteKnowledgeFile}
           onRemoveFile={handleRemoveKnowledgeFile}
           onAttachFile={handleAttachKnowledgeFile}
         />

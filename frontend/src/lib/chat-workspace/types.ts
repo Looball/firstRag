@@ -172,6 +172,11 @@ export type KnowledgeBase = {
   fileCount: number;
 };
 
+export type DeletedKnowledgeBase = KnowledgeBase & {
+  conversationCount: number;
+  deletedAt: string;
+};
+
 export type RetrievalMode = "auto" | "always" | "never";
 
 export type KnowledgeBaseRetrievalSettings = {
@@ -190,6 +195,8 @@ export type BackendKnowledgeBase = {
   name?: unknown;
   is_default?: unknown;
   file_count?: unknown;
+  conversation_count?: unknown;
+  deleted_at?: unknown;
   conversations?: unknown;
 };
 

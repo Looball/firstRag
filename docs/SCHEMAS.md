@@ -7,9 +7,9 @@
 | 表 | 用途 |
 | --- | --- |
 | `users` | 用户账号，保存 argon2 密码哈希。 |
-| `knowledge_bases` | 用户知识库，每个用户有默认知识库。 |
+| `knowledge_bases` | 用户知识库，每个用户有默认知识库；`deleted_at` 用于回收站软删除和恢复。 |
 | `knowledge_base_retrieval_settings` | 知识库级 RAG 检索策略设置。 |
-| `knowledge_files` | 知识文件元数据，包含软删除、SHA-256 去重和索引状态。 |
+| `knowledge_files` | 知识文件元数据，包含软删除兼容字段、SHA-256 去重和索引状态；用户永久删除时会同步清理关联存储。 |
 | `knowledge_base_files` | 知识库与文件多对多关联。 |
 | `knowledge_file_chunks` | 文本分块正文、metadata、全文检索索引和索引版本。 |
 | `conversations` | 会话，属于某个知识库。 |
@@ -69,10 +69,13 @@
 | `MessageFeedbackRequest` | `rating`, `reason`, `note` | 创建或更新助手消息质量反馈。 |
 | `MessageSourceFeedbackRequest` | `rating`, `note` | 创建或更新助手消息引用来源反馈。 |
 | `CreateKnowledgeBaseRequest` | `name` | 新建知识库，1 到 50 字符。 |
+| `RenameKnowledgeBaseRequest` | `name` | 重命名知识库，1 到 50 字符。 |
 | `UpdateRetrievalSettingsRequest` | `retrieval_mode`, `enable_query_router`, `enable_rerank`, `top_k`, `vector_top_k`, `fulltext_top_k`, `rrf_k`, `rerank_score_threshold` | 更新知识库检索策略。 |
 | `UpdateUserLLMSettingsRequest` | `credential_mode`, `provider`, `model`, `base_url`, `api_key`, `temperature`, `max_tokens`, `timeout_seconds`, `max_retries` | 更新或测试用户模型设置。 |
 | `UpdateUserEmbeddingSettingsRequest` | `provider`, `model`, `base_url`, `dimensions`, `api_key`, `timeout_seconds`, `max_retries` | 更新或测试用户 embedding/向量模型设置。 |
 | `UpdateUserRerankSettingsRequest` | `provider`, `model`, `base_url`, `instruct`, `api_key`, `timeout_seconds`, `max_retries` | 更新或测试用户 rerank 模型设置。 |
+
+知识库删除只设置 `knowledge_bases.deleted_at`，不会删除 `knowledge_base_files`、文件记录或会话；恢复时清空 `deleted_at`，因此原关联重新可见。知识文件永久删除会删除 `knowledge_files` 记录及对应关联、chunks、jobs 和 source feedback，并从历史 `messages.sources` 数组中移除引用该文件的条目。
 
 ## 消息结构
 
