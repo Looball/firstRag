@@ -76,7 +76,7 @@
 | `PLAN-20260720-07` | 2026-07-20 | `Done` | 固化 GitHub Actions 第三方依赖，使用完整 commit SHA 并由 Dependabot 持续更新。 | `T-068` |
 | `PLAN-20260721-01` | 2026-07-21 | `Done` | 补齐知识库与知识文件的用户可见生命周期，支持安全删除、恢复和跨存储清理。 | `T-069` |
 | `PLAN-20260721-02` | 2026-07-21 | `Done` | 增强回答引用的可核验性，支持按 chunk 查看前后文并安全打开原始文件。 | `T-070` |
-| `PLAN-20260721-03` | 2026-07-21 | `Doing` | 为 PDF/DOCX 引用补充可验证的位置 metadata，并增强原文定位展示。 | `T-071` |
+| `PLAN-20260721-03` | 2026-07-21 | `Done` | 为 PDF/DOCX 引用补充可验证的位置 metadata，并增强原文定位展示。 | `T-071` |
 
 ## 任务总览
 
@@ -152,7 +152,7 @@
 | `T-068` | `PLAN-20260720-07` | `P1` | `Done` | 固定 GitHub Actions SHA 并启用 Dependabot 更新 | 2026-07-20 | `06c9b61` |
 | `T-069` | `PLAN-20260721-01` | `P1` | `Done` | 补齐知识库和知识文件完整生命周期 | 2026-07-21 | `ac4397b` |
 | `T-070` | `PLAN-20260721-02` | `P1` | `Done` | 实现来源原文预览与精确引用跳转 | 2026-07-21 | `11ed2e4` |
-| `T-071` | `PLAN-20260721-03` | `P1` | `Doing` | 持久化 PDF 页码和 DOCX 段落位置 | — | — |
+| `T-071` | `PLAN-20260721-03` | `P1` | `Done` | 持久化 PDF 页码和 DOCX 段落位置 | 2026-07-21 | `d03de10` |
 
 ## 新计划接入流程
 
@@ -2719,7 +2719,7 @@ git diff --check
 
 - 来源计划：`PLAN-20260721-03`
 - 优先级：`P1`
-- 状态：`Doing`
+- 状态：`Done`
 - 目标：让新索引的 PDF/DOCX source 携带可验证的位置 metadata，使引用弹窗能展示真实页码或段落范围，并在打开 PDF 时跳到对应页面。
 - 位置语义：
   - PDF 使用解析器逐页输出的 1-based `page_number`，并保留 0-based `page_index` 供内部诊断。
@@ -2738,6 +2738,19 @@ git diff --check
   - 同一 PDF/DOCX 文件的 chunk index 全局唯一且连续，不因 page/block 重置。
   - 现有 Markdown、TXT、图片解析与索引行为保持兼容。
   - 测试、production build、Docker Compose 真实 PDF/DOCX indexing smoke 和 production preflight 通过。
+- 相关提交：`d03de10`。
+- 完成记录：
+  - 完成日期：2026-07-21。
+  - PDF 使用 `pymupdf4llm page_chunks=True` 逐页解析，保存 0-based `page_index`、1-based `page_number` 和 `page_count`；DOCX 直接读取 OOXML 主文档，按标题与字符上限组成 block，并保留包含空段落间隔的 1-based 段落范围。
+  - `split_documents` 按 `user_id + file_id` 为跨 page/block 的 chunks 分配全局连续序号，位置 metadata 随 PostgreSQL、Chroma、source serializer 和会话诊断完整传递。
+  - chunk preview API 白名单扩展 PDF/DOCX 位置字段；真实 smoke 同时发现并修复了未指定 `index_version` 时 PostgreSQL 无法推断 NULL 参数类型的问题，查询参数现显式转换为 `integer`。
+  - 前端来源卡片与原文弹窗展示页码或段落范围，目标 chunk 延续高亮和自动滚动；PDF blob URL 使用 `#page=N` 打开目标页，DOCX 保持内置 chunk 高亮与安全原文件打开行为。
+  - 真实三页 PDF 完成 Poppler 渲染和逐页目检，三页标题、页序及预期 metadata 均清晰正确。
+  - Docker Compose 真实 smoke 使用一次性 PDF/DOCX 完成上传、异步向量化和 chunk preview：PDF 页码为 1/2/3，DOCX 段落范围为 1-2、4-5，chunk index 连续；两份文件永久删除返回 200，最终 PostgreSQL files/chunks/jobs 和 Chroma vectors 残留计数均为 0。
+  - `cd backend && conda run -n firstrag python -m pytest -q`：289 passed、8 warnings、28 subtests passed。
+  - `cd frontend && npm test -- --run`：10 个 test files、66 tests passed；`npm run lint`：0 error、保留 2 个既有 `<img>` performance warnings；Next 16.2.10 production build 通过。
+  - `docker compose up -d --build`、`docker compose ps -a` 和最近关键服务日志通过：Redis、PostgreSQL、Chroma healthy，backend、worker、frontend Up，migration `applied=0 skipped=5`。
+  - production preflight、Docker Compose config、Chroma runtime health、migration dry-run 和 `git diff --check` 全部通过。
 - 建议验证命令：
 
 ```bash
