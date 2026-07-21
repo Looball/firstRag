@@ -40,7 +40,7 @@
 
 ## 当前基线
 
-- 2026-07-20 已刷新静态回归验收：后端 272 个 pytest 用例和 28 个 subtests 通过、前端 lint 0 error（保留 2 个 `<img>` 性能 warning）、Vitest 58 个用例通过、Next 16.2.10 production build 通过。
+- 2026-07-21 已刷新静态回归验收：后端 282 个 pytest 用例和 28 个 subtests 通过、前端 lint 0 error（保留 2 个 `<img>` 性能 warning）、Vitest 61 个用例通过、Next 16.2.10 production build 通过。
 - 2026-07-20 已完成前端依赖安全审计：Next.js 从 16.2.2 升级到 16.2.10，已消除已确认的 high findings；Babel、brace-expansion 和 js-yaml 开发依赖补丁已更新。`npm audit` 仍报告 Next 内嵌 PostCSS 的 2 个 moderate 条目，当前项目没有用户可控 CSS 进入 stringify 的运行路径，且审计器只提供降级到 Next 9.3.3 的 breaking fix，因此保留为已 triage 的不可达例外。
 - 2026-07-20 已完成后端与镜像依赖安全审计：PyJWT、python-dotenv 和 python-multipart 已升级到安全补丁版本；`pip-audit` 只剩 ChromaDB 1.5.9 的 no-fix finding，由精确到版本且 2026-08-20 到期的内网不可达例外管理；Trivy 对当前 backend/frontend 镜像的可修复 high/critical OS finding 均为 0。
 - 2026-07-20 已完成 GitHub Actions supply chain 固化：7 个外部 Action 引用均固定到官方 release 的 40 位 commit SHA，CI 自动拒绝 tag/branch/短 SHA 和缺失版本注释；Dependabot 每周聚合提出 Action 更新 PR。
@@ -74,7 +74,7 @@
 | `PLAN-20260720-05` | 2026-07-20 | `Done` | 将前端依赖漏洞审计固化到 CI，并为已 triage finding 建立限时例外和自动到期复查。 | `T-066` |
 | `PLAN-20260720-06` | 2026-07-20 | `Done` | 将后端 Python 依赖和第一方 Docker 镜像的漏洞审计固化到 CI。 | `T-067` |
 | `PLAN-20260720-07` | 2026-07-20 | `Done` | 固化 GitHub Actions 第三方依赖，使用完整 commit SHA 并由 Dependabot 持续更新。 | `T-068` |
-| `PLAN-20260721-01` | 2026-07-21 | `Doing` | 补齐知识库与知识文件的用户可见生命周期，支持安全删除、恢复和跨存储清理。 | `T-069` |
+| `PLAN-20260721-01` | 2026-07-21 | `Done` | 补齐知识库与知识文件的用户可见生命周期，支持安全删除、恢复和跨存储清理。 | `T-069` |
 
 ## 任务总览
 
@@ -148,7 +148,7 @@
 | `T-066` | `PLAN-20260720-05` | `P1` | `Done` | 将依赖漏洞审计和例外复查固化到 CI | 2026-07-20 | `a948662` |
 | `T-067` | `PLAN-20260720-06` | `P1` | `Done` | 增加 Python 依赖和 Docker 镜像漏洞 CI 门禁 | 2026-07-20 | `fd18c44` |
 | `T-068` | `PLAN-20260720-07` | `P1` | `Done` | 固定 GitHub Actions SHA 并启用 Dependabot 更新 | 2026-07-20 | `06c9b61` |
-| `T-069` | `PLAN-20260721-01` | `P1` | `Doing` | 补齐知识库和知识文件完整生命周期 | — | — |
+| `T-069` | `PLAN-20260721-01` | `P1` | `Done` | 补齐知识库和知识文件完整生命周期 | 2026-07-21 | `ac4397b` |
 
 ## 新计划接入流程
 
@@ -2630,7 +2630,7 @@ git diff --check
 
 - 来源计划：`PLAN-20260721-01`
 - 优先级：`P1`
-- 状态：`Doing`
+- 状态：`Done`
 - 目标：让用户能够安全地管理知识库和全局知识文件，补齐重命名、回收站恢复与永久删除能力，并避免删除后遗留向量、全文分块、任务或磁盘文件。
 - 范围：
   - 支持知识库重命名、软删除、回收站列表和恢复；默认知识库禁止删除。
@@ -2643,6 +2643,17 @@ git diff --check
   - 已删除知识库不会出现在活动列表，恢复后原会话和文件关联重新可见。
   - 永久删除文件后无法再查询或复用，相关向量、chunks、jobs、source feedback 和磁盘文件均已清理。
   - 后端、前端测试和 build 通过，Docker Compose 服务健康，production preflight 通过。
+- 相关提交：`ac4397b`。
+- 完成记录：
+  - 完成日期：2026-07-21。
+  - 后端新增知识库重命名、回收站列表、软删除和恢复 API；默认知识库删除返回 `400`，所有生命周期查询和写入均按当前 `user_id` 隔离。
+  - 新增知识文件永久删除 service：在 file index lock 内取消 active jobs、删除 Chroma vectors，并事务性清理知识库关联、PostgreSQL chunks、vector jobs、source feedback、历史 `messages.sources` 和主文件记录，最后删除受 uploads 根目录约束的磁盘文件。
+  - 前端知识库管理弹窗支持重命名、移入回收站和恢复；文件管理弹窗提供带影响范围说明和二次确认的永久删除操作，并统一展示进行中、成功和失败反馈。
+  - 真实 API smoke 使用一次性知识库和 Markdown 文件验证登录、重命名、回收站可见性、恢复、默认知识库保护、异步向量化成功和跨存储永久删除；测试后知识库与文件残留计数均为 0。
+  - `cd backend && conda run -n firstrag python -m pytest -q`：282 passed、8 warnings、28 subtests passed。
+  - `cd frontend && npm test -- --run`：10 个 test files、61 tests passed；`npm run lint`：0 error、保留 2 个既有 `<img>` performance warnings；Next 16.2.10 production build 通过。
+  - `docker compose up -d --build`、`docker compose ps -a` 和最近 10 分钟关键服务日志通过：Redis、PostgreSQL、Chroma healthy，backend、worker、frontend Up，migration `applied=0 skipped=5`。
+  - `conda run -n firstrag python scripts/production_preflight.py --env-file .env --migration-method compose --check-runtime-health` 全部通过；`docker compose config --quiet` 和 `git diff --check` 通过。
 - 建议验证命令：
 
 ```bash
