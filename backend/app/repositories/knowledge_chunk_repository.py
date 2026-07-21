@@ -149,6 +149,64 @@ def delete_file_chunks(
             return cursor.rowcount
 
 
+def get_user_knowledge_file_chunk_context(
+    user_id: int,
+    file_id: UUID | str,
+    chunk_index: int,
+    radius: int = 1,
+    index_version: int | None = None,
+) -> list[Row]:
+    """查询指定版本或最新可用版本的目标 chunk 及相邻上下文。"""
+    return fetch_all(
+        """
+        WITH target_chunk AS (
+            SELECT
+                chunk.knowledge_file_id,
+                chunk.index_version,
+                chunk.chunk_index AS target_chunk_index,
+                file.original_name
+            FROM knowledge_file_chunks AS chunk
+            JOIN knowledge_files AS file
+              ON file.id = chunk.knowledge_file_id
+             AND file.user_id = chunk.user_id
+            WHERE chunk.user_id = %s
+              AND chunk.knowledge_file_id = %s
+              AND chunk.chunk_index = %s
+              AND (%s IS NULL OR chunk.index_version = %s)
+              AND file.deleted_at IS NULL
+            ORDER BY chunk.index_version DESC
+            LIMIT 1
+        )
+        SELECT
+            target.original_name,
+            target.index_version,
+            target.target_chunk_index,
+            context.chunk_index,
+            context.content,
+            context.metadata
+        FROM target_chunk AS target
+        JOIN knowledge_file_chunks AS context
+          ON context.user_id = %s
+         AND context.knowledge_file_id = target.knowledge_file_id
+         AND context.index_version = target.index_version
+        WHERE context.chunk_index BETWEEN
+              target.target_chunk_index - %s
+              AND target.target_chunk_index + %s
+        ORDER BY context.chunk_index ASC;
+        """,
+        (
+            user_id,
+            str(file_id),
+            chunk_index,
+            index_version,
+            index_version,
+            user_id,
+            radius,
+            radius,
+        ),
+    )
+
+
 def search_chunks(
     user_id: int,
     query: str,

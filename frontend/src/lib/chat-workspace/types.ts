@@ -47,12 +47,29 @@ export type ChatSource = {
   fileName?: string;
   fileType?: string;
   chunkIndex?: number;
+  indexVersion?: number;
   vectorScore?: number;
   fulltextScore?: number;
   rerankScore?: number;
   rrfScore?: number;
   retrievalSources?: string[];
   feedback?: MessageSourceFeedback | null;
+};
+
+export type KnowledgeSourcePreviewChunk = {
+  chunkIndex: number;
+  content: string;
+  location: Record<string, string | number>;
+  isTarget: boolean;
+};
+
+export type KnowledgeSourcePreview = {
+  fileId: string;
+  fileName: string;
+  mimeType: string;
+  indexVersion: number;
+  targetChunkIndex: number;
+  chunks: KnowledgeSourcePreviewChunk[];
 };
 
 export type MessageSourceFeedbackRating = "useful" | "irrelevant";

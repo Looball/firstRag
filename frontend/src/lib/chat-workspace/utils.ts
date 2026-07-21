@@ -903,6 +903,7 @@ export function toChatSource(value: unknown, index: number): ChatSource | null {
     "chunk_index",
     "chunk_id",
   ]);
+  const indexVersion = getOptionalNumberField(source, ["index_version"]);
   const rerankScore = getOptionalNumberField(source, [
     "rerank_score",
     "score",
@@ -1038,6 +1039,7 @@ export function toChatSource(value: unknown, index: number): ChatSource | null {
     ...(fileName ? { fileName } : {}),
     ...(fileType ? { fileType } : {}),
     ...(chunkIndex !== undefined ? { chunkIndex } : {}),
+    ...(indexVersion !== undefined ? { indexVersion } : {}),
     ...(vectorScore !== undefined ? { vectorScore } : {}),
     ...(fulltextScore !== undefined ? { fulltextScore } : {}),
     ...(rerankScore !== undefined ? { rerankScore } : {}),
@@ -1064,6 +1066,7 @@ export function hasSourceShape(value: Record<string, unknown>) {
     "document",
     "index",
     "chunk_index",
+    "index_version",
     "vector_score",
     "fulltext_score",
     "rerank_score",

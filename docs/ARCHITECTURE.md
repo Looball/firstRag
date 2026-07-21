@@ -46,6 +46,13 @@ FirstRAG/
   -> 删除 Chroma vectors
   -> 事务清理文件关联、chunks、jobs、历史 sources/feedback 和文件记录
   -> 删除 uploads 下的磁盘文件并失效知识库画像缓存
+
+回答引用原文预览
+  -> source.file_id + source.chunk_index
+  -> 当前用户 JWT 权限校验
+  -> PostgreSQL knowledge_file_chunks 当前 index_version
+  -> 返回目标 chunk 与相邻上下文，不暴露 storage_path
+  -> 可选读取 uploads 边界内的原始文件
 ```
 
 ## 分层边界

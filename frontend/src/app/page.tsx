@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import dynamic from "next/dynamic";
 import { FileManagerDialog } from "@/components/chat-workspace/FileManagerDialog";
 import { MessageDiagnosticsPanel } from "@/components/chat-workspace/MessageDiagnosticsPanel";
 import {
@@ -54,6 +55,14 @@ import type {
   RetrievalMode,
   RetrievalState,
 } from "@/lib/chat-workspace/types";
+
+const SourcePreviewDialog = dynamic(
+  () =>
+    import("@/components/chat-workspace/SourcePreviewDialog").then(
+      (module) => module.SourcePreviewDialog,
+    ),
+  { ssr: false },
+);
 
 const CHAT_IMAGE_ACCEPT = "image/png,image/jpeg,image/webp";
 const CHAT_IMAGE_MAX_FILES = 3;
@@ -580,6 +589,8 @@ export default function Home() {
   const [sourceFeedbackMessages, setSourceFeedbackMessages] = useState<
     Record<string, string>
   >({});
+  const [activeSourcePreview, setActiveSourcePreview] =
+    useState<ChatSource | null>(null);
   const [exportingEvalDrafts, setExportingEvalDrafts] = useState<
     Record<string, boolean>
   >({});
@@ -2824,6 +2835,9 @@ export default function Home() {
                                 sourceFeedbackMessages[sourceKey] || "";
                               const sourceFeedbackRating =
                                 source.feedback?.rating;
+                              const canPreviewSource =
+                                Boolean(source.fileId) &&
+                                source.chunkIndex !== undefined;
                               const sourceFeedbackLabel =
                                 sourceFeedbackRating === "useful"
                                   ? "已标记：引用有用"
@@ -2894,10 +2908,23 @@ export default function Home() {
                                       {source.content}
                                     </p>
                                   )}
-                                  {sourceFileMeta && (
-                                    <p className="mt-1 truncate text-[11px] text-[#72807b]">
-                                      {sourceFileMeta}
-                                    </p>
+                                  {(sourceFileMeta || canPreviewSource) && (
+                                    <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
+                                      <p className="min-w-0 truncate text-[11px] text-[#72807b]">
+                                        {sourceFileMeta}
+                                      </p>
+                                      {canPreviewSource && (
+                                        <button
+                                          type="button"
+                                          onClick={() =>
+                                            setActiveSourcePreview(source)
+                                          }
+                                          className="font-utility shrink-0 border border-[#8aa9a0] px-2.5 py-1 text-[10px] font-semibold uppercase text-[#176b62] transition hover:border-[#176b62] hover:bg-[#edf7f3]"
+                                        >
+                                          查看原文 →
+                                        </button>
+                                      )}
+                                    </div>
                                   )}
                                   {isAdvancedMode && (
                                   <div className="mt-2 flex flex-wrap items-center justify-between gap-2 border-t border-[#e2e8e5] pt-2">
@@ -3818,6 +3845,13 @@ export default function Home() {
           onPermanentlyDeleteFile={handlePermanentlyDeleteKnowledgeFile}
           onRemoveFile={handleRemoveKnowledgeFile}
           onAttachFile={handleAttachKnowledgeFile}
+        />
+      )}
+
+      {activeSourcePreview && (
+        <SourcePreviewDialog
+          source={activeSourcePreview}
+          onClose={() => setActiveSourcePreview(null)}
         />
       )}
 

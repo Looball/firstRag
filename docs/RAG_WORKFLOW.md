@@ -76,6 +76,8 @@
 - `sources`：回答引用的文件、chunk、分数和检索来源。
 - `retrieval`：最终是否检索、Router LLM 原始判断、规则覆盖原因、改写问题、召回数量、降级状态和诊断信息。
 
+前端可使用 source 中持久化的 `file_id + chunk_index + index_version` 调用 chunk 上下文 API，从 PostgreSQL 精确读取目标 chunk 和相邻正文；旧 source 缺少 `index_version` 时回退到最新可用 chunk 版本。该能力用于引用核验，不重新执行 embedding、全文检索或 rerank；旧 source 缺少文件/chunk 定位字段、文件已永久删除或重新索引后指定版本不再存在时安全返回不可用状态。
+
 诊断展示应区分三类信息：
 
 | 类型 | 字段 | 说明 |

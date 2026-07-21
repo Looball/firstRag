@@ -13,6 +13,8 @@ import {
   listConversationMessages,
   listKnowledgeBasesAndSessions,
   listDeletedKnowledgeBases,
+  loadKnowledgeFileContent,
+  loadKnowledgeSourcePreview,
   loadQualityDashboard,
   loadVectorIndexHealth,
   postChatMessage,
@@ -77,6 +79,78 @@ describe("chat workspace api", () => {
 
     await expect(listAllKnowledgeFiles()).rejects.toThrow(
       "文件列表响应格式异常。",
+    );
+  });
+
+  it("normalizes source chunk preview payloads", async () => {
+    const fileId = "11111111-1111-4111-8111-111111111111";
+    authenticatedJsonMock.mockResolvedValueOnce({
+      success: true,
+      file: {
+        id: fileId,
+        original_name: "guide.md",
+        mime_type: "text/markdown",
+        index_version: 3,
+      },
+      target_chunk_index: 2,
+      chunks: [
+        {
+          chunk_index: 1,
+          content: "previous",
+          location: { h1: "指南" },
+          is_target: false,
+        },
+        {
+          chunk_index: 2,
+          content: "target",
+          location: { h1: "指南", h2: "安装" },
+          is_target: true,
+        },
+      ],
+    });
+
+    await expect(loadKnowledgeSourcePreview(fileId, 2, 1, 3)).resolves.toEqual({
+      fileId,
+      fileName: "guide.md",
+      mimeType: "text/markdown",
+      indexVersion: 3,
+      targetChunkIndex: 2,
+      chunks: [
+        {
+          chunkIndex: 1,
+          content: "previous",
+          location: { h1: "指南" },
+          isTarget: false,
+        },
+        {
+          chunkIndex: 2,
+          content: "target",
+          location: { h1: "指南", h2: "安装" },
+          isTarget: true,
+        },
+      ],
+    });
+    expect(authenticatedJsonMock).toHaveBeenCalledWith(
+      `/api/chat/knowledge-files/${fileId}/chunks/2?radius=1&index_version=3`,
+      { method: "GET" },
+      { fallbackMessage: "读取引用原文失败，请稍后再试。" },
+    );
+  });
+
+  it("loads original knowledge file content as a blob", async () => {
+    const fileId = "11111111-1111-4111-8111-111111111111";
+    const expectedBlob = new Blob(["original"], { type: "text/plain" });
+    authenticatedFetchMock.mockResolvedValueOnce(
+      new Response(expectedBlob, { status: 200 }),
+    );
+
+    const blob = await loadKnowledgeFileContent(fileId);
+
+    await expect(blob.text()).resolves.toBe("original");
+    expect(authenticatedFetchMock).toHaveBeenCalledWith(
+      `/api/chat/knowledge-files/${fileId}/content`,
+      { method: "GET" },
+      { fallbackMessage: "读取原始文件失败，请稍后再试。" },
     );
   });
 

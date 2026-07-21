@@ -1,4 +1,5 @@
 import logging
+from pathlib import Path
 from uuid import UUID, uuid4
 
 from fastapi import (
@@ -7,9 +8,11 @@ from fastapi import (
     File,
     Form,
     HTTPException,
+    Query,
     Request,
     UploadFile,
 )
+from fastapi.responses import FileResponse
 
 from app.core.config import (
     API_RATE_LIMIT_WINDOW_SECONDS,
@@ -29,6 +32,10 @@ from app.repositories.knowledge_file_repository import (
     get_file_by_hash,
     get_user_file_quota_usage,
     get_user_knowledge_files,
+    get_user_knowledge_file,
+)
+from app.repositories.knowledge_chunk_repository import (
+    get_user_knowledge_file_chunk_context,
 )
 from app.repositories.vector_index_job_repository import (
     get_latest_vector_index_jobs_by_file_ids,
@@ -54,11 +61,55 @@ from app.services.knowledge_profile_cache import (
 )
 from app.services.knowledge_file_lifecycle_service import (
     permanently_delete_knowledge_file,
+    resolve_knowledge_file_storage_path,
 )
 
 
 router = APIRouter(prefix="/chat", tags=["knowledge-files"])
 logger = logging.getLogger(__name__)
+CHUNK_LOCATION_METADATA_KEYS = (
+    "h1",
+    "h2",
+    "h3",
+    "h4",
+    "h5",
+    "h6",
+    "page",
+    "page_number",
+)
+SAFE_INLINE_MEDIA_TYPES = {
+    ".pdf": "application/pdf",
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".webp": "image/webp",
+    ".md": "text/plain; charset=utf-8",
+    ".txt": "text/plain; charset=utf-8",
+    ".docx": (
+        "application/vnd.openxmlformats-officedocument."
+        "wordprocessingml.document"
+    ),
+}
+
+
+def serialize_chunk_location_metadata(metadata: object) -> dict[str, object]:
+    """仅返回可展示的标题或页码元数据，不暴露内部存储路径。"""
+    if not isinstance(metadata, dict):
+        return {}
+
+    return {
+        key: metadata[key]
+        for key in CHUNK_LOCATION_METADATA_KEYS
+        if key in metadata and isinstance(metadata[key], (str, int, float))
+    }
+
+
+def get_safe_knowledge_file_media_type(original_name: str) -> str:
+    """按受支持扩展名确定安全响应类型，避免信任上传 Content-Type。"""
+    return SAFE_INLINE_MEDIA_TYPES.get(
+        Path(original_name).suffix.lower(),
+        "application/octet-stream",
+    )
 
 
 def format_quota_size(size_bytes: int) -> str:
@@ -342,6 +393,88 @@ def get_all_knowledge_files(user_id: int = Depends(get_current_user_id)):
             for row in rows
         ],
     }
+
+
+@router.get(
+    "/knowledge-files/{knowledge_file_id}/chunks/{chunk_index}",
+)
+def get_knowledge_file_chunk_context(
+    knowledge_file_id: UUID,
+    chunk_index: int,
+    radius: int = Query(default=1, ge=0, le=3),
+    index_version: int | None = Query(default=None, ge=0),
+    user_id: int = Depends(get_current_user_id),
+):
+    """读取当前用户文件中目标 chunk 的完整正文和相邻上下文。"""
+    rows = get_user_knowledge_file_chunk_context(
+        user_id=user_id,
+        file_id=knowledge_file_id,
+        chunk_index=chunk_index,
+        radius=radius,
+        index_version=index_version,
+    )
+    if not rows:
+        raise HTTPException(status_code=404, detail="引用原文不存在")
+
+    first_row = rows[0]
+    return {
+        "success": True,
+        "file": {
+            "id": str(knowledge_file_id),
+            "original_name": first_row["original_name"],
+            "mime_type": get_safe_knowledge_file_media_type(
+                str(first_row["original_name"]),
+            ),
+            "index_version": first_row["index_version"],
+        },
+        "target_chunk_index": first_row["target_chunk_index"],
+        "chunks": [
+            {
+                "chunk_index": row["chunk_index"],
+                "content": row["content"],
+                "location": serialize_chunk_location_metadata(
+                    row.get("metadata"),
+                ),
+                "is_target": (
+                    row["chunk_index"] == first_row["target_chunk_index"]
+                ),
+            }
+            for row in rows
+        ],
+    }
+
+
+@router.get("/knowledge-files/{knowledge_file_id}/content")
+def get_knowledge_file_content(
+    knowledge_file_id: UUID,
+    user_id: int = Depends(get_current_user_id),
+) -> FileResponse:
+    """在权限和 uploads 路径边界内返回原始知识文件。"""
+    file_record = get_user_knowledge_file(user_id, knowledge_file_id)
+    if file_record is None:
+        raise HTTPException(status_code=404, detail="文件不存在")
+
+    try:
+        storage_path = resolve_knowledge_file_storage_path(
+            str(file_record["storage_path"]),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail="文件内容不可用") from exc
+    if not storage_path.is_file():
+        raise HTTPException(status_code=404, detail="文件内容不存在")
+
+    return FileResponse(
+        storage_path,
+        media_type=get_safe_knowledge_file_media_type(
+            str(file_record["original_name"]),
+        ),
+        filename=file_record["original_name"],
+        content_disposition_type="inline",
+        headers={
+            "Content-Security-Policy": "sandbox",
+            "X-Content-Type-Options": "nosniff",
+        },
+    )
 
 
 @router.delete("/knowledge-files/{knowledge_file_id}")

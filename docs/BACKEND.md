@@ -49,7 +49,7 @@ python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 | `conversations.py` | 会话列表、创建、重命名、删除、消息和诊断读取。 |
 | `health.py` | 后端和 Redis 基础设施健康检查，不返回敏感连接串。 |
 | `knowledge_bases.py` | 知识库列表、创建、重命名、回收站删除/恢复和文件关联管理。 |
-| `knowledge_files.py` | 文件上传、复用、知识文件列表和永久删除入口。 |
+| `knowledge_files.py` | 文件上传、复用、知识文件列表、引用 chunk 上下文、原始文件读取和永久删除入口。 |
 | `user_settings.py` | 用户模型厂商、凭据、测试连接和设置保存。 |
 | `vector_indexes.py` | 文件/知识库向量化任务、任务状态和向量删除。 |
 

@@ -146,6 +146,8 @@ ID 随聊天请求提交。当前支持 `image/png`、`image/jpeg` 和 `image/we
 | --- | --- | --- |
 | `POST` | `/chat/knowledge-base/{knowledge_base_id}/files` | 上传文件，支持 `multipart/form-data`。 |
 | `GET` | `/chat/knowledge-files` | 当前用户所有知识文件。 |
+| `GET` | `/chat/knowledge-files/{knowledge_file_id}/chunks/{chunk_index}?radius=1` | 读取目标 chunk 和相邻上下文，`radius` 范围为 0-3。 |
+| `GET` | `/chat/knowledge-files/{knowledge_file_id}/content` | 在权限与 uploads 路径校验后读取原始文件。 |
 | `DELETE` | `/chat/knowledge-files/{knowledge_file_id}` | 永久删除用户知识文件及其全部索引数据。 |
 
 上传字段：
@@ -159,6 +161,8 @@ ID 随聊天请求提交。当前支持 `image/png`、`image/jpeg` 和 `image/we
 上传入口当前支持 `.pdf`、`.docx`、`.md`、`.txt`、`.png`、`.jpg/.jpeg` 和 `.webp`。不支持的扩展名、明显不匹配的 MIME 类型或伪装成图片的无效文件头会返回 `400`，不会创建无效文件记录或向量化任务。
 
 图片知识文件上传成功后仍然走异步向量化。worker 会使用当前登录用户保存的 vision-capable 聊天模型把图片解析为可检索 Markdown，再切分为 chunk，写入 PostgreSQL full-text chunks 和 Chroma。若用户未配置聊天模型，或当前模型不支持 vision，单文件/整库向量化提交会返回 `400`；通过 `auto_index=true` 自动入队的任务会在 worker 阶段失败，并返回安全的恢复提示。
+
+引用原文定位使用 `knowledge_file_id + chunk_index + index_version`；新生成的 source 会持久化其索引版本，旧 source 未携带版本时回退到最新可用 chunk 版本。chunk 上下文接口只返回完整正文和白名单位置 metadata（`h1`-`h6`、可用页码），不返回 `storage_path`。当前解析链路没有稳定页码时，前端只展示精确 chunk，不生成推测页码。原始文件接口不信任上传时的 Content-Type，而是按受支持扩展名设置安全 MIME，并返回 `nosniff` 和 sandbox 响应头；跨用户、路径越界、文件缺失或已重新索引后目标 chunk 不存在时返回 `404`。
 
 上传同时受单文件大小、用户文件数量和用户总容量配额限制：
 

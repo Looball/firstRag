@@ -75,6 +75,7 @@
 | `PLAN-20260720-06` | 2026-07-20 | `Done` | 将后端 Python 依赖和第一方 Docker 镜像的漏洞审计固化到 CI。 | `T-067` |
 | `PLAN-20260720-07` | 2026-07-20 | `Done` | 固化 GitHub Actions 第三方依赖，使用完整 commit SHA 并由 Dependabot 持续更新。 | `T-068` |
 | `PLAN-20260721-01` | 2026-07-21 | `Done` | 补齐知识库与知识文件的用户可见生命周期，支持安全删除、恢复和跨存储清理。 | `T-069` |
+| `PLAN-20260721-02` | 2026-07-21 | `Doing` | 增强回答引用的可核验性，支持按 chunk 查看前后文并安全打开原始文件。 | `T-070` |
 
 ## 任务总览
 
@@ -149,6 +150,7 @@
 | `T-067` | `PLAN-20260720-06` | `P1` | `Done` | 增加 Python 依赖和 Docker 镜像漏洞 CI 门禁 | 2026-07-20 | `fd18c44` |
 | `T-068` | `PLAN-20260720-07` | `P1` | `Done` | 固定 GitHub Actions SHA 并启用 Dependabot 更新 | 2026-07-20 | `06c9b61` |
 | `T-069` | `PLAN-20260721-01` | `P1` | `Done` | 补齐知识库和知识文件完整生命周期 | 2026-07-21 | `ac4397b` |
+| `T-070` | `PLAN-20260721-02` | `P1` | `Doing` | 实现来源原文预览与精确引用跳转 | — | — |
 
 ## 新计划接入流程
 
@@ -2662,6 +2664,38 @@ cd ../frontend && npm test && npm run lint && npm run build
 cd .. && docker compose up -d --build
 docker compose ps
 docker compose logs --tail=100 redis postgres chroma migrate backend worker frontend
+conda run -n firstrag python scripts/production_preflight.py --env-file .env --migration-method compose --check-runtime-health
+git diff --check
+```
+
+## T-070 实现来源原文预览与精确引用跳转
+
+- 来源计划：`PLAN-20260721-02`
+- 优先级：`P1`
+- 状态：`Doing`
+- 目标：让用户可以从回答引用直接核验目标 chunk 的完整正文和相邻上下文，并在权限校验后打开原始知识文件。
+- 定位边界：当前索引数据没有稳定的 PDF 页码或字符 offset，本任务以 `file_id + chunk_index + index_version` 作为可验证的精确定位键，不展示无法保证准确的页码；旧 source 缺少版本时回退到最新可用 chunk 版本。
+- 范围：
+  - 后端增加目标 chunk 上下文 API，按当前用户、文件和索引版本查询目标 chunk 及相邻 chunks。
+  - 后端增加原始知识文件内容 API，校验文件所属用户并限制磁盘路径位于 uploads 根目录。
+  - 前端引用卡片增加“查看原文”操作，按需打开独立预览弹窗并高亮目标 chunk。
+  - 预览弹窗支持浏览相邻 chunk、展示可用的标题层级元数据，并安全打开原始文件。
+  - 预览组件动态加载，chunk 请求使用 React Query 缓存和去重，避免增加聊天首屏 bundle 和重复请求。
+  - 同步更新 API、Frontend、RAG workflow 文档和回归测试。
+- 验收标准：
+  - 当前用户只能读取自己的文件和 chunks，跨用户或不存在资源统一返回 `404`。
+  - API 不返回磁盘 `storage_path`；原始文件路径越界或文件缺失时安全失败。
+  - 点击引用后准确高亮 source 对应的 `chunk_index`，并展示至少一个相邻 chunk（存在时）。
+  - 历史引用缺少 `file_id` 或 `chunk_index` 时不展示不可用操作，保留现有引用内容。
+  - 后端、前端测试和 production build 通过，Docker Compose 真实 smoke 能读取目标 chunk、拒绝跨用户访问并打开原始文件。
+- 建议验证命令：
+
+```bash
+cd backend && conda run -n firstrag python -m pytest -q
+cd ../frontend && npm test -- --run && npm run lint && npm run build
+cd .. && docker compose up -d --build
+docker compose ps -a
+docker compose logs --since=10m redis postgres chroma migrate backend worker frontend
 conda run -n firstrag python scripts/production_preflight.py --env-file .env --migration-method compose --check-runtime-health
 git diff --check
 ```

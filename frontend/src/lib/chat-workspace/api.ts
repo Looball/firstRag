@@ -14,6 +14,7 @@ import type {
   KnowledgeBase,
   KnowledgeBaseRetrievalSettings,
   KnowledgeFile,
+  KnowledgeSourcePreview,
   ListMessagesResponse,
   MessageFeedback,
   MessageFeedbackReason,
@@ -68,6 +69,29 @@ const retrievalSettingsResponseSchema = z
   })
   .passthrough();
 
+const sourcePreviewResponseSchema = z
+  .object({
+    file: z.object({
+      id: z.string().min(1),
+      original_name: z.string().min(1),
+      mime_type: z.string().min(1),
+      index_version: z.number().int().nonnegative(),
+    }),
+    target_chunk_index: z.number().int().nonnegative(),
+    chunks: z.array(
+      z.object({
+        chunk_index: z.number().int().nonnegative(),
+        content: z.string(),
+        location: z.record(
+          z.string(),
+          z.union([z.string(), z.number()]),
+        ).default({}),
+        is_target: z.boolean(),
+      }),
+    ),
+  })
+  .passthrough();
+
 function jsonHeaders() {
   return {
     "Content-Type": "application/json",
@@ -104,6 +128,51 @@ export async function listAllKnowledgeFiles() {
   );
 
   return parseFilesResponse(data);
+}
+
+export async function loadKnowledgeSourcePreview(
+  knowledgeFileId: string,
+  chunkIndex: number,
+  radius = 1,
+  indexVersion?: number,
+): Promise<KnowledgeSourcePreview> {
+  const indexVersionQuery =
+    indexVersion === undefined ? "" : `&index_version=${indexVersion}`;
+  const data = await authenticatedJson<unknown>(
+    `/api/chat/knowledge-files/${encodeURIComponent(
+      knowledgeFileId,
+    )}/chunks/${chunkIndex}?radius=${radius}${indexVersionQuery}`,
+    { method: "GET" },
+    { fallbackMessage: "读取引用原文失败，请稍后再试。" },
+  );
+  const parsed = sourcePreviewResponseSchema.safeParse(data);
+
+  if (!parsed.success) {
+    throw new Error("引用原文响应格式异常。");
+  }
+
+  return {
+    fileId: parsed.data.file.id,
+    fileName: parsed.data.file.original_name,
+    mimeType: parsed.data.file.mime_type,
+    indexVersion: parsed.data.file.index_version,
+    targetChunkIndex: parsed.data.target_chunk_index,
+    chunks: parsed.data.chunks.map((chunk) => ({
+      chunkIndex: chunk.chunk_index,
+      content: chunk.content,
+      location: chunk.location,
+      isTarget: chunk.is_target,
+    })),
+  };
+}
+
+export async function loadKnowledgeFileContent(knowledgeFileId: string) {
+  const response = await authenticatedFetch(
+    `/api/chat/knowledge-files/${encodeURIComponent(knowledgeFileId)}/content`,
+    { method: "GET" },
+    { fallbackMessage: "读取原始文件失败，请稍后再试。" },
+  );
+  return response.blob();
 }
 
 export async function loadVectorIndexHealth() {
