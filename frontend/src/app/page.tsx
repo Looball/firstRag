@@ -2847,6 +2847,9 @@ export default function Home() {
                                     : "";
                               const sourceFileMeta = [
                                 formatSourcePosition(source),
+                                source.pdfParseMethod === "ocr"
+                                  ? "OCR 识别"
+                                  : "",
                                 source.fileName !== source.title
                                   ? source.fileName
                                   : "",

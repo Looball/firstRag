@@ -80,6 +80,7 @@ def serialize_source_preview(source: dict) -> dict:
         "page_number": source.get("page_number"),
         "paragraph_start": source.get("paragraph_start"),
         "paragraph_end": source.get("paragraph_end"),
+        "pdf_parse_method": source.get("pdf_parse_method"),
         "retrieval_sources": source.get("retrieval_sources") or [],
         "vector_score": source.get("vector_score"),
         "fulltext_score": source.get("fulltext_score"),

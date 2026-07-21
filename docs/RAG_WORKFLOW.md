@@ -17,7 +17,7 @@
 
 1. `vector_index_worker` 领取 `queued` 任务。
 2. 使用 PostgreSQL advisory lock 避免同一文件并发索引。
-3. `document_service` 加载 PDF、DOCX、Markdown、TXT 或图片知识文件。PDF 按真实页面加载并写入页码 metadata；DOCX 从 OOXML 主文档按标题和段落边界加载，保留原始段落范围。图片文件会使用当前用户配置的 vision 聊天模型解析为可检索 Markdown；聊天图片附件不走这条入库链路。
+3. `document_service` 加载 PDF、DOCX、Markdown、TXT 或图片知识文件。PDF 先按页解析原生文本，无有效文本层的页面渲染为 PNG 并通过本地 Tesseract OCR，同时写入真实页码和解析方式 metadata；DOCX 从 OOXML 主文档按标题和段落边界加载，保留原始段落范围。图片文件会使用当前用户配置的 vision 聊天模型解析为可检索 Markdown；聊天图片附件不走这条入库链路。
 4. 文本或图片解析结果切分为 chunk；同一文件跨 PDF page 或 DOCX block 使用全局连续的 `chunk_index`。
 5. 当前登录用户保存的 embedding provider 生成向量，支持 Qwen、智谱、OpenAI、Voyage、Cohere、Jina 和自定义 OpenAI-compatible embedding API。用户可按厂商保存多份 API Key，当前生效配置决定实际调用的 provider/model/base_url。
 6. Chroma 保存向量；Compose 中 worker 与 backend 均通过 HTTP client 访问独立

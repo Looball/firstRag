@@ -75,6 +75,10 @@ class RagReferenceFilteringTests(unittest.TestCase):
                     "page_count": 3,
                     "paragraph_start": 4,
                     "paragraph_end": 5,
+                    "pdf_parse_method": "ocr",
+                    "ocr_engine": "tesseract",
+                    "ocr_languages": "chi_sim+eng",
+                    "ocr_dpi": 300,
                 },
             ),
         ]
@@ -92,6 +96,10 @@ class RagReferenceFilteringTests(unittest.TestCase):
         self.assertEqual(references[0]["page_count"], 3)
         self.assertEqual(references[0]["paragraph_start"], 4)
         self.assertEqual(references[0]["paragraph_end"], 5)
+        self.assertEqual(references[0]["pdf_parse_method"], "ocr")
+        self.assertEqual(references[0]["ocr_engine"], "tesseract")
+        self.assertEqual(references[0]["ocr_languages"], "chi_sim+eng")
+        self.assertEqual(references[0]["ocr_dpi"], 300)
 
     def test_get_res_doc_excludes_low_relevance_context(self) -> None:
         """低相关片段不应进入最终提示词上下文。"""

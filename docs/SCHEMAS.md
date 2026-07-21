@@ -131,7 +131,9 @@
 `source`、`file_id`、`file_name`、`user_id` 和 `chunk_index`。同一文件的
 `chunk_index` 会跨 PDF page 或 DOCX block 全局连续分配。PDF 额外保存
 `location_type=pdf_page`、0-based `page_index`、1-based `page_number` 和
-`page_count`；DOCX 额外保存 `location_type=docx_paragraphs` 以及 1-based
+`page_count`。PDF 原生文本页保存 `pdf_parse_method=native_text`；扫描页保存
+`pdf_parse_method=ocr`、`ocr_engine=tesseract`、`ocr_languages` 和 `ocr_dpi`。
+DOCX 额外保存 `location_type=docx_paragraphs` 以及 1-based
 `paragraph_start` / `paragraph_end`，空段落不写入正文但仍占用原始段落序号。
 图片知识文件还会包含：
 

@@ -44,6 +44,9 @@ function formatChunkLocation(location: Record<string, string | number>) {
   if (position) {
     headings.push(position);
   }
+  if (location.pdf_parse_method === "ocr") {
+    headings.push("OCR 识别");
+  }
 
   return headings.join(" / ");
 }

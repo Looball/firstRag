@@ -3,6 +3,7 @@ import logging
 import os
 from pathlib import Path
 import re
+import subprocess
 from uuid import UUID
 from xml.etree import ElementTree
 from zipfile import BadZipFile, ZipFile
@@ -14,7 +15,7 @@ from langchain_core.messages import HumanMessage
 import mammoth
 from markdownify import markdownify
 
-# 将PDF转为md文件
+import pymupdf
 import pymupdf4llm
 
 from langchain_core.documents import Document
@@ -23,7 +24,15 @@ from langchain_text_splitters import (
     RecursiveCharacterTextSplitter,
 )
 
-from app.core.config import VECTOR_STORE_PATH
+from app.core.config import (
+    PDF_OCR_DPI,
+    PDF_OCR_ENABLED,
+    PDF_OCR_LANGUAGES,
+    PDF_OCR_MAX_PAGES,
+    PDF_OCR_MIN_NATIVE_TEXT_CHARACTERS,
+    PDF_OCR_TIMEOUT_SECONDS,
+    VECTOR_STORE_PATH,
+)
 from app.services.llm_service import (
     chat_model_supports_images,
     create_openai_compatible_chat_model,
@@ -78,6 +87,7 @@ WORD_TEXT_TAG = f"{{{WORDPROCESSINGML_NAMESPACE}}}t"
 WORD_TAB_TAG = f"{{{WORDPROCESSINGML_NAMESPACE}}}tab"
 WORD_BREAK_TAG = f"{{{WORDPROCESSINGML_NAMESPACE}}}br"
 WORD_VALUE_ATTRIBUTE = f"{{{WORDPROCESSINGML_NAMESPACE}}}val"
+PDF_OCR_LANGUAGE_PATTERN = re.compile(r"^[A-Za-z0-9_+./-]+$")
 
 
 class UnsupportedDocumentTypeError(ValueError):
@@ -90,6 +100,10 @@ class EmptyDocumentError(ValueError):
 
 class ImageDocumentParseError(ValueError):
     """图片文件无法通过 vision 模型解析时抛出。"""
+
+
+class PdfOcrError(ValueError):
+    """扫描 PDF 的本地 OCR 无法安全完成时抛出。"""
 
 
 def get_supported_document_type_text() -> str:
@@ -341,18 +355,64 @@ def build_pdf_page_documents(
     page_chunks = pymupdf4llm.to_markdown(
         str(file_path),
         page_chunks=True,
+        use_ocr=False,
     )
     if not isinstance(page_chunks, list):
         raise EmptyDocumentError("PDF 解析器没有返回逐页结果")
+
+    minimum_native_characters = max(0, PDF_OCR_MIN_NATIVE_TEXT_CHARACTERS)
+    ocr_page_indexes = [
+        page_index
+        for page_index, page_chunk in enumerate(page_chunks)
+        if isinstance(page_chunk, dict)
+        and count_effective_text_characters(
+            str(page_chunk.get("text") or ""),
+        ) < minimum_native_characters
+    ]
+    if PDF_OCR_ENABLED and PDF_OCR_MAX_PAGES > 0:
+        if len(ocr_page_indexes) > PDF_OCR_MAX_PAGES:
+            raise PdfOcrError(
+                "PDF OCR 页数超过配置上限，"
+                f"最多允许 {PDF_OCR_MAX_PAGES} 页",
+            )
+
+    ocr_text_by_page: dict[int, str] = {}
+    if PDF_OCR_ENABLED and ocr_page_indexes:
+        validate_pdf_ocr_runtime_config()
+        try:
+            pdf_document = pymupdf.open(str(file_path))
+        except (OSError, RuntimeError, ValueError) as exc:
+            raise PdfOcrError("PDF OCR 无法打开原始文档") from exc
+        try:
+            for page_index in ocr_page_indexes:
+                if page_index >= pdf_document.page_count:
+                    raise PdfOcrError("PDF OCR 页码与解析结果不一致")
+                ocr_text_by_page[page_index] = run_pdf_page_ocr(
+                    pdf_document.load_page(page_index),
+                )
+        finally:
+            pdf_document.close()
 
     documents = []
     page_count = len(page_chunks)
     for page_index, page_chunk in enumerate(page_chunks):
         if not isinstance(page_chunk, dict):
             continue
-        markdown_text = str(page_chunk.get("text") or "").strip()
+        native_markdown_text = str(page_chunk.get("text") or "").strip()
+        ocr_text = ocr_text_by_page.get(page_index, "").strip()
+        markdown_text = ocr_text or native_markdown_text
         if not markdown_text:
             continue
+        parse_method = "ocr" if ocr_text else "native_text"
+        ocr_metadata = (
+            {
+                "ocr_engine": "tesseract",
+                "ocr_languages": PDF_OCR_LANGUAGES,
+                "ocr_dpi": normalize_pdf_ocr_dpi(PDF_OCR_DPI),
+            }
+            if parse_method == "ocr"
+            else {}
+        )
         documents.append(
             Document(
                 page_content=markdown_text,
@@ -363,6 +423,8 @@ def build_pdf_page_documents(
                     "page_index": page_index,
                     "page_number": page_index + 1,
                     "page_count": page_count,
+                    "pdf_parse_method": parse_method,
+                    **ocr_metadata,
                 },
             )
         )
@@ -370,6 +432,60 @@ def build_pdf_page_documents(
     if not documents:
         raise EmptyDocumentError("PDF 文件没有可索引正文")
     return documents
+
+
+def count_effective_text_characters(text: str) -> int:
+    """统计可表达正文的字母、数字或 CJK 字符，忽略 Markdown 标记。"""
+    return sum(character.isalnum() for character in text)
+
+
+def normalize_pdf_ocr_dpi(value: int) -> int:
+    """将 OCR DPI 限制到兼顾识别质量和内存占用的安全范围。"""
+    return min(600, max(72, value))
+
+
+def validate_pdf_ocr_runtime_config() -> None:
+    """校验不会传入 shell 的 Tesseract 语言与资源限制配置。"""
+    if not PDF_OCR_LANGUAGE_PATTERN.fullmatch(PDF_OCR_LANGUAGES):
+        raise PdfOcrError("PDF OCR 语言配置无效")
+    if PDF_OCR_TIMEOUT_SECONDS <= 0:
+        raise PdfOcrError("PDF OCR 单页超时必须大于 0 秒")
+
+
+def run_pdf_page_ocr(page: pymupdf.Page) -> str:
+    """把单个扫描 PDF 页面渲染为 PNG，并调用本地 Tesseract。"""
+    dpi = normalize_pdf_ocr_dpi(PDF_OCR_DPI)
+    pixmap = page.get_pixmap(dpi=dpi, alpha=False)
+    command = [
+        "tesseract",
+        "stdin",
+        "stdout",
+        "-l",
+        PDF_OCR_LANGUAGES,
+        "--dpi",
+        str(dpi),
+        "--psm",
+        "3",
+    ]
+    try:
+        result = subprocess.run(
+            command,
+            input=pixmap.tobytes("png"),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+            timeout=PDF_OCR_TIMEOUT_SECONDS,
+        )
+    except FileNotFoundError as exc:
+        raise PdfOcrError("PDF OCR 引擎不可用，请安装 Tesseract") from exc
+    except subprocess.TimeoutExpired as exc:
+        raise PdfOcrError("PDF OCR 单页识别超时") from exc
+    except OSError as exc:
+        raise PdfOcrError("PDF OCR 无法启动本地识别引擎") from exc
+
+    if result.returncode != 0:
+        raise PdfOcrError("PDF OCR 识别失败，请检查语言包和文件清晰度")
+    return result.stdout.decode("utf-8", errors="replace").strip()
 
 
 def extract_chat_message_text(content: object) -> str:

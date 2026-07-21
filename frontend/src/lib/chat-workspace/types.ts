@@ -53,6 +53,7 @@ export type ChatSource = {
   pageCount?: number;
   paragraphStart?: number;
   paragraphEnd?: number;
+  pdfParseMethod?: string;
   vectorScore?: number;
   fulltextScore?: number;
   rerankScore?: number;

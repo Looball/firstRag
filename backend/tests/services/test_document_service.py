@@ -4,6 +4,7 @@ from contextlib import redirect_stdout
 from html import escape
 from io import StringIO
 from pathlib import Path
+import subprocess
 from tempfile import TemporaryDirectory
 import unittest
 from unittest.mock import Mock, patch
@@ -13,9 +14,11 @@ import pymupdf
 
 from app.services.documents.document_service import (
     ImageDocumentParseError,
+    PdfOcrError,
     build_vector_store,
     get_document_paths,
     load_document,
+    run_pdf_page_ocr,
     split_documents,
 )
 from app.services.llm_service import ChatModelSettings
@@ -40,6 +43,58 @@ def create_pdf_fixture(path: Path, page_texts: list[str]) -> None:
         for page_text in page_texts:
             page = document.new_page()
             page.insert_text((72, 72), page_text, fontsize=12)
+        document.save(path)
+    finally:
+        document.close()
+
+
+def create_mixed_pdf_fixture(path: Path) -> None:
+    """创建一页原生文本和一页纯图片的混合 PDF。"""
+    image_source = pymupdf.open()
+    image_page = image_source.new_page()
+    image_page.insert_text(
+        (72, 120),
+        "T072 SCANNED PAGE TARGET",
+        fontsize=24,
+    )
+    image_bytes = image_page.get_pixmap(
+        dpi=200,
+        alpha=False,
+    ).tobytes("png")
+
+    document = pymupdf.open()
+    try:
+        native_page = document.new_page()
+        native_page.insert_text(
+            (72, 120),
+            "T072 NATIVE PAGE TEXT",
+            fontsize=18,
+        )
+        scanned_page = document.new_page()
+        scanned_page.insert_image(scanned_page.rect, stream=image_bytes)
+        document.save(path)
+    finally:
+        document.close()
+        image_source.close()
+
+
+def create_scanned_pdf_fixture(path: Path, page_texts: list[str]) -> None:
+    """创建每页仅含文字栅格图、没有原生文本层的扫描 PDF。"""
+    document = pymupdf.open()
+    try:
+        for page_text in page_texts:
+            image_source = pymupdf.open()
+            try:
+                image_page = image_source.new_page()
+                image_page.insert_text((72, 120), page_text, fontsize=24)
+                image_bytes = image_page.get_pixmap(
+                    dpi=200,
+                    alpha=False,
+                ).tobytes("png")
+            finally:
+                image_source.close()
+            scanned_page = document.new_page()
+            scanned_page.insert_image(scanned_page.rect, stream=image_bytes)
         document.save(path)
     finally:
         document.close()
@@ -189,6 +244,76 @@ class DocumentServiceTests(unittest.TestCase):
             chunk for chunk in chunks if "PAGE TWO TARGET" in chunk.page_content
         )
         self.assertEqual(target_chunk.metadata["page_number"], 2)
+
+    def test_mixed_pdf_only_uses_ocr_for_scanned_page(self) -> None:
+        """混合 PDF 只应 OCR 无文本层页面，并保留逐页解析方式。"""
+        with TemporaryDirectory() as temporary_directory:
+            pdf_path = Path(temporary_directory) / "mixed.pdf"
+            create_mixed_pdf_fixture(pdf_path)
+
+            with patch(
+                "app.services.documents.document_service.PDF_OCR_ENABLED",
+                True,
+            ), patch(
+                "app.services.documents.document_service.PDF_OCR_MAX_PAGES",
+                10,
+            ), patch(
+                "app.services.documents.document_service.run_pdf_page_ocr",
+                return_value="T072 OCR RECOGNIZED TARGET",
+            ) as run_ocr:
+                documents = load_document(
+                    pdf_path,
+                    file_id="mixed-pdf",
+                    user_id=7,
+                )
+
+        self.assertEqual(len(documents), 2)
+        self.assertEqual(
+            [document.metadata["pdf_parse_method"] for document in documents],
+            ["native_text", "ocr"],
+        )
+        self.assertEqual(documents[1].metadata["ocr_engine"], "tesseract")
+        self.assertEqual(documents[1].metadata["page_number"], 2)
+        self.assertIn("OCR RECOGNIZED", documents[1].page_content)
+        run_ocr.assert_called_once()
+
+    def test_pdf_ocr_page_limit_is_enforced_before_recognition(self) -> None:
+        """待 OCR 页数超过上限时应安全失败且不启动识别引擎。"""
+        with TemporaryDirectory() as temporary_directory:
+            pdf_path = Path(temporary_directory) / "two-scanned-pages.pdf"
+            create_scanned_pdf_fixture(
+                pdf_path,
+                ["T072 SCAN ONE", "T072 SCAN TWO"],
+            )
+
+            with patch(
+                "app.services.documents.document_service.PDF_OCR_ENABLED",
+                True,
+            ), patch(
+                "app.services.documents.document_service.PDF_OCR_MAX_PAGES",
+                1,
+            ), patch(
+                "app.services.documents.document_service.run_pdf_page_ocr",
+            ) as run_ocr:
+                with self.assertRaises(PdfOcrError):
+                    load_document(
+                        pdf_path,
+                        file_id="ocr-over-limit",
+                        user_id=7,
+                    )
+
+        run_ocr.assert_not_called()
+
+    def test_pdf_ocr_timeout_returns_safe_error(self) -> None:
+        """Tesseract 单页超时应转换为稳定且不含内部路径的错误。"""
+        page = Mock()
+        page.get_pixmap.return_value.tobytes.return_value = b"png-bytes"
+        with patch(
+            "app.services.documents.document_service.subprocess.run",
+            side_effect=subprocess.TimeoutExpired("tesseract", 60),
+        ):
+            with self.assertRaisesRegex(PdfOcrError, "单页识别超时"):
+                run_pdf_page_ocr(page)
 
     def test_docx_chunks_keep_original_paragraph_ranges(self) -> None:
         """DOCX 分块应保留含空段落间隔的原始 OOXML 段落范围。"""

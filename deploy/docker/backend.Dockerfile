@@ -33,11 +33,15 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
-# Chroma/ONNX runtime 可能需要 libgomp；编译工具只保留在 builder 阶段。
+# Chroma/ONNX runtime 需要 libgomp；扫描 PDF OCR 使用本地 Tesseract，
+# 同时安装简体中文和英文语言数据。编译工具只保留在 builder 阶段。
 RUN sed -i 's/deb.debian.org/mirrors.tuna.tsinghua.edu.cn/g' /etc/apt/sources.list.d/debian.sources \
     && apt-get update \
     && apt-get install -y --no-install-recommends \
         libgomp1 \
+        tesseract-ocr \
+        tesseract-ocr-chi-sim \
+        tesseract-ocr-eng \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /opt/venv /opt/venv

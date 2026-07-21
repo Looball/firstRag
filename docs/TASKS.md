@@ -77,6 +77,7 @@
 | `PLAN-20260721-01` | 2026-07-21 | `Done` | 补齐知识库与知识文件的用户可见生命周期，支持安全删除、恢复和跨存储清理。 | `T-069` |
 | `PLAN-20260721-02` | 2026-07-21 | `Done` | 增强回答引用的可核验性，支持按 chunk 查看前后文并安全打开原始文件。 | `T-070` |
 | `PLAN-20260721-03` | 2026-07-21 | `Done` | 为 PDF/DOCX 引用补充可验证的位置 metadata，并增强原文定位展示。 | `T-071` |
+| `PLAN-20260721-04` | 2026-07-21 | `Doing` | 为无文本层的扫描 PDF 增加本地 OCR fallback，并保留页码级引用。 | `T-072` |
 
 ## 任务总览
 
@@ -153,6 +154,7 @@
 | `T-069` | `PLAN-20260721-01` | `P1` | `Done` | 补齐知识库和知识文件完整生命周期 | 2026-07-21 | `ac4397b` |
 | `T-070` | `PLAN-20260721-02` | `P1` | `Done` | 实现来源原文预览与精确引用跳转 | 2026-07-21 | `11ed2e4` |
 | `T-071` | `PLAN-20260721-03` | `P1` | `Done` | 持久化 PDF 页码和 DOCX 段落位置 | 2026-07-21 | `d03de10` |
+| `T-072` | `PLAN-20260721-04` | `P1` | `Doing` | 为扫描 PDF 增加本地 OCR fallback | — | — |
 
 ## 新计划接入流程
 
@@ -2751,6 +2753,40 @@ git diff --check
   - `cd frontend && npm test -- --run`：10 个 test files、66 tests passed；`npm run lint`：0 error、保留 2 个既有 `<img>` performance warnings；Next 16.2.10 production build 通过。
   - `docker compose up -d --build`、`docker compose ps -a` 和最近关键服务日志通过：Redis、PostgreSQL、Chroma healthy，backend、worker、frontend Up，migration `applied=0 skipped=5`。
   - production preflight、Docker Compose config、Chroma runtime health、migration dry-run 和 `git diff --check` 全部通过。
+- 建议验证命令：
+
+```bash
+cd backend && conda run -n firstrag python -m pytest -q
+cd ../frontend && npm test -- --run && npm run lint && npm run build
+cd .. && docker compose up -d --build
+docker compose ps -a
+docker compose logs --since=10m redis postgres chroma migrate backend worker frontend
+conda run -n firstrag python scripts/production_preflight.py --env-file .env --migration-method compose --check-runtime-health
+git diff --check
+```
+
+## T-072 为扫描 PDF 增加本地 OCR fallback
+
+- 来源计划：`PLAN-20260721-04`
+- 优先级：`P1`
+- 状态：`Doing`
+- 目标：让图片型、无可复制文本层的 PDF 也能进入现有 RAG 索引，并继续提供准确的页码级引用定位。
+- 技术边界：
+  - 优先使用 `pymupdf4llm` 原生文本；仅低于有效文本阈值的页面渲染为 PNG 并调用本地 Tesseract。
+  - OCR 运行在 backend/worker 容器内，不发送到用户 LLM 或第三方 OCR API，不消耗模型额度。
+  - 默认识别 `chi_sim+eng`，DPI、语言、单页超时、最少原生文本字符数和单文件最大 OCR 页数均可通过环境变量调整。
+  - 超过 OCR 页数上限、Tesseract/语言包不可用或单页超时时，任务返回可理解且不泄露内部路径的失败分类。
+- 范围：
+  - 扩展 PDF 逐页解析，对无文本层页面执行本地 OCR，并记录 `pdf_parse_method`、OCR engine/languages/DPI metadata。
+  - 保持 T-071 的 `page_index/page_number/page_count` 和跨页连续 chunk index 语义。
+  - Docker backend image 安装 Tesseract 与简体中文/英文语言数据；本地 conda 调试复用系统 Tesseract。
+  - 增加 OCR 配置样例、失败提示、单元测试、真实扫描 PDF smoke 和相关文档。
+- 验收标准：
+  - 原生文本 PDF 不调用 OCR，现有解析结果和性能路径保持兼容。
+  - 至少一份纯图片三页 PDF 能识别目标文字，chunks 保留 1/2/3 页码且 source 可定位对应页面。
+  - 混合 PDF 只 OCR 扫描页，原生文本页继续标记为 `native_text`。
+  - OCR 不可用、超时或页数超限时任务给出稳定恢复提示，worker 能继续处理后续任务。
+  - 后端、前端测试、production build、Docker Compose smoke 和 production preflight 通过。
 - 建议验证命令：
 
 ```bash

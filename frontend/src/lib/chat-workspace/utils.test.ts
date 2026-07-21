@@ -69,6 +69,7 @@ describe("chat workspace source parsing", () => {
           page_index: 1,
           page_number: 2,
           page_count: 3,
+          pdf_parse_method: "ocr",
           rerank_score: "1.25",
           retrieval_sources: ["fulltext", "vector"],
           content: "matched chunk",
@@ -88,6 +89,7 @@ describe("chat workspace source parsing", () => {
         pageIndex: 1,
         pageNumber: 2,
         pageCount: 3,
+        pdfParseMethod: "ocr",
         rerankScore: 1.25,
         retrievalSources: ["fulltext", "vector"],
       },
@@ -415,6 +417,11 @@ describe("chat workspace vector status parsing", () => {
     expect(getVectorFailureRecoveryActions("image_parse_error", true)).toEqual([
       "在模型设置中选择支持 vision 的聊天模型",
       "确认图片文字清晰后重新向量化",
+    ]);
+    expect(getVectorFailureRecoveryActions("ocr_error", true)).toEqual([
+      "确认扫描页面清晰且 OCR 页数未超过限制",
+      "检查 worker 的 Tesseract 中文/英文语言包",
+      "重新向量化",
     ]);
     expect(getVectorFailureRecoveryActions("chunk_write_error", true)).toEqual([
       "检查 PostgreSQL chunk 表和迁移状态",

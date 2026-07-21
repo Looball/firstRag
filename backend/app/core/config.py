@@ -63,6 +63,21 @@ VECTOR_INDEX_MAX_BATCH_FILES = read_int_env(
     100,
 )
 
+# 扫描 PDF OCR 配置。仅原生文本不足的页面进入本地 Tesseract，避免普通
+# PDF 承担额外 CPU 开销；最大页数与超时用于限制公开环境中的资源占用。
+PDF_OCR_ENABLED = read_bool_env("PDF_OCR_ENABLED", True)
+PDF_OCR_LANGUAGES = os.environ.get(
+    "PDF_OCR_LANGUAGES",
+    "chi_sim+eng",
+).strip() or "chi_sim+eng"
+PDF_OCR_DPI = read_int_env("PDF_OCR_DPI", 300)
+PDF_OCR_TIMEOUT_SECONDS = read_int_env("PDF_OCR_TIMEOUT_SECONDS", 60)
+PDF_OCR_MIN_NATIVE_TEXT_CHARACTERS = read_int_env(
+    "PDF_OCR_MIN_NATIVE_TEXT_CHARACTERS",
+    1,
+)
+PDF_OCR_MAX_PAGES = read_int_env("PDF_OCR_MAX_PAGES", 100)
+
 # 限流配置。Docker/生产默认使用 Redis 分布式窗口；本地未显式配置时
 # Redis 故障会 fail-open 到进程内限流，避免开发环境被基础设施阻塞。
 LOGIN_FAILURE_RATE_LIMIT_MAX_ATTEMPTS = read_int_env(

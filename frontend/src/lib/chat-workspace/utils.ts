@@ -968,6 +968,11 @@ export function toChatSource(value: unknown, index: number): ChatSource | null {
     (metadataRecord
       ? getOptionalNumberField(metadataRecord, ["paragraph_end"])
       : undefined);
+  const pdfParseMethod =
+    getStringField(source, ["pdf_parse_method"]) ||
+    (metadataRecord
+      ? getStringField(metadataRecord, ["pdf_parse_method"])
+      : "");
   const rerankScore = getOptionalNumberField(source, [
     "rerank_score",
     "score",
@@ -1104,6 +1109,7 @@ export function toChatSource(value: unknown, index: number): ChatSource | null {
     ...(pageCount !== undefined ? { pageCount } : {}),
     ...(paragraphStart !== undefined ? { paragraphStart } : {}),
     ...(paragraphEnd !== undefined ? { paragraphEnd } : {}),
+    ...(pdfParseMethod ? { pdfParseMethod } : {}),
     ...(vectorScore !== undefined ? { vectorScore } : {}),
     ...(fulltextScore !== undefined ? { fulltextScore } : {}),
     ...(rerankScore !== undefined ? { rerankScore } : {}),
@@ -1136,6 +1142,7 @@ export function hasSourceShape(value: Record<string, unknown>) {
     "page_count",
     "paragraph_start",
     "paragraph_end",
+    "pdf_parse_method",
     "vector_score",
     "fulltext_score",
     "rerank_score",
@@ -1525,6 +1532,14 @@ export function getVectorFailureRecoveryActions(
     return [
       "在模型设置中选择支持 vision 的聊天模型",
       "确认图片文字清晰后重新向量化",
+    ];
+  }
+
+  if (failureType === "ocr_error") {
+    return [
+      "确认扫描页面清晰且 OCR 页数未超过限制",
+      "检查 worker 的 Tesseract 中文/英文语言包",
+      ...retryAction,
     ];
   }
 

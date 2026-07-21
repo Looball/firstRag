@@ -49,6 +49,15 @@ def classify_vector_index_failure(error_message: str | None) -> str | None:
     if any(
         keyword in normalized
         for keyword in [
+            "pdf ocr",
+            "tesseract",
+            "ocr 页数",
+        ]
+    ):
+        return "ocr_error"
+    if any(
+        keyword in normalized
+        for keyword in [
             "图片解析",
             "vision",
             "视觉能力",
@@ -157,6 +166,8 @@ def build_vector_index_failure_hint(failure_type: str | None) -> str | None:
         return "文件没有解析出可入库文本。请确认文件不是空文件，必要时转为可复制文本后重新上传。"
     if failure_type == "image_parse_error":
         return "图片解析失败。请在设置页配置支持 vision 的聊天模型，例如 Qwen-VL 或 GLM-4V，然后重新向量化。"
+    if failure_type == "ocr_error":
+        return "扫描 PDF OCR 失败。请确认页面清晰、OCR 页数未超过限制，并检查 Tesseract 中文/英文语言包后重新向量化。"
     if failure_type == "parse_error":
         return "文件解析失败。请确认文件内容可读取，必要时转为 PDF、Markdown、TXT 或支持的图片格式后重新上传。"
     if failure_type == "embedding_error":
@@ -190,6 +201,8 @@ def build_safe_vector_index_error_message(
         return "文件没有可入库文本"
     if failure_type == "image_parse_error":
         return "图片解析失败"
+    if failure_type == "ocr_error":
+        return "扫描 PDF OCR 失败"
     if failure_type == "parse_error":
         return "文件解析失败"
     if failure_type == "embedding_error":

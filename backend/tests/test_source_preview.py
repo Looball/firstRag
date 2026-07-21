@@ -84,6 +84,10 @@ class SourcePreviewApiTests(unittest.TestCase):
                     "page_count": 3,
                     "paragraph_start": 4,
                     "paragraph_end": 5,
+                    "pdf_parse_method": "ocr",
+                    "ocr_engine": "tesseract",
+                    "ocr_languages": "chi_sim+eng",
+                    "ocr_dpi": 300,
                 },
             },
         ]
@@ -116,6 +120,14 @@ class SourcePreviewApiTests(unittest.TestCase):
             4,
         )
         self.assertEqual(payload["chunks"][1]["location"]["paragraph_end"], 5)
+        self.assertEqual(
+            payload["chunks"][1]["location"]["pdf_parse_method"],
+            "ocr",
+        )
+        self.assertEqual(
+            payload["chunks"][1]["location"]["ocr_engine"],
+            "tesseract",
+        )
         self.assertNotIn("source", payload["chunks"][0]["location"])
 
     def test_chunk_preview_hides_missing_or_cross_user_resource(self) -> None:

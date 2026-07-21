@@ -81,6 +81,10 @@ CHUNK_LOCATION_METADATA_KEYS = (
     "page_count",
     "paragraph_start",
     "paragraph_end",
+    "pdf_parse_method",
+    "ocr_engine",
+    "ocr_languages",
+    "ocr_dpi",
 )
 SAFE_INLINE_MEDIA_TYPES = {
     ".pdf": "application/pdf",
