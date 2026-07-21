@@ -67,11 +67,12 @@ FirstRAG/
 | 仓库层 | `backend/app/repositories` | 纯 SQL 数据访问。 |
 | 数据库工具 | `backend/app/db` | 连接、执行器、PostgreSQL advisory lock。 |
 | 基础设施 | `backend/app/core` | 配置、JWT、安全和密钥加密。 |
-| Worker | `backend/app/workers` | 异步向量化任务消费；扫描 PDF 页面在容器内通过 Tesseract OCR，保存页级置信度并消费受控单页重识别选项。 |
+| Worker | `backend/app/workers` | 异步向量化任务消费；扫描 PDF 页面在容器内通过 Tesseract OCR，保存页级置信度，消费受控重识别选项，并在切分前应用持久化人工修订。 |
 
 ## 存储组件
 
 - PostgreSQL：用户、知识库、文件、会话、消息、聊天附件 metadata、文本/图片解析分块、向量化任务队列。
+- PostgreSQL OCR corrections：按用户、文件和页码保存人工修订、原始 OCR 文本与 revision；知识文件永久删除时级联清理。
 - Redis：提供基础设施健康检查、RAG 热点共享缓存、后端分布式限流和 vector worker 运行态，包括知识库画像、retrieval settings、query embedding、登录/业务 API sliding-window 计数、worker 心跳、单文件短租约和运行指标；不作为会话、消息或 vector index job 的持久存储。
 - Chroma：文档分块向量。Docker Compose 使用独立 `chroma` service，backend 与
   worker 通过 HTTP client 共享访问，数据持久化到根目录 `vector_db/chroma`；

@@ -19,7 +19,9 @@ type SourcePreviewDialogProps = {
 const LOCATION_KEYS = ["h1", "h2", "h3", "h4", "h5", "h6"];
 
 /** 将 chunk 标题层级和可用页码格式化为可读定位信息。 */
-function formatChunkLocation(location: Record<string, string | number>) {
+function formatChunkLocation(
+  location: Record<string, string | number | boolean>,
+) {
   const headings = LOCATION_KEYS.map((key) => location[key])
     .filter((value): value is string | number => value !== undefined)
     .map(String);
@@ -51,7 +53,9 @@ function formatChunkLocation(location: Record<string, string | number>) {
         ? formatOcrConfidence(location.ocr_confidence)
         : "";
     headings.push(
-      location.ocr_quality === "low"
+      location.ocr_correction_applied === true
+        ? `已人工校对${confidence ? ` / 原 OCR ${confidence}` : ""}`
+        : location.ocr_quality === "low"
         ? `OCR 质量较低${confidence ? ` ${confidence}` : ""}`
         : `OCR 识别${confidence ? ` ${confidence}` : ""}`,
     );
@@ -69,6 +73,14 @@ export function SourcePreviewDialog({
   const [isOpeningFile, setIsOpeningFile] = useState(false);
   const [fileOpenError, setFileOpenError] = useState("");
   const [ocrReindexJobId, setOcrReindexJobId] = useState("");
+  const [isCorrectionEditorOpen, setIsCorrectionEditorOpen] = useState(false);
+  const [correctionDraft, setCorrectionDraft] = useState("");
+  const [correctionJobId, setCorrectionJobId] = useState("");
+  const [correctionOperation, setCorrectionOperation] = useState<
+    "delete" | "save" | ""
+  >("");
+  const [isConfirmingCorrectionDelete, setIsConfirmingCorrectionDelete] =
+    useState(false);
   const fileId = source.fileId || "";
   const chunkIndex = source.chunkIndex;
   const canLoadPreview = Boolean(fileId) && chunkIndex !== undefined;
@@ -125,6 +137,87 @@ export function SourcePreviewDialog({
       ? targetChunk.location.ocr_quality
       : "";
   const targetOcrConfidenceLabel = formatOcrConfidence(targetOcrConfidence);
+  const correctionQuery = useQuery({
+    queryKey: ["pdf-ocr-page-correction", fileId, targetPageNumber],
+    queryFn: () =>
+      chatApi.loadPdfOcrPageCorrection(fileId, targetPageNumber!),
+    enabled: Boolean(targetIsOcrPage && targetPageNumber !== undefined),
+    staleTime: 60_000,
+    retry: 1,
+  });
+  const saveCorrectionMutation = useMutation({
+    mutationFn: (correctedText: string) =>
+      chatApi.savePdfOcrPageCorrection(
+        fileId,
+        targetPageNumber!,
+        correctedText,
+      ),
+    onSuccess: ({ job }) => {
+      setCorrectionOperation("save");
+      setCorrectionJobId(job.id);
+      setIsCorrectionEditorOpen(false);
+      setIsConfirmingCorrectionDelete(false);
+    },
+  });
+  const deleteCorrectionMutation = useMutation({
+    mutationFn: () =>
+      chatApi.deletePdfOcrPageCorrection(fileId, targetPageNumber!),
+    onSuccess: (job) => {
+      setCorrectionOperation("delete");
+      setCorrectionJobId(job.id);
+      setIsCorrectionEditorOpen(false);
+      setIsConfirmingCorrectionDelete(false);
+    },
+  });
+  const retryCorrectionIndexMutation = useMutation({
+    mutationFn: async () => {
+      const jobs = await chatApi.indexKnowledgeFile(fileId);
+      const job = jobs[0];
+      if (!job?.id) {
+        throw new Error("重新提交索引后没有返回有效任务。");
+      }
+      return job;
+    },
+    onSuccess: (job) => setCorrectionJobId(job.id),
+  });
+  const correctionJobQuery = useQuery({
+    queryKey: ["pdf-ocr-correction-index", correctionJobId],
+    queryFn: () => chatApi.getVectorIndexJob(correctionJobId),
+    enabled: Boolean(correctionJobId),
+    refetchInterval: (query) => {
+      const status = query.state.data?.status;
+      return status === "queued" || status === "processing" ? 1_000 : false;
+    },
+  });
+  const correction =
+    saveCorrectionMutation.data?.correction ?? correctionQuery.data;
+  const correctionJob = correctionJobQuery.data;
+  const correctionIsActive =
+    saveCorrectionMutation.isPending ||
+    deleteCorrectionMutation.isPending ||
+    retryCorrectionIndexMutation.isPending ||
+    correctionJob?.status === "queued" ||
+    correctionJob?.status === "processing";
+  const hasCorrection = deleteCorrectionMutation.isSuccess
+    ? false
+    : Boolean(correction?.hasCorrection);
+  const correctionError =
+    saveCorrectionMutation.error instanceof Error
+      ? saveCorrectionMutation.error.message
+      : deleteCorrectionMutation.error instanceof Error
+        ? deleteCorrectionMutation.error.message
+        : retryCorrectionIndexMutation.error instanceof Error
+          ? retryCorrectionIndexMutation.error.message
+          : correctionJobQuery.error instanceof Error
+            ? correctionJobQuery.error.message
+            : correctionJob?.status === "failed"
+              ? correctionJob.errorMessage ||
+                correctionJob.failureHint ||
+                "OCR 校对索引重建失败。"
+              : "";
+  const normalizedCorrectionDraft = correctionDraft.trim();
+  const correctionDraftUnchanged =
+    normalizedCorrectionDraft === (correction?.currentText || "").trim();
   const ocrReindexMutation = useMutation({
     mutationFn: () =>
       chatApi.reindexKnowledgeFileOcrPage(fileId, targetPageNumber!),
@@ -166,6 +259,26 @@ export function SourcePreviewDialog({
       ocrReindexMutation.reset();
     }
     ocrReindexMutation.mutate();
+  }
+
+  /** 打开完整页级 OCR 编辑器，避免只修改当前 chunk。 */
+  function handleOpenCorrectionEditor() {
+    if (!correction) {
+      return;
+    }
+    setCorrectionDraft(correction.currentText);
+    setIsCorrectionEditorOpen(true);
+    setIsConfirmingCorrectionDelete(false);
+    saveCorrectionMutation.reset();
+  }
+
+  /** 失败任务保留已保存修订，仅重新提交文件索引。 */
+  function handleRetryCorrectionIndex() {
+    if (correctionJobQuery.isError && correctionJobId) {
+      void correctionJobQuery.refetch();
+      return;
+    }
+    retryCorrectionIndexMutation.mutate();
   }
 
   useEffect(() => {
@@ -284,7 +397,10 @@ export function SourcePreviewDialog({
               {targetIsOcrPage && targetPageNumber !== undefined ? (
                 <section
                   className={
-                    targetOcrQuality === "low"
+                    targetChunk?.location.ocr_correction_applied === true ||
+                    correction?.hasCorrection
+                      ? "border border-[#78a99d] bg-[#eef7f4] px-4 py-3 text-[#275f58]"
+                      : targetOcrQuality === "low"
                       ? "border border-[#d9aa2f] bg-[#fff7df] px-4 py-3 text-[#6d5010]"
                       : "border border-[#bdd2cc] bg-[#eef7f4] px-4 py-3 text-[#275f58]"
                   }
@@ -293,7 +409,10 @@ export function SourcePreviewDialog({
                   <div className="flex flex-wrap items-start justify-between gap-3">
                     <div>
                       <p className="font-utility text-[10px] font-semibold uppercase tracking-[0.12em]">
-                        {targetOcrQuality === "low"
+                        {targetChunk?.location.ocr_correction_applied === true ||
+                        correction?.hasCorrection
+                          ? "OCR 已人工校对"
+                          : targetOcrQuality === "low"
                           ? "OCR 质量需要关注"
                           : "OCR 质量"}
                       </p>
@@ -302,33 +421,183 @@ export function SourcePreviewDialog({
                         {targetOcrConfidenceLabel
                           ? `置信度 ${targetOcrConfidenceLabel}`
                           : "暂时没有可用置信度"}
-                        。重新识别会异步重建该文件索引，期间文件暂不可检索。
+                        。人工校对或重新识别都会异步重建该文件索引，期间文件暂不可检索。
                       </p>
+                      {correction?.hasCorrection ? (
+                        <p className="mt-1 text-xs font-medium">
+                          当前使用人工修订 #{correction.revision}
+                          {correction.updatedAt
+                            ? ` · 更新于 ${new Date(correction.updatedAt).toLocaleString("zh-CN")}`
+                            : ""}
+                        </p>
+                      ) : null}
                     </div>
-                    <button
-                      type="button"
-                      disabled={
-                        ocrReindexIsActive ||
-                        ocrReindexJob?.status === "succeeded"
-                      }
-                      onClick={handleOcrReindex}
-                      className="font-utility shrink-0 border border-current px-3 py-2 text-[10px] font-semibold uppercase transition-colors duration-150 hover:bg-white/55 disabled:cursor-not-allowed disabled:opacity-50"
-                    >
-                      {ocrReindexMutation.isPending
-                        ? "正在提交"
-                        : ocrReindexJob?.status === "queued"
-                          ? "排队中"
-                          : ocrReindexJob?.status === "processing"
-                            ? "重新识别中"
-                            : ocrReindexJob?.status === "succeeded"
-                              ? "已完成"
-                              : ocrReindexJob?.status === "failed"
-                                ? "重新尝试"
-                                : ocrReindexJobQuery.isError
-                                  ? "重新查询"
-                                  : "重新识别此页"}
-                    </button>
+                    <div className="flex shrink-0 flex-wrap gap-2">
+                      <button
+                        type="button"
+                        disabled={
+                          correctionQuery.isPending ||
+                          correctionQuery.isError ||
+                          correctionIsActive ||
+                          ocrReindexIsActive ||
+                          correctionJob?.status === "succeeded"
+                        }
+                        onClick={handleOpenCorrectionEditor}
+                        className="font-utility border border-current bg-white/45 px-3 py-2 text-[10px] font-semibold uppercase transition-colors duration-150 hover:bg-white/75 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        {correctionQuery.isPending
+                          ? "读取校对文本"
+                          : correction?.hasCorrection
+                            ? "继续校对"
+                            : "人工校对"}
+                      </button>
+                      <button
+                        type="button"
+                        disabled={
+                          correctionIsActive ||
+                          ocrReindexIsActive ||
+                          ocrReindexJob?.status === "succeeded"
+                        }
+                        onClick={handleOcrReindex}
+                        className="font-utility border border-current px-3 py-2 text-[10px] font-semibold uppercase transition-colors duration-150 hover:bg-white/55 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        {ocrReindexMutation.isPending
+                          ? "正在提交"
+                          : ocrReindexJob?.status === "queued"
+                            ? "排队中"
+                            : ocrReindexJob?.status === "processing"
+                              ? "重新识别中"
+                              : ocrReindexJob?.status === "succeeded"
+                                ? "已完成"
+                                : ocrReindexJob?.status === "failed"
+                                  ? "重新尝试"
+                                  : ocrReindexJobQuery.isError
+                                    ? "重新查询"
+                                    : "重新识别此页"}
+                      </button>
+                    </div>
                   </div>
+                  {isCorrectionEditorOpen ? (
+                    <div className="mt-3 border-t border-current/25 pt-3">
+                      <label
+                        htmlFor="ocr-correction-text"
+                        className="font-utility text-[10px] font-semibold uppercase tracking-[0.12em]"
+                      >
+                        第 {targetPageNumber} 页完整校对文本
+                      </label>
+                      <textarea
+                        id="ocr-correction-text"
+                        value={correctionDraft}
+                        onChange={(event) => setCorrectionDraft(event.target.value)}
+                        maxLength={50000}
+                        rows={10}
+                        className="mt-2 w-full resize-y border border-[#9fbcb5] bg-white px-3 py-3 text-sm leading-6 text-[#26312f] outline-none focus:border-[#176b62] focus:ring-1 focus:ring-[#176b62]"
+                      />
+                      <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
+                        <p className="text-xs">
+                          {normalizedCorrectionDraft.length.toLocaleString()} / 50,000 字符
+                        </p>
+                        <div className="flex flex-wrap gap-2">
+                          <button
+                            type="button"
+                            onClick={() => setIsCorrectionEditorOpen(false)}
+                            className="font-utility border border-current px-3 py-2 text-[10px] font-semibold uppercase"
+                          >
+                            取消
+                          </button>
+                          <button
+                            type="button"
+                            disabled={
+                              !normalizedCorrectionDraft ||
+                              correctionDraftUnchanged ||
+                              correctionIsActive
+                            }
+                            onClick={() =>
+                              saveCorrectionMutation.mutate(
+                                normalizedCorrectionDraft,
+                              )
+                            }
+                            className="font-utility border border-[#176b62] bg-[#176b62] px-3 py-2 text-[10px] font-semibold uppercase text-white disabled:cursor-not-allowed disabled:opacity-50"
+                          >
+                            {saveCorrectionMutation.isPending
+                              ? "保存中"
+                              : "保存并重建索引"}
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  ) : null}
+                  {hasCorrection && !isCorrectionEditorOpen ? (
+                    <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-current/25 pt-3">
+                      <p className="text-xs">
+                        撤销后会删除人工文本，并重新运行 Tesseract 恢复页面索引。
+                      </p>
+                      <button
+                        type="button"
+                        disabled={correctionIsActive || ocrReindexIsActive}
+                        onClick={() => {
+                          if (isConfirmingCorrectionDelete) {
+                            deleteCorrectionMutation.mutate();
+                          } else {
+                            setIsConfirmingCorrectionDelete(true);
+                          }
+                        }}
+                        className="font-utility border border-[#9b3c29] px-3 py-2 text-[10px] font-semibold uppercase text-[#9b3c29] disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        {deleteCorrectionMutation.isPending
+                          ? "正在撤销"
+                          : isConfirmingCorrectionDelete
+                            ? "确认撤销并重建"
+                            : "撤销人工修订"}
+                      </button>
+                    </div>
+                  ) : null}
+                  {correctionQuery.isError ? (
+                    <div className="mt-2 flex flex-wrap items-center justify-between gap-2 text-xs text-[#9b3c29]">
+                      <p>
+                        {correctionQuery.error instanceof Error
+                          ? correctionQuery.error.message
+                          : "读取 OCR 校对文本失败。"}
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => correctionQuery.refetch()}
+                        className="font-utility border border-current px-2 py-1 text-[10px] font-semibold uppercase"
+                      >
+                        重新读取
+                      </button>
+                    </div>
+                  ) : null}
+                  {correctionJob?.status === "succeeded" ? (
+                    <p className="mt-2 text-xs font-medium">
+                      {correctionOperation === "delete"
+                        ? "人工修订已撤销，OCR 索引已恢复。"
+                        : "人工修订已进入新索引。"}
+                      请关闭弹窗并重新提问，以获取使用新文本的引用。
+                    </p>
+                  ) : correctionJob?.status === "failed" || correctionJobQuery.isError ? (
+                    <div className="mt-2 flex flex-wrap items-center justify-between gap-2 text-xs text-[#9b3c29]">
+                      <p>{correctionError}</p>
+                      <button
+                        type="button"
+                        disabled={retryCorrectionIndexMutation.isPending}
+                        onClick={handleRetryCorrectionIndex}
+                        className="font-utility border border-current px-2 py-1 text-[10px] font-semibold uppercase disabled:opacity-50"
+                      >
+                        {correctionJobQuery.isError ? "重新查询" : "重试索引"}
+                      </button>
+                    </div>
+                  ) : correctionIsActive ? (
+                    <p className="mt-2 text-xs">
+                      {correctionJob?.status === "processing"
+                        ? "正在应用人工修订并重建文件索引。"
+                        : "校对任务已提交，正在等待 worker。"}
+                    </p>
+                  ) : correctionError ? (
+                    <p className="mt-2 text-xs text-[#9b3c29]">
+                      {correctionError}
+                    </p>
+                  ) : null}
                   {ocrReindexJob?.status === "succeeded" ? (
                     <p className="mt-2 text-xs font-medium">
                       新索引已生成。请关闭弹窗并重新提问，以获取使用新 OCR 文本的引用。

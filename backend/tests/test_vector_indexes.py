@@ -253,6 +253,100 @@ class VectorIndexJobHealthTests(unittest.TestCase):
         self.assertEqual(response.json(), {"detail": "文件不存在"})
         enqueue.assert_not_called()
 
+    def test_get_pdf_ocr_correction_returns_page_editor_payload(self) -> None:
+        """OCR 校对读取接口应返回完整页级文本和修订状态。"""
+        file_id = uuid4()
+        with patch(
+            "app.api.vector_indexes.get_pdf_ocr_page_correction",
+            return_value={
+                "file_id": str(file_id),
+                "page_number": 2,
+                "index_version": 4,
+                "original_text": "OCR ORIGINAL",
+                "current_text": "HUMAN CORRECTED",
+                "corrected_text": "HUMAN CORRECTED",
+                "has_correction": True,
+                "revision": 2,
+                "updated_at": "2026-07-21T12:00:00+08:00",
+                "ocr_confidence": 42.5,
+                "ocr_quality": "low",
+            },
+        ) as get_correction:
+            response = self.client.get(
+                f"/chat/knowledge-files/{file_id}/ocr/pages/2/correction",
+            )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()["correction"]
+        self.assertTrue(payload["has_correction"])
+        self.assertEqual(payload["current_text"], "HUMAN CORRECTED")
+        get_correction.assert_called_once_with(
+            user_id=1,
+            knowledge_file_id=file_id,
+            page_number=2,
+        )
+
+    def test_save_pdf_ocr_correction_returns_async_job(self) -> None:
+        """保存 OCR 修订应返回新索引版本和异步任务。"""
+        file_id = uuid4()
+        job_id = uuid4()
+        result = {
+            "file_id": str(file_id),
+            "page_number": 2,
+            "previous_index_version": 4,
+            "index_version": 5,
+            "original_text": "OCR ORIGINAL",
+            "current_text": "HUMAN CORRECTED",
+            "corrected_text": "HUMAN CORRECTED",
+            "has_correction": True,
+            "revision": 1,
+            "updated_at": None,
+            "ocr_confidence": 42.5,
+            "ocr_quality": "low",
+            "job": {"id": str(job_id), "status": "queued"},
+        }
+        with patch(
+            "app.api.vector_indexes.get_user_knowledge_file",
+            return_value={"id": file_id, "original_name": "scan.pdf"},
+        ), patch(
+            "app.api.vector_indexes.ensure_user_embedding_settings",
+        ), patch(
+            "app.api.vector_indexes.save_pdf_ocr_page_correction",
+            return_value=result,
+        ) as save:
+            response = self.client.patch(
+                f"/chat/knowledge-files/{file_id}/ocr/pages/2/correction",
+                json={"corrected_text": "HUMAN CORRECTED"},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["job"]["id"], str(job_id))
+        self.assertEqual(payload["correction"]["revision"], 1)
+        save.assert_called_once_with(
+            user_id=1,
+            knowledge_file_id=file_id,
+            page_number=2,
+            corrected_text="HUMAN CORRECTED",
+        )
+
+    def test_delete_pdf_ocr_correction_hides_inaccessible_file(self) -> None:
+        """跨用户文件不能通过撤销修订接口被探测。"""
+        file_id = uuid4()
+        with patch(
+            "app.api.vector_indexes.get_user_knowledge_file",
+            return_value=None,
+        ), patch(
+            "app.api.vector_indexes.delete_pdf_ocr_page_correction",
+        ) as delete:
+            response = self.client.delete(
+                f"/chat/knowledge-files/{file_id}/ocr/pages/1/correction",
+            )
+
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(response.json(), {"detail": "文件不存在"})
+        delete.assert_not_called()
+
     def test_index_knowledge_base_vectors_rejects_batch_quota(self) -> None:
         """知识库批量向量化超过单次文件上限时应给出配额提示。"""
         knowledge_base_id = uuid4()

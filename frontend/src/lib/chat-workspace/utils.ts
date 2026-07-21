@@ -994,6 +994,14 @@ export function toChatSource(value: unknown, index: number): ChatSource | null {
     (metadataRecord
       ? getOptionalNumberField(metadataRecord, ["ocr_attempt"])
       : undefined);
+  const ocrCorrectionApplied =
+    source["ocr_correction_applied"] === true ||
+    metadataRecord?.["ocr_correction_applied"] === true;
+  const ocrCorrectionRevision =
+    getOptionalNumberField(source, ["ocr_correction_revision"]) ??
+    (metadataRecord
+      ? getOptionalNumberField(metadataRecord, ["ocr_correction_revision"])
+      : undefined);
   const rerankScore = getOptionalNumberField(source, [
     "rerank_score",
     "score",
@@ -1134,6 +1142,10 @@ export function toChatSource(value: unknown, index: number): ChatSource | null {
     ...(ocrConfidence !== undefined ? { ocrConfidence } : {}),
     ...(ocrQuality ? { ocrQuality } : {}),
     ...(ocrAttempt !== undefined ? { ocrAttempt } : {}),
+    ...(ocrCorrectionApplied ? { ocrCorrectionApplied: true } : {}),
+    ...(ocrCorrectionRevision !== undefined
+      ? { ocrCorrectionRevision }
+      : {}),
     ...(vectorScore !== undefined ? { vectorScore } : {}),
     ...(fulltextScore !== undefined ? { fulltextScore } : {}),
     ...(rerankScore !== undefined ? { rerankScore } : {}),
@@ -1170,6 +1182,8 @@ export function hasSourceShape(value: Record<string, unknown>) {
     "ocr_confidence",
     "ocr_quality",
     "ocr_attempt",
+    "ocr_correction_applied",
+    "ocr_correction_revision",
     "vector_score",
     "fulltext_score",
     "rerank_score",

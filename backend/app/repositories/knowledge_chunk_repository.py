@@ -237,6 +237,36 @@ def get_user_pdf_page_ocr_metadata(
     )
 
 
+def get_user_pdf_page_chunks(
+    user_id: int,
+    file_id: UUID | str,
+    page_number: int,
+    index_version: int,
+) -> list[Row]:
+    """读取当前用户指定 PDF 页面的全部连续 chunks。"""
+    return fetch_all(
+        """
+        SELECT
+            chunk.chunk_index,
+            chunk.index_version,
+            chunk.content,
+            chunk.metadata
+        FROM knowledge_file_chunks AS chunk
+        JOIN knowledge_files AS file
+          ON file.id = chunk.knowledge_file_id
+         AND file.user_id = chunk.user_id
+        WHERE chunk.user_id = %s
+          AND chunk.knowledge_file_id = %s
+          AND chunk.index_version = %s
+          AND chunk.metadata ->> 'location_type' = 'pdf_page'
+          AND chunk.metadata ->> 'page_number' = %s
+          AND file.deleted_at IS NULL
+        ORDER BY chunk.chunk_index ASC;
+        """,
+        (user_id, str(file_id), index_version, str(page_number)),
+    )
+
+
 def search_chunks(
     user_id: int,
     query: str,

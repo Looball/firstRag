@@ -89,6 +89,11 @@ CHUNK_LOCATION_METADATA_KEYS = (
     "ocr_quality",
     "ocr_word_count",
     "ocr_attempt",
+    "ocr_text_source",
+    "ocr_correction_applied",
+    "ocr_correction_revision",
+    "ocr_correction_character_count",
+    "ocr_correction_updated_at",
 )
 SAFE_INLINE_MEDIA_TYPES = {
     ".pdf": "application/pdf",
@@ -113,7 +118,7 @@ def serialize_chunk_location_metadata(metadata: object) -> dict[str, object]:
     return {
         key: metadata[key]
         for key in CHUNK_LOCATION_METADATA_KEYS
-        if key in metadata and isinstance(metadata[key], (str, int, float))
+        if key in metadata and isinstance(metadata[key], (str, int, float, bool))
     }
 
 

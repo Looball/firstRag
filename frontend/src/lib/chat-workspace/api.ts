@@ -25,6 +25,7 @@ import type {
   MessageSourceFeedback,
   MessageSourceFeedbackRating,
   MessageSourceFeedbackResponse,
+  PdfOcrPageCorrection,
   QualityDashboard,
   RetrievalSettingsResponse,
   UploadKnowledgeFilesResponse,
@@ -84,13 +85,55 @@ const sourcePreviewResponseSchema = z
         content: z.string(),
         location: z.record(
           z.string(),
-          z.union([z.string(), z.number()]),
+          z.union([z.string(), z.number(), z.boolean()]),
         ).default({}),
         is_target: z.boolean(),
       }),
     ),
   })
   .passthrough();
+
+const pdfOcrCorrectionResponseSchema = z
+  .object({
+    correction: z.object({
+      file_id: z.string().min(1),
+      page_number: z.number().int().positive(),
+      index_version: z.number().int().nonnegative(),
+      original_text: z.string().default(""),
+      current_text: z.string().default(""),
+      corrected_text: z.string().nullable().default(null),
+      has_correction: z.boolean(),
+      revision: z.number().int().nonnegative(),
+      updated_at: z.string().nullable().default(null),
+      ocr_confidence: z.number().optional(),
+      ocr_quality: z.string().default("unknown"),
+    }),
+    job: z.unknown().optional(),
+  })
+  .passthrough();
+
+function parsePdfOcrCorrection(value: unknown): PdfOcrPageCorrection {
+  const parsed = pdfOcrCorrectionResponseSchema.safeParse(value);
+  if (!parsed.success) {
+    throw new Error("OCR 校对响应格式异常。");
+  }
+  const correction = parsed.data.correction;
+  return {
+    fileId: correction.file_id,
+    pageNumber: correction.page_number,
+    indexVersion: correction.index_version,
+    originalText: correction.original_text,
+    currentText: correction.current_text,
+    correctedText: correction.corrected_text,
+    hasCorrection: correction.has_correction,
+    revision: correction.revision,
+    updatedAt: correction.updated_at,
+    ...(correction.ocr_confidence !== undefined
+      ? { ocrConfidence: correction.ocr_confidence }
+      : {}),
+    ocrQuality: correction.ocr_quality,
+  };
+}
 
 function jsonHeaders() {
   return {
@@ -437,6 +480,61 @@ export async function reindexKnowledgeFileOcrPage(
   const job = getVectorIndexJobs(data)[0];
   if (!job) {
     throw new Error("OCR 重新识别响应缺少任务信息。");
+  }
+  return job;
+}
+
+export async function loadPdfOcrPageCorrection(
+  fileId: string,
+  pageNumber: number,
+) {
+  const data = await authenticatedJson<unknown>(
+    `/api/chat/knowledge-files/${encodeURIComponent(
+      fileId,
+    )}/ocr/pages/${pageNumber}/correction`,
+    { method: "GET" },
+    { fallbackMessage: "读取 OCR 校对文本失败，请稍后再试。" },
+  );
+  return parsePdfOcrCorrection(data);
+}
+
+export async function savePdfOcrPageCorrection(
+  fileId: string,
+  pageNumber: number,
+  correctedText: string,
+) {
+  const data = await authenticatedJson<VectorIndexResponse>(
+    `/api/chat/knowledge-files/${encodeURIComponent(
+      fileId,
+    )}/ocr/pages/${pageNumber}/correction`,
+    {
+      method: "PATCH",
+      headers: jsonHeaders(),
+      body: JSON.stringify({ corrected_text: correctedText }),
+    },
+    { fallbackMessage: "保存 OCR 人工修订失败，请稍后再试。" },
+  );
+  const job = getVectorIndexJobs(data)[0];
+  if (!job) {
+    throw new Error("OCR 校对响应缺少任务信息。");
+  }
+  return { correction: parsePdfOcrCorrection(data), job };
+}
+
+export async function deletePdfOcrPageCorrection(
+  fileId: string,
+  pageNumber: number,
+) {
+  const data = await authenticatedJson<VectorIndexResponse>(
+    `/api/chat/knowledge-files/${encodeURIComponent(
+      fileId,
+    )}/ocr/pages/${pageNumber}/correction`,
+    { method: "DELETE" },
+    { fallbackMessage: "撤销 OCR 人工修订失败，请稍后再试。" },
+  );
+  const job = getVectorIndexJobs(data)[0];
+  if (!job) {
+    throw new Error("OCR 校对撤销响应缺少任务信息。");
   }
   return job;
 }

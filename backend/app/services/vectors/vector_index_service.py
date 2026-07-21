@@ -22,6 +22,9 @@ from app.repositories.knowledge_chunk_repository import (
     replace_file_chunks,
 )
 from app.repositories.knowledge_file_repository import update_knowledge_file_status
+from app.repositories.pdf_ocr_correction_repository import (
+    list_pdf_ocr_corrections,
+)
 from app.services.documents.document_service import (
     EmptyDocumentError,
     load_document,
@@ -181,6 +184,7 @@ def index_file_vectors(
     persist_directory: str | Path = VECTOR_STORE_PATH,
     collection_name: str = CHROMA_COLLECTION_NAME,
     force_ocr_page_numbers: set[int] | None = None,
+    pdf_ocr_corrections: dict[int, dict[str, object]] | None = None,
 ) -> dict[str, Any]:
     """将单个知识文件解析、切分并写入 Chroma。"""
     file_path = Path(storage_path)
@@ -193,6 +197,7 @@ def index_file_vectors(
         user_id=user_id,
         original_name=original_name or file_path.name,
         force_ocr_page_numbers=force_ocr_page_numbers,
+        pdf_ocr_corrections=pdf_ocr_corrections,
     )
     chunks = split_documents(documents)
     if not chunks:
@@ -246,6 +251,9 @@ def index_file_vectors(
         "collection_name": actual_collection_name,
         "persist_directory": str(persist_directory),
         "force_ocr_page_numbers": sorted(force_ocr_page_numbers or set()),
+        "ocr_correction_page_numbers": sorted(
+            (pdf_ocr_corrections or {}).keys(),
+        ),
     }
 
 
@@ -273,6 +281,11 @@ def index_knowledge_file_record(
         invalidate_file_knowledge_base_contexts(user_id, file_id)
 
         try:
+            correction_rows = list_pdf_ocr_corrections(user_id, file_id)
+            pdf_ocr_corrections = {
+                int(row["page_number"]): dict(row)
+                for row in correction_rows
+            }
             index_result = index_file_vectors(
                 user_id=user_id,
                 file_id=file_id,
@@ -280,6 +293,7 @@ def index_knowledge_file_record(
                 index_version=index_version,
                 original_name=str(file_record["original_name"]),
                 force_ocr_page_numbers=get_force_ocr_page_numbers(job_options),
+                pdf_ocr_corrections=pdf_ocr_corrections,
             )
         except Exception:
             update_knowledge_file_status(

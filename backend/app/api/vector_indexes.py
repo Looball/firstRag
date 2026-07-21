@@ -26,6 +26,14 @@ from app.repositories.vector_index_job_repository import (
     get_user_vector_index_job,
     get_user_vector_index_job_health,
 )
+from app.schemas.knowledge import UpdatePdfOcrCorrectionRequest
+from app.services.documents.pdf_ocr_correction_service import (
+    PdfOcrCorrectionConflictError,
+    PdfOcrCorrectionValidationError,
+    delete_pdf_ocr_page_correction,
+    get_pdf_ocr_page_correction,
+    save_pdf_ocr_page_correction,
+)
 from app.services.vectors.vector_index_queue_service import (
     enqueue_file_vector_index,
     serialize_vector_index_job_health,
@@ -168,6 +176,134 @@ def reindex_knowledge_file_ocr_page(
         "success": True,
         "message": f"第 {page_number} 页 OCR 重新识别任务已提交",
         **result,
+    }
+
+
+@router.get(
+    "/knowledge-files/{knowledge_file_id}/ocr/pages/{page_number}/correction",
+)
+def get_knowledge_file_ocr_page_correction(
+    knowledge_file_id: UUID,
+    page_number: int,
+    user_id: int = Depends(get_current_user_id),
+):
+    """读取指定 OCR 页面的完整文本和当前人工修订。"""
+    try:
+        result = get_pdf_ocr_page_correction(
+            user_id=user_id,
+            knowledge_file_id=knowledge_file_id,
+            page_number=page_number,
+        )
+    except PdfOcrCorrectionValidationError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except PdfOcrCorrectionConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    if result is None:
+        raise HTTPException(status_code=404, detail="文件不存在")
+    return {"success": True, "correction": result}
+
+
+@router.patch(
+    "/knowledge-files/{knowledge_file_id}/ocr/pages/{page_number}/correction",
+)
+def update_knowledge_file_ocr_page_correction(
+    request: Request,
+    payload: UpdatePdfOcrCorrectionRequest,
+    knowledge_file_id: UUID,
+    page_number: int,
+    user_id: int = Depends(get_current_user_id),
+):
+    """保存指定 OCR 页面的人工修订并异步重建索引。"""
+    if get_user_knowledge_file(user_id, knowledge_file_id) is None:
+        raise HTTPException(status_code=404, detail="文件不存在")
+    ensure_user_embedding_settings(user_id)
+    enforce_rate_limit(
+        "vector-index",
+        build_rate_limit_identifier(request, "user", user_id),
+        VECTOR_INDEX_RATE_LIMIT_MAX_REQUESTS,
+        API_RATE_LIMIT_WINDOW_SECONDS,
+        "OCR 校对提交过于频繁，请稍后再试。",
+    )
+    try:
+        result = save_pdf_ocr_page_correction(
+            user_id=user_id,
+            knowledge_file_id=knowledge_file_id,
+            page_number=page_number,
+            corrected_text=payload.corrected_text,
+        )
+    except PdfOcrCorrectionValidationError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except PdfOcrCorrectionConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.exception(
+            "保存 PDF OCR 人工修订失败 user_id=%s file_id=%s page=%s",
+            user_id,
+            knowledge_file_id,
+            page_number,
+        )
+        raise HTTPException(
+            status_code=500,
+            detail="保存 OCR 人工修订失败，请稍后重试。",
+        ) from exc
+    if result is None:
+        raise HTTPException(status_code=404, detail="文件不存在")
+    return {
+        "success": True,
+        "message": f"第 {page_number} 页人工修订已保存，正在重建索引",
+        "correction": result,
+        "job": result["job"],
+    }
+
+
+@router.delete(
+    "/knowledge-files/{knowledge_file_id}/ocr/pages/{page_number}/correction",
+)
+def delete_knowledge_file_ocr_page_correction(
+    request: Request,
+    knowledge_file_id: UUID,
+    page_number: int,
+    user_id: int = Depends(get_current_user_id),
+):
+    """撤销指定 OCR 页面的人工修订并异步恢复 OCR 索引。"""
+    if get_user_knowledge_file(user_id, knowledge_file_id) is None:
+        raise HTTPException(status_code=404, detail="文件不存在")
+    ensure_user_embedding_settings(user_id)
+    enforce_rate_limit(
+        "vector-index",
+        build_rate_limit_identifier(request, "user", user_id),
+        VECTOR_INDEX_RATE_LIMIT_MAX_REQUESTS,
+        API_RATE_LIMIT_WINDOW_SECONDS,
+        "OCR 校对提交过于频繁，请稍后再试。",
+    )
+    try:
+        result = delete_pdf_ocr_page_correction(
+            user_id=user_id,
+            knowledge_file_id=knowledge_file_id,
+            page_number=page_number,
+        )
+    except PdfOcrCorrectionValidationError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except PdfOcrCorrectionConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.exception(
+            "撤销 PDF OCR 人工修订失败 user_id=%s file_id=%s page=%s",
+            user_id,
+            knowledge_file_id,
+            page_number,
+        )
+        raise HTTPException(
+            status_code=500,
+            detail="撤销 OCR 人工修订失败，请稍后重试。",
+        ) from exc
+    if result is None:
+        raise HTTPException(status_code=404, detail="文件不存在")
+    return {
+        "success": True,
+        "message": f"第 {page_number} 页人工修订已撤销，正在恢复 OCR 索引",
+        "correction": result,
+        "job": result["job"],
     }
 
 

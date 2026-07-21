@@ -2,7 +2,7 @@
 
 ## 项目介绍
 
-FirstRAG 是一个全栈 RAG（Retrieval-Augmented Generation，检索增强生成）应用，用于构建本地知识库问答系统。项目支持用户注册登录、知识库管理、文件上传、扫描 PDF 本地 OCR 与质量诊断、图片知识文件解析、异步向量化、混合检索、模型设置、聊天图片附件和流式回答。
+FirstRAG 是一个全栈 RAG（Retrieval-Augmented Generation，检索增强生成）应用，用于构建本地知识库问答系统。项目支持用户注册登录、知识库管理、文件上传、扫描 PDF 本地 OCR、质量诊断与人工校对、图片知识文件解析、异步向量化、混合检索、模型设置、聊天图片附件和流式回答。
 
 当前仓库采用 monorepo 结构：
 
@@ -61,7 +61,7 @@ conda run -n firstrag python scripts/production_preflight.py --env-file .env --m
 1. 注册并登录一个本地测试账号。
 2. 进入“聊天模型设置”，填写自己的 OpenAI-compatible provider。
 3. 回到工作台，新建知识库并上传一份 `.md`、`.txt`、`.pdf`、`.docx`、`.png`、`.jpg/.jpeg` 或 `.webp` 文件；图片入库解析需要当前聊天模型支持 vision。
-4. 在“文件”弹窗中触发向量化，等待任务队列完成。无文本层的扫描 PDF 会在 worker 内通过本地 Tesseract OCR，图片文件则由当前用户的 vision 聊天模型解析为可检索 Markdown，再进入向量与全文检索。
+4. 在“文件”弹窗中触发向量化，等待任务队列完成。无文本层的扫描 PDF 会在 worker 内通过本地 Tesseract OCR；引用原文预览可按页人工校对 OCR 文本并异步重建索引。图片文件则由当前用户的 vision 聊天模型解析为可检索 Markdown，再进入向量与全文检索。
 5. 对当前知识库提问，检查回答和引用来源；如果当前聊天模型支持 vision，也可以在聊天框附加 PNG、JPEG 或 WebP 图片进行单轮多模态提问。
 6. 如需调试检索效果，切换到高级模式后查看 retrieval diagnostics、提交反馈或打开质量看板。
 

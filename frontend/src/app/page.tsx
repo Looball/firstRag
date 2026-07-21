@@ -2851,7 +2851,9 @@ export default function Home() {
                               const sourceFileMeta = [
                                 formatSourcePosition(source),
                                 source.pdfParseMethod === "ocr"
-                                  ? source.ocrQuality === "low"
+                                  ? source.ocrCorrectionApplied
+                                    ? `已人工校对${source.ocrCorrectionRevision ? ` · 修订 #${source.ocrCorrectionRevision}` : ""}${sourceOcrConfidence ? ` · 原 OCR ${sourceOcrConfidence}` : ""}`
+                                    : source.ocrQuality === "low"
                                     ? `OCR 质量较低${sourceOcrConfidence ? ` ${sourceOcrConfidence}` : ""}`
                                     : `OCR 识别${sourceOcrConfidence ? ` ${sourceOcrConfidence}` : ""}`
                                   : "",

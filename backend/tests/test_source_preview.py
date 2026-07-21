@@ -92,6 +92,11 @@ class SourcePreviewApiTests(unittest.TestCase):
                     "ocr_quality": "low",
                     "ocr_word_count": 8,
                     "ocr_attempt": 2,
+                    "ocr_text_source": "manual_correction",
+                    "ocr_correction_applied": True,
+                    "ocr_correction_revision": 3,
+                    "ocr_correction_character_count": 18,
+                    "ocr_correction_updated_at": "2026-07-21T12:00:00+08:00",
                 },
             },
         ]
@@ -139,6 +144,13 @@ class SourcePreviewApiTests(unittest.TestCase):
         self.assertEqual(
             payload["chunks"][1]["location"]["ocr_quality"],
             "low",
+        )
+        self.assertTrue(
+            payload["chunks"][1]["location"]["ocr_correction_applied"],
+        )
+        self.assertEqual(
+            payload["chunks"][1]["location"]["ocr_correction_revision"],
+            3,
         )
         self.assertNotIn("source", payload["chunks"][0]["location"])
 

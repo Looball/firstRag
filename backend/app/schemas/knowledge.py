@@ -16,6 +16,12 @@ class RenameKnowledgeBaseRequest(BaseModel):
     name: str = Field(min_length=1, max_length=50)
 
 
+class UpdatePdfOcrCorrectionRequest(BaseModel):
+    """保存扫描 PDF 页级人工修订。"""
+
+    corrected_text: str = Field(min_length=1, max_length=50000)
+
+
 class UpdateRetrievalSettingsRequest(BaseModel):
     """知识库级 RAG 检索策略设置。"""
 

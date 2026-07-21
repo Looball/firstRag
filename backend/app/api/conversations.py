@@ -83,6 +83,8 @@ def serialize_source_preview(source: dict) -> dict:
         "pdf_parse_method": source.get("pdf_parse_method"),
         "ocr_confidence": source.get("ocr_confidence"),
         "ocr_quality": source.get("ocr_quality"),
+        "ocr_correction_applied": source.get("ocr_correction_applied"),
+        "ocr_correction_revision": source.get("ocr_correction_revision"),
         "retrieval_sources": source.get("retrieval_sources") or [],
         "vector_score": source.get("vector_score"),
         "fulltext_score": source.get("fulltext_score"),

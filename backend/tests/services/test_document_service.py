@@ -339,6 +339,43 @@ class DocumentServiceTests(unittest.TestCase):
         self.assertEqual(documents[0].metadata["ocr_quality"], "low")
         self.assertEqual(documents[0].metadata["ocr_confidence"], 52.5)
 
+    def test_pdf_ocr_page_uses_manual_correction_and_keeps_confidence(self) -> None:
+        """人工修订应覆盖正文，同时保留本次 OCR 质量与修订版本。"""
+        with TemporaryDirectory() as temporary_directory:
+            pdf_path = Path(temporary_directory) / "scanned.pdf"
+            create_scanned_pdf_fixture(pdf_path, ["T074 ORIGINAL OCR"])
+
+            with patch(
+                "app.services.documents.document_service.run_pdf_page_ocr",
+                return_value=PdfOcrResult(
+                    text="T074 ORIGINAL OCR",
+                    confidence=48.75,
+                    word_count=3,
+                ),
+            ):
+                documents = load_document(
+                    pdf_path,
+                    file_id="corrected-ocr",
+                    user_id=7,
+                    pdf_ocr_corrections={
+                        1: {
+                            "corrected_text": "T074 HUMAN CORRECTED TEXT",
+                            "revision": 3,
+                            "updated_at": "2026-07-21T12:00:00+08:00",
+                        },
+                    },
+                )
+
+        self.assertEqual(documents[0].page_content, "T074 HUMAN CORRECTED TEXT")
+        self.assertEqual(documents[0].metadata["ocr_confidence"], 48.75)
+        self.assertEqual(documents[0].metadata["ocr_quality"], "low")
+        self.assertEqual(
+            documents[0].metadata["ocr_text_source"],
+            "manual_correction",
+        )
+        self.assertTrue(documents[0].metadata["ocr_correction_applied"])
+        self.assertEqual(documents[0].metadata["ocr_correction_revision"], 3)
+
     def test_tesseract_confidence_is_weighted_by_word_characters(self) -> None:
         """较长 word 应在页面置信度中获得更高权重。"""
         confidence, word_count = parse_tesseract_tsv_confidence(

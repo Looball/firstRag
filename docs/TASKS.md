@@ -79,6 +79,7 @@
 | `PLAN-20260721-03` | 2026-07-21 | `Done` | 为 PDF/DOCX 引用补充可验证的位置 metadata，并增强原文定位展示。 | `T-071` |
 | `PLAN-20260721-04` | 2026-07-21 | `Done` | 为无文本层的扫描 PDF 增加本地 OCR fallback，并保留页码级引用。 | `T-072` |
 | `PLAN-20260721-05` | 2026-07-21 | `Done` | 记录 OCR 置信度、提示低质量页面，并支持单页异步重新识别。 | `T-073` |
+| `PLAN-20260721-06` | 2026-07-21 | `Doing` | 支持 OCR 页面人工校对、持久化修订和可撤销的异步索引重建。 | `T-074` |
 
 ## 任务总览
 
@@ -157,6 +158,7 @@
 | `T-071` | `PLAN-20260721-03` | `P1` | `Done` | 持久化 PDF 页码和 DOCX 段落位置 | 2026-07-21 | `d03de10` |
 | `T-072` | `PLAN-20260721-04` | `P1` | `Done` | 为扫描 PDF 增加本地 OCR fallback | 2026-07-21 | `2a9ef37` |
 | `T-073` | `PLAN-20260721-05` | `P1` | `Done` | 增加 OCR 质量诊断与单页重新识别 | 2026-07-21 | `729e575` |
+| `T-074` | `PLAN-20260721-06` | `P1` | `Doing` | 支持 OCR 页面人工校对并重新索引 | — | — |
 
 ## 新计划接入流程
 
@@ -2849,6 +2851,41 @@ git diff --check
   - `cd frontend && npm test -- --run`：10 个 test files、67 tests passed；`npm run lint`：0 error、保留 2 个既有 `<img>` performance warnings；Next 16.2.10 production build 通过。
   - `docker compose up -d --build`、`docker compose ps` 和近期日志通过；migration 首次应用 005，最终重建为 `applied=0 skipped=6`，backend、worker、frontend 均正常启动，Redis、PostgreSQL、Chroma healthy。
   - production preflight、Chroma runtime health、migration dry-run、数据库 `options:jsonb` 检查和 `git diff --check` 全部通过。
+- 建议验证命令：
+
+```bash
+cd backend && conda run -n firstrag python -m pytest -q
+cd ../frontend && npm test -- --run && npm run lint && npm run build
+cd .. && docker compose up -d --build
+docker compose ps -a
+docker compose logs --since=10m redis postgres chroma migrate backend worker frontend
+conda run -n firstrag python scripts/production_preflight.py --env-file .env --migration-method compose --check-runtime-health
+git diff --check
+```
+
+## T-074 支持 OCR 页面人工校对并重新索引
+
+- 来源计划：`PLAN-20260721-06`
+- 优先级：`P1`
+- 状态：`Doing`
+- 目标：允许用户在原文预览中修正 OCR 页面文本，把修订持久化并安全重建索引，同时保留原始 OCR 质量信息和历史引用版本。
+- 技术边界：
+  - 人工修订按 `user_id + knowledge_file_id + page_number` 持久化，不直接原地修改已有 chunks 或历史 message sources。
+  - worker 每次索引仍执行原始 PDF OCR，并在切分前用当前有效人工修订覆盖页面正文；metadata 同时保留 OCR 置信度与人工修订版本。
+  - 保存或撤销修订均递增文件 index version，通过现有 `vector_index_jobs` 异步重建整个文件索引。
+  - API 只允许当前用户、已完成索引且当前页面确由 OCR 生成的 PDF；修订正文必须非空并受长度限制。
+- 范围：
+  - 新增页级 OCR correction 表、repository、migration 和文件删除级联清理。
+  - 新增读取、保存和撤销人工修订 API，并复用 embedding 配置检查、限流、file advisory lock 和任务状态反馈。
+  - document/vector service 应用修订正文并传播 `ocr_correction_applied`、revision、更新时间等白名单 metadata。
+  - 原文预览提供编辑、取消、保存、撤销和异步重建状态；成功后提示重新提问获取新引用。
+  - 补齐权限、输入边界、版本递增、worker 应用、前端请求与真实 PDF smoke 测试及文档。
+- 验收标准：
+  - 当前用户可读取 OCR 页的原始/当前文本并提交非空修订；跨用户、非 PDF、原生文本页和无效页码被拒绝。
+  - 保存修订后新索引使用人工文本，metadata 保留原 OCR 置信度且标记人工修订版本。
+  - 撤销修订后新索引恢复 Tesseract 文本，修订记录被删除且历史 source 不被改写。
+  - 重复提交、索引中的文件和异常 worker 状态有明确反馈，不产生并发版本覆盖。
+  - 后端、前端测试、production build、Docker Compose migration/smoke 和 production preflight 通过。
 - 建议验证命令：
 
 ```bash

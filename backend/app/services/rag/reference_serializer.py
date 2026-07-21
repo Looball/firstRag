@@ -134,6 +134,12 @@ def serialize_reference_documents(
             "ocr_quality": metadata.get("ocr_quality"),
             "ocr_word_count": metadata.get("ocr_word_count"),
             "ocr_attempt": metadata.get("ocr_attempt"),
+            "ocr_text_source": metadata.get("ocr_text_source"),
+            "ocr_correction_applied": metadata.get("ocr_correction_applied"),
+            "ocr_correction_revision": metadata.get("ocr_correction_revision"),
+            "ocr_correction_updated_at": metadata.get(
+                "ocr_correction_updated_at",
+            ),
             "retrieval_sources": metadata.get("retrieval_sources"),
             "vector_score": metadata.get("vector_score"),
             "fulltext_score": metadata.get("fulltext_score"),

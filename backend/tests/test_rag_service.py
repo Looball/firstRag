@@ -83,6 +83,10 @@ class RagReferenceFilteringTests(unittest.TestCase):
                     "ocr_quality": "low",
                     "ocr_word_count": 8,
                     "ocr_attempt": 2,
+                    "ocr_text_source": "manual_correction",
+                    "ocr_correction_applied": True,
+                    "ocr_correction_revision": 3,
+                    "ocr_correction_updated_at": "2026-07-21T12:00:00+08:00",
                 },
             ),
         ]
@@ -108,6 +112,8 @@ class RagReferenceFilteringTests(unittest.TestCase):
         self.assertEqual(references[0]["ocr_quality"], "low")
         self.assertEqual(references[0]["ocr_word_count"], 8)
         self.assertEqual(references[0]["ocr_attempt"], 2)
+        self.assertTrue(references[0]["ocr_correction_applied"])
+        self.assertEqual(references[0]["ocr_correction_revision"], 3)
 
     def test_get_res_doc_excludes_low_relevance_context(self) -> None:
         """低相关片段不应进入最终提示词上下文。"""

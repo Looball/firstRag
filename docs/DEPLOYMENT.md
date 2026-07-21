@@ -425,7 +425,7 @@ MODELS_DIR=/srv/firstrag/models
 
 目录策略：
 
-- `uploads/` 是用户上传原文，必须和 PostgreSQL metadata 一起备份；恢复时路径结构要保持不变。
+- `uploads/` 是用户上传原文，必须和 PostgreSQL metadata（包括 OCR 人工修订）一起备份；恢复时路径结构要保持不变。
 - `vector_db/` 保存 Chroma 数据，建议随 `uploads/` 一起备份。理论上可通过重新 vector indexing 重建，但恢复成本高，公开环境优先保留备份。
 - `models/` 仅在启用本地 reranker 时保存模型，生产以只读方式挂载到 `/app/models`。模型文件可从制品仓库或模型源重建；默认最小镜像不依赖该目录。
 - 日志当前走 Docker stdout/stderr，由 Docker 日志驱动持久化和轮转；接入集中日志前不要新增会写入 secret 或用户原文的应用文件日志。

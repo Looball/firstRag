@@ -57,6 +57,8 @@ export type ChatSource = {
   ocrConfidence?: number;
   ocrQuality?: string;
   ocrAttempt?: number;
+  ocrCorrectionApplied?: boolean;
+  ocrCorrectionRevision?: number;
   vectorScore?: number;
   fulltextScore?: number;
   rerankScore?: number;
@@ -68,8 +70,22 @@ export type ChatSource = {
 export type KnowledgeSourcePreviewChunk = {
   chunkIndex: number;
   content: string;
-  location: Record<string, string | number>;
+  location: Record<string, string | number | boolean>;
   isTarget: boolean;
+};
+
+export type PdfOcrPageCorrection = {
+  fileId: string;
+  pageNumber: number;
+  indexVersion: number;
+  originalText: string;
+  currentText: string;
+  correctedText: string | null;
+  hasCorrection: boolean;
+  revision: number;
+  updatedAt: string | null;
+  ocrConfidence?: number;
+  ocrQuality: string;
 };
 
 export type KnowledgeSourcePreview = {

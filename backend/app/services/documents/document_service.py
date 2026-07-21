@@ -364,6 +364,7 @@ def build_pdf_page_documents(
     file_path: Path,
     base_metadata: dict[str, str],
     force_ocr_page_numbers: set[int] | None = None,
+    pdf_ocr_corrections: dict[int, dict[str, object]] | None = None,
 ) -> list[Document]:
     """逐页解析 PDF，并把真实 1-based 页码写入 Document metadata。"""
     page_chunks = pymupdf4llm.to_markdown(
@@ -431,12 +432,18 @@ def build_pdf_page_documents(
         native_markdown_text = str(page_chunk.get("text") or "").strip()
         ocr_result = ocr_result_by_page.get(page_index)
         ocr_text = ocr_result.text.strip() if ocr_result is not None else ""
-        markdown_text = ocr_text or native_markdown_text
+        correction = (pdf_ocr_corrections or {}).get(page_index + 1)
+        corrected_text = (
+            str(correction.get("corrected_text") or "").strip()
+            if isinstance(correction, dict)
+            else ""
+        )
+        markdown_text = corrected_text or ocr_text or native_markdown_text
         if not markdown_text:
             continue
-        parse_method = "ocr" if ocr_text else "native_text"
-        if parse_method == "ocr" and ocr_result is not None:
-            confidence = ocr_result.confidence
+        parse_method = "ocr" if corrected_text or ocr_text else "native_text"
+        if parse_method == "ocr":
+            confidence = ocr_result.confidence if ocr_result is not None else None
             low_confidence_threshold = normalize_pdf_ocr_confidence_threshold(
                 PDF_OCR_LOW_CONFIDENCE_THRESHOLD,
             )
@@ -451,11 +458,27 @@ def build_pdf_page_documents(
                     if confidence < low_confidence_threshold
                     else "good"
                 ),
-                "ocr_word_count": ocr_result.word_count,
+                "ocr_word_count": (
+                    ocr_result.word_count if ocr_result is not None else 0
+                ),
                 "ocr_attempt": 2 if page_index in forced_page_indexes else 1,
+                "ocr_text_source": (
+                    "manual_correction" if corrected_text else "tesseract"
+                ),
             }
             if confidence is not None:
                 ocr_metadata["ocr_confidence"] = confidence
+            if corrected_text and isinstance(correction, dict):
+                ocr_metadata.update({
+                    "ocr_correction_applied": True,
+                    "ocr_correction_revision": int(
+                        correction.get("revision") or 1,
+                    ),
+                    "ocr_correction_character_count": len(corrected_text),
+                    "ocr_correction_updated_at": str(
+                        correction.get("updated_at") or "",
+                    ),
+                })
         else:
             ocr_metadata = {}
         documents.append(
@@ -692,6 +715,7 @@ def load_document(
     user_id: int | str | None = None,
     original_name: str | None = None,
     force_ocr_page_numbers: set[int] | None = None,
+    pdf_ocr_corrections: dict[int, dict[str, object]] | None = None,
 ) -> list[Document]:
     """根据文件类型加载单个本地文档。"""
     display_name = original_name or file_path.name
@@ -740,6 +764,7 @@ def load_document(
             file_path,
             base_metadata,
             force_ocr_page_numbers=force_ocr_page_numbers,
+            pdf_ocr_corrections=pdf_ocr_corrections,
         )
 
     if suffix == ".docx":

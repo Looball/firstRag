@@ -15,13 +15,16 @@ import {
   listDeletedKnowledgeBases,
   loadKnowledgeFileContent,
   loadKnowledgeSourcePreview,
+  loadPdfOcrPageCorrection,
   loadQualityDashboard,
   loadVectorIndexHealth,
   postChatMessage,
   permanentlyDeleteKnowledgeFile,
+  deletePdfOcrPageCorrection,
   reindexKnowledgeFileOcrPage,
   renameKnowledgeBase,
   restoreKnowledgeBase,
+  savePdfOcrPageCorrection,
   submitMessageFeedback,
   submitMessageSourceFeedback,
   uploadChatAttachments,
@@ -179,6 +182,95 @@ describe("chat workspace api", () => {
       `/api/chat/knowledge-files/${fileId}/ocr/pages/2/reindex`,
       { method: "POST" },
       { fallbackMessage: "提交 OCR 重新识别失败，请稍后再试。" },
+    );
+  });
+
+  it("loads a PDF OCR page correction editor payload", async () => {
+    const fileId = "11111111-1111-4111-8111-111111111111";
+    authenticatedJsonMock.mockResolvedValueOnce({
+      success: true,
+      correction: {
+        file_id: fileId,
+        page_number: 2,
+        index_version: 4,
+        original_text: "OCR ORIGINAL",
+        current_text: "HUMAN CORRECTED",
+        corrected_text: "HUMAN CORRECTED",
+        has_correction: true,
+        revision: 2,
+        updated_at: "2026-07-21T12:00:00+08:00",
+        ocr_confidence: 42.5,
+        ocr_quality: "low",
+      },
+    });
+
+    await expect(loadPdfOcrPageCorrection(fileId, 2)).resolves.toEqual({
+      fileId,
+      pageNumber: 2,
+      indexVersion: 4,
+      originalText: "OCR ORIGINAL",
+      currentText: "HUMAN CORRECTED",
+      correctedText: "HUMAN CORRECTED",
+      hasCorrection: true,
+      revision: 2,
+      updatedAt: "2026-07-21T12:00:00+08:00",
+      ocrConfidence: 42.5,
+      ocrQuality: "low",
+    });
+  });
+
+  it("saves and deletes a PDF OCR page correction through vector jobs", async () => {
+    const fileId = "11111111-1111-4111-8111-111111111111";
+    const saveJobId = "22222222-2222-4222-8222-222222222222";
+    const deleteJobId = "33333333-3333-4333-8333-333333333333";
+    authenticatedJsonMock
+      .mockResolvedValueOnce({
+        success: true,
+        correction: {
+          file_id: fileId,
+          page_number: 2,
+          index_version: 5,
+          original_text: "OCR ORIGINAL",
+          current_text: "HUMAN CORRECTED",
+          corrected_text: "HUMAN CORRECTED",
+          has_correction: true,
+          revision: 1,
+          updated_at: null,
+          ocr_quality: "low",
+        },
+        job: {
+          id: saveJobId,
+          knowledge_file_id: fileId,
+          status: "queued",
+        },
+      })
+      .mockResolvedValueOnce({
+        success: true,
+        correction: {
+          file_id: fileId,
+          page_number: 2,
+          previous_index_version: 5,
+          index_version: 6,
+          has_correction: false,
+        },
+        job: {
+          id: deleteJobId,
+          knowledge_file_id: fileId,
+          status: "queued",
+        },
+      });
+
+    await expect(
+      savePdfOcrPageCorrection(fileId, 2, "HUMAN CORRECTED"),
+    ).resolves.toEqual({
+      correction: expect.objectContaining({
+        currentText: "HUMAN CORRECTED",
+        revision: 1,
+      }),
+      job: expect.objectContaining({ id: saveJobId, status: "queued" }),
+    });
+    await expect(deletePdfOcrPageCorrection(fileId, 2)).resolves.toEqual(
+      expect.objectContaining({ id: deleteJobId, status: "queued" }),
     );
   });
 

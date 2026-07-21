@@ -1,5 +1,6 @@
 """向量索引服务回归测试。"""
 
+from contextlib import nullcontext
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
@@ -9,6 +10,7 @@ from uuid import uuid4
 from app.services.vectors.vector_index_service import (
     get_vector_store,
     index_file_vectors,
+    index_knowledge_file_record,
 )
 
 
@@ -41,6 +43,7 @@ class VectorIndexServiceTests(unittest.TestCase):
             user_id=1,
             original_name="用户上传文件.txt",
             force_ocr_page_numbers=None,
+            pdf_ocr_corrections=None,
         )
 
     def test_get_vector_store_uses_http_client_when_host_is_configured(
@@ -67,6 +70,53 @@ class VectorIndexServiceTests(unittest.TestCase):
             host="chroma",
             port=8000,
             ssl=False,
+        )
+
+    def test_index_record_loads_persistent_pdf_ocr_corrections(self) -> None:
+        """worker 索引文件时应加载并传递全部持久化页级修订。"""
+        file_id = uuid4()
+        file_record = {
+            "id": file_id,
+            "original_name": "scan.pdf",
+            "storage_path": "/tmp/scan.pdf",
+        }
+        with patch(
+            "app.services.vectors.vector_index_service.file_index_lock",
+            return_value=nullcontext(),
+        ), patch(
+            "app.services.vectors.vector_index_service.update_knowledge_file_status",
+            return_value=1,
+        ), patch(
+            "app.services.vectors.vector_index_service.invalidate_file_knowledge_base_contexts",
+        ), patch(
+            "app.services.vectors.vector_index_service.list_pdf_ocr_corrections",
+            return_value=[{
+                "page_number": 2,
+                "corrected_text": "HUMAN CORRECTED",
+                "revision": 4,
+                "updated_at": "2026-07-21T12:00:00+08:00",
+            }],
+        ), patch(
+            "app.services.vectors.vector_index_service.index_file_vectors",
+            return_value={"chunk_count": 1},
+        ) as index_file:
+            result = index_knowledge_file_record(
+                file_record=file_record,
+                user_id=1,
+                index_version=3,
+            )
+
+        self.assertEqual(result["status"], "indexed")
+        self.assertEqual(
+            index_file.call_args.kwargs["pdf_ocr_corrections"],
+            {
+                2: {
+                    "page_number": 2,
+                    "corrected_text": "HUMAN CORRECTED",
+                    "revision": 4,
+                    "updated_at": "2026-07-21T12:00:00+08:00",
+                },
+            },
         )
 
     def test_get_vector_store_keeps_embedded_mode_without_host(self) -> None:
