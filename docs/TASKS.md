@@ -40,7 +40,7 @@
 
 ## 当前基线
 
-- 2026-07-21 已刷新静态回归验收：后端 287 个 pytest 用例和 28 个 subtests 通过、前端 lint 0 error（保留 2 个 `<img>` 性能 warning）、Vitest 63 个用例通过、Next 16.2.10 production build 通过。
+- 2026-07-21 已刷新静态回归验收：后端 302 个 pytest 用例和 30 个 subtests 通过、前端 lint 0 error（保留 2 个 `<img>` 性能 warning）、Vitest 67 个用例通过、Next 16.2.10 production build 通过。
 - 2026-07-20 已完成前端依赖安全审计：Next.js 从 16.2.2 升级到 16.2.10，已消除已确认的 high findings；Babel、brace-expansion 和 js-yaml 开发依赖补丁已更新。`npm audit` 仍报告 Next 内嵌 PostCSS 的 2 个 moderate 条目，当前项目没有用户可控 CSS 进入 stringify 的运行路径，且审计器只提供降级到 Next 9.3.3 的 breaking fix，因此保留为已 triage 的不可达例外。
 - 2026-07-20 已完成后端与镜像依赖安全审计：PyJWT、python-dotenv 和 python-multipart 已升级到安全补丁版本；`pip-audit` 只剩 ChromaDB 1.5.9 的 no-fix finding，由精确到版本且 2026-08-20 到期的内网不可达例外管理；Trivy 对当前 backend/frontend 镜像的可修复 high/critical OS finding 均为 0。
 - 2026-07-20 已完成 GitHub Actions supply chain 固化：7 个外部 Action 引用均固定到官方 release 的 40 位 commit SHA，CI 自动拒绝 tag/branch/短 SHA 和缺失版本注释；Dependabot 每周聚合提出 Action 更新 PR。
@@ -78,7 +78,7 @@
 | `PLAN-20260721-02` | 2026-07-21 | `Done` | 增强回答引用的可核验性，支持按 chunk 查看前后文并安全打开原始文件。 | `T-070` |
 | `PLAN-20260721-03` | 2026-07-21 | `Done` | 为 PDF/DOCX 引用补充可验证的位置 metadata，并增强原文定位展示。 | `T-071` |
 | `PLAN-20260721-04` | 2026-07-21 | `Done` | 为无文本层的扫描 PDF 增加本地 OCR fallback，并保留页码级引用。 | `T-072` |
-| `PLAN-20260721-05` | 2026-07-21 | `Doing` | 记录 OCR 置信度、提示低质量页面，并支持单页异步重新识别。 | `T-073` |
+| `PLAN-20260721-05` | 2026-07-21 | `Done` | 记录 OCR 置信度、提示低质量页面，并支持单页异步重新识别。 | `T-073` |
 
 ## 任务总览
 
@@ -156,7 +156,7 @@
 | `T-070` | `PLAN-20260721-02` | `P1` | `Done` | 实现来源原文预览与精确引用跳转 | 2026-07-21 | `11ed2e4` |
 | `T-071` | `PLAN-20260721-03` | `P1` | `Done` | 持久化 PDF 页码和 DOCX 段落位置 | 2026-07-21 | `d03de10` |
 | `T-072` | `PLAN-20260721-04` | `P1` | `Done` | 为扫描 PDF 增加本地 OCR fallback | 2026-07-21 | `2a9ef37` |
-| `T-073` | `PLAN-20260721-05` | `P1` | `Doing` | 增加 OCR 质量诊断与单页重新识别 | — | — |
+| `T-073` | `PLAN-20260721-05` | `P1` | `Done` | 增加 OCR 质量诊断与单页重新识别 | 2026-07-21 | `729e575` |
 
 ## 新计划接入流程
 
@@ -2818,7 +2818,8 @@ git diff --check
 
 - 来源计划：`PLAN-20260721-05`
 - 优先级：`P1`
-- 状态：`Doing`
+- 状态：`Done`
+- 完成日期：`2026-07-21`
 - 目标：让用户能够判断扫描 PDF 页面的 OCR 可靠程度，并对可疑页面发起可追踪的异步重新识别。
 - 技术边界：
   - Tesseract 单次识别同时输出文本和 TSV word confidence，避免为了置信度重复执行 OCR。
@@ -2837,6 +2838,17 @@ git diff --check
   - 跨用户、非 PDF、非 OCR 页、越界页或非 indexed 文件不能发起重新识别。
   - 单页操作生成新 index version 的异步任务，worker 消费强制页选项并成功重建索引。
   - 后端、前端测试、production build、Docker Compose migration/smoke 和 production preflight 通过。
+- 相关提交：`729e575`。
+- 完成记录：
+  - Tesseract 每页只执行一次，使用 `txt` 与 `tsv` 两个 output renderer 同时生成正文和 word confidence；页面置信度按有效字符数加权，保存 `ocr_confidence`、`ocr_quality`、`ocr_word_count` 和 `ocr_attempt`，没有有效分数时明确标记 `unknown`。
+  - 新增 `PDF_OCR_LOW_CONFIDENCE_THRESHOLD`，引用卡片和原文预览展示 OCR 百分比与低质量警告；弹窗支持提交、排队、处理中、成功、失败、失败重试和查询重试状态，且不会用装饰动画干扰阅读。
+  - migration `005_add_vector_index_job_options.sql` 为 vector job 增加内部 `JSONB options`；单页 API 只允许当前用户、已完成索引且现有 metadata 为 OCR 的 PDF 页面，worker 从受控 options 读取强制页并异步重建整个文件索引。
+  - 真实两页纯图片 PDF 已通过 Poppler 渲染目检；本机 Tesseract 同次正文/TSV 验证得到 89.30 与 95.35 的页级置信度，文本和 word count 均正常。
+  - Docker Compose 真实账号 smoke 完成上传、首次 OCR 索引、第 2 页重新识别、重复提交冲突和永久删除：两次任务均为 `succeeded`，重复提交返回 `409`，index version 从 0 升到 1，第 2 页 `ocr_attempt` 从 1 升到 2；数据库测试文件残留为 0。
+  - `cd backend && conda run -n firstrag python -m pytest -q`：302 passed、8 warnings、30 subtests passed；T-073 最终专项回归 8 passed。
+  - `cd frontend && npm test -- --run`：10 个 test files、67 tests passed；`npm run lint`：0 error、保留 2 个既有 `<img>` performance warnings；Next 16.2.10 production build 通过。
+  - `docker compose up -d --build`、`docker compose ps` 和近期日志通过；migration 首次应用 005，最终重建为 `applied=0 skipped=6`，backend、worker、frontend 均正常启动，Redis、PostgreSQL、Chroma healthy。
+  - production preflight、Chroma runtime health、migration dry-run、数据库 `options:jsonb` 检查和 `git diff --check` 全部通过。
 - 建议验证命令：
 
 ```bash
