@@ -88,6 +88,10 @@ class SourcePreviewApiTests(unittest.TestCase):
                     "ocr_engine": "tesseract",
                     "ocr_languages": "chi_sim+eng",
                     "ocr_dpi": 300,
+                    "ocr_confidence": 62.4,
+                    "ocr_quality": "low",
+                    "ocr_word_count": 8,
+                    "ocr_attempt": 2,
                 },
             },
         ]
@@ -127,6 +131,14 @@ class SourcePreviewApiTests(unittest.TestCase):
         self.assertEqual(
             payload["chunks"][1]["location"]["ocr_engine"],
             "tesseract",
+        )
+        self.assertEqual(
+            payload["chunks"][1]["location"]["ocr_confidence"],
+            62.4,
+        )
+        self.assertEqual(
+            payload["chunks"][1]["location"]["ocr_quality"],
+            "low",
         )
         self.assertNotIn("source", payload["chunks"][0]["location"])
 

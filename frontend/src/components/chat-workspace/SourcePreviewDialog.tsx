@@ -1,12 +1,13 @@
 "use client";
 
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 
 import * as chatApi from "@/lib/chat-workspace/api";
 import type { ChatSource } from "@/lib/chat-workspace/types";
 import {
   buildOriginalFilePreviewUrl,
+  formatOcrConfidence,
   formatSourcePosition,
 } from "@/lib/chat-workspace/utils";
 
@@ -45,7 +46,15 @@ function formatChunkLocation(location: Record<string, string | number>) {
     headings.push(position);
   }
   if (location.pdf_parse_method === "ocr") {
-    headings.push("OCR 识别");
+    const confidence =
+      typeof location.ocr_confidence === "number"
+        ? formatOcrConfidence(location.ocr_confidence)
+        : "";
+    headings.push(
+      location.ocr_quality === "low"
+        ? `OCR 质量较低${confidence ? ` ${confidence}` : ""}`
+        : `OCR 识别${confidence ? ` ${confidence}` : ""}`,
+    );
   }
 
   return headings.join(" / ");
@@ -59,6 +68,7 @@ export function SourcePreviewDialog({
   const targetChunkRef = useRef<HTMLElement | null>(null);
   const [isOpeningFile, setIsOpeningFile] = useState(false);
   const [fileOpenError, setFileOpenError] = useState("");
+  const [ocrReindexJobId, setOcrReindexJobId] = useState("");
   const fileId = source.fileId || "";
   const chunkIndex = source.chunkIndex;
   const canLoadPreview = Boolean(fileId) && chunkIndex !== undefined;
@@ -105,6 +115,58 @@ export function SourcePreviewDialog({
         ? targetChunk.location.paragraph_end
         : undefined),
   });
+  const targetIsOcrPage = targetChunk?.location.pdf_parse_method === "ocr";
+  const targetOcrConfidence =
+    typeof targetChunk?.location.ocr_confidence === "number"
+      ? targetChunk.location.ocr_confidence
+      : undefined;
+  const targetOcrQuality =
+    typeof targetChunk?.location.ocr_quality === "string"
+      ? targetChunk.location.ocr_quality
+      : "";
+  const targetOcrConfidenceLabel = formatOcrConfidence(targetOcrConfidence);
+  const ocrReindexMutation = useMutation({
+    mutationFn: () =>
+      chatApi.reindexKnowledgeFileOcrPage(fileId, targetPageNumber!),
+    onSuccess: (job) => setOcrReindexJobId(job.id),
+  });
+  const ocrReindexJobQuery = useQuery({
+    queryKey: ["pdf-ocr-page-reindex", ocrReindexJobId],
+    queryFn: () => chatApi.getVectorIndexJob(ocrReindexJobId),
+    enabled: Boolean(ocrReindexJobId),
+    refetchInterval: (query) => {
+      const status = query.state.data?.status;
+      return status === "queued" || status === "processing" ? 1_000 : false;
+    },
+  });
+  const ocrReindexJob = ocrReindexJobQuery.data;
+  const ocrReindexIsActive =
+    ocrReindexMutation.isPending ||
+    ocrReindexJob?.status === "queued" ||
+    ocrReindexJob?.status === "processing";
+  const ocrReindexError =
+    ocrReindexMutation.error instanceof Error
+      ? ocrReindexMutation.error.message
+      : ocrReindexJobQuery.error instanceof Error
+        ? ocrReindexJobQuery.error.message
+        : ocrReindexJob?.status === "failed"
+          ? ocrReindexJob.errorMessage ||
+            ocrReindexJob.failureHint ||
+            "OCR 重新识别失败，请稍后重试。"
+          : "";
+
+  /** 根据失败来源重试提交或仅重试任务状态查询，避免重复创建任务。 */
+  function handleOcrReindex() {
+    if (ocrReindexJobQuery.isError && ocrReindexJobId) {
+      void ocrReindexJobQuery.refetch();
+      return;
+    }
+    if (ocrReindexJob?.status === "failed") {
+      setOcrReindexJobId("");
+      ocrReindexMutation.reset();
+    }
+    ocrReindexMutation.mutate();
+  }
 
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
@@ -219,6 +281,67 @@ export function SourcePreviewDialog({
             </div>
           ) : (
             <div className="space-y-3">
+              {targetIsOcrPage && targetPageNumber !== undefined ? (
+                <section
+                  className={
+                    targetOcrQuality === "low"
+                      ? "border border-[#d9aa2f] bg-[#fff7df] px-4 py-3 text-[#6d5010]"
+                      : "border border-[#bdd2cc] bg-[#eef7f4] px-4 py-3 text-[#275f58]"
+                  }
+                  aria-live="polite"
+                >
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                      <p className="font-utility text-[10px] font-semibold uppercase tracking-[0.12em]">
+                        {targetOcrQuality === "low"
+                          ? "OCR 质量需要关注"
+                          : "OCR 质量"}
+                      </p>
+                      <p className="mt-1 text-sm leading-6">
+                        第 {targetPageNumber} 页
+                        {targetOcrConfidenceLabel
+                          ? `置信度 ${targetOcrConfidenceLabel}`
+                          : "暂时没有可用置信度"}
+                        。重新识别会异步重建该文件索引，期间文件暂不可检索。
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      disabled={
+                        ocrReindexIsActive ||
+                        ocrReindexJob?.status === "succeeded"
+                      }
+                      onClick={handleOcrReindex}
+                      className="font-utility shrink-0 border border-current px-3 py-2 text-[10px] font-semibold uppercase transition-colors duration-150 hover:bg-white/55 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      {ocrReindexMutation.isPending
+                        ? "正在提交"
+                        : ocrReindexJob?.status === "queued"
+                          ? "排队中"
+                          : ocrReindexJob?.status === "processing"
+                            ? "重新识别中"
+                            : ocrReindexJob?.status === "succeeded"
+                              ? "已完成"
+                              : ocrReindexJob?.status === "failed"
+                                ? "重新尝试"
+                                : ocrReindexJobQuery.isError
+                                  ? "重新查询"
+                                  : "重新识别此页"}
+                    </button>
+                  </div>
+                  {ocrReindexJob?.status === "succeeded" ? (
+                    <p className="mt-2 text-xs font-medium">
+                      新索引已生成。请关闭弹窗并重新提问，以获取使用新 OCR 文本的引用。
+                    </p>
+                  ) : ocrReindexError ? (
+                    <p className="mt-2 text-xs text-[#9b3c29]">
+                      {ocrReindexError}
+                    </p>
+                  ) : ocrReindexIsActive ? (
+                    <p className="mt-2 text-xs">任务已提交，可保持弹窗打开查看进度。</p>
+                  ) : null}
+                </section>
+              ) : null}
               {previewQuery.data?.chunks.map((chunk) => {
                 const location = formatChunkLocation(chunk.location);
                 return (

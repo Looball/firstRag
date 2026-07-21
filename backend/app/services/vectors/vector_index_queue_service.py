@@ -408,6 +408,7 @@ def enqueue_file_vector_index(
     file_record: Row | dict[str, Any],
     user_id: int,
     knowledge_base_id: UUID | None = None,
+    job_options: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """为单个文件创建向量化任务，并把文件状态更新为 queued。
 
@@ -438,6 +439,7 @@ def enqueue_file_vector_index(
         knowledge_file_id=file_record["id"],
         knowledge_base_id=knowledge_base_id,
         index_version=file_record.get("index_version", 0),
+        options=job_options,
     )
     if job["status"] == "queued":
         update_knowledge_file_status(

@@ -46,6 +46,11 @@ from app.services.documents.document_service import (
     ensure_image_document_vision_settings,
     is_image_document_file_name,
 )
+from app.services.documents.pdf_ocr_reindex_service import (
+    PdfOcrReindexConflictError,
+    PdfOcrReindexValidationError,
+    enqueue_pdf_page_ocr_reindex,
+)
 
 
 router = APIRouter(prefix="/chat", tags=["vector-indexes"])
@@ -111,6 +116,58 @@ def index_knowledge_file_vectors(
         "success": True,
         "message": job.get("message") or "文件向量化任务已提交",
         "job": job,
+    }
+
+
+@router.post(
+    "/knowledge-files/{knowledge_file_id}/ocr/pages/{page_number}/reindex",
+)
+def reindex_knowledge_file_ocr_page(
+    request: Request,
+    knowledge_file_id: UUID,
+    page_number: int,
+    user_id: int = Depends(get_current_user_id),
+):
+    """提交指定扫描 PDF 页面的异步 OCR 重新识别任务。"""
+    if get_user_knowledge_file(user_id, knowledge_file_id) is None:
+        raise HTTPException(status_code=404, detail="文件不存在")
+    ensure_user_embedding_settings(user_id)
+    enforce_rate_limit(
+        "vector-index",
+        build_rate_limit_identifier(request, "user", user_id),
+        VECTOR_INDEX_RATE_LIMIT_MAX_REQUESTS,
+        API_RATE_LIMIT_WINDOW_SECONDS,
+        "向量化提交过于频繁，请稍后再试。",
+    )
+
+    try:
+        result = enqueue_pdf_page_ocr_reindex(
+            user_id=user_id,
+            knowledge_file_id=knowledge_file_id,
+            page_number=page_number,
+        )
+    except PdfOcrReindexValidationError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except PdfOcrReindexConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.exception(
+            "提交 PDF 单页 OCR 重新识别失败 user_id=%s file_id=%s page=%s",
+            user_id,
+            knowledge_file_id,
+            page_number,
+        )
+        raise HTTPException(
+            status_code=500,
+            detail="提交 OCR 重新识别失败，请稍后重试。",
+        ) from exc
+
+    if result is None:
+        raise HTTPException(status_code=404, detail="文件不存在")
+    return {
+        "success": True,
+        "message": f"第 {page_number} 页 OCR 重新识别任务已提交",
+        **result,
     }
 
 

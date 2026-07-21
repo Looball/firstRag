@@ -67,7 +67,7 @@ FirstRAG/
 | 仓库层 | `backend/app/repositories` | 纯 SQL 数据访问。 |
 | 数据库工具 | `backend/app/db` | 连接、执行器、PostgreSQL advisory lock。 |
 | 基础设施 | `backend/app/core` | 配置、JWT、安全和密钥加密。 |
-| Worker | `backend/app/workers` | 异步向量化任务消费；扫描 PDF 页面在容器内通过 Tesseract OCR。 |
+| Worker | `backend/app/workers` | 异步向量化任务消费；扫描 PDF 页面在容器内通过 Tesseract OCR，保存页级置信度并消费受控单页重识别选项。 |
 
 ## 存储组件
 
@@ -76,7 +76,7 @@ FirstRAG/
 - Chroma：文档分块向量。Docker Compose 使用独立 `chroma` service，backend 与
   worker 通过 HTTP client 共享访问，数据持久化到根目录 `vector_db/chroma`；
   单进程 conda 调试未配置 `CHROMA_HOST` 时仍可使用 embedded 模式。
-- Tesseract：仅对无有效文本层的 PDF 页面执行本地 OCR；原始页面和识别文本不发送到外部 OCR 服务。
+- Tesseract：仅对无有效文本层或用户明确重识别的 PDF 页面执行本地 OCR；同次调用产出正文和 TSV word confidence，原始页面和识别文本不发送到外部 OCR 服务。
 - 本地文件系统：知识文件默认保存到根目录 `uploads/users/...`，聊天图片附件默认保存到 `uploads/chat_attachments/users/...`。
 
 ## 认证与权限

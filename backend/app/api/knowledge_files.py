@@ -85,6 +85,10 @@ CHUNK_LOCATION_METADATA_KEYS = (
     "ocr_engine",
     "ocr_languages",
     "ocr_dpi",
+    "ocr_confidence",
+    "ocr_quality",
+    "ocr_word_count",
+    "ocr_attempt",
 )
 SAFE_INLINE_MEDIA_TYPES = {
     ".pdf": "application/pdf",

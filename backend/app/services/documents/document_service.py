@@ -1,9 +1,12 @@
 import base64
+import csv
+from dataclasses import dataclass
 import logging
 import os
 from pathlib import Path
 import re
 import subprocess
+from tempfile import TemporaryDirectory
 from uuid import UUID
 from xml.etree import ElementTree
 from zipfile import BadZipFile, ZipFile
@@ -28,6 +31,7 @@ from app.core.config import (
     PDF_OCR_DPI,
     PDF_OCR_ENABLED,
     PDF_OCR_LANGUAGES,
+    PDF_OCR_LOW_CONFIDENCE_THRESHOLD,
     PDF_OCR_MAX_PAGES,
     PDF_OCR_MIN_NATIVE_TEXT_CHARACTERS,
     PDF_OCR_TIMEOUT_SECONDS,
@@ -104,6 +108,15 @@ class ImageDocumentParseError(ValueError):
 
 class PdfOcrError(ValueError):
     """扫描 PDF 的本地 OCR 无法安全完成时抛出。"""
+
+
+@dataclass(frozen=True)
+class PdfOcrResult:
+    """单页 Tesseract 文本、置信度和有效 word 数量。"""
+
+    text: str
+    confidence: float | None
+    word_count: int
 
 
 def get_supported_document_type_text() -> str:
@@ -350,6 +363,7 @@ def build_docx_block_documents(
 def build_pdf_page_documents(
     file_path: Path,
     base_metadata: dict[str, str],
+    force_ocr_page_numbers: set[int] | None = None,
 ) -> list[Document]:
     """逐页解析 PDF，并把真实 1-based 页码写入 Document metadata。"""
     page_chunks = pymupdf4llm.to_markdown(
@@ -361,14 +375,30 @@ def build_pdf_page_documents(
         raise EmptyDocumentError("PDF 解析器没有返回逐页结果")
 
     minimum_native_characters = max(0, PDF_OCR_MIN_NATIVE_TEXT_CHARACTERS)
-    ocr_page_indexes = [
+    ocr_page_indexes = {
         page_index
         for page_index, page_chunk in enumerate(page_chunks)
         if isinstance(page_chunk, dict)
         and count_effective_text_characters(
             str(page_chunk.get("text") or ""),
         ) < minimum_native_characters
-    ]
+    }
+    normalized_force_pages = {
+        int(page_number)
+        for page_number in (force_ocr_page_numbers or set())
+    }
+    invalid_force_pages = {
+        page_number
+        for page_number in normalized_force_pages
+        if page_number < 1 or page_number > len(page_chunks)
+    }
+    if invalid_force_pages:
+        raise PdfOcrError("PDF OCR 强制重新识别页码超出范围")
+    forced_page_indexes = {
+        page_number - 1
+        for page_number in normalized_force_pages
+    }
+    ocr_page_indexes.update(forced_page_indexes)
     if PDF_OCR_ENABLED and PDF_OCR_MAX_PAGES > 0:
         if len(ocr_page_indexes) > PDF_OCR_MAX_PAGES:
             raise PdfOcrError(
@@ -376,7 +406,7 @@ def build_pdf_page_documents(
                 f"最多允许 {PDF_OCR_MAX_PAGES} 页",
             )
 
-    ocr_text_by_page: dict[int, str] = {}
+    ocr_result_by_page: dict[int, PdfOcrResult] = {}
     if PDF_OCR_ENABLED and ocr_page_indexes:
         validate_pdf_ocr_runtime_config()
         try:
@@ -384,10 +414,10 @@ def build_pdf_page_documents(
         except (OSError, RuntimeError, ValueError) as exc:
             raise PdfOcrError("PDF OCR 无法打开原始文档") from exc
         try:
-            for page_index in ocr_page_indexes:
+            for page_index in sorted(ocr_page_indexes):
                 if page_index >= pdf_document.page_count:
                     raise PdfOcrError("PDF OCR 页码与解析结果不一致")
-                ocr_text_by_page[page_index] = run_pdf_page_ocr(
+                ocr_result_by_page[page_index] = run_pdf_page_ocr(
                     pdf_document.load_page(page_index),
                 )
         finally:
@@ -399,20 +429,35 @@ def build_pdf_page_documents(
         if not isinstance(page_chunk, dict):
             continue
         native_markdown_text = str(page_chunk.get("text") or "").strip()
-        ocr_text = ocr_text_by_page.get(page_index, "").strip()
+        ocr_result = ocr_result_by_page.get(page_index)
+        ocr_text = ocr_result.text.strip() if ocr_result is not None else ""
         markdown_text = ocr_text or native_markdown_text
         if not markdown_text:
             continue
         parse_method = "ocr" if ocr_text else "native_text"
-        ocr_metadata = (
-            {
+        if parse_method == "ocr" and ocr_result is not None:
+            confidence = ocr_result.confidence
+            low_confidence_threshold = normalize_pdf_ocr_confidence_threshold(
+                PDF_OCR_LOW_CONFIDENCE_THRESHOLD,
+            )
+            ocr_metadata = {
                 "ocr_engine": "tesseract",
                 "ocr_languages": PDF_OCR_LANGUAGES,
                 "ocr_dpi": normalize_pdf_ocr_dpi(PDF_OCR_DPI),
+                "ocr_quality": (
+                    "unknown"
+                    if confidence is None
+                    else "low"
+                    if confidence < low_confidence_threshold
+                    else "good"
+                ),
+                "ocr_word_count": ocr_result.word_count,
+                "ocr_attempt": 2 if page_index in forced_page_indexes else 1,
             }
-            if parse_method == "ocr"
-            else {}
-        )
+            if confidence is not None:
+                ocr_metadata["ocr_confidence"] = confidence
+        else:
+            ocr_metadata = {}
         documents.append(
             Document(
                 page_content=markdown_text,
@@ -444,6 +489,37 @@ def normalize_pdf_ocr_dpi(value: int) -> int:
     return min(600, max(72, value))
 
 
+def normalize_pdf_ocr_confidence_threshold(value: int) -> int:
+    """将低置信度阈值限制在 Tesseract 的 0-100 分数范围。"""
+    return min(100, max(0, value))
+
+
+def parse_tesseract_tsv_confidence(tsv_text: str) -> tuple[float | None, int]:
+    """按有效 word 字符数加权计算 Tesseract 页面置信度。"""
+    weighted_confidence = 0.0
+    total_character_count = 0
+    word_count = 0
+    for row in csv.DictReader(tsv_text.splitlines(), delimiter="\t"):
+        word_text = str(row.get("text") or "").strip()
+        character_count = count_effective_text_characters(word_text)
+        if character_count <= 0:
+            continue
+        try:
+            confidence = float(row.get("conf") or "-1")
+        except ValueError:
+            continue
+        if confidence < 0:
+            continue
+        normalized_confidence = min(100.0, max(0.0, confidence))
+        weighted_confidence += normalized_confidence * character_count
+        total_character_count += character_count
+        word_count += 1
+
+    if total_character_count <= 0:
+        return None, 0
+    return round(weighted_confidence / total_character_count, 2), word_count
+
+
 def validate_pdf_ocr_runtime_config() -> None:
     """校验不会传入 shell 的 Tesseract 语言与资源限制配置。"""
     if not PDF_OCR_LANGUAGE_PATTERN.fullmatch(PDF_OCR_LANGUAGES):
@@ -452,40 +528,59 @@ def validate_pdf_ocr_runtime_config() -> None:
         raise PdfOcrError("PDF OCR 单页超时必须大于 0 秒")
 
 
-def run_pdf_page_ocr(page: pymupdf.Page) -> str:
-    """把单个扫描 PDF 页面渲染为 PNG，并调用本地 Tesseract。"""
+def run_pdf_page_ocr(page: pymupdf.Page) -> PdfOcrResult:
+    """单次调用 Tesseract，同时读取页面文本和 TSV confidence。"""
     dpi = normalize_pdf_ocr_dpi(PDF_OCR_DPI)
     pixmap = page.get_pixmap(dpi=dpi, alpha=False)
-    command = [
-        "tesseract",
-        "stdin",
-        "stdout",
-        "-l",
-        PDF_OCR_LANGUAGES,
-        "--dpi",
-        str(dpi),
-        "--psm",
-        "3",
-    ]
-    try:
-        result = subprocess.run(
-            command,
-            input=pixmap.tobytes("png"),
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            check=False,
-            timeout=PDF_OCR_TIMEOUT_SECONDS,
-        )
-    except FileNotFoundError as exc:
-        raise PdfOcrError("PDF OCR 引擎不可用，请安装 Tesseract") from exc
-    except subprocess.TimeoutExpired as exc:
-        raise PdfOcrError("PDF OCR 单页识别超时") from exc
-    except OSError as exc:
-        raise PdfOcrError("PDF OCR 无法启动本地识别引擎") from exc
+    with TemporaryDirectory(prefix="firstrag-ocr-") as temporary_directory:
+        output_base = Path(temporary_directory) / "page"
+        command = [
+            "tesseract",
+            "stdin",
+            str(output_base),
+            "-l",
+            PDF_OCR_LANGUAGES,
+            "--dpi",
+            str(dpi),
+            "--psm",
+            "3",
+            "txt",
+            "tsv",
+        ]
+        try:
+            result = subprocess.run(
+                command,
+                input=pixmap.tobytes("png"),
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=False,
+                timeout=PDF_OCR_TIMEOUT_SECONDS,
+            )
+        except FileNotFoundError as exc:
+            raise PdfOcrError("PDF OCR 引擎不可用，请安装 Tesseract") from exc
+        except subprocess.TimeoutExpired as exc:
+            raise PdfOcrError("PDF OCR 单页识别超时") from exc
+        except OSError as exc:
+            raise PdfOcrError("PDF OCR 无法启动本地识别引擎") from exc
 
-    if result.returncode != 0:
-        raise PdfOcrError("PDF OCR 识别失败，请检查语言包和文件清晰度")
-    return result.stdout.decode("utf-8", errors="replace").strip()
+        if result.returncode != 0:
+            raise PdfOcrError("PDF OCR 识别失败，请检查语言包和文件清晰度")
+        try:
+            text = output_base.with_suffix(".txt").read_text(
+                encoding="utf-8",
+            ).strip()
+            tsv_text = output_base.with_suffix(".tsv").read_text(
+                encoding="utf-8",
+            )
+        except OSError as exc:
+            raise PdfOcrError("PDF OCR 结果读取失败") from exc
+
+    confidence, word_count = parse_tesseract_tsv_confidence(tsv_text)
+    return PdfOcrResult(
+        text=text,
+        confidence=confidence,
+        word_count=word_count,
+    )
 
 
 def extract_chat_message_text(content: object) -> str:
@@ -596,6 +691,7 @@ def load_document(
     file_id: UUID | str,
     user_id: int | str | None = None,
     original_name: str | None = None,
+    force_ocr_page_numbers: set[int] | None = None,
 ) -> list[Document]:
     """根据文件类型加载单个本地文档。"""
     display_name = original_name or file_path.name
@@ -640,7 +736,11 @@ def load_document(
         ]
 
     if suffix == ".pdf":
-        return build_pdf_page_documents(file_path, base_metadata)
+        return build_pdf_page_documents(
+            file_path,
+            base_metadata,
+            force_ocr_page_numbers=force_ocr_page_numbers,
+        )
 
     if suffix == ".docx":
         return build_docx_block_documents(file_path, base_metadata)

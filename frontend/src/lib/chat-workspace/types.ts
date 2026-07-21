@@ -54,6 +54,9 @@ export type ChatSource = {
   paragraphStart?: number;
   paragraphEnd?: number;
   pdfParseMethod?: string;
+  ocrConfidence?: number;
+  ocrQuality?: string;
+  ocrAttempt?: number;
   vectorScore?: number;
   fulltextScore?: number;
   rerankScore?: number;

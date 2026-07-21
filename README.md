@@ -2,7 +2,7 @@
 
 ## 项目介绍
 
-FirstRAG 是一个全栈 RAG（Retrieval-Augmented Generation，检索增强生成）应用，用于构建本地知识库问答系统。项目支持用户注册登录、知识库管理、文件上传、扫描 PDF 本地 OCR、图片知识文件解析、异步向量化、混合检索、模型设置、聊天图片附件和流式回答。
+FirstRAG 是一个全栈 RAG（Retrieval-Augmented Generation，检索增强生成）应用，用于构建本地知识库问答系统。项目支持用户注册登录、知识库管理、文件上传、扫描 PDF 本地 OCR 与质量诊断、图片知识文件解析、异步向量化、混合检索、模型设置、聊天图片附件和流式回答。
 
 当前仓库采用 monorepo 结构：
 

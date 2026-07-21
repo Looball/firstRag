@@ -7,7 +7,7 @@ from langchain_core.documents import Document
 from psycopg.types.json import Jsonb
 
 from app.db.connection import get_connection
-from app.db.executor import Row, fetch_all
+from app.db.executor import Row, fetch_all, fetch_one
 
 
 CHINESE_STOP_TERMS = {
@@ -204,6 +204,36 @@ def get_user_knowledge_file_chunk_context(
             radius,
             radius,
         ),
+    )
+
+
+def get_user_pdf_page_ocr_metadata(
+    user_id: int,
+    file_id: UUID | str,
+    page_number: int,
+    index_version: int,
+) -> Row | None:
+    """读取当前用户指定 PDF 页面的首个 chunk OCR metadata。"""
+    return fetch_one(
+        """
+        SELECT
+            chunk.chunk_index,
+            chunk.index_version,
+            chunk.metadata
+        FROM knowledge_file_chunks AS chunk
+        JOIN knowledge_files AS file
+          ON file.id = chunk.knowledge_file_id
+         AND file.user_id = chunk.user_id
+        WHERE chunk.user_id = %s
+          AND chunk.knowledge_file_id = %s
+          AND chunk.index_version = %s
+          AND chunk.metadata ->> 'location_type' = 'pdf_page'
+          AND chunk.metadata ->> 'page_number' = %s
+          AND file.deleted_at IS NULL
+        ORDER BY chunk.chunk_index ASC
+        LIMIT 1;
+        """,
+        (user_id, str(file_id), index_version, str(page_number)),
     )
 
 

@@ -40,6 +40,7 @@ class VectorIndexServiceTests(unittest.TestCase):
             file_id=file_id,
             user_id=1,
             original_name="用户上传文件.txt",
+            force_ocr_page_numbers=None,
         )
 
     def test_get_vector_store_uses_http_client_when_host_is_configured(

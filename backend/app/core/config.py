@@ -77,6 +77,10 @@ PDF_OCR_MIN_NATIVE_TEXT_CHARACTERS = read_int_env(
     1,
 )
 PDF_OCR_MAX_PAGES = read_int_env("PDF_OCR_MAX_PAGES", 100)
+PDF_OCR_LOW_CONFIDENCE_THRESHOLD = read_int_env(
+    "PDF_OCR_LOW_CONFIDENCE_THRESHOLD",
+    70,
+)
 
 # 限流配置。Docker/生产默认使用 Redis 分布式窗口；本地未显式配置时
 # Redis 故障会 fail-open 到进程内限流，避免开发环境被基础设施阻塞。

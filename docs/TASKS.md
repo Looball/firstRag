@@ -78,6 +78,7 @@
 | `PLAN-20260721-02` | 2026-07-21 | `Done` | 增强回答引用的可核验性，支持按 chunk 查看前后文并安全打开原始文件。 | `T-070` |
 | `PLAN-20260721-03` | 2026-07-21 | `Done` | 为 PDF/DOCX 引用补充可验证的位置 metadata，并增强原文定位展示。 | `T-071` |
 | `PLAN-20260721-04` | 2026-07-21 | `Done` | 为无文本层的扫描 PDF 增加本地 OCR fallback，并保留页码级引用。 | `T-072` |
+| `PLAN-20260721-05` | 2026-07-21 | `Doing` | 记录 OCR 置信度、提示低质量页面，并支持单页异步重新识别。 | `T-073` |
 
 ## 任务总览
 
@@ -155,6 +156,7 @@
 | `T-070` | `PLAN-20260721-02` | `P1` | `Done` | 实现来源原文预览与精确引用跳转 | 2026-07-21 | `11ed2e4` |
 | `T-071` | `PLAN-20260721-03` | `P1` | `Done` | 持久化 PDF 页码和 DOCX 段落位置 | 2026-07-21 | `d03de10` |
 | `T-072` | `PLAN-20260721-04` | `P1` | `Done` | 为扫描 PDF 增加本地 OCR fallback | 2026-07-21 | `2a9ef37` |
+| `T-073` | `PLAN-20260721-05` | `P1` | `Doing` | 增加 OCR 质量诊断与单页重新识别 | — | — |
 
 ## 新计划接入流程
 
@@ -2800,6 +2802,41 @@ git diff --check
   - `cd frontend && npm test -- --run`：10 个 test files、66 tests passed；`npm run lint`：0 error、保留 2 个既有 `<img>` performance warnings。
   - `docker compose ps -a` 和最近 10 分钟日志通过：Redis、PostgreSQL、Chroma healthy，backend、worker、frontend Up，migration `applied=0 skipped=5`；日志只包含预期 smoke 请求。
   - production preflight、Docker Compose config、Chroma runtime health、migration dry-run 和 `git diff --check` 全部通过。
+- 建议验证命令：
+
+```bash
+cd backend && conda run -n firstrag python -m pytest -q
+cd ../frontend && npm test -- --run && npm run lint && npm run build
+cd .. && docker compose up -d --build
+docker compose ps -a
+docker compose logs --since=10m redis postgres chroma migrate backend worker frontend
+conda run -n firstrag python scripts/production_preflight.py --env-file .env --migration-method compose --check-runtime-health
+git diff --check
+```
+
+## T-073 增加 OCR 质量诊断与单页重新识别
+
+- 来源计划：`PLAN-20260721-05`
+- 优先级：`P1`
+- 状态：`Doing`
+- 目标：让用户能够判断扫描 PDF 页面的 OCR 可靠程度，并对可疑页面发起可追踪的异步重新识别。
+- 技术边界：
+  - Tesseract 单次识别同时输出文本和 TSV word confidence，避免为了置信度重复执行 OCR。
+  - 页面置信度按有效 word 字符长度加权，阈值可配置；没有有效 word confidence 时不伪造分数。
+  - 单页重新识别通过已有 `vector_index_jobs` 异步执行，API 不同步承担 OCR、embedding 或向量写入。
+  - 重新识别会递增文件索引版本并重建该文件索引；历史回答引用不被静默改写，用户需重新提问生成新引用。
+- 范围：
+  - 新增 `ocr_confidence`、`ocr_quality`、`ocr_word_count` 和 `ocr_attempt` metadata，并贯通 chunk、Chroma、source 和 preview。
+  - 为 vector index job 增加受限 `options`，仅允许 worker 接收经过后端构造的强制 OCR 页码。
+  - 增加当前用户 PDF 页面的重新识别 API，校验文件类型、索引状态、页码和现有 OCR metadata。
+  - 原文预览展示 OCR 百分比和低质量告警，并提供排队、处理中、成功、失败反馈。
+  - 同步更新 migration、API、Schema、Frontend、RAG workflow、Deployment 文档和回归测试。
+- 验收标准：
+  - 清晰扫描页持久化 0-100 置信度且识别文本不因 TSV 输出发生退化。
+  - 低于阈值的页面在引用卡片和原文预览中有明确警告；原生文本页不展示 OCR 分数。
+  - 跨用户、非 PDF、非 OCR 页、越界页或非 indexed 文件不能发起重新识别。
+  - 单页操作生成新 index version 的异步任务，worker 消费强制页选项并成功重建索引。
+  - 后端、前端测试、production build、Docker Compose migration/smoke 和 production preflight 通过。
 - 建议验证命令：
 
 ```bash

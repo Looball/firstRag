@@ -46,7 +46,7 @@
 | `messages` | `id`, `conversation_id`, `role`, `content`, `created_at`, `status`, `error_message`, `completed_at`, `sources`, `retrieval` |
 | `message_attachments` | `id`, `user_id`, `conversation_id`, `message_id`, `original_name`, `storage_path`, `mime_type`, `size_bytes`, `file_hash`, `status`, `created_at`, `updated_at` |
 | `knowledge_file_chunks` | `chunk_id`, `user_id`, `knowledge_file_id`, `chunk_index`, `content`, `metadata`, `created_at`, `updated_at`, `index_version` |
-| `vector_index_jobs` | `id`, `user_id`, `knowledge_file_id`, `knowledge_base_id`, `status`, `priority`, `attempts`, `max_attempts`, `locked_by`, `locked_at`, `started_at`, `finished_at`, `error_message`, `result`, `created_at`, `updated_at`, `available_at`, `heartbeat_at`, `index_version` |
+| `vector_index_jobs` | `id`, `user_id`, `knowledge_file_id`, `knowledge_base_id`, `status`, `priority`, `attempts`, `max_attempts`, `locked_by`, `locked_at`, `started_at`, `finished_at`, `error_message`, `result`, `options`, `created_at`, `updated_at`, `available_at`, `heartbeat_at`, `index_version` |
 | `user_llm_settings` | `user_id`, `credential_mode`, `provider`, `model`, `base_url`, `api_key_ciphertext`, `encryption_key_version`, `temperature`, `max_tokens`, `timeout_seconds`, `max_retries`, `created_at`, `updated_at`, `api_key_hint` |
 | `user_llm_provider_credentials` | `user_id`, `provider`, `api_key_ciphertext`, `api_key_hint`, `encryption_key_version`, `created_at`, `updated_at` |
 | `user_embedding_settings` | `user_id`, `provider`, `model`, `base_url`, `dimensions`, `api_key_ciphertext`, `api_key_hint`, `encryption_key_version`, `timeout_seconds`, `max_retries`, `created_at`, `updated_at` |
@@ -260,6 +260,10 @@ DOCX 额外保存 `location_type=docx_paragraphs` 以及 1-based
 - `cancelled`
 
 `knowledge_files.status` 与任务状态共同决定前端展示的文件索引状态。
+
+`vector_index_jobs.options` 是后端生成的内部控制参数，不接受前端透传任意 worker 参数。PDF 单页 OCR 重新识别任务会写入 `trigger=pdf_page_ocr_reindex` 和经过校验的 `force_ocr_page_numbers`；worker 仍重建完整文件索引，并通过新的 `index_version` 隔离旧结果。
+
+扫描 PDF chunk 的 `metadata` 额外保存 `ocr_confidence`、`ocr_quality`、`ocr_word_count` 和 `ocr_attempt`。`ocr_confidence` 是 Tesseract TSV word confidence 按有效字符数加权后的 0-100 分数；没有有效 word 时不写入虚构分数，并将 `ocr_quality` 记为 `unknown`。低于 `PDF_OCR_LOW_CONFIDENCE_THRESHOLD` 时记为 `low`，否则为 `good`。
 
 ## 凭据安全结构
 

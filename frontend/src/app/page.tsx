@@ -36,6 +36,7 @@ import { useKnowledgeFiles } from "@/lib/chat-workspace/use-knowledge-files";
 import {
   buildSessionTitle,
   formatFileSize,
+  formatOcrConfidence,
   formatSourcePosition,
 } from "@/lib/chat-workspace/utils";
 import { streamChatResponse } from "@/lib/chat-workspace/chat-stream";
@@ -2845,10 +2846,14 @@ export default function Home() {
                                   : sourceFeedbackRating === "irrelevant"
                                     ? "已标记：引用无关"
                                     : "";
+                              const sourceOcrConfidence =
+                                formatOcrConfidence(source.ocrConfidence);
                               const sourceFileMeta = [
                                 formatSourcePosition(source),
                                 source.pdfParseMethod === "ocr"
-                                  ? "OCR 识别"
+                                  ? source.ocrQuality === "low"
+                                    ? `OCR 质量较低${sourceOcrConfidence ? ` ${sourceOcrConfidence}` : ""}`
+                                    : `OCR 识别${sourceOcrConfidence ? ` ${sourceOcrConfidence}` : ""}`
                                   : "",
                                 source.fileName !== source.title
                                   ? source.fileName

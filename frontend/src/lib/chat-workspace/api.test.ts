@@ -19,6 +19,7 @@ import {
   loadVectorIndexHealth,
   postChatMessage,
   permanentlyDeleteKnowledgeFile,
+  reindexKnowledgeFileOcrPage,
   renameKnowledgeBase,
   restoreKnowledgeBase,
   submitMessageFeedback,
@@ -151,6 +152,33 @@ describe("chat workspace api", () => {
       `/api/chat/knowledge-files/${fileId}/content`,
       { method: "GET" },
       { fallbackMessage: "读取原始文件失败，请稍后再试。" },
+    );
+  });
+
+  it("submits a PDF OCR page reindex job", async () => {
+    const fileId = "11111111-1111-4111-8111-111111111111";
+    const jobId = "22222222-2222-4222-8222-222222222222";
+    authenticatedJsonMock.mockResolvedValueOnce({
+      success: true,
+      page_number: 2,
+      job: {
+        id: jobId,
+        knowledge_file_id: fileId,
+        status: "queued",
+      },
+    });
+
+    await expect(reindexKnowledgeFileOcrPage(fileId, 2)).resolves.toEqual(
+      expect.objectContaining({
+        id: jobId,
+        knowledgeFileId: fileId,
+        status: "queued",
+      }),
+    );
+    expect(authenticatedJsonMock).toHaveBeenCalledWith(
+      `/api/chat/knowledge-files/${fileId}/ocr/pages/2/reindex`,
+      { method: "POST" },
+      { fallbackMessage: "提交 OCR 重新识别失败，请稍后再试。" },
     );
   });
 

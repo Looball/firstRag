@@ -423,6 +423,24 @@ export async function indexKnowledgeFile(fileId: string) {
   return getVectorIndexJobs(data);
 }
 
+export async function reindexKnowledgeFileOcrPage(
+  fileId: string,
+  pageNumber: number,
+) {
+  const data = await authenticatedJson<VectorIndexResponse>(
+    `/api/chat/knowledge-files/${encodeURIComponent(
+      fileId,
+    )}/ocr/pages/${pageNumber}/reindex`,
+    { method: "POST" },
+    { fallbackMessage: "提交 OCR 重新识别失败，请稍后再试。" },
+  );
+  const job = getVectorIndexJobs(data)[0];
+  if (!job) {
+    throw new Error("OCR 重新识别响应缺少任务信息。");
+  }
+  return job;
+}
+
 export async function deleteKnowledgeFileVectors(fileId: string) {
   await authenticatedText(
     `/api/chat/knowledge-files/${encodeURIComponent(fileId)}/vectors`,

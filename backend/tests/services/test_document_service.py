@@ -15,9 +15,11 @@ import pymupdf
 from app.services.documents.document_service import (
     ImageDocumentParseError,
     PdfOcrError,
+    PdfOcrResult,
     build_vector_store,
     get_document_paths,
     load_document,
+    parse_tesseract_tsv_confidence,
     run_pdf_page_ocr,
     split_documents,
 )
@@ -259,7 +261,11 @@ class DocumentServiceTests(unittest.TestCase):
                 10,
             ), patch(
                 "app.services.documents.document_service.run_pdf_page_ocr",
-                return_value="T072 OCR RECOGNIZED TARGET",
+                return_value=PdfOcrResult(
+                    text="T072 OCR RECOGNIZED TARGET",
+                    confidence=88.25,
+                    word_count=4,
+                ),
             ) as run_ocr:
                 documents = load_document(
                     pdf_path,
@@ -273,6 +279,9 @@ class DocumentServiceTests(unittest.TestCase):
             ["native_text", "ocr"],
         )
         self.assertEqual(documents[1].metadata["ocr_engine"], "tesseract")
+        self.assertEqual(documents[1].metadata["ocr_confidence"], 88.25)
+        self.assertEqual(documents[1].metadata["ocr_quality"], "good")
+        self.assertEqual(documents[1].metadata["ocr_attempt"], 1)
         self.assertEqual(documents[1].metadata["page_number"], 2)
         self.assertIn("OCR RECOGNIZED", documents[1].page_content)
         run_ocr.assert_called_once()
@@ -303,6 +312,45 @@ class DocumentServiceTests(unittest.TestCase):
                     )
 
         run_ocr.assert_not_called()
+
+    def test_forced_pdf_page_ocr_records_second_attempt(self) -> None:
+        """强制页应进入 OCR，并记录重新识别 attempt。"""
+        with TemporaryDirectory() as temporary_directory:
+            pdf_path = Path(temporary_directory) / "native.pdf"
+            create_pdf_fixture(pdf_path, ["T073 NATIVE PAGE"])
+
+            with patch(
+                "app.services.documents.document_service.run_pdf_page_ocr",
+                return_value=PdfOcrResult(
+                    text="T073 FORCED OCR PAGE",
+                    confidence=52.5,
+                    word_count=4,
+                ),
+            ):
+                documents = load_document(
+                    pdf_path,
+                    file_id="forced-ocr",
+                    user_id=7,
+                    force_ocr_page_numbers={1},
+                )
+
+        self.assertEqual(documents[0].page_content, "T073 FORCED OCR PAGE")
+        self.assertEqual(documents[0].metadata["ocr_attempt"], 2)
+        self.assertEqual(documents[0].metadata["ocr_quality"], "low")
+        self.assertEqual(documents[0].metadata["ocr_confidence"], 52.5)
+
+    def test_tesseract_confidence_is_weighted_by_word_characters(self) -> None:
+        """较长 word 应在页面置信度中获得更高权重。"""
+        confidence, word_count = parse_tesseract_tsv_confidence(
+            "level\tpage_num\tblock_num\tpar_num\tline_num\tword_num\t"
+            "left\ttop\twidth\theight\tconf\ttext\n"
+            "5\t1\t1\t1\t1\t1\t0\t0\t10\t10\t50\tA\n"
+            "5\t1\t1\t1\t1\t2\t0\t0\t10\t10\t90\tLONG\n"
+            "4\t1\t1\t1\t1\t0\t0\t0\t10\t10\t-1\t\n",
+        )
+
+        self.assertEqual(confidence, 82.0)
+        self.assertEqual(word_count, 2)
 
     def test_pdf_ocr_timeout_returns_safe_error(self) -> None:
         """Tesseract 单页超时应转换为稳定且不含内部路径的错误。"""

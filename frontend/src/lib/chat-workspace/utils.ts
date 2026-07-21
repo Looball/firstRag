@@ -109,6 +109,14 @@ export function formatSourcePosition(
 }
 
 
+export function formatOcrConfidence(confidence?: number) {
+  if (confidence === undefined || !Number.isFinite(confidence)) {
+    return "";
+  }
+  return `${Math.round(Math.min(100, Math.max(0, confidence)))}%`;
+}
+
+
 export function buildOriginalFilePreviewUrl(
   objectUrl: string,
   mimeType: string,
@@ -973,6 +981,19 @@ export function toChatSource(value: unknown, index: number): ChatSource | null {
     (metadataRecord
       ? getStringField(metadataRecord, ["pdf_parse_method"])
       : "");
+  const ocrConfidence =
+    getOptionalNumberField(source, ["ocr_confidence"]) ??
+    (metadataRecord
+      ? getOptionalNumberField(metadataRecord, ["ocr_confidence"])
+      : undefined);
+  const ocrQuality =
+    getStringField(source, ["ocr_quality"]) ||
+    (metadataRecord ? getStringField(metadataRecord, ["ocr_quality"]) : "");
+  const ocrAttempt =
+    getOptionalNumberField(source, ["ocr_attempt"]) ??
+    (metadataRecord
+      ? getOptionalNumberField(metadataRecord, ["ocr_attempt"])
+      : undefined);
   const rerankScore = getOptionalNumberField(source, [
     "rerank_score",
     "score",
@@ -1110,6 +1131,9 @@ export function toChatSource(value: unknown, index: number): ChatSource | null {
     ...(paragraphStart !== undefined ? { paragraphStart } : {}),
     ...(paragraphEnd !== undefined ? { paragraphEnd } : {}),
     ...(pdfParseMethod ? { pdfParseMethod } : {}),
+    ...(ocrConfidence !== undefined ? { ocrConfidence } : {}),
+    ...(ocrQuality ? { ocrQuality } : {}),
+    ...(ocrAttempt !== undefined ? { ocrAttempt } : {}),
     ...(vectorScore !== undefined ? { vectorScore } : {}),
     ...(fulltextScore !== undefined ? { fulltextScore } : {}),
     ...(rerankScore !== undefined ? { rerankScore } : {}),
@@ -1143,6 +1167,9 @@ export function hasSourceShape(value: Record<string, unknown>) {
     "paragraph_start",
     "paragraph_end",
     "pdf_parse_method",
+    "ocr_confidence",
+    "ocr_quality",
+    "ocr_attempt",
     "vector_score",
     "fulltext_score",
     "rerank_score",

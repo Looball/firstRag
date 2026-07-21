@@ -16,6 +16,7 @@ def enqueue_vector_index_job(
     knowledge_base_id: UUID | None = None,
     index_version: int = 0,
     priority: int = 100,
+    options: dict[str, Any] | None = None,
 ) -> Row:
     """创建文件向量化任务；如果已有活跃任务，则返回已有任务。"""
     job_id = uuid4()
@@ -29,9 +30,10 @@ def enqueue_vector_index_job(
                     knowledge_file_id,
                     knowledge_base_id,
                     index_version,
-                    priority
+                    priority,
+                    options
                 )
-                VALUES (%s, %s, %s, %s, %s, %s)
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
                 ON CONFLICT DO NOTHING
                 RETURNING
                     id,
@@ -44,6 +46,7 @@ def enqueue_vector_index_job(
                     max_attempts,
                     error_message,
                     result,
+                    options,
                     created_at,
                     updated_at;
                 """,
@@ -54,6 +57,7 @@ def enqueue_vector_index_job(
                     knowledge_base_id,
                     index_version,
                     priority,
+                    Jsonb(options or {}),
                 ),
             )
             row = cursor.fetchone()
@@ -75,6 +79,7 @@ def enqueue_vector_index_job(
                     max_attempts,
                     error_message,
                     result,
+                    options,
                     created_at,
                     updated_at
                 FROM vector_index_jobs
@@ -113,6 +118,7 @@ def get_user_vector_index_job(
             max_attempts,
             error_message,
             result,
+            options,
             created_at,
             updated_at,
             started_at,
@@ -147,6 +153,7 @@ def get_latest_vector_index_jobs_by_file_ids(
             max_attempts,
             error_message,
             result,
+            options,
             created_at,
             updated_at,
             started_at,
@@ -280,6 +287,7 @@ def claim_next_vector_index_job(worker_id: str) -> Row | None:
                     job.max_attempts,
                     job.error_message,
                     job.result,
+                    job.options,
                     job.created_at,
                     job.updated_at;
                 """,

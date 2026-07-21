@@ -170,6 +170,48 @@ class VectorIndexWorkerLoggingTests(unittest.TestCase):
         self.assertEqual(stdout.getvalue(), "")
         mark_failed.assert_called_once_with(job_id, error_message)
 
+    def test_process_job_passes_internal_ocr_options_to_indexer(self) -> None:
+        """worker 应把 job 中受控 OCR 页选项传给索引 service。"""
+        job_id = uuid4()
+        file_id = uuid4()
+        options = {"force_ocr_page_numbers": [2]}
+        job = {
+            "id": job_id,
+            "user_id": 1,
+            "knowledge_file_id": file_id,
+            "index_version": 2,
+            "options": options,
+        }
+        file_record = {
+            "id": file_id,
+            "status": "pending",
+            "index_version": 2,
+        }
+        with unittest.mock.patch(
+            "app.workers.vector_index_worker.reclaim_expired_vector_index_jobs",
+            return_value=0,
+        ), unittest.mock.patch(
+            "app.workers.vector_index_worker.claim_next_vector_index_job",
+            return_value=job,
+        ), unittest.mock.patch(
+            "app.workers.vector_index_worker.get_user_knowledge_file",
+            return_value=file_record,
+        ), unittest.mock.patch(
+            "app.workers.vector_index_worker.index_knowledge_file_record",
+            return_value={"chunk_count": 1, "character_count": 10},
+        ) as index_file, unittest.mock.patch(
+            "app.workers.vector_index_worker.mark_vector_index_job_succeeded",
+        ), self.patch_worker_runtime():
+            processed = process_next_vector_index_job("worker-1")
+
+        self.assertTrue(processed)
+        index_file.assert_called_once_with(
+            file_record,
+            1,
+            2,
+            job_options=options,
+        )
+
     def test_lock_busy_defers_job_without_processing_file(self) -> None:
         """Redis 短租约被占用时应短暂退回队列，避免重复索引。"""
         job_id = uuid4()

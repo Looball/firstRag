@@ -40,6 +40,22 @@ from app.services.vectors.embedding_settings_service import (
 logger = logging.getLogger(__name__)
 
 
+def get_force_ocr_page_numbers(options: object) -> set[int]:
+    """从内部 job options 提取正整数 OCR 页码，忽略异常字段。"""
+    if not isinstance(options, dict):
+        return set()
+    page_numbers = options.get("force_ocr_page_numbers")
+    if not isinstance(page_numbers, list):
+        return set()
+    return {
+        page_number
+        for page_number in page_numbers
+        if isinstance(page_number, int)
+        and not isinstance(page_number, bool)
+        and page_number >= 1
+    }
+
+
 def _normalize_collection_name_part(value: str) -> str:
     """将 collection 名称片段规范化为 Chroma 可接受的安全字符。"""
     normalized = re.sub(r"[^a-zA-Z0-9_-]+", "-", value.strip().lower())
@@ -164,6 +180,7 @@ def index_file_vectors(
     original_name: str | None = None,
     persist_directory: str | Path = VECTOR_STORE_PATH,
     collection_name: str = CHROMA_COLLECTION_NAME,
+    force_ocr_page_numbers: set[int] | None = None,
 ) -> dict[str, Any]:
     """将单个知识文件解析、切分并写入 Chroma。"""
     file_path = Path(storage_path)
@@ -175,6 +192,7 @@ def index_file_vectors(
         file_id=file_id,
         user_id=user_id,
         original_name=original_name or file_path.name,
+        force_ocr_page_numbers=force_ocr_page_numbers,
     )
     chunks = split_documents(documents)
     if not chunks:
@@ -227,6 +245,7 @@ def index_file_vectors(
         ),
         "collection_name": actual_collection_name,
         "persist_directory": str(persist_directory),
+        "force_ocr_page_numbers": sorted(force_ocr_page_numbers or set()),
     }
 
 
@@ -234,6 +253,7 @@ def index_knowledge_file_record(
     file_record: Row | dict[str, Any],
     user_id: int,
     index_version: int,
+    job_options: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """索引单条知识文件记录，并同步文件处理状态。
 
@@ -259,6 +279,7 @@ def index_knowledge_file_record(
                 storage_path=file_record["storage_path"],
                 index_version=index_version,
                 original_name=str(file_record["original_name"]),
+                force_ocr_page_numbers=get_force_ocr_page_numbers(job_options),
             )
         except Exception:
             update_knowledge_file_status(

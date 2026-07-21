@@ -17,13 +17,15 @@
 
 1. `vector_index_worker` 领取 `queued` 任务。
 2. 使用 PostgreSQL advisory lock 避免同一文件并发索引。
-3. `document_service` 加载 PDF、DOCX、Markdown、TXT 或图片知识文件。PDF 先按页解析原生文本，无有效文本层的页面渲染为 PNG 并通过本地 Tesseract OCR，同时写入真实页码和解析方式 metadata；DOCX 从 OOXML 主文档按标题和段落边界加载，保留原始段落范围。图片文件会使用当前用户配置的 vision 聊天模型解析为可检索 Markdown；聊天图片附件不走这条入库链路。
+3. `document_service` 加载 PDF、DOCX、Markdown、TXT 或图片知识文件。PDF 先按页解析原生文本，无有效文本层的页面渲染为 PNG 并通过本地 Tesseract OCR；同一次识别同时生成正文和 TSV word confidence，写入真实页码、解析方式、字符加权置信度、质量等级和识别次数 metadata。DOCX 从 OOXML 主文档按标题和段落边界加载，保留原始段落范围。图片文件会使用当前用户配置的 vision 聊天模型解析为可检索 Markdown；聊天图片附件不走这条入库链路。
 4. 文本或图片解析结果切分为 chunk；同一文件跨 PDF page 或 DOCX block 使用全局连续的 `chunk_index`。
 5. 当前登录用户保存的 embedding provider 生成向量，支持 Qwen、智谱、OpenAI、Voyage、Cohere、Jina 和自定义 OpenAI-compatible embedding API。用户可按厂商保存多份 API Key，当前生效配置决定实际调用的 provider/model/base_url。
 6. Chroma 保存向量；Compose 中 worker 与 backend 均通过 HTTP client 访问独立
    `chroma` service，避免多个 embedded 进程共享目录产生索引可见性问题。
 7. PostgreSQL `knowledge_file_chunks` 保存 chunk 正文和 metadata，用于全文检索。
 8. 更新文件状态和任务状态。
+
+用户可从低质量 OCR 引用的原文预览中提交指定页重新识别。后端只允许当前用户、已完成索引且确由 OCR 生成的 PDF 页面；请求递增文件 `index_version`，把经过校验的强制页写入内部 job options，再由原有 worker 异步重建整个文件索引。重建期间该文件暂不可检索，旧回答继续绑定旧 index version，不会被后台静默替换；任务成功后需要重新提问才能获得采用新文本的引用。
 
 ## 聊天生成
 

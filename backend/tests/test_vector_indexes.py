@@ -198,6 +198,61 @@ class VectorIndexJobHealthTests(unittest.TestCase):
         )
         enqueue.assert_called_once()
 
+    def test_reindex_pdf_ocr_page_returns_async_job(self) -> None:
+        """OCR 页重新识别接口应返回新版本异步任务。"""
+        file_id = uuid4()
+        job_id = uuid4()
+        with patch(
+            "app.api.vector_indexes.get_user_knowledge_file",
+            return_value={"id": file_id, "original_name": "scan.pdf"},
+        ), patch(
+            "app.api.vector_indexes.ensure_user_embedding_settings",
+        ), patch(
+            "app.api.vector_indexes.enqueue_pdf_page_ocr_reindex",
+            return_value={
+                "file_id": str(file_id),
+                "page_number": 2,
+                "previous_index_version": 1,
+                "index_version": 2,
+                "job": {
+                    "id": str(job_id),
+                    "status": "queued",
+                },
+            },
+        ) as enqueue:
+            response = self.client.post(
+                f"/chat/knowledge-files/{file_id}/ocr/pages/2/reindex",
+            )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertTrue(payload["success"])
+        self.assertEqual(payload["page_number"], 2)
+        self.assertEqual(payload["index_version"], 2)
+        self.assertEqual(payload["job"]["id"], str(job_id))
+        enqueue.assert_called_once_with(
+            user_id=1,
+            knowledge_file_id=file_id,
+            page_number=2,
+        )
+
+    def test_reindex_pdf_ocr_page_hides_inaccessible_file(self) -> None:
+        """跨用户文件不能通过 OCR 页接口被探测。"""
+        file_id = uuid4()
+        with patch(
+            "app.api.vector_indexes.get_user_knowledge_file",
+            return_value=None,
+        ), patch(
+            "app.api.vector_indexes.enqueue_pdf_page_ocr_reindex",
+        ) as enqueue:
+            response = self.client.post(
+                f"/chat/knowledge-files/{file_id}/ocr/pages/1/reindex",
+            )
+
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(response.json(), {"detail": "文件不存在"})
+        enqueue.assert_not_called()
+
     def test_index_knowledge_base_vectors_rejects_batch_quota(self) -> None:
         """知识库批量向量化超过单次文件上限时应给出配额提示。"""
         knowledge_base_id = uuid4()
