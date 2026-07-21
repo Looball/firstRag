@@ -40,7 +40,7 @@
 
 ## 当前基线
 
-- 2026-07-21 已刷新静态回归验收：后端 302 个 pytest 用例和 30 个 subtests 通过、前端 lint 0 error（保留 2 个 `<img>` 性能 warning）、Vitest 67 个用例通过、Next 16.2.10 production build 通过。
+- 2026-07-21 已刷新静态回归验收：后端 311 个 pytest 用例和 30 个 subtests 通过、前端 lint 0 error（保留 2 个 `<img>` 性能 warning）、Vitest 69 个用例通过、Next 16.2.10 production build 通过。
 - 2026-07-20 已完成前端依赖安全审计：Next.js 从 16.2.2 升级到 16.2.10，已消除已确认的 high findings；Babel、brace-expansion 和 js-yaml 开发依赖补丁已更新。`npm audit` 仍报告 Next 内嵌 PostCSS 的 2 个 moderate 条目，当前项目没有用户可控 CSS 进入 stringify 的运行路径，且审计器只提供降级到 Next 9.3.3 的 breaking fix，因此保留为已 triage 的不可达例外。
 - 2026-07-20 已完成后端与镜像依赖安全审计：PyJWT、python-dotenv 和 python-multipart 已升级到安全补丁版本；`pip-audit` 只剩 ChromaDB 1.5.9 的 no-fix finding，由精确到版本且 2026-08-20 到期的内网不可达例外管理；Trivy 对当前 backend/frontend 镜像的可修复 high/critical OS finding 均为 0。
 - 2026-07-20 已完成 GitHub Actions supply chain 固化：7 个外部 Action 引用均固定到官方 release 的 40 位 commit SHA，CI 自动拒绝 tag/branch/短 SHA 和缺失版本注释；Dependabot 每周聚合提出 Action 更新 PR。
@@ -79,7 +79,7 @@
 | `PLAN-20260721-03` | 2026-07-21 | `Done` | 为 PDF/DOCX 引用补充可验证的位置 metadata，并增强原文定位展示。 | `T-071` |
 | `PLAN-20260721-04` | 2026-07-21 | `Done` | 为无文本层的扫描 PDF 增加本地 OCR fallback，并保留页码级引用。 | `T-072` |
 | `PLAN-20260721-05` | 2026-07-21 | `Done` | 记录 OCR 置信度、提示低质量页面，并支持单页异步重新识别。 | `T-073` |
-| `PLAN-20260721-06` | 2026-07-21 | `Doing` | 支持 OCR 页面人工校对、持久化修订和可撤销的异步索引重建。 | `T-074` |
+| `PLAN-20260721-06` | 2026-07-21 | `Done` | 支持 OCR 页面人工校对、持久化修订和可撤销的异步索引重建。 | `T-074` |
 
 ## 任务总览
 
@@ -158,7 +158,7 @@
 | `T-071` | `PLAN-20260721-03` | `P1` | `Done` | 持久化 PDF 页码和 DOCX 段落位置 | 2026-07-21 | `d03de10` |
 | `T-072` | `PLAN-20260721-04` | `P1` | `Done` | 为扫描 PDF 增加本地 OCR fallback | 2026-07-21 | `2a9ef37` |
 | `T-073` | `PLAN-20260721-05` | `P1` | `Done` | 增加 OCR 质量诊断与单页重新识别 | 2026-07-21 | `729e575` |
-| `T-074` | `PLAN-20260721-06` | `P1` | `Doing` | 支持 OCR 页面人工校对并重新索引 | — | — |
+| `T-074` | `PLAN-20260721-06` | `P1` | `Done` | 支持 OCR 页面人工校对并重新索引 | 2026-07-21 | `e6cc52d` |
 
 ## 新计划接入流程
 
@@ -2867,7 +2867,7 @@ git diff --check
 
 - 来源计划：`PLAN-20260721-06`
 - 优先级：`P1`
-- 状态：`Doing`
+- 状态：`Done`
 - 目标：允许用户在原文预览中修正 OCR 页面文本，把修订持久化并安全重建索引，同时保留原始 OCR 质量信息和历史引用版本。
 - 技术边界：
   - 人工修订按 `user_id + knowledge_file_id + page_number` 持久化，不直接原地修改已有 chunks 或历史 message sources。
@@ -2886,6 +2886,17 @@ git diff --check
   - 撤销修订后新索引恢复 Tesseract 文本，修订记录被删除且历史 source 不被改写。
   - 重复提交、索引中的文件和异常 worker 状态有明确反馈，不产生并发版本覆盖。
   - 后端、前端测试、production build、Docker Compose migration/smoke 和 production preflight 通过。
+- 相关提交：`e6cc52d`。
+- 完成记录：
+  - 新增 migration `006_create_pdf_ocr_corrections.sql` 和 `knowledge_file_ocr_corrections` 表，以 `user_id + knowledge_file_id + page_number` 保存原始 OCR 文本、人工正文、revision 和时间戳；文件或用户永久删除时由外键级联清理。
+  - 新增页级 correction `GET/PATCH/DELETE` API；保存与撤销均校验当前用户、已索引 OCR PDF 页面、embedding 配置和 Redis 限流，并通过 file advisory lock 递增 index version、异步重建完整文件。
+  - worker 仍运行 Tesseract 获取文本和置信度，再在切分前应用当前人工正文；新 chunks/source 标记 `ocr_correction_applied`、revision、字符数和更新时间，原 OCR confidence/quality 保持可审计，历史引用继续绑定旧 index version。
+  - 原文预览新增完整页编辑、字符计数、无变化阻断、保存状态、两步撤销、失败重试和任务轮询；人工修订后的引用卡片优先展示 revision 与原 OCR 置信度。
+  - 两页纯图片 PDF 已通过 Poppler 144 DPI 渲染目检；真实账号 smoke 完成上传与首次 OCR、读取整页、保存人工文本、处理中重复提交 `409`、revision 1 chunk/metadata 验证、撤销后恢复 Tesseract 文本和永久删除，数据库测试文件与 correction 残留均为 0。
+  - `cd backend && conda run -n firstrag python -m pytest -q`：311 passed、8 warnings、30 subtests passed。
+  - `cd frontend && npm test -- --run`：10 个 test files、69 tests passed；`npm run lint`：0 error、保留 2 个既有 `<img>` performance warnings；Next 16.2.10 production build 通过。
+  - `docker compose up -d --build`、服务状态与近期日志检查通过；migration 首次应用 006，backend、worker、frontend 均正常启动，Redis、PostgreSQL、Chroma healthy。
+  - production preflight、Chroma runtime health、migration dry-run 和 `git diff --check` 全部通过。
 - 建议验证命令：
 
 ```bash
