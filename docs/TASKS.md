@@ -77,7 +77,7 @@
 | `PLAN-20260721-01` | 2026-07-21 | `Done` | 补齐知识库与知识文件的用户可见生命周期，支持安全删除、恢复和跨存储清理。 | `T-069` |
 | `PLAN-20260721-02` | 2026-07-21 | `Done` | 增强回答引用的可核验性，支持按 chunk 查看前后文并安全打开原始文件。 | `T-070` |
 | `PLAN-20260721-03` | 2026-07-21 | `Done` | 为 PDF/DOCX 引用补充可验证的位置 metadata，并增强原文定位展示。 | `T-071` |
-| `PLAN-20260721-04` | 2026-07-21 | `Doing` | 为无文本层的扫描 PDF 增加本地 OCR fallback，并保留页码级引用。 | `T-072` |
+| `PLAN-20260721-04` | 2026-07-21 | `Done` | 为无文本层的扫描 PDF 增加本地 OCR fallback，并保留页码级引用。 | `T-072` |
 
 ## 任务总览
 
@@ -154,7 +154,7 @@
 | `T-069` | `PLAN-20260721-01` | `P1` | `Done` | 补齐知识库和知识文件完整生命周期 | 2026-07-21 | `ac4397b` |
 | `T-070` | `PLAN-20260721-02` | `P1` | `Done` | 实现来源原文预览与精确引用跳转 | 2026-07-21 | `11ed2e4` |
 | `T-071` | `PLAN-20260721-03` | `P1` | `Done` | 持久化 PDF 页码和 DOCX 段落位置 | 2026-07-21 | `d03de10` |
-| `T-072` | `PLAN-20260721-04` | `P1` | `Doing` | 为扫描 PDF 增加本地 OCR fallback | — | — |
+| `T-072` | `PLAN-20260721-04` | `P1` | `Done` | 为扫描 PDF 增加本地 OCR fallback | 2026-07-21 | `2a9ef37` |
 
 ## 新计划接入流程
 
@@ -2769,7 +2769,7 @@ git diff --check
 
 - 来源计划：`PLAN-20260721-04`
 - 优先级：`P1`
-- 状态：`Doing`
+- 状态：`Done`
 - 目标：让图片型、无可复制文本层的 PDF 也能进入现有 RAG 索引，并继续提供准确的页码级引用定位。
 - 技术边界：
   - 优先使用 `pymupdf4llm` 原生文本；仅低于有效文本阈值的页面渲染为 PNG 并调用本地 Tesseract。
@@ -2787,6 +2787,19 @@ git diff --check
   - 混合 PDF 只 OCR 扫描页，原生文本页继续标记为 `native_text`。
   - OCR 不可用、超时或页数超限时任务给出稳定恢复提示，worker 能继续处理后续任务。
   - 后端、前端测试、production build、Docker Compose smoke 和 production preflight 通过。
+- 相关提交：`2a9ef37`。
+- 完成记录：
+  - 完成日期：2026-07-21。
+  - PDF 解析显式关闭 `pymupdf4llm` 隐式 OCR，先读取逐页原生文本，仅对低于有效字符阈值的页面按配置 DPI 渲染 PNG 并调用本地 Tesseract；原生文本页和 OCR 页分别标记为 `native_text` 与 `ocr`。
+  - 新增 OCR 开关、语言、DPI、单页超时、原生文本阈值和单文件最大 OCR 页数配置；语言参数不经过 shell，缺失引擎、超时、页数超限和识别失败统一归类为安全的 `ocr_error`。
+  - OCR metadata 随 PostgreSQL chunks、Chroma vectors、source serializer 和 chunk preview 传递；前端引用卡片和原文弹窗会显示“OCR 识别”，同时继续使用 T-071 的真实页码定位。
+  - backend/worker 镜像安装 Tesseract 5.5.0 及 `chi_sim`、`eng` 语言包；Compose 首次构建和 Next.js 16.2.10 production build 通过。
+  - 三页纯图片 PDF 已通过 Poppler 逐页渲染和目视检查；本机与 Compose worker 均准确识别三页目标文字，真实异步任务一次成功，chunk 页码为 1/2/3，第二页包含 `PRECISE TARGET`。
+  - 真实账号 smoke 完成登录、上传、异步 OCR 索引、三个 chunk preview 和永久删除；清理后 PostgreSQL files/chunks/jobs 与 Chroma vectors 残留计数均为 0。
+  - `cd backend && conda run -n firstrag python -m pytest -q`：292 passed、8 warnings、30 subtests passed。
+  - `cd frontend && npm test -- --run`：10 个 test files、66 tests passed；`npm run lint`：0 error、保留 2 个既有 `<img>` performance warnings。
+  - `docker compose ps -a` 和最近 10 分钟日志通过：Redis、PostgreSQL、Chroma healthy，backend、worker、frontend Up，migration `applied=0 skipped=5`；日志只包含预期 smoke 请求。
+  - production preflight、Docker Compose config、Chroma runtime health、migration dry-run 和 `git diff --check` 全部通过。
 - 建议验证命令：
 
 ```bash
