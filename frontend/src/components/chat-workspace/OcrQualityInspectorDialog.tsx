@@ -22,6 +22,10 @@ import {
   type OcrQualityFilter,
   type OcrQualitySort,
 } from "@/lib/chat-workspace/ocr-quality";
+import {
+  formatOcrStrategyDetail,
+  formatOcrStrategyLabel,
+} from "@/lib/chat-workspace/ocr-strategy";
 
 import { SourcePreviewDialog } from "./SourcePreviewDialog";
 import { OcrHistoryDialog } from "./OcrHistoryDialog";
@@ -460,6 +464,14 @@ export function OcrQualityInspectorDialog({
                                 : "质量正常"}
                           </span>
                           <span className="text-[#8a9591]">第 {page.ocrAttempt} 次识别</span>
+                          <span className="bg-[#edf3f0] px-2 py-0.5 text-[#526b65]">
+                            {formatOcrStrategyLabel(page.ocrStrategy)} · {formatOcrStrategyDetail(page.ocrPsm, page.ocrRotation)}
+                          </span>
+                          {page.ocrCandidateCount > 1 ? (
+                            <span className="font-utility bg-[#dcece6] px-2 py-0.5 text-[9px] font-semibold uppercase text-[#176b62]">
+                              {page.ocrCandidateCount} 候选选优
+                            </span>
+                          ) : null}
                           {page.latestConfidenceDelta !== null ? (
                             <span className={page.latestConfidenceDelta >= 0
                               ? "font-utility text-[10px] font-semibold text-[#176b62]"

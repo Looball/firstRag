@@ -47,6 +47,23 @@ class PdfOcrHistoryServiceTests(unittest.TestCase):
                     "ocr_text_sha256": "b" * 64,
                     "ocr_text_source": "tesseract",
                     "correction_revision": None,
+                    "ocr_strategy": "rotate_90_gray",
+                    "ocr_preprocessing": "grayscale",
+                    "ocr_psm": 6,
+                    "ocr_rotation": 90,
+                    "ocr_candidate_count": 2,
+                    "ocr_candidate_results": [{
+                        "strategy": "rotate_90_gray",
+                        "preprocessing": "grayscale",
+                        "psm": 6,
+                        "rotation": 90,
+                        "status": "succeeded",
+                        "confidence": 82.5,
+                        "word_count": 12,
+                        "effective_characters": 10,
+                        "text_sha256": "b" * 64,
+                        "selected": True,
+                    }],
                     "created_at": datetime(2026, 7, 22, 3, 0, tzinfo=UTC),
                 },
                 {
@@ -76,6 +93,11 @@ class PdfOcrHistoryServiceTests(unittest.TestCase):
         self.assertEqual(report["runs"][0]["previous_run_id"], str(previous_id))
         self.assertEqual(report["runs"][0]["word_count_delta"], 2)
         self.assertTrue(report["runs"][0]["text_changed"])
+        self.assertEqual(report["runs"][0]["ocr_strategy"], "rotate_90_gray")
+        self.assertEqual(report["runs"][0]["ocr_rotation"], 90)
+        self.assertTrue(
+            report["runs"][0]["ocr_candidate_results"][0]["selected"],
+        )
 
     def test_report_returns_empty_history_for_valid_ocr_page(self) -> None:
         """迁移前尚无历史时应返回可理解空清单。"""

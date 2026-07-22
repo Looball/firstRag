@@ -96,6 +96,11 @@ export type PdfOcrQualityPage = {
   ocrConfidence: number | null;
   ocrQuality: string;
   ocrAttempt: number;
+  ocrStrategy: string;
+  ocrPreprocessing: string;
+  ocrPsm: number;
+  ocrRotation: number;
+  ocrCandidateCount: number;
   needsReview: boolean;
   hasCorrection: boolean;
   correctionRevision: number;
@@ -103,6 +108,19 @@ export type PdfOcrQualityPage = {
   historyCount: number;
   latestConfidenceDelta: number | null;
   excerpt: string;
+};
+
+export type PdfOcrCandidateResult = {
+  strategy: string;
+  preprocessing: string;
+  psm: number;
+  rotation: number;
+  status: "succeeded" | "failed" | "skipped";
+  confidence: number | null;
+  wordCount: number;
+  effectiveCharacters: number;
+  textSha256: string | null;
+  selected: boolean;
 };
 
 export type PdfOcrQualityReport = {
@@ -138,6 +156,12 @@ export type PdfOcrHistoryRun = {
   ocrTextSha256: string;
   ocrTextSource: string;
   correctionRevision: number | null;
+  ocrStrategy: string;
+  ocrPreprocessing: string;
+  ocrPsm: number;
+  ocrRotation: number;
+  ocrCandidateCount: number;
+  ocrCandidateResults: PdfOcrCandidateResult[];
   createdAt: string;
   previousRunId: string | null;
   confidenceDelta: number | null;

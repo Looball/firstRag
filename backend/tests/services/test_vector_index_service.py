@@ -66,7 +66,24 @@ class VectorIndexServiceTests(unittest.TestCase):
                 "ocr_word_count": 7,
                 "ocr_text_source": "manual_correction",
                 "ocr_correction_revision": 3,
+                "ocr_strategy": "single_block_binary",
+                "ocr_preprocessing": "binary",
+                "ocr_psm": 6,
+                "ocr_rotation": 0,
+                "ocr_candidate_count": 2,
                 "_ocr_history_text": "RAW TESSERACT OCR",
+                "_ocr_history_candidates": [{
+                    "strategy": "single_block_binary",
+                    "preprocessing": "binary",
+                    "psm": 6,
+                    "rotation": 0,
+                    "status": "succeeded",
+                    "confidence": 81.25,
+                    "word_count": 7,
+                    "effective_characters": 15,
+                    "text_sha256": "c" * 64,
+                    "selected": True,
+                }],
             },
         )
 
@@ -80,7 +97,11 @@ class VectorIndexServiceTests(unittest.TestCase):
         self.assertEqual(entries[0]["ocr_text"], "RAW TESSERACT OCR")
         self.assertEqual(entries[0]["ocr_attempt"], 4)
         self.assertEqual(entries[0]["correction_revision"], 3)
+        self.assertEqual(entries[0]["ocr_strategy"], "single_block_binary")
+        self.assertEqual(entries[0]["ocr_candidate_count"], 1)
+        self.assertTrue(entries[0]["ocr_candidate_results"][0]["selected"])
         self.assertNotIn("_ocr_history_text", document.metadata)
+        self.assertNotIn("_ocr_history_candidates", document.metadata)
 
     def test_get_vector_store_uses_http_client_when_host_is_configured(
         self,

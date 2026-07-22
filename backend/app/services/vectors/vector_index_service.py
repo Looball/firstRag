@@ -48,6 +48,7 @@ from app.services.vectors.embedding_settings_service import (
 
 logger = logging.getLogger(__name__)
 OCR_HISTORY_TEXT_MAX_CHARACTERS = 100_000
+OCR_HISTORY_MAX_CANDIDATES = 6
 
 
 def get_force_ocr_page_numbers(options: object) -> set[int]:
@@ -87,6 +88,78 @@ def _normalize_ocr_history_positive_int(
     return normalized if normalized >= 1 else default
 
 
+def _normalize_ocr_history_nonnegative_int(
+    value: object,
+    default: int = 0,
+) -> int:
+    """把候选数量与字符统计规范化为非负整数。"""
+    if isinstance(value, bool):
+        return default
+    try:
+        normalized = int(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return default
+    return normalized if normalized >= 0 else default
+
+
+def _normalize_ocr_history_candidates(value: object) -> list[dict[str, Any]]:
+    """约束内部候选摘要，避免把任意 metadata 写入历史 JSONB。"""
+    if not isinstance(value, list):
+        return []
+
+    candidates: list[dict[str, Any]] = []
+    for raw_candidate in value[:OCR_HISTORY_MAX_CANDIDATES]:
+        if not isinstance(raw_candidate, dict):
+            continue
+        status = str(raw_candidate.get("status") or "failed")
+        if status not in {"succeeded", "failed", "skipped"}:
+            status = "failed"
+        rotation = raw_candidate.get("rotation")
+        normalized_rotation = (
+            int(rotation)
+            if isinstance(rotation, int)
+            and not isinstance(rotation, bool)
+            and rotation in {0, 90, 180, 270}
+            else 0
+        )
+        psm = raw_candidate.get("psm")
+        normalized_psm = (
+            int(psm)
+            if isinstance(psm, int)
+            and not isinstance(psm, bool)
+            and 0 <= psm <= 13
+            else 3
+        )
+        text_sha256 = str(raw_candidate.get("text_sha256") or "")
+        candidates.append({
+            "strategy": str(
+                raw_candidate.get("strategy") or "baseline_auto",
+            )[:64],
+            "preprocessing": str(
+                raw_candidate.get("preprocessing") or "color",
+            )[:32],
+            "psm": normalized_psm,
+            "rotation": normalized_rotation,
+            "status": status,
+            "confidence": _normalize_ocr_history_confidence(
+                raw_candidate.get("confidence"),
+            ),
+            "word_count": _normalize_ocr_history_nonnegative_int(
+                raw_candidate.get("word_count"),
+            ),
+            "effective_characters": _normalize_ocr_history_nonnegative_int(
+                raw_candidate.get("effective_characters"),
+            ),
+            "text_sha256": (
+                text_sha256
+                if re.fullmatch(r"[0-9a-f]{64}", text_sha256)
+                else None
+            ),
+            "selected": raw_candidate.get("selected") is True,
+        })
+    return candidates
+
+
 def _build_pdf_ocr_history_entry(
     *,
     page_number: int,
@@ -96,6 +169,7 @@ def _build_pdf_ocr_history_entry(
     source_job_id: UUID | str | None,
     trigger: str,
     text_source: str,
+    candidate_results: object = None,
 ) -> dict[str, Any]:
     """从页级 metadata 构造受约束、可持久化的 OCR 历史记录。"""
     normalized_text = ocr_text[:OCR_HISTORY_TEXT_MAX_CHARACTERS]
@@ -115,6 +189,25 @@ def _build_pdf_ocr_history_entry(
         _normalize_ocr_history_positive_int(correction_revision, 1)
         if correction_revision is not None
         else None
+    )
+    normalized_candidates = _normalize_ocr_history_candidates(
+        candidate_results,
+    )
+    rotation = metadata.get("ocr_rotation")
+    normalized_rotation = (
+        int(rotation)
+        if isinstance(rotation, int)
+        and not isinstance(rotation, bool)
+        and rotation in {0, 90, 180, 270}
+        else 0
+    )
+    psm = metadata.get("ocr_psm")
+    normalized_psm = (
+        int(psm)
+        if isinstance(psm, int)
+        and not isinstance(psm, bool)
+        and 0 <= psm <= 13
+        else 3
     )
     return {
         "page_number": page_number,
@@ -137,6 +230,23 @@ def _build_pdf_ocr_history_entry(
         ).hexdigest(),
         "ocr_text_source": (text_source.strip() or "tesseract")[:32],
         "correction_revision": normalized_revision,
+        "ocr_strategy": str(
+            metadata.get("ocr_strategy") or "baseline_auto",
+        )[:64],
+        "ocr_preprocessing": str(
+            metadata.get("ocr_preprocessing") or "color",
+        )[:32],
+        "ocr_psm": normalized_psm,
+        "ocr_rotation": normalized_rotation,
+        "ocr_candidate_count": min(
+            OCR_HISTORY_MAX_CANDIDATES,
+            len(normalized_candidates)
+            if normalized_candidates
+            else _normalize_ocr_history_nonnegative_int(
+                metadata.get("ocr_candidate_count"),
+            ),
+        ),
+        "ocr_candidate_results": normalized_candidates,
     }
 
 
@@ -151,6 +261,7 @@ def build_pdf_ocr_history_entries(
     for document in documents:
         metadata = document.metadata
         raw_ocr_text = metadata.pop("_ocr_history_text", None)
+        candidate_results = metadata.pop("_ocr_history_candidates", None)
         if metadata.get("pdf_parse_method") != "ocr":
             continue
         page_number = metadata.get("page_number")
@@ -168,6 +279,7 @@ def build_pdf_ocr_history_entries(
             source_job_id=source_job_id,
             trigger=trigger,
             text_source="tesseract",
+            candidate_results=candidate_results,
         ))
     return entries
 

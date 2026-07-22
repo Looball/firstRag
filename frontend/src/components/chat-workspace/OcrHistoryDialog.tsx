@@ -11,9 +11,14 @@ import {
 } from "@/lib/chat-workspace/ocr-correction-diff";
 import type {
   KnowledgeFile,
+  PdfOcrCandidateResult,
   PdfOcrHistoryRun,
   PdfOcrQualityPage,
 } from "@/lib/chat-workspace/types";
+import {
+  formatOcrStrategyDetail,
+  formatOcrStrategyLabel,
+} from "@/lib/chat-workspace/ocr-strategy";
 import { formatOcrConfidence } from "@/lib/chat-workspace/utils";
 
 type OcrHistoryDialogProps = {
@@ -94,7 +99,68 @@ function RunLedgerLabel({ run }: { run: PdfOcrHistoryRun }) {
       <span className="mt-1 text-[10px] text-[#72807b]">
         {TRIGGER_LABELS[run.trigger] || "索引识别"}
       </span>
+      <span className="mt-1 text-[10px] font-medium text-[#3d6760]">
+        {formatOcrStrategyLabel(run.ocrStrategy)}
+      </span>
     </>
+  );
+}
+
+/** 以识别实验条带展示本次候选质量与最终采用项。 */
+function CandidateLab({ candidates }: { candidates: PdfOcrCandidateResult[] }) {
+  if (!candidates.length) return null;
+  return (
+    <section className="border-b border-[#d3ddda] bg-[#f7f9f7] px-4 py-4" aria-label="OCR 自适应候选比较">
+      <div className="flex flex-wrap items-end justify-between gap-2">
+        <div>
+          <p className="font-utility text-[9px] font-semibold uppercase tracking-[0.14em] text-[#176b62]">
+            Candidate Lab
+          </p>
+          <h4 className="mt-1 text-sm font-semibold text-[#26312f]">本次参数选优</h4>
+        </div>
+        <p className="text-[11px] text-[#72807b]">仅保存未选中候选的质量摘要和文本指纹</p>
+      </div>
+      <div className="mt-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+        {candidates.map((candidate) => (
+          <article
+            key={`${candidate.strategy}-${candidate.psm}-${candidate.rotation}`}
+            className={candidate.selected
+              ? "border-l-4 border-[#176b62] bg-white px-3 py-3 shadow-sm"
+              : candidate.status === "failed"
+                ? "border-l-4 border-[#c98170] bg-[#fff7f4] px-3 py-3"
+                : "border-l-4 border-[#bdc9c5] bg-[#edf2ef] px-3 py-3"}
+          >
+            <div className="flex items-start justify-between gap-2">
+              <div>
+                <p className="text-xs font-semibold text-[#26312f]">
+                  {formatOcrStrategyLabel(candidate.strategy)}
+                </p>
+                <p className="mt-1 font-mono text-[10px] text-[#72807b]">
+                  {formatOcrStrategyDetail(candidate.psm, candidate.rotation)}
+                </p>
+              </div>
+              <span className={candidate.selected
+                ? "font-utility bg-[#d9eee7] px-2 py-1 text-[8px] font-semibold uppercase text-[#176b62]"
+                : "font-utility bg-white/70 px-2 py-1 text-[8px] font-semibold uppercase text-[#72807b]"}
+              >
+                {candidate.selected
+                  ? "已采用"
+                  : candidate.status === "succeeded"
+                    ? "候选"
+                    : candidate.status === "failed"
+                      ? "失败"
+                      : "跳过"}
+              </span>
+            </div>
+            <div className="mt-3 flex gap-3 text-[11px] text-[#52605c]">
+              <span>置信度 {formatOcrConfidence(candidate.confidence ?? undefined) || "—"}</span>
+              <span>{candidate.wordCount} 词</span>
+              <span>{candidate.effectiveCharacters} 字符</span>
+            </div>
+          </article>
+        ))}
+      </div>
+    </section>
   );
 }
 
@@ -256,8 +322,13 @@ export function OcrHistoryDialog({
                             ? "文字有变化"
                             : "文字未变化"}
                       </span>
+                      <span className="bg-[#dcece6] px-2 py-1 font-medium text-[#176b62]">
+                        {formatOcrStrategyLabel(selectedRun.ocrStrategy)} · {formatOcrStrategyDetail(selectedRun.ocrPsm, selectedRun.ocrRotation)}
+                      </span>
                     </div>
                   </div>
+
+                  <CandidateLab candidates={selectedRun.ocrCandidateResults} />
 
                   {previousRun ? (
                     <>

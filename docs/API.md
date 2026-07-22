@@ -171,11 +171,11 @@ ID 随聊天请求提交。当前支持 `image/png`、`image/jpeg` 和 `image/we
 
 PDF 优先解析原生文本层；没有有效文本层的页面由 worker 使用本地 Tesseract OCR，默认语言为简体中文和英文，不调用用户聊天模型或第三方 OCR API。Tesseract 单次识别同时输出文本和 TSV word confidence，页面分数按有效字符长度加权，并随 `ocr_confidence`、`ocr_quality`、`ocr_word_count` 和 `ocr_attempt` 持久化；没有有效 word confidence 时 `ocr_quality=unknown`，不会伪造分数。OCR 引擎不可用、语言包缺失、单页超时或页数超过配置上限时，任务返回 `ocr_error` 和安全恢复提示。
 
-文件级 OCR 巡检接口只查询当前用户、未删除文件和当前 `index_version` 的 PostgreSQL chunks，并按页返回代表 `chunk_index`、置信度、质量状态、识别次数、人工修订 revision 和最多 220 字符的折叠摘要。默认响应把尚未人工修订的 `ocr_quality=low` 页面放在前面，同时提供文档页数、OCR 页数、待处理数、低置信度数、已校对数、平均置信度和批量重新识别页数上限。它不会读取磁盘、Chroma、完整页正文或重新运行 OCR；跨用户或不存在文件返回 `404`，非 PDF 返回 `400`，未完成索引返回 `409`，原生文本 PDF 返回空清单。
+文件级 OCR 巡检接口只查询当前用户、未删除文件和当前 `index_version` 的 PostgreSQL chunks，并按页返回代表 `chunk_index`、置信度、质量状态、识别次数、所选 strategy/preprocessing/PSM/rotation、候选数、人工修订 revision 和最多 220 字符的折叠摘要。默认响应把尚未人工修订的 `ocr_quality=low` 页面放在前面，同时提供文档页数、OCR 页数、待处理数、低置信度数、已校对数、平均置信度和批量重新识别页数上限。它不会读取磁盘、Chroma、完整页正文或重新运行 OCR；跨用户或不存在文件返回 `404`，非 PDF 返回 `400`，未完成索引返回 `409`，原生文本 PDF 返回空清单。
 
-页级 OCR 历史接口按当前用户、文件和 1-based 页码读取最近记录。响应包含每次识别的 index version、attempt、触发来源、关联 job、原始 Tesseract 文本及 SHA-256、confidence、quality、word count、人工修订 revision，以及相对前一次识别的 confidence/word count delta 和文字是否变化。默认每页最多保留 20 次，可通过 `PDF_OCR_HISTORY_MAX_RUNS_PER_PAGE` 调整；超限后只裁剪该页最旧记录。接口不返回磁盘路径、job options 或人工校对正文，跨用户或不存在文件返回 `404`，非 OCR 页返回 `400`，索引未稳定返回 `409`。
+页级 OCR 历史接口按当前用户、文件和 1-based 页码读取最近记录。响应包含每次识别的 index version、attempt、触发来源、关联 job、原始 Tesseract 文本及 SHA-256、confidence、quality、word count、所选 strategy/preprocessing/PSM/rotation、候选质量摘要、人工修订 revision，以及相对前一次识别的 confidence/word count delta 和文字是否变化。未选中候选只返回 status、confidence、word count、有效字符数和文本 SHA，不返回完整正文。默认每页最多保留 20 次，可通过 `PDF_OCR_HISTORY_MAX_RUNS_PER_PAGE` 调整；超限后只裁剪该页最旧记录。接口不返回磁盘路径、job options 或人工校对正文，跨用户或不存在文件返回 `404`，非 OCR 页返回 `400`，索引未稳定返回 `409`。
 
-单页 OCR 重新识别接口只接受当前用户已完成索引的 PDF OCR 页面。跨用户或文件不存在返回 `404`；非 PDF、原生文本页、无索引页或无效页码返回 `400`；文件正在排队、索引或处于失败状态时返回 `409`。成功响应包含新的 `index_version` 和 `job`，worker 通过受控 job `options.force_ocr_page_numbers` 强制识别目标页并异步重建整个文件索引。重建期间文件暂不可检索；历史回答 source 保留原 index version，用户应重新提问生成采用新 OCR 文本的引用。
+单页 OCR 重新识别接口只接受当前用户已完成索引的 PDF OCR 页面。跨用户或文件不存在返回 `404`；非 PDF、原生文本页、无索引页或无效页码返回 `400`；文件正在排队、索引或处于失败状态时返回 `409`。成功响应包含新的 `index_version` 和 `job`，worker 通过受控 job `options.force_ocr_page_numbers` 强制识别目标页并异步重建整个文件索引。默认会在共享总超时内依次比较原图 PSM 3、灰度/二值化 PSM 6 和 90°/180°/270° 灰度旋转候选，按有效文本、confidence、字符数和稳定顺序采用最佳结果；前端不能传入任意 Tesseract 参数。重建期间文件暂不可检索；历史回答 source 保留原 index version，用户应重新提问生成采用新 OCR 文本的引用。
 
 批量 OCR 重新识别请求体为 `{ "page_numbers": [1, 3, 5] }`。服务端会去重、升序规范化并校验所有页均属于当前 index version 的 OCR 页面；单批次默认最多 20 页，可通过 `PDF_OCR_REINDEX_MAX_BATCH_PAGES` 调整。无论选择多少页，都只递增一次 index version 并创建一个 job，避免整文件重建互相覆盖。失败重试只接受当前用户、当前文件、当前 index version 的失败 OCR job id，页码从服务端保存的受控 options 恢复，前端不能在重试时扩大页集合。
 

@@ -36,6 +36,36 @@ def _build_delta(current: float | None, previous: float | None) -> float | None:
     return round(current - previous, 2)
 
 
+def _serialize_candidate_results(value: object) -> list[dict[str, Any]]:
+    """序列化候选质量摘要，不返回任何未选中的完整 OCR 文本。"""
+    if not isinstance(value, list):
+        return []
+    return [
+        {
+            "strategy": str(candidate.get("strategy") or "baseline_auto"),
+            "preprocessing": str(
+                candidate.get("preprocessing") or "color",
+            ),
+            "psm": int(candidate.get("psm") or 3),
+            "rotation": int(candidate.get("rotation") or 0),
+            "status": str(candidate.get("status") or "failed"),
+            "confidence": _normalize_confidence(candidate.get("confidence")),
+            "word_count": int(candidate.get("word_count") or 0),
+            "effective_characters": int(
+                candidate.get("effective_characters") or 0,
+            ),
+            "text_sha256": (
+                str(candidate["text_sha256"])
+                if candidate.get("text_sha256") is not None
+                else None
+            ),
+            "selected": candidate.get("selected") is True,
+        }
+        for candidate in value
+        if isinstance(candidate, dict)
+    ]
+
+
 def get_pdf_ocr_page_history_report(
     user_id: int,
     knowledge_file_id: UUID,
@@ -102,6 +132,18 @@ def get_pdf_ocr_page_history_report(
                 int(row["correction_revision"])
                 if row.get("correction_revision") is not None
                 else None
+            ),
+            "ocr_strategy": str(row.get("ocr_strategy") or "baseline_auto"),
+            "ocr_preprocessing": str(
+                row.get("ocr_preprocessing") or "color",
+            ),
+            "ocr_psm": int(row.get("ocr_psm") or 3),
+            "ocr_rotation": int(row.get("ocr_rotation") or 0),
+            "ocr_candidate_count": int(
+                row.get("ocr_candidate_count") or 0,
+            ),
+            "ocr_candidate_results": _serialize_candidate_results(
+                row.get("ocr_candidate_results"),
             ),
             "created_at": row.get("created_at"),
             "previous_run_id": (

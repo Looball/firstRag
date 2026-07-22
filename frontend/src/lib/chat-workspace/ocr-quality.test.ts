@@ -8,6 +8,14 @@ import {
   toggleOcrPageSelection,
 } from "./ocr-quality";
 
+const baselineStrategy = {
+  ocrStrategy: "baseline_auto",
+  ocrPreprocessing: "color",
+  ocrPsm: 3,
+  ocrRotation: 0,
+  ocrCandidateCount: 1,
+};
+
 const pages: PdfOcrQualityPage[] = [
   {
     pageNumber: 1,
@@ -17,6 +25,7 @@ const pages: PdfOcrQualityPage[] = [
     ocrConfidence: 92,
     ocrQuality: "ok",
     ocrAttempt: 1,
+    ...baselineStrategy,
     needsReview: false,
     hasCorrection: false,
     correctionRevision: 0,
@@ -33,6 +42,7 @@ const pages: PdfOcrQualityPage[] = [
     ocrConfidence: 38,
     ocrQuality: "low",
     ocrAttempt: 1,
+    ...baselineStrategy,
     needsReview: true,
     hasCorrection: false,
     correctionRevision: 0,
@@ -49,6 +59,7 @@ const pages: PdfOcrQualityPage[] = [
     ocrConfidence: 44,
     ocrQuality: "low",
     ocrAttempt: 1,
+    ...baselineStrategy,
     needsReview: false,
     hasCorrection: true,
     correctionRevision: 2,

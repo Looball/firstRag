@@ -7,7 +7,7 @@ from pathlib import Path
 import subprocess
 from tempfile import TemporaryDirectory
 import unittest
-from unittest.mock import Mock, patch
+from unittest.mock import ANY, Mock, patch
 from zipfile import ZIP_DEFLATED, ZipFile
 
 import pymupdf
@@ -23,6 +23,7 @@ from app.services.documents.document_service import (
     run_pdf_page_ocr,
     split_documents,
 )
+from app.services.documents.pdf_ocr_engine import PdfOcrCandidateSummary
 from app.services.llm_service import ChatModelSettings
 from app.services.user_settings_service import EffectiveChatModelConfig
 
@@ -284,7 +285,44 @@ class DocumentServiceTests(unittest.TestCase):
         self.assertEqual(documents[1].metadata["ocr_attempt"], 1)
         self.assertEqual(documents[1].metadata["page_number"], 2)
         self.assertIn("OCR RECOGNIZED", documents[1].page_content)
-        run_ocr.assert_called_once()
+        run_ocr.assert_called_once_with(ANY, adaptive=False)
+
+    def test_pdf_picture_placeholder_does_not_suppress_ocr(self) -> None:
+        """pymupdf4llm 图片省略占位符不能被当作原生正文。"""
+        with TemporaryDirectory() as temporary_directory:
+            pdf_path = Path(temporary_directory) / "scanned-placeholder.pdf"
+            create_scanned_pdf_fixture(pdf_path, ["T079 PLACEHOLDER SCAN"])
+
+            with patch(
+                "app.services.documents.document_service.pymupdf4llm.to_markdown",
+                return_value=[
+                    {
+                        "text": (
+                            "**==> picture [451 x 842] intentionally omitted <==**\n\n"
+                        ),
+                    },
+                ],
+            ), patch(
+                "app.services.documents.document_service.PDF_OCR_ENABLED",
+                True,
+            ), patch(
+                "app.services.documents.document_service.run_pdf_page_ocr",
+                return_value=PdfOcrResult(
+                    text="T079 OCR PLACEHOLDER RECOVERED",
+                    confidence=91.0,
+                    word_count=4,
+                ),
+            ) as run_ocr:
+                documents = load_document(
+                    pdf_path,
+                    file_id="placeholder-pdf",
+                    user_id=7,
+                )
+
+        self.assertEqual(len(documents), 1)
+        self.assertEqual(documents[0].metadata["pdf_parse_method"], "ocr")
+        self.assertIn("PLACEHOLDER RECOVERED", documents[0].page_content)
+        run_ocr.assert_called_once_with(ANY, adaptive=False)
 
     def test_pdf_ocr_page_limit_is_enforced_before_recognition(self) -> None:
         """待 OCR 页数超过上限时应安全失败且不启动识别引擎。"""
@@ -325,8 +363,26 @@ class DocumentServiceTests(unittest.TestCase):
                     text="T073 FORCED OCR PAGE",
                     confidence=52.5,
                     word_count=4,
+                    strategy="rotate_90_gray",
+                    preprocessing="grayscale",
+                    psm=6,
+                    rotation=90,
+                    candidate_summaries=(
+                        PdfOcrCandidateSummary(
+                            strategy="rotate_90_gray",
+                            preprocessing="grayscale",
+                            psm=6,
+                            rotation=90,
+                            status="succeeded",
+                            confidence=52.5,
+                            word_count=4,
+                            effective_characters=17,
+                            text_sha256="a" * 64,
+                            selected=True,
+                        ),
+                    ),
                 ),
-            ):
+            ) as run_ocr:
                 documents = load_document(
                     pdf_path,
                     file_id="forced-ocr",
@@ -338,6 +394,10 @@ class DocumentServiceTests(unittest.TestCase):
         self.assertEqual(documents[0].metadata["ocr_attempt"], 2)
         self.assertEqual(documents[0].metadata["ocr_quality"], "low")
         self.assertEqual(documents[0].metadata["ocr_confidence"], 52.5)
+        self.assertEqual(documents[0].metadata["ocr_strategy"], "rotate_90_gray")
+        self.assertEqual(documents[0].metadata["ocr_rotation"], 90)
+        self.assertEqual(documents[0].metadata["ocr_candidate_count"], 1)
+        run_ocr.assert_called_once_with(ANY, adaptive=True)
 
     def test_pdf_ocr_attempt_continues_from_persisted_history(self) -> None:
         """后续 OCR 应从页面历史 attempt 单调递增。"""
@@ -421,10 +481,10 @@ class DocumentServiceTests(unittest.TestCase):
         page = Mock()
         page.get_pixmap.return_value.tobytes.return_value = b"png-bytes"
         with patch(
-            "app.services.documents.document_service.subprocess.run",
+            "app.services.documents.pdf_ocr_engine.subprocess.run",
             side_effect=subprocess.TimeoutExpired("tesseract", 60),
         ):
-            with self.assertRaisesRegex(PdfOcrError, "单页识别超时"):
+            with self.assertRaisesRegex(PdfOcrError, "识别超时"):
                 run_pdf_page_ocr(page)
 
     def test_docx_chunks_keep_original_paragraph_ranges(self) -> None:

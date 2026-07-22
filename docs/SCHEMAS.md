@@ -267,11 +267,11 @@ DOCX 额外保存 `location_type=docx_paragraphs` 以及 1-based
 
 `vector_index_jobs.options` 是后端生成的内部控制参数，不接受前端透传任意 worker 参数。PDF OCR 重新识别任务会写入 `trigger=pdf_page_ocr_reindex|pdf_pages_ocr_reindex` 和经过校验、去重、升序排列的 `force_ocr_page_numbers`；单页或多页批次都只创建一个 job，worker 仍重建完整文件索引，并通过新的 `index_version` 隔离旧结果。批次失败重试会从原 job 的受控 options 恢复页码，不接受前端重新指定页面。
 
-扫描 PDF chunk 的 `metadata` 额外保存 `ocr_confidence`、`ocr_quality`、`ocr_word_count` 和 `ocr_attempt`。`ocr_confidence` 是 Tesseract TSV word confidence 按有效字符数加权后的 0-100 分数；没有有效 word 时不写入虚构分数，并将 `ocr_quality` 记为 `unknown`。低于 `PDF_OCR_LOW_CONFIDENCE_THRESHOLD` 时记为 `low`，否则为 `good`。
+扫描 PDF chunk 的 `metadata` 额外保存 `ocr_confidence`、`ocr_quality`、`ocr_word_count`、`ocr_attempt`、`ocr_strategy`、`ocr_preprocessing`、`ocr_psm`、`ocr_rotation` 和 `ocr_candidate_count`。`ocr_confidence` 是 Tesseract TSV word confidence 按有效字符数加权后的 0-100 分数；没有有效 word 时不写入虚构分数，并将 `ocr_quality` 记为 `unknown`。低于 `PDF_OCR_LOW_CONFIDENCE_THRESHOLD` 时记为 `low`，否则为 `good`。未选中候选摘要不会写入 Chroma metadata，避免复杂 JSON 破坏向量存储约束。
 
 人工校对按用户、文件和 1-based 页码唯一保存。首次修订固定记录 `original_ocr_text`，后续保存只更新 `corrected_text` 并递增 `revision`；知识文件永久删除时由外键级联清理。应用修订后的 chunk metadata 增加 `ocr_text_source=manual_correction`、`ocr_correction_applied=true`、revision、字符数和更新时间，同时继续保留本次 Tesseract OCR 置信度。
 
-OCR 识别历史按 `user_id + knowledge_file_id + page_number + index_version` 唯一保存，并以 `source_job_id` 关联产生该结果的 vector job。表中只保存本次 Tesseract 原始文本；人工校对存在时通过 `correction_revision` 标注，但不会覆盖 `ocr_text`。`ocr_attempt` 从已有历史或迁移前 chunk metadata 单调递增，`ocr_text_sha256` 用于快速判断相邻结果是否变化；每页保留数量由配置限制，用户或文件删除时由外键级联清理。
+OCR 识别历史按 `user_id + knowledge_file_id + page_number + index_version` 唯一保存，并以 `source_job_id` 关联产生该结果的 vector job。表中只保存本次最终采用的 Tesseract 原始文本；人工校对存在时通过 `correction_revision` 标注，但不会覆盖 `ocr_text`。migration `008_add_pdf_ocr_strategy_metadata.sql` 增加所选 strategy/preprocessing/PSM/rotation、候选数量和 `ocr_candidate_results JSONB`；候选 JSON 只保存状态、质量、有效字符数与文本 SHA，不保存未选中的完整文本。`ocr_attempt` 从已有历史或迁移前 chunk metadata 单调递增，`ocr_text_sha256` 用于快速判断相邻结果是否变化；每页保留数量由配置限制，用户或文件删除时由外键级联清理。
 
 ## 凭据安全结构
 

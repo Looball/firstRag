@@ -3,6 +3,8 @@
 from typing import Any
 from uuid import UUID, uuid4
 
+from psycopg.types.json import Jsonb
+
 from app.db.connection import get_connection
 from app.db.executor import Row, fetch_all
 
@@ -36,6 +38,12 @@ def record_pdf_ocr_history_entries(
             entry["ocr_text_sha256"],
             entry["ocr_text_source"],
             entry.get("correction_revision"),
+            entry["ocr_strategy"],
+            entry["ocr_preprocessing"],
+            entry["ocr_psm"],
+            entry["ocr_rotation"],
+            entry["ocr_candidate_count"],
+            Jsonb(entry["ocr_candidate_results"]),
         )
         for entry in entries
     ]
@@ -62,11 +70,18 @@ def record_pdf_ocr_history_entries(
                     ocr_text,
                     ocr_text_sha256,
                     ocr_text_source,
-                    correction_revision
+                    correction_revision,
+                    ocr_strategy,
+                    ocr_preprocessing,
+                    ocr_psm,
+                    ocr_rotation,
+                    ocr_candidate_count,
+                    ocr_candidate_results
                 )
                 VALUES (
                     %s, %s, %s, %s, %s, %s, %s, %s,
-                    %s, %s, %s, %s, %s, %s, %s, %s
+                    %s, %s, %s, %s, %s, %s, %s, %s,
+                    %s, %s, %s, %s, %s, %s
                 )
                 ON CONFLICT (
                     user_id,
@@ -131,6 +146,12 @@ def list_pdf_ocr_page_history(
             history.ocr_text_sha256,
             history.ocr_text_source,
             history.correction_revision,
+            history.ocr_strategy,
+            history.ocr_preprocessing,
+            history.ocr_psm,
+            history.ocr_rotation,
+            history.ocr_candidate_count,
+            history.ocr_candidate_results,
             history.created_at
         FROM knowledge_file_ocr_history AS history
         JOIN knowledge_files AS file

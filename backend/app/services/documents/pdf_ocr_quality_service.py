@@ -53,6 +53,17 @@ def _normalize_positive_int(value: object, default: int = 1) -> int:
     return normalized if normalized is not None else default
 
 
+def _normalize_nonnegative_int(value: object, default: int = 0) -> int:
+    """把 OCR 策略计数规范化为非负整数。"""
+    if isinstance(value, bool):
+        return default
+    try:
+        normalized = int(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return default
+    return normalized if normalized >= 0 else default
+
+
 def _build_excerpt(value: object) -> str:
     """折叠空白并截断代表 chunk，避免列表返回完整页面正文。"""
     normalized = re.sub(r"\s+", " ", str(value or "")).strip()
@@ -126,6 +137,22 @@ def get_pdf_ocr_quality_report(
             "ocr_confidence": confidence,
             "ocr_quality": quality,
             "ocr_attempt": _normalize_positive_int(metadata.get("ocr_attempt")),
+            "ocr_strategy": str(
+                metadata.get("ocr_strategy") or "baseline_auto",
+            ),
+            "ocr_preprocessing": str(
+                metadata.get("ocr_preprocessing") or "color",
+            ),
+            "ocr_psm": _normalize_nonnegative_int(
+                metadata.get("ocr_psm"),
+                3,
+            ),
+            "ocr_rotation": _normalize_nonnegative_int(
+                metadata.get("ocr_rotation"),
+            ),
+            "ocr_candidate_count": _normalize_nonnegative_int(
+                metadata.get("ocr_candidate_count"),
+            ),
             "needs_review": quality == "low" and not has_correction,
             "has_correction": has_correction,
             "correction_revision": (

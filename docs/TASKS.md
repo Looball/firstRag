@@ -84,6 +84,7 @@
 | `PLAN-20260722-02` | 2026-07-22 | `Done` | 建立文件级 OCR 质量巡检入口，集中发现低置信度页面并直接进入校对工作台。 | `T-076` |
 | `PLAN-20260722-03` | 2026-07-22 | `Done` | 支持从 OCR 巡检中批量选择页面，以单次文件重建任务重新识别并提供进度与失败重试。 | `T-077` |
 | `PLAN-20260722-04` | 2026-07-22 | `Done` | 持久化页级 OCR 识别历史，展示置信度趋势和相邻识别文本差异。 | `T-078` |
+| `PLAN-20260722-05` | 2026-07-22 | `Doing` | 为主动 OCR 重识别增加自适应预处理、页面旋转和多 PSM 候选选优。 | `T-079` |
 
 ## 任务总览
 
@@ -167,6 +168,7 @@
 | `T-076` | `PLAN-20260722-02` | `P1` | `Done` | 增加文件级 OCR 质量巡检 | 2026-07-22 | `ca92e0b` |
 | `T-077` | `PLAN-20260722-03` | `P1` | `Done` | 支持批量 OCR 重新识别与失败重试 | 2026-07-22 | `2de3486` |
 | `T-078` | `PLAN-20260722-04` | `P1` | `Done` | 增加 OCR 识别历史、质量趋势与文本差异 | 2026-07-22 | `ab9dd0d` |
+| `T-079` | `PLAN-20260722-05` | `P1` | `Doing` | 增加 OCR 自适应预处理与参数选优 | — | — |
 
 ## 新计划接入流程
 
@@ -3084,6 +3086,39 @@ git diff --check
   - `cd frontend && npm test -- --run`：12 个 test files、85 tests passed；`npm run lint`：0 error、保留 2 个既有 `<img>` performance warnings；Next.js 16.2.10 production build 通过。
   - Docker Compose 最终重建通过：PostgreSQL、Redis、Chroma healthy，migration 成功应用 `007_create_pdf_ocr_history.sql`（`applied=1 skipped=7`），backend、worker、frontend 正常启动。
   - production preflight、Chroma runtime health、migration dry-run 和 `git diff --check` 通过；npm 与 pip audit policy 均通过，仅保留截至 2026-08-20 的 PostCSS moderate 与 ChromaDB no-fix 限时例外。
+- 建议验证命令：
+
+```bash
+cd backend && conda run -n firstrag env PYTHONPATH=. pytest -q
+cd ../frontend && npm test -- --run && npm run lint && npm run build
+cd .. && docker compose up -d --build
+docker compose ps -a
+docker compose logs --since=10m backend worker frontend
+conda run -n firstrag python scripts/production_preflight.py --env-file .env --migration-method compose --check-runtime-health
+git diff --check
+```
+
+## T-079 增加 OCR 自适应预处理与参数选优
+
+- 来源计划：`PLAN-20260722-05`
+- 优先级：`P1`
+- 状态：`Doing`
+- 目标：让用户主动重新识别低质量扫描页时，不再用完全相同参数重复执行，而是比较多种安全候选并自动采用更可信的结果。
+- 技术边界：
+  - 首次扫描 PDF 索引继续使用单次基线 OCR；只有受控单页或批量重识别任务启用自适应候选，避免普通上传承担成倍 CPU 开销。
+  - 候选固定由服务端构造，不接受前端传入任意 Tesseract 参数；语言、DPI、候选数量、二值化阈值和总超时继续受配置上限约束。
+  - 候选覆盖原图自动布局、灰度/二值化单块文本，以及 90°、180°、270° 旋转；按有效文本、confidence、字符数和稳定顺序选优，单个候选失败不污染其他候选。
+  - 人工校对正文仍优先用于索引；自适应选优只更新本次 Tesseract 原始结果、质量 metadata 和不可变 OCR history，不覆盖人工文本。
+- 范围：
+  - 重构单页 Tesseract 执行为可测试的候选渲染、运行、评分和选优流程，并为总耗时与最大候选数增加配置。
+  - 新增 OCR history 策略字段与候选摘要，保存所选 preprocessing、PSM、rotation、候选数量和每个候选的 confidence/word count/text hash。
+  - OCR 巡检与 Recognition Ledger 展示当前选优策略、候选数量和本次候选比较结果，不在前端计算或加载未选中的完整 OCR 文本。
+  - 覆盖基线不扩增、候选选优、旋转、二值化、部分失败、全部失败、超时、人工校对、历史序列化、API schema 和窄屏布局。
+- 验收标准：
+  - 普通首次 OCR 仍只启动一次 Tesseract；主动重识别在配置上限内产生多个候选，并把确定性最佳结果用于当前 chunks 与 history。
+  - 候选结果能说明采用了哪种 preprocessing、PSM 和 rotation；文本 SHA 与置信度对应最终选中原文，未选中候选不保存完整文本。
+  - 单个候选失败时仍可采用其他有效结果；全部失败或总超时返回稳定、安全、可重试错误，worker 能继续处理后续任务。
+  - 后端、前端测试、lint、production build、Docker Compose 真实低质量/旋转扫描 PDF smoke、production preflight 和 `git diff --check` 通过。
 - 建议验证命令：
 
 ```bash

@@ -1,12 +1,8 @@
 import base64
-import csv
-from dataclasses import dataclass
 import logging
 import os
 from pathlib import Path
 import re
-import subprocess
-from tempfile import TemporaryDirectory
 from uuid import UUID
 from xml.etree import ElementTree
 from zipfile import BadZipFile, ZipFile
@@ -28,14 +24,23 @@ from langchain_text_splitters import (
 )
 
 from app.core.config import (
+    PDF_OCR_ADAPTIVE_REINDEX_ENABLED,
     PDF_OCR_DPI,
     PDF_OCR_ENABLED,
     PDF_OCR_LANGUAGES,
     PDF_OCR_LOW_CONFIDENCE_THRESHOLD,
     PDF_OCR_MAX_PAGES,
     PDF_OCR_MIN_NATIVE_TEXT_CHARACTERS,
-    PDF_OCR_TIMEOUT_SECONDS,
     VECTOR_STORE_PATH,
+)
+from app.services.documents.pdf_ocr_engine import (
+    PdfOcrError,
+    PdfOcrResult,
+    count_effective_text_characters,
+    normalize_pdf_ocr_dpi,
+    parse_tesseract_tsv_confidence,
+    run_pdf_page_ocr,
+    validate_pdf_ocr_runtime_config,
 )
 from app.services.llm_service import (
     chat_model_supports_images,
@@ -72,6 +77,10 @@ SUPPORTED_DOCUMENT_MIME_TYPES = {
     "image/jpg",
     "image/webp",
 }
+PYMUPDF4LLM_OMITTED_PICTURE_PATTERN = re.compile(
+    r"\*\*==>\s*picture\s*\[[^\]]+\]\s*intentionally omitted\s*<==\*\*",
+    flags=re.IGNORECASE,
+)
 MARKDOWN_HEADERS_TO_SPLIT_ON = [
     ("#", "h1"),
     ("##", "h2"),
@@ -80,6 +89,13 @@ MARKDOWN_HEADERS_TO_SPLIT_ON = [
     ("#####", "h5"),
     ("######", "h6"),
 ]
+
+
+def normalize_pdf_native_text_for_detection(text: str) -> str:
+    """移除 parser 的图片占位提示，避免把扫描页误判成原生文本页。"""
+    return PYMUPDF4LLM_OMITTED_PICTURE_PATTERN.sub("", text).strip()
+
+
 TEXT_SEPARATORS = ["\n\n", "\n", "。", "！", "？", "；", "，", " ", ""]
 DOCX_BLOCK_MAX_CHARACTERS = 900
 WORDPROCESSINGML_NAMESPACE = (
@@ -91,7 +107,6 @@ WORD_TEXT_TAG = f"{{{WORDPROCESSINGML_NAMESPACE}}}t"
 WORD_TAB_TAG = f"{{{WORDPROCESSINGML_NAMESPACE}}}tab"
 WORD_BREAK_TAG = f"{{{WORDPROCESSINGML_NAMESPACE}}}br"
 WORD_VALUE_ATTRIBUTE = f"{{{WORDPROCESSINGML_NAMESPACE}}}val"
-PDF_OCR_LANGUAGE_PATTERN = re.compile(r"^[A-Za-z0-9_+./-]+$")
 
 
 class UnsupportedDocumentTypeError(ValueError):
@@ -104,19 +119,6 @@ class EmptyDocumentError(ValueError):
 
 class ImageDocumentParseError(ValueError):
     """图片文件无法通过 vision 模型解析时抛出。"""
-
-
-class PdfOcrError(ValueError):
-    """扫描 PDF 的本地 OCR 无法安全完成时抛出。"""
-
-
-@dataclass(frozen=True)
-class PdfOcrResult:
-    """单页 Tesseract 文本、置信度和有效 word 数量。"""
-
-    text: str
-    confidence: float | None
-    word_count: int
 
 
 def get_supported_document_type_text() -> str:
@@ -382,7 +384,9 @@ def build_pdf_page_documents(
         for page_index, page_chunk in enumerate(page_chunks)
         if isinstance(page_chunk, dict)
         and count_effective_text_characters(
-            str(page_chunk.get("text") or ""),
+            normalize_pdf_native_text_for_detection(
+                str(page_chunk.get("text") or ""),
+            ),
         ) < minimum_native_characters
     }
     normalized_force_pages = {
@@ -421,6 +425,10 @@ def build_pdf_page_documents(
                     raise PdfOcrError("PDF OCR 页码与解析结果不一致")
                 ocr_result_by_page[page_index] = run_pdf_page_ocr(
                     pdf_document.load_page(page_index),
+                    adaptive=(
+                        PDF_OCR_ADAPTIVE_REINDEX_ENABLED
+                        and page_index in forced_page_indexes
+                    ),
                 )
         finally:
             pdf_document.close()
@@ -471,11 +479,34 @@ def build_pdf_page_documents(
                 "ocr_word_count": (
                     ocr_result.word_count if ocr_result is not None else 0
                 ),
+                "ocr_strategy": (
+                    ocr_result.strategy if ocr_result is not None else "baseline_auto"
+                ),
+                "ocr_preprocessing": (
+                    ocr_result.preprocessing if ocr_result is not None else "color"
+                ),
+                "ocr_psm": ocr_result.psm if ocr_result is not None else 3,
+                "ocr_rotation": (
+                    ocr_result.rotation if ocr_result is not None else 0
+                ),
+                "ocr_candidate_count": (
+                    len(ocr_result.candidate_summaries)
+                    if ocr_result is not None
+                    else 0
+                ),
                 "ocr_attempt": ocr_attempt,
                 "ocr_text_source": (
                     "manual_correction" if corrected_text else "tesseract"
                 ),
                 "_ocr_history_text": ocr_text,
+                "_ocr_history_candidates": (
+                    [
+                        summary.to_dict()
+                        for summary in ocr_result.candidate_summaries
+                    ]
+                    if ocr_result is not None
+                    else []
+                ),
             }
             if confidence is not None:
                 ocr_metadata["ocr_confidence"] = confidence
@@ -513,108 +544,9 @@ def build_pdf_page_documents(
     return documents
 
 
-def count_effective_text_characters(text: str) -> int:
-    """统计可表达正文的字母、数字或 CJK 字符，忽略 Markdown 标记。"""
-    return sum(character.isalnum() for character in text)
-
-
-def normalize_pdf_ocr_dpi(value: int) -> int:
-    """将 OCR DPI 限制到兼顾识别质量和内存占用的安全范围。"""
-    return min(600, max(72, value))
-
-
 def normalize_pdf_ocr_confidence_threshold(value: int) -> int:
     """将低置信度阈值限制在 Tesseract 的 0-100 分数范围。"""
     return min(100, max(0, value))
-
-
-def parse_tesseract_tsv_confidence(tsv_text: str) -> tuple[float | None, int]:
-    """按有效 word 字符数加权计算 Tesseract 页面置信度。"""
-    weighted_confidence = 0.0
-    total_character_count = 0
-    word_count = 0
-    for row in csv.DictReader(tsv_text.splitlines(), delimiter="\t"):
-        word_text = str(row.get("text") or "").strip()
-        character_count = count_effective_text_characters(word_text)
-        if character_count <= 0:
-            continue
-        try:
-            confidence = float(row.get("conf") or "-1")
-        except ValueError:
-            continue
-        if confidence < 0:
-            continue
-        normalized_confidence = min(100.0, max(0.0, confidence))
-        weighted_confidence += normalized_confidence * character_count
-        total_character_count += character_count
-        word_count += 1
-
-    if total_character_count <= 0:
-        return None, 0
-    return round(weighted_confidence / total_character_count, 2), word_count
-
-
-def validate_pdf_ocr_runtime_config() -> None:
-    """校验不会传入 shell 的 Tesseract 语言与资源限制配置。"""
-    if not PDF_OCR_LANGUAGE_PATTERN.fullmatch(PDF_OCR_LANGUAGES):
-        raise PdfOcrError("PDF OCR 语言配置无效")
-    if PDF_OCR_TIMEOUT_SECONDS <= 0:
-        raise PdfOcrError("PDF OCR 单页超时必须大于 0 秒")
-
-
-def run_pdf_page_ocr(page: pymupdf.Page) -> PdfOcrResult:
-    """单次调用 Tesseract，同时读取页面文本和 TSV confidence。"""
-    dpi = normalize_pdf_ocr_dpi(PDF_OCR_DPI)
-    pixmap = page.get_pixmap(dpi=dpi, alpha=False)
-    with TemporaryDirectory(prefix="firstrag-ocr-") as temporary_directory:
-        output_base = Path(temporary_directory) / "page"
-        command = [
-            "tesseract",
-            "stdin",
-            str(output_base),
-            "-l",
-            PDF_OCR_LANGUAGES,
-            "--dpi",
-            str(dpi),
-            "--psm",
-            "3",
-            "txt",
-            "tsv",
-        ]
-        try:
-            result = subprocess.run(
-                command,
-                input=pixmap.tobytes("png"),
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                check=False,
-                timeout=PDF_OCR_TIMEOUT_SECONDS,
-            )
-        except FileNotFoundError as exc:
-            raise PdfOcrError("PDF OCR 引擎不可用，请安装 Tesseract") from exc
-        except subprocess.TimeoutExpired as exc:
-            raise PdfOcrError("PDF OCR 单页识别超时") from exc
-        except OSError as exc:
-            raise PdfOcrError("PDF OCR 无法启动本地识别引擎") from exc
-
-        if result.returncode != 0:
-            raise PdfOcrError("PDF OCR 识别失败，请检查语言包和文件清晰度")
-        try:
-            text = output_base.with_suffix(".txt").read_text(
-                encoding="utf-8",
-            ).strip()
-            tsv_text = output_base.with_suffix(".tsv").read_text(
-                encoding="utf-8",
-            )
-        except OSError as exc:
-            raise PdfOcrError("PDF OCR 结果读取失败") from exc
-
-    confidence, word_count = parse_tesseract_tsv_confidence(tsv_text)
-    return PdfOcrResult(
-        text=text,
-        confidence=confidence,
-        word_count=word_count,
-    )
 
 
 def extract_chat_message_text(content: object) -> str:

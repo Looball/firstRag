@@ -74,18 +74,18 @@ FirstRAG/
 | 仓库层 | `backend/app/repositories` | 纯 SQL 数据访问。 |
 | 数据库工具 | `backend/app/db` | 连接、执行器、PostgreSQL advisory lock。 |
 | 基础设施 | `backend/app/core` | 配置、JWT、安全和密钥加密。 |
-| Worker | `backend/app/workers` | 异步向量化任务消费；扫描 PDF 页面在容器内通过 Tesseract OCR，保存页级置信度和原始识别历史，一次消费单页或多页受控重识别批次，并在切分前应用持久化人工修订。 |
+| Worker | `backend/app/workers` | 异步向量化任务消费；扫描 PDF 页面在容器内通过 Tesseract OCR，主动重识别时比较预处理/PSM/旋转候选，保存页级置信度、选优依据和原始识别历史，一次消费单页或多页受控批次，并在切分前应用持久化人工修订。 |
 
 ## 存储组件
 
 - PostgreSQL：用户、知识库、文件、会话、消息、聊天附件 metadata、文本/图片解析分块、向量化任务队列。
 - PostgreSQL OCR corrections：按用户、文件和页码保存人工修订、原始 OCR 文本与 revision；知识文件永久删除时级联清理。
-- PostgreSQL OCR history：按用户、文件、页码和 index version 保存有上限的 Tesseract 原始识别记录、质量指标、文本 SHA 和来源 job；与 chunks 生命周期解耦，文件删除时级联清理。
+- PostgreSQL OCR history：按用户、文件、页码和 index version 保存有上限的 Tesseract 最佳原始识别记录、质量指标、文本 SHA、所选策略、候选摘要和来源 job；与 chunks 生命周期解耦，文件删除时级联清理。
 - Redis：提供基础设施健康检查、RAG 热点共享缓存、后端分布式限流和 vector worker 运行态，包括知识库画像、retrieval settings、query embedding、登录/业务 API sliding-window 计数、worker 心跳、单文件短租约和运行指标；不作为会话、消息或 vector index job 的持久存储。
 - Chroma：文档分块向量。Docker Compose 使用独立 `chroma` service，backend 与
   worker 通过 HTTP client 共享访问，数据持久化到根目录 `vector_db/chroma`；
   单进程 conda 调试未配置 `CHROMA_HOST` 时仍可使用 embedded 模式。
-- Tesseract：仅对无有效文本层或用户明确重识别的 PDF 页面执行本地 OCR；同次调用产出正文和 TSV word confidence，原始页面和识别文本不发送到外部 OCR 服务。
+- Tesseract：仅对无有效文本层或用户明确重识别的 PDF 页面执行本地 OCR；首次索引使用单次基线，主动重识别在候选/总超时上限内比较原图、灰度、二值化和页面旋转，同次调用产出正文和 TSV word confidence，原始页面和识别文本不发送到外部 OCR 服务。
 - 本地文件系统：知识文件默认保存到根目录 `uploads/users/...`，聊天图片附件默认保存到 `uploads/chat_attachments/users/...`。
 
 ## 认证与权限

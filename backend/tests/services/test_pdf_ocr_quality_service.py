@@ -38,6 +38,11 @@ class PdfOcrQualityServiceTests(unittest.TestCase):
                     "ocr_confidence": 38.5,
                     "ocr_quality": "low",
                     "ocr_attempt": 2,
+                    "ocr_strategy": "single_block_binary",
+                    "ocr_preprocessing": "binary",
+                    "ocr_psm": 6,
+                    "ocr_rotation": 0,
+                    "ocr_candidate_count": 6,
                 },
             },
             {
@@ -91,6 +96,11 @@ class PdfOcrQualityServiceTests(unittest.TestCase):
         self.assertEqual(report["pages"][0]["ocr_attempt"], 2)
         self.assertEqual(report["pages"][0]["history_count"], 2)
         self.assertEqual(report["pages"][0]["latest_confidence_delta"], 7.5)
+        self.assertEqual(
+            report["pages"][0]["ocr_strategy"],
+            "single_block_binary",
+        )
+        self.assertEqual(report["pages"][0]["ocr_candidate_count"], 6)
         self.assertTrue(report["pages"][1]["has_correction"])
         self.assertEqual(report["pages"][1]["correction_revision"], 2)
         self.assertEqual(report["summary"]["document_page_count"], 3)
