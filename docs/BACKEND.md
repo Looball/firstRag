@@ -49,7 +49,7 @@ python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 | `conversations.py` | 会话列表、创建、重命名、删除、消息和诊断读取。 |
 | `health.py` | 后端和 Redis 基础设施健康检查，不返回敏感连接串。 |
 | `knowledge_bases.py` | 知识库列表、创建、重命名、回收站删除/恢复和文件关联管理。 |
-| `knowledge_files.py` | 文件上传、复用、知识文件列表、引用 chunk 上下文、原始文件读取和永久删除入口。 |
+| `knowledge_files.py` | 文件上传、复用、知识文件列表、引用 chunk 上下文、原始文件读取、PDF 页级 PNG 预览和永久删除入口。 |
 | `user_settings.py` | 用户模型厂商、凭据、测试连接和设置保存。 |
 | `vector_indexes.py` | 文件/知识库向量化任务、任务状态和向量删除。 |
 
@@ -86,3 +86,5 @@ python -m app.workers.vector_index_worker
 ```
 
 worker 从 PostgreSQL `vector_index_jobs` 领取任务，解析文件、切分文本、写 Chroma、写 PostgreSQL chunk，并更新任务状态。PDF 逐页解析并保存真实页码；无有效文本层的页面才会渲染并调用本地 Tesseract，默认使用 `chi_sim+eng`，一次调用同时产出正文和 TSV confidence，并把字符加权页级置信度写入 chunk metadata，不调用用户 LLM。低质量 OCR 页可通过受控 `vector_index_jobs.options` 强制再次识别，也可把人工修订持久化到 `knowledge_file_ocr_corrections`；worker 在 OCR 后、切分前应用当前 revision，仍异步重建完整文件索引。DOCX 从 OOXML 保存原始段落范围；同一文件跨 page/block 的 chunk index 保持全局连续。Compose 中的 backend 与 worker 都通过 HTTP 访问独立 `chroma` service，避免多个 embedded Chroma 进程共享目录导致 HNSW 视图不可见。Redis 只保存短 TTL 运行态：worker 心跳、当前任务摘要、单文件短租约和运行指标；Redis 不可用时 worker 会继续依赖 PostgreSQL 队列处理任务。图片知识文件会在 worker 中通过当前用户的 vision 聊天模型解析为可检索 Markdown；解析失败只会标记当前任务失败，不阻塞后续队列。常规验证仍以 Docker Compose 中的 `worker` service 为准。
+
+OCR 校对工作台不依赖浏览器内置 PDF plugin。`pdf_page_preview_service.py` 在用户权限与 uploads 路径校验后，用 PyMuPDF 将单个目标页即时渲染为最长边不超过 1800px 的 RGB PNG；响应使用私有短缓存且不写入磁盘。无效页码或非 PDF 返回 `400`，损坏或暂时无法渲染的 PDF 返回安全的 `422` 提示。

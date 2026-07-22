@@ -218,6 +218,20 @@ export async function loadKnowledgeFileContent(knowledgeFileId: string) {
   return response.blob();
 }
 
+export async function loadKnowledgePdfPagePreview(
+  knowledgeFileId: string,
+  pageNumber: number,
+) {
+  const response = await authenticatedFetch(
+    `/api/chat/knowledge-files/${encodeURIComponent(
+      knowledgeFileId,
+    )}/pages/${pageNumber}/preview`,
+    { method: "GET" },
+    { fallbackMessage: "读取 PDF 页面预览失败，请稍后再试。" },
+  );
+  return response.blob();
+}
+
 export async function loadVectorIndexHealth() {
   const data = await authenticatedJson<unknown>(
     "/api/chat/vector-index-jobs/health",

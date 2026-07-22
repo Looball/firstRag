@@ -2871,12 +2871,12 @@ export default function Home() {
                                   key={sourceKey}
                                   className="border border-[#d5ded9] bg-[#fcfdfb] px-3 py-2 text-xs text-[#46514e]"
                                 >
-                                  <div className="flex items-start justify-between gap-3">
+                                  <div className="flex min-w-0 flex-wrap items-start justify-between gap-3">
                                     <p className="min-w-0 truncate font-semibold text-[#17201f]">
                                       {source.title}
                                     </p>
                                     {isAdvancedMode && (
-                                    <div className="font-utility flex shrink-0 flex-wrap justify-end gap-2 text-[10px] text-[#72807b]">
+                                    <div className="font-utility flex min-w-0 basis-full flex-wrap justify-start gap-2 text-[10px] text-[#72807b] sm:basis-auto sm:shrink-0 sm:justify-end">
                                       {source.chunkIndex !== undefined && (
                                         <span>
                                           Chunk #{source.chunkIndex}

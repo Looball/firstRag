@@ -14,6 +14,7 @@ import {
   listKnowledgeBasesAndSessions,
   listDeletedKnowledgeBases,
   loadKnowledgeFileContent,
+  loadKnowledgePdfPagePreview,
   loadKnowledgeSourcePreview,
   loadPdfOcrPageCorrection,
   loadQualityDashboard,
@@ -155,6 +156,25 @@ describe("chat workspace api", () => {
       `/api/chat/knowledge-files/${fileId}/content`,
       { method: "GET" },
       { fallbackMessage: "读取原始文件失败，请稍后再试。" },
+    );
+  });
+
+  it("loads a rendered PDF page preview as a blob", async () => {
+    const expectedBlob = new Blob(["png"], { type: "image/png" });
+    authenticatedFetchMock.mockResolvedValueOnce(
+      new Response(expectedBlob, {
+        status: 200,
+        headers: { "Content-Type": "image/png" },
+      }),
+    );
+
+    const blob = await loadKnowledgePdfPagePreview("file/1", 2);
+
+    expect(blob.type).toBe("image/png");
+    expect(authenticatedFetchMock).toHaveBeenCalledWith(
+      "/api/chat/knowledge-files/file%2F1/pages/2/preview",
+      { method: "GET" },
+      { fallbackMessage: "读取 PDF 页面预览失败，请稍后再试。" },
     );
   });
 

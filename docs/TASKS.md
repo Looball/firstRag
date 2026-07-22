@@ -80,6 +80,7 @@
 | `PLAN-20260721-04` | 2026-07-21 | `Done` | 为无文本层的扫描 PDF 增加本地 OCR fallback，并保留页码级引用。 | `T-072` |
 | `PLAN-20260721-05` | 2026-07-21 | `Done` | 记录 OCR 置信度、提示低质量页面，并支持单页异步重新识别。 | `T-073` |
 | `PLAN-20260721-06` | 2026-07-21 | `Done` | 支持 OCR 页面人工校对、持久化修订和可撤销的异步索引重建。 | `T-074` |
+| `PLAN-20260722-01` | 2026-07-22 | `Doing` | 将 OCR 校对扩展为原始 PDF 页面、编辑文本和差异结果一体化工作台。 | `T-075` |
 
 ## 任务总览
 
@@ -159,6 +160,7 @@
 | `T-072` | `PLAN-20260721-04` | `P1` | `Done` | 为扫描 PDF 增加本地 OCR fallback | 2026-07-21 | `2a9ef37` |
 | `T-073` | `PLAN-20260721-05` | `P1` | `Done` | 增加 OCR 质量诊断与单页重新识别 | 2026-07-21 | `729e575` |
 | `T-074` | `PLAN-20260721-06` | `P1` | `Done` | 支持 OCR 页面人工校对并重新索引 | 2026-07-21 | `e6cc52d` |
+| `T-075` | `PLAN-20260722-01` | `P1` | `Doing` | 增加 PDF 与 OCR 校对文本并排工作台 | — | — |
 
 ## 新计划接入流程
 
@@ -2906,6 +2908,38 @@ cd .. && docker compose up -d --build
 docker compose ps -a
 docker compose logs --since=10m redis postgres chroma migrate backend worker frontend
 conda run -n firstrag python scripts/production_preflight.py --env-file .env --migration-method compose --check-runtime-health
+git diff --check
+```
+
+## T-075 增加 PDF 与 OCR 校对文本并排工作台
+
+- 来源计划：`PLAN-20260722-01`
+- 优先级：`P1`
+- 状态：`Doing`
+- 目标：让用户校对扫描 PDF 时无需在原始文件和文本编辑器之间来回切换，并能快速识别原 OCR 与当前人工文本的差异。
+- 技术边界：
+  - 复用 T-074 的校对读取、保存、撤销和异步重建 API，不新增同步 OCR、embedding 或索引路径。
+  - PDF 目标页通过新增的认证预览接口由 PyMuPDF 即时渲染为受限尺寸 PNG，再以临时 Blob URL 展示；关闭工作台后立即释放 URL，不把页面、文件或 API Key 写入持久化存储。
+  - 差异比较在前端完成并限制为线性空间；超长 OCR 文本不能触发无界 LCS 计算或阻塞输入。
+  - 历史引用、index version、权限与文件路径安全语义保持不变。
+- 范围：
+  - 原文预览中的校对区域扩展为桌面双栏、窄屏单栏的 PDF/文本工作台，并自动定位目标页。
+  - 编辑区支持编辑视图和差异视图；差异视图按行展示原 OCR 与当前文本，并高亮新增、删除和修改内容。
+  - PDF 加载提供骨架、失败提示、重新加载和独立窗口打开入口；保存、取消、字符计数和异步任务状态继续复用现有交互。
+  - 补充差异算法、请求状态和关键 UI 文案测试，同步更新 Frontend/API 使用说明和任务台账。
+- 验收标准：
+  - 打开 OCR 校对后，同一工作台可见目标 PDF 页和完整校对文本；窄屏不会横向溢出或遮挡操作按钮。
+  - 原 OCR 与当前草稿一致时明确显示无差异；存在变更时能区分新增、删除和修改行，并显示汇总数量。
+  - PDF 读取失败不丢失校对草稿，用户可重新加载或在新窗口打开原始文件。
+  - 关闭、切页或卸载组件后 Blob URL 被释放；50,000 字符上限、无变化阻断、保存/撤销/任务轮询保持兼容。
+  - 前端测试、lint、production build、Docker Compose 页面 smoke 和 `git diff --check` 通过。
+- 建议验证命令：
+
+```bash
+cd frontend && npm test -- --run && npm run lint && npm run build
+cd .. && docker compose up -d --build
+docker compose ps -a
+docker compose logs --since=10m backend worker frontend
 git diff --check
 ```
 

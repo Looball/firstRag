@@ -61,7 +61,7 @@ conda run -n firstrag python scripts/production_preflight.py --env-file .env --m
 1. 注册并登录一个本地测试账号。
 2. 进入“聊天模型设置”，填写自己的 OpenAI-compatible provider。
 3. 回到工作台，新建知识库并上传一份 `.md`、`.txt`、`.pdf`、`.docx`、`.png`、`.jpg/.jpeg` 或 `.webp` 文件；图片入库解析需要当前聊天模型支持 vision。
-4. 在“文件”弹窗中触发向量化，等待任务队列完成。无文本层的扫描 PDF 会在 worker 内通过本地 Tesseract OCR；引用原文预览可按页人工校对 OCR 文本并异步重建索引。图片文件则由当前用户的 vision 聊天模型解析为可检索 Markdown，再进入向量与全文检索。
+4. 在“文件”弹窗中触发向量化，等待任务队列完成。无文本层的扫描 PDF 会在 worker 内通过本地 Tesseract OCR；引用原文预览提供 PDF 原页与文本并排校对、差异高亮和异步索引重建。图片文件则由当前用户的 vision 聊天模型解析为可检索 Markdown，再进入向量与全文检索。
 5. 对当前知识库提问，检查回答和引用来源；如果当前聊天模型支持 vision，也可以在聊天框附加 PNG、JPEG 或 WebP 图片进行单轮多模态提问。
 6. 如需调试检索效果，切换到高级模式后查看 retrieval diagnostics、提交反馈或打开质量看板。
 

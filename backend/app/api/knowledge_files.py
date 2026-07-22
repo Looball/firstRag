@@ -12,7 +12,7 @@ from fastapi import (
     Request,
     UploadFile,
 )
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 
 from app.core.config import (
     API_RATE_LIMIT_WINDOW_SECONDS,
@@ -51,6 +51,11 @@ from app.services.documents.document_service import (
     is_image_document_file_name,
     is_supported_document_file,
     validate_supported_image_content,
+)
+from app.services.documents.pdf_page_preview_service import (
+    PdfPagePreviewRenderError,
+    PdfPagePreviewValidationError,
+    render_pdf_page_preview,
 )
 from app.services.vectors.vector_index_queue_service import (
     enqueue_file_vector_index,
@@ -490,6 +495,58 @@ def get_knowledge_file_content(
         content_disposition_type="inline",
         headers={
             "Content-Security-Policy": "sandbox",
+            "X-Content-Type-Options": "nosniff",
+        },
+    )
+
+
+@router.get(
+    "/knowledge-files/{knowledge_file_id}/pages/{page_number}/preview",
+)
+def get_knowledge_file_pdf_page_preview(
+    knowledge_file_id: UUID,
+    page_number: int,
+    user_id: int = Depends(get_current_user_id),
+) -> Response:
+    """按当前用户权限将 PDF 目标页渲染为 PNG。"""
+    file_record = get_user_knowledge_file(user_id, knowledge_file_id)
+    if file_record is None:
+        raise HTTPException(status_code=404, detail="文件不存在")
+
+    try:
+        storage_path = resolve_knowledge_file_storage_path(
+            str(file_record["storage_path"]),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail="文件内容不可用") from exc
+    if not storage_path.is_file():
+        raise HTTPException(status_code=404, detail="文件内容不存在")
+
+    try:
+        content = render_pdf_page_preview(storage_path, page_number)
+    except PdfPagePreviewValidationError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except PdfPagePreviewRenderError as exc:
+        logger.warning(
+            "PDF 页面预览失败 user_id=%s file_id=%s page=%s error=%s",
+            user_id,
+            knowledge_file_id,
+            page_number,
+            exc,
+        )
+        raise HTTPException(
+            status_code=422,
+            detail="PDF 页面暂时无法预览，请在新窗口打开原始文件。",
+        ) from exc
+
+    return Response(
+        content=content,
+        media_type="image/png",
+        headers={
+            "Cache-Control": "private, max-age=60",
+            "Content-Disposition": (
+                f'inline; filename="page-{page_number}.png"'
+            ),
             "X-Content-Type-Options": "nosniff",
         },
     )

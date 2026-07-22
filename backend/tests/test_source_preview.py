@@ -216,6 +216,52 @@ class SourcePreviewApiTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 404)
 
+    def test_pdf_page_preview_returns_private_png(self) -> None:
+        """当前用户的 PDF 目标页应以内联 PNG 返回。"""
+        file_id = uuid4()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            storage_path = Path(temp_dir) / "scan.pdf"
+            storage_path.write_bytes(b"%PDF-test")
+            with patch(
+                "app.api.knowledge_files.get_user_knowledge_file",
+                return_value={
+                    "storage_path": str(storage_path),
+                    "original_name": "scan.pdf",
+                },
+            ), patch(
+                "app.api.knowledge_files.resolve_knowledge_file_storage_path",
+                return_value=storage_path,
+            ), patch(
+                "app.api.knowledge_files.render_pdf_page_preview",
+                return_value=b"\x89PNG\r\n\x1a\npreview",
+            ) as render_preview:
+                response = self.client.get(
+                    f"/chat/knowledge-files/{file_id}/pages/2/preview",
+                )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.headers["content-type"], "image/png")
+        self.assertEqual(response.headers["cache-control"], "private, max-age=60")
+        self.assertEqual(response.headers["x-content-type-options"], "nosniff")
+        self.assertTrue(response.content.startswith(b"\x89PNG"))
+        render_preview.assert_called_once_with(storage_path, 2)
+
+    def test_pdf_page_preview_hides_cross_user_file(self) -> None:
+        """跨用户或不存在的 PDF 不得进入磁盘渲染流程。"""
+        file_id = uuid4()
+        with patch(
+            "app.api.knowledge_files.get_user_knowledge_file",
+            return_value=None,
+        ), patch(
+            "app.api.knowledge_files.render_pdf_page_preview",
+        ) as render_preview:
+            response = self.client.get(
+                f"/chat/knowledge-files/{file_id}/pages/1/preview",
+            )
+
+        self.assertEqual(response.status_code, 404)
+        render_preview.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()

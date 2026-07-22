@@ -52,7 +52,7 @@ FirstRAG/
   -> 当前用户 JWT 权限校验
   -> PostgreSQL knowledge_file_chunks 当前 index_version
   -> 返回目标 chunk、相邻上下文及 PDF 页码或 DOCX 段落范围
-  -> 可选读取 uploads 边界内的原始文件；PDF 使用 #page=N 跳页
+  -> 校对工作台按权限将 PDF 目标页即时渲染为 PNG；新窗口原文件使用 #page=N 跳页
 ```
 
 ## 分层边界
