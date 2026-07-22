@@ -80,7 +80,7 @@
 | `PLAN-20260721-04` | 2026-07-21 | `Done` | 为无文本层的扫描 PDF 增加本地 OCR fallback，并保留页码级引用。 | `T-072` |
 | `PLAN-20260721-05` | 2026-07-21 | `Done` | 记录 OCR 置信度、提示低质量页面，并支持单页异步重新识别。 | `T-073` |
 | `PLAN-20260721-06` | 2026-07-21 | `Done` | 支持 OCR 页面人工校对、持久化修订和可撤销的异步索引重建。 | `T-074` |
-| `PLAN-20260722-01` | 2026-07-22 | `Doing` | 将 OCR 校对扩展为原始 PDF 页面、编辑文本和差异结果一体化工作台。 | `T-075` |
+| `PLAN-20260722-01` | 2026-07-22 | `Done` | 将 OCR 校对扩展为原始 PDF 页面、编辑文本和差异结果一体化工作台。 | `T-075` |
 
 ## 任务总览
 
@@ -160,7 +160,7 @@
 | `T-072` | `PLAN-20260721-04` | `P1` | `Done` | 为扫描 PDF 增加本地 OCR fallback | 2026-07-21 | `2a9ef37` |
 | `T-073` | `PLAN-20260721-05` | `P1` | `Done` | 增加 OCR 质量诊断与单页重新识别 | 2026-07-21 | `729e575` |
 | `T-074` | `PLAN-20260721-06` | `P1` | `Done` | 支持 OCR 页面人工校对并重新索引 | 2026-07-21 | `e6cc52d` |
-| `T-075` | `PLAN-20260722-01` | `P1` | `Doing` | 增加 PDF 与 OCR 校对文本并排工作台 | — | — |
+| `T-075` | `PLAN-20260722-01` | `P1` | `Done` | 增加 PDF 与 OCR 校对文本并排工作台 | 2026-07-22 | `976214b` |
 
 ## 新计划接入流程
 
@@ -2915,7 +2915,7 @@ git diff --check
 
 - 来源计划：`PLAN-20260722-01`
 - 优先级：`P1`
-- 状态：`Doing`
+- 状态：`Done`
 - 目标：让用户校对扫描 PDF 时无需在原始文件和文本编辑器之间来回切换，并能快速识别原 OCR 与当前人工文本的差异。
 - 技术边界：
   - 复用 T-074 的校对读取、保存、撤销和异步重建 API，不新增同步 OCR、embedding 或索引路径。
@@ -2933,6 +2933,18 @@ git diff --check
   - PDF 读取失败不丢失校对草稿，用户可重新加载或在新窗口打开原始文件。
   - 关闭、切页或卸载组件后 Blob URL 被释放；50,000 字符上限、无变化阻断、保存/撤销/任务轮询保持兼容。
   - 前端测试、lint、production build、Docker Compose 页面 smoke 和 `git diff --check` 通过。
+- 相关提交：`976214b`。
+- 完成记录：
+  - 新增当前用户鉴权的 PDF 页级 PNG 预览 API 与 Next.js streaming proxy；PyMuPDF 只渲染目标页、最长边限制为 1800 像素，超大页面自动下采样，响应禁止公共缓存且不落盘。
+  - 原文预览中的校对区域升级为响应式工作台：桌面并排展示 PDF 与文本，窄屏依次展示；包含预览骨架、失败重试、独立窗口打开、编辑/差异视图、只看变化和保存/取消状态。
+  - 差异算法使用唯一行锚点与 longest increasing subsequence 固定未变化区域，额外行区分新增/删除，成对变化行继续高亮字符级前后缀；通过 `useDeferredValue` 和线性空间实现避免长页输入阻塞。
+  - Blob URL 在请求替换、取消或组件卸载时释放；实际浏览器验证取消工作台后预览节点移除，未保存验收草稿，也未产生 correction 或重建任务。
+  - 真实账号完成两页扫描 PDF smoke：第 2 页 PNG 正常显示；人工草稿得到“修改 2 / 新增 1 / 删除 0”和正确字符高亮；390px viewport 下 `clientWidth = scrollWidth = 390`，底层来源评分条同步修正为小屏换行。
+  - 浏览器验收创建的 PDF 与临时会话已清理；测试文件永久删除成功，测试会话软删除成功。
+  - `cd backend && conda run -n firstrag env PYTHONPATH=. pytest -q`：316 passed、8 warnings、30 subtests passed。
+  - `cd frontend && npm test -- --run`：11 个 test files、75 tests passed；`npm run lint`：0 error、保留 2 个既有 `<img>` performance warnings；Next 16.2.10 production build 通过。
+  - Docker Compose 最终重建通过；PostgreSQL、Redis、Chroma healthy，migration 0 applied / 7 skipped，backend、worker、frontend 正常启动；production preflight、Chroma runtime health、migration dry-run 与 `git diff --check` 通过。
+  - 构建期间 npm 新披露的 Sharp high finding 已通过 override 到 `sharp@0.35.3` 消除；production audit 门禁通过，仅保留截至 2026-08-20 的 PostCSS moderate 限时例外。
 - 建议验证命令：
 
 ```bash
