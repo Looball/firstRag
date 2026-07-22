@@ -53,6 +53,12 @@ FirstRAG/
   -> PostgreSQL knowledge_file_chunks 当前 index_version
   -> 返回目标 chunk、相邻上下文及 PDF 页码或 DOCX 段落范围
   -> 校对工作台按权限将 PDF 目标页即时渲染为 PNG；新窗口原文件使用 #page=N 跳页
+
+文件级 OCR 质量巡检
+  -> 当前用户选择已索引 PDF
+  -> PostgreSQL 当前 index_version 的 OCR 代表 chunks + corrections
+  -> 汇总待处理、已校对、页级置信度和安全摘要
+  -> 点击页码复用引用原文预览与校对工作台
 ```
 
 ## 分层边界

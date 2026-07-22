@@ -237,6 +237,38 @@ def get_user_pdf_page_ocr_metadata(
     )
 
 
+def list_user_pdf_ocr_page_rows(
+    user_id: int,
+    file_id: UUID | str,
+    index_version: int,
+) -> list[Row]:
+    """读取当前用户文件当前版本中每个 OCR 页的代表 chunk。"""
+    return fetch_all(
+        """
+        SELECT DISTINCT ON ((chunk.metadata ->> 'page_number')::integer)
+            chunk.chunk_index,
+            chunk.index_version,
+            chunk.content,
+            chunk.metadata
+        FROM knowledge_file_chunks AS chunk
+        JOIN knowledge_files AS file
+          ON file.id = chunk.knowledge_file_id
+         AND file.user_id = chunk.user_id
+        WHERE chunk.user_id = %s
+          AND chunk.knowledge_file_id = %s
+          AND chunk.index_version = %s
+          AND chunk.metadata ->> 'location_type' = 'pdf_page'
+          AND chunk.metadata ->> 'pdf_parse_method' = 'ocr'
+          AND chunk.metadata ->> 'page_number' ~ '^[0-9]+$'
+          AND file.deleted_at IS NULL
+        ORDER BY
+            (chunk.metadata ->> 'page_number')::integer ASC,
+            chunk.chunk_index ASC;
+        """,
+        (user_id, str(file_id), index_version),
+    )
+
+
 def get_user_pdf_page_chunks(
     user_id: int,
     file_id: UUID | str,

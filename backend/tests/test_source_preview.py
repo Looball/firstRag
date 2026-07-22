@@ -12,6 +12,7 @@ from app.core.security import get_current_user_id
 from app.main import app
 from app.repositories.knowledge_chunk_repository import (
     get_user_knowledge_file_chunk_context,
+    list_user_pdf_ocr_page_rows,
 )
 
 
@@ -40,6 +41,24 @@ class KnowledgeChunkContextRepositoryTests(unittest.TestCase):
         self.assertIn("ORDER BY chunk.index_version DESC", sql)
         self.assertIn("context.user_id = %s", sql)
         self.assertEqual(params, (7, str(file_id), 4, 5, 5, 7, 2, 2))
+
+    def test_ocr_page_list_query_is_scoped_to_user_file_and_version(self) -> None:
+        """OCR 页级清单必须绑定 user、file、index version 和软删除条件。"""
+        file_id = uuid4()
+        with patch(
+            "app.repositories.knowledge_chunk_repository.fetch_all",
+            return_value=[],
+        ) as fetch_all:
+            result = list_user_pdf_ocr_page_rows(7, file_id, 5)
+
+        self.assertEqual(result, [])
+        sql, params = fetch_all.call_args.args
+        self.assertIn("chunk.user_id = %s", sql)
+        self.assertIn("chunk.knowledge_file_id = %s", sql)
+        self.assertIn("chunk.index_version = %s", sql)
+        self.assertIn("pdf_parse_method' = 'ocr'", sql)
+        self.assertIn("file.deleted_at IS NULL", sql)
+        self.assertEqual(params, (7, str(file_id), 5))
 
 
 class SourcePreviewApiTests(unittest.TestCase):

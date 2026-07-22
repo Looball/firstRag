@@ -26,6 +26,7 @@ import type {
   MessageSourceFeedbackRating,
   MessageSourceFeedbackResponse,
   PdfOcrPageCorrection,
+  PdfOcrQualityReport,
   QualityDashboard,
   RetrievalSettingsResponse,
   UploadKnowledgeFilesResponse,
@@ -109,6 +110,38 @@ const pdfOcrCorrectionResponseSchema = z
       ocr_quality: z.string().default("unknown"),
     }),
     job: z.unknown().optional(),
+  })
+  .passthrough();
+
+const pdfOcrQualityReportSchema = z
+  .object({
+    file: z.object({
+      id: z.string().min(1),
+      original_name: z.string().min(1),
+      status: z.string().min(1),
+      index_version: z.number().int().nonnegative(),
+    }),
+    summary: z.object({
+      document_page_count: z.number().int().nonnegative(),
+      ocr_page_count: z.number().int().nonnegative(),
+      needs_review_count: z.number().int().nonnegative(),
+      low_confidence_count: z.number().int().nonnegative(),
+      corrected_count: z.number().int().nonnegative(),
+      average_confidence: z.number().nullable(),
+    }),
+    pages: z.array(z.object({
+      page_number: z.number().int().positive(),
+      page_count: z.number().int().positive().nullable(),
+      chunk_index: z.number().int().nonnegative(),
+      index_version: z.number().int().nonnegative(),
+      ocr_confidence: z.number().nullable(),
+      ocr_quality: z.string(),
+      needs_review: z.boolean(),
+      has_correction: z.boolean(),
+      correction_revision: z.number().int().nonnegative(),
+      correction_updated_at: z.string().nullable(),
+      excerpt: z.string(),
+    })),
   })
   .passthrough();
 
@@ -230,6 +263,51 @@ export async function loadKnowledgePdfPagePreview(
     { fallbackMessage: "读取 PDF 页面预览失败，请稍后再试。" },
   );
   return response.blob();
+}
+
+export async function loadPdfOcrQualityReport(
+  knowledgeFileId: string,
+): Promise<PdfOcrQualityReport> {
+  const data = await authenticatedJson<unknown>(
+    `/api/chat/knowledge-files/${encodeURIComponent(
+      knowledgeFileId,
+    )}/ocr/pages`,
+    { method: "GET" },
+    { fallbackMessage: "读取 OCR 质量巡检失败，请稍后再试。" },
+  );
+  const parsed = pdfOcrQualityReportSchema.safeParse(data);
+  if (!parsed.success) {
+    throw new Error("OCR 质量巡检响应格式异常。");
+  }
+  return {
+    file: {
+      id: parsed.data.file.id,
+      originalName: parsed.data.file.original_name,
+      status: parsed.data.file.status,
+      indexVersion: parsed.data.file.index_version,
+    },
+    summary: {
+      documentPageCount: parsed.data.summary.document_page_count,
+      ocrPageCount: parsed.data.summary.ocr_page_count,
+      needsReviewCount: parsed.data.summary.needs_review_count,
+      lowConfidenceCount: parsed.data.summary.low_confidence_count,
+      correctedCount: parsed.data.summary.corrected_count,
+      averageConfidence: parsed.data.summary.average_confidence,
+    },
+    pages: parsed.data.pages.map((page) => ({
+      pageNumber: page.page_number,
+      pageCount: page.page_count,
+      chunkIndex: page.chunk_index,
+      indexVersion: page.index_version,
+      ocrConfidence: page.ocr_confidence,
+      ocrQuality: page.ocr_quality,
+      needsReview: page.needs_review,
+      hasCorrection: page.has_correction,
+      correctionRevision: page.correction_revision,
+      correctionUpdatedAt: page.correction_updated_at,
+      excerpt: page.excerpt,
+    })),
+  };
 }
 
 export async function loadVectorIndexHealth() {

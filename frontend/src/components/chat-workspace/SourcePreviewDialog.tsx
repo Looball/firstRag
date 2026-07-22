@@ -16,6 +16,7 @@ import { OcrCorrectionWorkspace } from "./OcrCorrectionWorkspace";
 type SourcePreviewDialogProps = {
   source: ChatSource;
   onClose: () => void;
+  initialCorrectionOpen?: boolean;
 };
 
 const LOCATION_KEYS = ["h1", "h2", "h3", "h4", "h5", "h6"];
@@ -70,12 +71,14 @@ function formatChunkLocation(
 export function SourcePreviewDialog({
   source,
   onClose,
+  initialCorrectionOpen = false,
 }: SourcePreviewDialogProps) {
   const targetChunkRef = useRef<HTMLElement | null>(null);
   const [isOpeningFile, setIsOpeningFile] = useState(false);
   const [fileOpenError, setFileOpenError] = useState("");
   const [ocrReindexJobId, setOcrReindexJobId] = useState("");
   const [isCorrectionEditorOpen, setIsCorrectionEditorOpen] = useState(false);
+  const [autoCorrectionDismissed, setAutoCorrectionDismissed] = useState(false);
   const [correctionDraft, setCorrectionDraft] = useState("");
   const [correctionJobId, setCorrectionJobId] = useState("");
   const [correctionOperation, setCorrectionOperation] = useState<
@@ -158,6 +161,7 @@ export function SourcePreviewDialog({
       setCorrectionOperation("save");
       setCorrectionJobId(job.id);
       setIsCorrectionEditorOpen(false);
+      setAutoCorrectionDismissed(true);
       setIsConfirmingCorrectionDelete(false);
     },
   });
@@ -168,6 +172,7 @@ export function SourcePreviewDialog({
       setCorrectionOperation("delete");
       setCorrectionJobId(job.id);
       setIsCorrectionEditorOpen(false);
+      setAutoCorrectionDismissed(true);
       setIsConfirmingCorrectionDelete(false);
     },
   });
@@ -193,6 +198,14 @@ export function SourcePreviewDialog({
   });
   const correction =
     saveCorrectionMutation.data?.correction ?? correctionQuery.data;
+  const correctionEditorVisible =
+    isCorrectionEditorOpen ||
+    (initialCorrectionOpen &&
+      !autoCorrectionDismissed &&
+      Boolean(correction));
+  const effectiveCorrectionDraft = isCorrectionEditorOpen
+    ? correctionDraft
+    : correction?.currentText || "";
   const correctionJob = correctionJobQuery.data;
   const correctionIsActive =
     saveCorrectionMutation.isPending ||
@@ -217,7 +230,7 @@ export function SourcePreviewDialog({
                 correctionJob.failureHint ||
                 "OCR 校对索引重建失败。"
               : "";
-  const normalizedCorrectionDraft = correctionDraft.trim();
+  const normalizedCorrectionDraft = effectiveCorrectionDraft.trim();
   const correctionDraftUnchanged =
     normalizedCorrectionDraft === (correction?.currentText || "").trim();
   const ocrReindexMutation = useMutation({
@@ -270,6 +283,7 @@ export function SourcePreviewDialog({
     }
     setCorrectionDraft(correction.currentText);
     setIsCorrectionEditorOpen(true);
+    setAutoCorrectionDismissed(false);
     setIsConfirmingCorrectionDelete(false);
     saveCorrectionMutation.reset();
   }
@@ -346,7 +360,7 @@ export function SourcePreviewDialog({
     >
       <div
         className={`flex w-full flex-col border border-[#bccac5] bg-[#f8faf7] shadow-2xl transition-[max-width] duration-200 ${
-          isCorrectionEditorOpen
+          correctionEditorVisible
             ? "max-h-[94vh] max-w-[1500px]"
             : "max-h-[88vh] max-w-4xl"
         }`}
@@ -485,12 +499,12 @@ export function SourcePreviewDialog({
                       </button>
                     </div>
                   </div>
-                  {isCorrectionEditorOpen ? (
+                  {correctionEditorVisible ? (
                     <OcrCorrectionWorkspace
                       fileId={fileId}
                       pageNumber={targetPageNumber}
                       originalText={correction?.originalText || ""}
-                      value={correctionDraft}
+                      value={effectiveCorrectionDraft}
                       disabled={
                         !normalizedCorrectionDraft ||
                         correctionDraftUnchanged ||
@@ -498,8 +512,14 @@ export function SourcePreviewDialog({
                       }
                       saving={saveCorrectionMutation.isPending}
                       openingOriginalFile={isOpeningFile}
-                      onChange={setCorrectionDraft}
-                      onCancel={() => setIsCorrectionEditorOpen(false)}
+                      onChange={(nextValue) => {
+                        setCorrectionDraft(nextValue);
+                        setIsCorrectionEditorOpen(true);
+                      }}
+                      onCancel={() => {
+                        setIsCorrectionEditorOpen(false);
+                        setAutoCorrectionDismissed(true);
+                      }}
                       onOpenOriginalFile={handleOpenOriginalFile}
                       onSave={() =>
                         saveCorrectionMutation.mutate(
@@ -508,7 +528,7 @@ export function SourcePreviewDialog({
                       }
                     />
                   ) : null}
-                  {hasCorrection && !isCorrectionEditorOpen ? (
+                  {hasCorrection && !correctionEditorVisible ? (
                     <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-current/25 pt-3">
                       <p className="text-xs">
                         撤销后会删除人工文本，并重新运行 Tesseract 恢复页面索引。

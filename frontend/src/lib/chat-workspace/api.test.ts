@@ -15,6 +15,7 @@ import {
   listDeletedKnowledgeBases,
   loadKnowledgeFileContent,
   loadKnowledgePdfPagePreview,
+  loadPdfOcrQualityReport,
   loadKnowledgeSourcePreview,
   loadPdfOcrPageCorrection,
   loadQualityDashboard,
@@ -175,6 +176,68 @@ describe("chat workspace api", () => {
       "/api/chat/knowledge-files/file%2F1/pages/2/preview",
       { method: "GET" },
       { fallbackMessage: "读取 PDF 页面预览失败，请稍后再试。" },
+    );
+  });
+
+  it("normalizes a PDF OCR quality report", async () => {
+    const fileId = "11111111-1111-4111-8111-111111111111";
+    authenticatedJsonMock.mockResolvedValueOnce({
+      success: true,
+      file: {
+        id: fileId,
+        original_name: "scan.pdf",
+        status: "indexed",
+        index_version: 4,
+      },
+      summary: {
+        document_page_count: 2,
+        ocr_page_count: 2,
+        needs_review_count: 1,
+        low_confidence_count: 1,
+        corrected_count: 0,
+        average_confidence: 65.25,
+      },
+      pages: [{
+        page_number: 2,
+        page_count: 2,
+        chunk_index: 1,
+        index_version: 4,
+        ocr_confidence: 40.5,
+        ocr_quality: "low",
+        needs_review: true,
+        has_correction: false,
+        correction_revision: 0,
+        correction_updated_at: null,
+        excerpt: "Needs review",
+      }],
+    });
+
+    await expect(loadPdfOcrQualityReport(fileId)).resolves.toEqual({
+      file: {
+        id: fileId,
+        originalName: "scan.pdf",
+        status: "indexed",
+        indexVersion: 4,
+      },
+      summary: {
+        documentPageCount: 2,
+        ocrPageCount: 2,
+        needsReviewCount: 1,
+        lowConfidenceCount: 1,
+        correctedCount: 0,
+        averageConfidence: 65.25,
+      },
+      pages: [expect.objectContaining({
+        pageNumber: 2,
+        chunkIndex: 1,
+        needsReview: true,
+        excerpt: "Needs review",
+      })],
+    });
+    expect(authenticatedJsonMock).toHaveBeenCalledWith(
+      `/api/chat/knowledge-files/${fileId}/ocr/pages`,
+      { method: "GET" },
+      { fallbackMessage: "读取 OCR 质量巡检失败，请稍后再试。" },
     );
   });
 

@@ -236,6 +236,69 @@ class VectorIndexJobHealthTests(unittest.TestCase):
             page_number=2,
         )
 
+    def test_get_pdf_ocr_quality_report_returns_page_queue(self) -> None:
+        """文件级 OCR 巡检接口应返回汇总和待处理页。"""
+        file_id = uuid4()
+        with patch(
+            "app.api.vector_indexes.get_pdf_ocr_quality_report",
+            return_value={
+                "file": {
+                    "id": str(file_id),
+                    "original_name": "scan.pdf",
+                    "status": "indexed",
+                    "index_version": 4,
+                },
+                "summary": {
+                    "document_page_count": 2,
+                    "ocr_page_count": 2,
+                    "needs_review_count": 1,
+                    "low_confidence_count": 1,
+                    "corrected_count": 0,
+                    "average_confidence": 65.0,
+                },
+                "pages": [{
+                    "page_number": 2,
+                    "page_count": 2,
+                    "chunk_index": 1,
+                    "index_version": 4,
+                    "ocr_confidence": 40.0,
+                    "ocr_quality": "low",
+                    "needs_review": True,
+                    "has_correction": False,
+                    "correction_revision": 0,
+                    "correction_updated_at": None,
+                    "excerpt": "Needs review",
+                }],
+            },
+        ) as get_report:
+            response = self.client.get(
+                f"/chat/knowledge-files/{file_id}/ocr/pages",
+            )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertTrue(payload["success"])
+        self.assertEqual(payload["summary"]["needs_review_count"], 1)
+        self.assertTrue(payload["pages"][0]["needs_review"])
+        get_report.assert_called_once_with(
+            user_id=1,
+            knowledge_file_id=file_id,
+        )
+
+    def test_get_pdf_ocr_quality_report_hides_inaccessible_file(self) -> None:
+        """跨用户文件不能通过 OCR 巡检接口被探测。"""
+        file_id = uuid4()
+        with patch(
+            "app.api.vector_indexes.get_pdf_ocr_quality_report",
+            return_value=None,
+        ):
+            response = self.client.get(
+                f"/chat/knowledge-files/{file_id}/ocr/pages",
+            )
+
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(response.json(), {"detail": "文件不存在"})
+
     def test_reindex_pdf_ocr_page_hides_inaccessible_file(self) -> None:
         """跨用户文件不能通过 OCR 页接口被探测。"""
         file_id = uuid4()

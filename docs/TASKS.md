@@ -81,6 +81,7 @@
 | `PLAN-20260721-05` | 2026-07-21 | `Done` | 记录 OCR 置信度、提示低质量页面，并支持单页异步重新识别。 | `T-073` |
 | `PLAN-20260721-06` | 2026-07-21 | `Done` | 支持 OCR 页面人工校对、持久化修订和可撤销的异步索引重建。 | `T-074` |
 | `PLAN-20260722-01` | 2026-07-22 | `Done` | 将 OCR 校对扩展为原始 PDF 页面、编辑文本和差异结果一体化工作台。 | `T-075` |
+| `PLAN-20260722-02` | 2026-07-22 | `Doing` | 建立文件级 OCR 质量巡检入口，集中发现低置信度页面并直接进入校对工作台。 | `T-076` |
 
 ## 任务总览
 
@@ -161,6 +162,7 @@
 | `T-073` | `PLAN-20260721-05` | `P1` | `Done` | 增加 OCR 质量诊断与单页重新识别 | 2026-07-21 | `729e575` |
 | `T-074` | `PLAN-20260721-06` | `P1` | `Done` | 支持 OCR 页面人工校对并重新索引 | 2026-07-21 | `e6cc52d` |
 | `T-075` | `PLAN-20260722-01` | `P1` | `Done` | 增加 PDF 与 OCR 校对文本并排工作台 | 2026-07-22 | `976214b` |
+| `T-076` | `PLAN-20260722-02` | `P1` | `Doing` | 增加文件级 OCR 质量巡检 | — | — |
 
 ## 新计划接入流程
 
@@ -2952,6 +2954,39 @@ cd frontend && npm test -- --run && npm run lint && npm run build
 cd .. && docker compose up -d --build
 docker compose ps -a
 docker compose logs --since=10m backend worker frontend
+git diff --check
+```
+
+## T-076 增加文件级 OCR 质量巡检
+
+- 来源计划：`PLAN-20260722-02`
+- 优先级：`P1`
+- 状态：`Doing`
+- 目标：让用户无需先通过问答命中某个页面，即可从知识文件入口发现并处理低置信度 OCR 页面。
+- 技术边界：
+  - 只读取当前文件当前 index version 的 PostgreSQL chunk metadata 和现有 correction 记录，不扫描磁盘、不重新运行 OCR、不读取 Chroma。
+  - 页级清单、统计与入口必须绑定当前用户和未删除文件；原文、人工校对、重新识别与异步重建继续复用 T-073 至 T-075 的现有接口。
+  - 列表只返回安全展示字段和截断摘要，不返回 storage path、完整页正文或内部凭据。
+- 范围：
+  - 新增文件级 OCR 页面质量清单 API，返回页码、置信度、质量状态、人工修订状态、代表 chunk 和安全摘要。
+  - 文件管理中为已索引 PDF 增加 OCR 巡检入口；巡检弹窗展示统计、页码质量刻度、筛选排序和分页质量列表。
+  - 点击页面直接打开该页的 PDF/文本校对工作台，并继续支持重新识别、保存修订、撤销和任务状态轮询。
+  - 覆盖无 OCR 页面、部分低置信度、已人工校对、加载失败、长列表与窄屏状态。
+- 验收标准：
+  - 当前用户只能读取自己的未删除文件；跨用户或不存在文件返回 404，未完成索引返回明确冲突提示。
+  - 默认优先展示尚未人工修订的低置信度页面，并可切换全部页、待处理页和已校对页以及页码顺序。
+  - 点击任一 OCR 页可直接看到 T-075 校对工作台和目标 PDF 页面，不要求先产生聊天引用。
+  - 文件没有 OCR 页面时展示可理解空状态；加载失败可重试，不影响文件管理其他操作。
+  - 后端、前端测试、lint、production build、Docker Compose 真实页面 smoke、production preflight 和 `git diff --check` 通过。
+- 建议验证命令：
+
+```bash
+cd backend && conda run -n firstrag env PYTHONPATH=. pytest -q
+cd ../frontend && npm test -- --run && npm run lint && npm run build
+cd .. && docker compose up -d --build
+docker compose ps -a
+docker compose logs --since=10m backend worker frontend
+conda run -n firstrag python scripts/production_preflight.py --env-file .env --migration-method compose --check-runtime-health
 git diff --check
 ```
 

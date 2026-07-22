@@ -1,5 +1,8 @@
+"use client";
+
+import { OcrQualityInspectorDialog } from "@/components/chat-workspace/OcrQualityInspectorDialog";
 import { TaskQueuePanel } from "@/components/chat-workspace/TaskQueuePanel";
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import type {
   KnowledgeFile,
   VectorIndexHealthResponse,
@@ -67,6 +70,7 @@ type KnowledgeFileListProps = {
   onPermanentlyDeleteFile: (fileId: string) => void | Promise<void>;
   onRemoveFile: (fileId: string) => void | Promise<void>;
   onAttachFile: (fileId: string) => void | Promise<void>;
+  onInspectOcr: (file: KnowledgeFile) => void;
 };
 
 function StatusMessage({
@@ -106,6 +110,7 @@ function KnowledgeFileRow({
   onPermanentlyDeleteFile,
   onRemoveFile,
   onAttachFile,
+  onInspectOcr,
 }: {
   file: KnowledgeFile;
   mode: "selected" | "reusable";
@@ -121,11 +126,14 @@ function KnowledgeFileRow({
   onPermanentlyDeleteFile: (fileId: string) => void | Promise<void>;
   onRemoveFile: (fileId: string) => void | Promise<void>;
   onAttachFile: (fileId: string) => void | Promise<void>;
+  onInspectOcr: (file: KnowledgeFile) => void;
 }) {
   const vectorStatus = getVectorStatus(file);
+  const canInspectOcr =
+    file.status === "indexed" && file.name.toLowerCase().endsWith(".pdf");
 
   return (
-    <div className="flex items-center justify-between gap-4 py-4">
+    <div className="flex flex-col items-start gap-4 py-4 sm:flex-row sm:items-center sm:justify-between">
       <div className="min-w-0">
         <p className="truncate text-sm font-semibold text-[#17201f]">
           {file.name}
@@ -157,7 +165,16 @@ function KnowledgeFileRow({
             </ul>
           )}
       </div>
-      <div className="flex shrink-0 items-center gap-2">
+      <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto sm:justify-end">
+        {canInspectOcr ? (
+          <button
+            type="button"
+            onClick={() => onInspectOcr(file)}
+            className="border border-[#8ca8a1] bg-[#eef5f2] px-3 py-1.5 text-xs font-semibold text-[#176b62] transition-colors duration-150 hover:border-[#176b62] hover:bg-[#e2efea]"
+          >
+            OCR 巡检
+          </button>
+        ) : null}
         {vectorStatus.canDeleteVector && (
           <button
             type="button"
@@ -261,6 +278,7 @@ function KnowledgeFileList({
   onPermanentlyDeleteFile,
   onRemoveFile,
   onAttachFile,
+  onInspectOcr,
 }: KnowledgeFileListProps) {
   const titleClass =
     titleTone === "primary" ? "text-[#176b62]" : "text-[#72807b]";
@@ -301,6 +319,7 @@ function KnowledgeFileList({
               onPermanentlyDeleteFile={onPermanentlyDeleteFile}
               onRemoveFile={onRemoveFile}
               onAttachFile={onAttachFile}
+              onInspectOcr={onInspectOcr}
             />
           ))
         ) : (
@@ -350,6 +369,8 @@ export function FileManagerDialog({
   onRemoveFile,
   onAttachFile,
 }: FileManagerDialogProps) {
+  const [ocrInspectionFile, setOcrInspectionFile] = useState<KnowledgeFile | null>(null);
+
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-[#17201f]/55 px-4 py-8 backdrop-blur-[2px]"
@@ -494,6 +515,7 @@ export function FileManagerDialog({
             onPermanentlyDeleteFile={onPermanentlyDeleteFile}
             onRemoveFile={onRemoveFile}
             onAttachFile={onAttachFile}
+            onInspectOcr={setOcrInspectionFile}
           />
 
           <KnowledgeFileList
@@ -520,9 +542,16 @@ export function FileManagerDialog({
             onPermanentlyDeleteFile={onPermanentlyDeleteFile}
             onRemoveFile={onRemoveFile}
             onAttachFile={onAttachFile}
+            onInspectOcr={setOcrInspectionFile}
           />
         </div>
       </section>
+      {ocrInspectionFile ? (
+        <OcrQualityInspectorDialog
+          file={ocrInspectionFile}
+          onClose={() => setOcrInspectionFile(null)}
+        />
+      ) : null}
     </div>
   );
 }

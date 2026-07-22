@@ -45,7 +45,9 @@ npm run dev
 
 聊天工作台默认按普通用户模式展示，只保留聊天、知识库、文件、引用来源和必要状态提示。高级/开发模式通过工作台侧栏的本地开关打开，打开后展示 diagnostics、eval case 草稿、回答反馈、source feedback、质量看板和知识库检索参数。
 
-具备 `file_id` 和 `chunk_index` 的引用卡片会显示“查看原文”。点击后按需加载 `SourcePreviewDialog`，并通过 React Query 按 `file_id + chunk_index + radius` 缓存请求；弹窗高亮目标 chunk、展示相邻上下文、标题层级和 PDF 页码或 DOCX 段落范围。扫描 PDF 来源显示 OCR 置信度，低于后端阈值时展示质量警告；人工校对工作台在桌面并排显示后端渲染的目标页 PNG 和完整文本，窄屏改为纵向排列。编辑区可切换“编辑全文”和“查看差异”，差异算法使用唯一行锚点和线性空间逐段对齐，高亮新增、删除、修改行及变化字符；`useDeferredValue` 避免长文本输入被比较阻塞。PDF 预览使用临时 Blob URL，组件关闭或重新加载时立即释放；失败不会清空草稿，并提供重试和新窗口打开原 PDF。保存后展示 revision，也可经过二次确认撤销修订。校对、撤销和“重新识别此页”都复用 vector job 查询，以 `queued`、`processing`、`succeeded`、`failed` 状态反馈重建进度，失败时只重试索引而不重复写修订。新窗口打开 PDF 时 blob URL 会附加 `#page=N` 跳到目标页；浏览器无法可靠控制 DOCX 内部光标，因此 DOCX 只在内置弹窗中高亮并展示段落范围。历史 source 缺少定位字段时保留现有摘要，不展示不可用入口。
+具备 `file_id` 和 `chunk_index` 的引用卡片会显示“查看原文”。点击后按需加载 `SourcePreviewDialog`，并通过 React Query 按 `file_id + chunk_index + radius` 缓存请求；弹窗高亮目标 chunk、展示相邻上下文、标题层级和 PDF 页码或 DOCX 段落范围。文件管理对已索引 PDF 提供“OCR 巡检”：`OcrQualityInspectorDialog` 展示待处理、已校对、OCR 页数和平均置信度，页码质量刻度以琥珀标出待处理页、墨绿标出人工修订页，并支持全部/待处理/已校对筛选与低分/页码排序。点击页码会构造绑定 `file_id + chunk_index + index_version` 的安全 source，直接以校对模式打开现有来源弹窗，不要求先产生聊天引用。
+
+扫描 PDF 来源显示 OCR 置信度，低于后端阈值时展示质量警告；人工校对工作台在桌面并排显示后端渲染的目标页 PNG 和完整文本，窄屏改为纵向排列。编辑区可切换“编辑全文”和“查看差异”，差异算法使用唯一行锚点和线性空间逐段对齐，高亮新增、删除、修改行及变化字符；`useDeferredValue` 避免长文本输入被比较阻塞。PDF 预览使用临时 Blob URL，组件关闭或重新加载时立即释放；失败不会清空草稿，并提供重试和新窗口打开原 PDF。保存后展示 revision，也可经过二次确认撤销修订。校对、撤销和“重新识别此页”都复用 vector job 查询，以 `queued`、`processing`、`succeeded`、`failed` 状态反馈重建进度，失败时只重试索引而不重复写修订。新窗口打开 PDF 时 blob URL 会附加 `#page=N` 跳到目标页；浏览器无法可靠控制 DOCX 内部光标，因此 DOCX 只在内置弹窗中高亮并展示段落范围。历史 source 缺少定位字段时保留现有摘要，不展示不可用入口。
 
 新浏览器会使用 `NEXT_PUBLIC_FIRSTRAG_ADVANCED_MODE_DEFAULT` 作为高级模式默认值；未配置或设为 `false` 时默认进入普通模式。用户手动切换后，偏好会写入浏览器 `localStorage`，只影响当前浏览器。
 

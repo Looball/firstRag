@@ -88,6 +88,38 @@ export type PdfOcrPageCorrection = {
   ocrQuality: string;
 };
 
+export type PdfOcrQualityPage = {
+  pageNumber: number;
+  pageCount: number | null;
+  chunkIndex: number;
+  indexVersion: number;
+  ocrConfidence: number | null;
+  ocrQuality: string;
+  needsReview: boolean;
+  hasCorrection: boolean;
+  correctionRevision: number;
+  correctionUpdatedAt: string | null;
+  excerpt: string;
+};
+
+export type PdfOcrQualityReport = {
+  file: {
+    id: string;
+    originalName: string;
+    status: string;
+    indexVersion: number;
+  };
+  summary: {
+    documentPageCount: number;
+    ocrPageCount: number;
+    needsReviewCount: number;
+    lowConfidenceCount: number;
+    correctedCount: number;
+    averageConfidence: number | null;
+  };
+  pages: PdfOcrQualityPage[];
+};
+
 export type KnowledgeSourcePreview = {
   fileId: string;
   fileName: string;

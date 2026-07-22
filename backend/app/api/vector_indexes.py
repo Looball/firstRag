@@ -59,10 +59,35 @@ from app.services.documents.pdf_ocr_reindex_service import (
     PdfOcrReindexValidationError,
     enqueue_pdf_page_ocr_reindex,
 )
+from app.services.documents.pdf_ocr_quality_service import (
+    PdfOcrQualityConflictError,
+    PdfOcrQualityValidationError,
+    get_pdf_ocr_quality_report,
+)
 
 
 router = APIRouter(prefix="/chat", tags=["vector-indexes"])
 logger = logging.getLogger(__name__)
+
+
+@router.get("/knowledge-files/{knowledge_file_id}/ocr/pages")
+def get_knowledge_file_ocr_quality_report(
+    knowledge_file_id: UUID,
+    user_id: int = Depends(get_current_user_id),
+):
+    """读取当前用户单个 PDF 文件的 OCR 页面质量巡检清单。"""
+    try:
+        result = get_pdf_ocr_quality_report(
+            user_id=user_id,
+            knowledge_file_id=knowledge_file_id,
+        )
+    except PdfOcrQualityValidationError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except PdfOcrQualityConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    if result is None:
+        raise HTTPException(status_code=404, detail="文件不存在")
+    return {"success": True, **result}
 
 
 def ensure_user_embedding_settings(user_id: int) -> None:
