@@ -84,7 +84,7 @@
 | `PLAN-20260722-02` | 2026-07-22 | `Done` | 建立文件级 OCR 质量巡检入口，集中发现低置信度页面并直接进入校对工作台。 | `T-076` |
 | `PLAN-20260722-03` | 2026-07-22 | `Done` | 支持从 OCR 巡检中批量选择页面，以单次文件重建任务重新识别并提供进度与失败重试。 | `T-077` |
 | `PLAN-20260722-04` | 2026-07-22 | `Done` | 持久化页级 OCR 识别历史，展示置信度趋势和相邻识别文本差异。 | `T-078` |
-| `PLAN-20260722-05` | 2026-07-22 | `Doing` | 为主动 OCR 重识别增加自适应预处理、页面旋转和多 PSM 候选选优。 | `T-079` |
+| `PLAN-20260722-05` | 2026-07-22 | `Done` | 为主动 OCR 重识别增加自适应预处理、页面旋转和多 PSM 候选选优。 | `T-079` |
 
 ## 任务总览
 
@@ -168,7 +168,7 @@
 | `T-076` | `PLAN-20260722-02` | `P1` | `Done` | 增加文件级 OCR 质量巡检 | 2026-07-22 | `ca92e0b` |
 | `T-077` | `PLAN-20260722-03` | `P1` | `Done` | 支持批量 OCR 重新识别与失败重试 | 2026-07-22 | `2de3486` |
 | `T-078` | `PLAN-20260722-04` | `P1` | `Done` | 增加 OCR 识别历史、质量趋势与文本差异 | 2026-07-22 | `ab9dd0d` |
-| `T-079` | `PLAN-20260722-05` | `P1` | `Doing` | 增加 OCR 自适应预处理与参数选优 | — | — |
+| `T-079` | `PLAN-20260722-05` | `P1` | `Done` | 增加 OCR 自适应预处理与参数选优 | 2026-07-22 | `005758c` |
 
 ## 新计划接入流程
 
@@ -3102,7 +3102,7 @@ git diff --check
 
 - 来源计划：`PLAN-20260722-05`
 - 优先级：`P1`
-- 状态：`Doing`
+- 状态：`Done`
 - 目标：让用户主动重新识别低质量扫描页时，不再用完全相同参数重复执行，而是比较多种安全候选并自动采用更可信的结果。
 - 技术边界：
   - 首次扫描 PDF 索引继续使用单次基线 OCR；只有受控单页或批量重识别任务启用自适应候选，避免普通上传承担成倍 CPU 开销。
@@ -3119,6 +3119,21 @@ git diff --check
   - 候选结果能说明采用了哪种 preprocessing、PSM 和 rotation；文本 SHA 与置信度对应最终选中原文，未选中候选不保存完整文本。
   - 单个候选失败时仍可采用其他有效结果；全部失败或总超时返回稳定、安全、可重试错误，worker 能继续处理后续任务。
   - 后端、前端测试、lint、production build、Docker Compose 真实低质量/旋转扫描 PDF smoke、production preflight 和 `git diff --check` 通过。
+- 相关提交：`005758c`。
+- 完成记录：
+  - 新增受资源约束的 `pdf_ocr_engine.py`：首次索引只运行原图 PSM 3 基线；主动重识别最多比较 6 个固定候选，覆盖灰度、二值化、PSM 6 和 90°/180°/270° 旋转，并把渲染和 Tesseract 都计入共享总超时。
+  - 选优按有效正文、字符加权 confidence、有效字符数、word count 和固定候选顺序确定；单候选失败继续比较，全部失败或总超时返回安全错误。二值化阈值、候选上限与总超时均由服务端配置约束，Tesseract 使用参数数组且不经过 shell。
+  - migration `008_add_pdf_ocr_strategy_metadata.sql` 为不可变 history 增加 strategy、preprocessing、PSM、rotation、candidate count 和 JSONB 候选摘要；候选只保存 confidence、word count、有效字符数、文本 SHA 和选中状态，未选中完整文本不落库也不返回前端。
+  - OCR 巡检展示当前策略与候选数量；Recognition Ledger 新增 Candidate Lab，展示本次最多 6 个候选、采用项、失败/跳过状态和相邻 OCR 文本差异，保持原有纸张/墨绿视觉与按需 history 查询。
+  - 真实 Docker smoke 发现并修复 `pymupdf4llm` 的 `picture ... intentionally omitted` 占位提示被误判为原生正文的问题；回归测试确保纯图片扫描页仍进入本地 OCR fallback。
+  - 真实旋转扫描 PDF 首次索引只运行基线，confidence 为 `47.05` 且文字方向错误；单页主动重识别比较 6 个候选后自动采用 `rotate_90_gray / PSM 6 / 90°`，confidence 提升到 `95.21`，正文恢复为 `FIRST RAG ADAPTIVE OCR TEST / ROTATED PAGE T079 ALPHA`。
+  - PostgreSQL 确认 history 的 index version 为 `0,1`、候选数量为 `1,6`，每次恰有一个 selected，候选 JSONB 不含 `text`、`full_text` 或 `content`；当前 chunk 同步保存选中策略、参数和正确正文。
+  - 390px viewport 下页面、OCR 巡检与 Recognition Ledger 均满足 `clientWidth = scrollWidth = 390`；浏览器仅记录 backend 重建瞬间的预期连接失败，服务恢复后完整 OCR 操作未产生新 console error。
+  - 验收 PDF 随后通过文件生命周期 API 永久删除；数据库确认文件、chunks、OCR history 和 index jobs 残留均为 0。
+  - `cd backend && conda run -n firstrag env PYTHONPATH=. pytest -q`：349 passed、8 warnings、30 subtests passed；OCR 引擎与相关 service 专项测试 34 passed。
+  - `cd frontend && npm test -- --run`：13 个 test files、87 tests passed；`npm run lint`：0 error、保留 2 个既有 `<img>` performance warnings；Next.js 16.2.10 Docker production build 通过。
+  - Docker Compose 重建通过：PostgreSQL、Redis、Chroma healthy，migration 成功应用 `008_add_pdf_ocr_strategy_metadata.sql`（`applied=1 skipped=8`），backend、worker、frontend 正常运行。
+  - production preflight、Chroma runtime health、migration dry-run 与 `git diff --check` 通过。
 - 建议验证命令：
 
 ```bash
