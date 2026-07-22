@@ -29,6 +29,8 @@
 
 用户也可读取指定 OCR 页的完整正文并保存人工修订。修订独立存放在 PostgreSQL，不直接覆盖当前 chunks；worker 每次重建仍运行 Tesseract 获取文本和质量分数，再在 chunk 切分前用当前 revision 的人工文本替换页面正文。撤销修订会删除 correction 并再建一个新 index version，从原 PDF 恢复 Tesseract 文本。保存、更新和撤销均沿用 file advisory lock、vector job、版本隔离和历史 source 语义。
 
+文件级巡检可以把多个 OCR 页码合并为一次重新识别批次。后端校验页码属于当前 index version 后，只递增一次版本，并把规范化页码写入一个 job 的 `force_ocr_page_numbers`；worker 在一次整文件解析中强制 OCR 所选页，避免逐页 job 造成重复 embedding 和版本竞争。失败重试不接受新的页码，而是从原失败 job 恢复受控 options，在同一 index version 下重新排队。
+
 ## 聊天生成
 
 1. 前端发送 `POST /api/chat`，代理到后端 `POST /chat`。

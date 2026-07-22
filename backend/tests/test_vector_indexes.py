@@ -236,6 +236,108 @@ class VectorIndexJobHealthTests(unittest.TestCase):
             page_number=2,
         )
 
+    def test_reindex_pdf_ocr_pages_returns_one_batch_job(self) -> None:
+        """批量 OCR 接口应把全部页码交给一次 service 调用。"""
+        file_id = uuid4()
+        job_id = uuid4()
+        with patch(
+            "app.api.vector_indexes.get_user_knowledge_file",
+            return_value={"id": file_id, "original_name": "scan.pdf"},
+        ), patch(
+            "app.api.vector_indexes.ensure_user_embedding_settings",
+        ), patch(
+            "app.api.vector_indexes.enqueue_pdf_pages_ocr_reindex",
+            return_value={
+                "file_id": str(file_id),
+                "page_numbers": [1, 3],
+                "page_count": 2,
+                "previous_index_version": 4,
+                "index_version": 5,
+                "job": {"id": str(job_id), "status": "queued"},
+            },
+        ) as enqueue:
+            response = self.client.post(
+                f"/chat/knowledge-files/{file_id}/ocr/pages/reindex",
+                json={"page_numbers": [3, 1]},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["page_numbers"], [1, 3])
+        self.assertEqual(payload["page_count"], 2)
+        self.assertEqual(payload["job"]["id"], str(job_id))
+        enqueue.assert_called_once_with(
+            user_id=1,
+            knowledge_file_id=file_id,
+            page_numbers=[3, 1],
+        )
+
+    def test_retry_pdf_ocr_batch_uses_failed_job_id(self) -> None:
+        """失败重试接口不接收页码，只交由 service 恢复原批次。"""
+        file_id = uuid4()
+        failed_job_id = uuid4()
+        retry_job_id = uuid4()
+        with patch(
+            "app.api.vector_indexes.get_user_knowledge_file",
+            return_value={"id": file_id, "status": "failed"},
+        ), patch(
+            "app.api.vector_indexes.ensure_user_embedding_settings",
+        ), patch(
+            "app.api.vector_indexes.retry_pdf_ocr_reindex_job",
+            return_value={
+                "file_id": str(file_id),
+                "page_numbers": [1, 2],
+                "page_count": 2,
+                "index_version": 5,
+                "retried_job_id": str(failed_job_id),
+                "job": {"id": str(retry_job_id), "status": "queued"},
+            },
+        ) as retry:
+            response = self.client.post(
+                f"/chat/knowledge-files/{file_id}/ocr/reindex-jobs/"
+                f"{failed_job_id}/retry",
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["job"]["id"], str(retry_job_id))
+        retry.assert_called_once_with(
+            user_id=1,
+            knowledge_file_id=file_id,
+            job_id=failed_job_id,
+        )
+
+    def test_reindex_pdf_ocr_pages_validates_non_empty_payload(self) -> None:
+        """空批次应由 schema 拒绝且不能调用 service。"""
+        file_id = uuid4()
+        with patch(
+            "app.api.vector_indexes.enqueue_pdf_pages_ocr_reindex",
+        ) as enqueue:
+            response = self.client.post(
+                f"/chat/knowledge-files/{file_id}/ocr/pages/reindex",
+                json={"page_numbers": []},
+            )
+
+        self.assertEqual(response.status_code, 422)
+        enqueue.assert_not_called()
+
+    def test_reindex_pdf_ocr_pages_hides_inaccessible_file(self) -> None:
+        """批量入口不能探测其他用户或已删除文件。"""
+        file_id = uuid4()
+        with patch(
+            "app.api.vector_indexes.get_user_knowledge_file",
+            return_value=None,
+        ), patch(
+            "app.api.vector_indexes.enqueue_pdf_pages_ocr_reindex",
+        ) as enqueue:
+            response = self.client.post(
+                f"/chat/knowledge-files/{file_id}/ocr/pages/reindex",
+                json={"page_numbers": [1, 2]},
+            )
+
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(response.json(), {"detail": "文件不存在"})
+        enqueue.assert_not_called()
+
     def test_get_pdf_ocr_quality_report_returns_page_queue(self) -> None:
         """文件级 OCR 巡检接口应返回汇总和待处理页。"""
         file_id = uuid4()
@@ -255,6 +357,7 @@ class VectorIndexJobHealthTests(unittest.TestCase):
                     "low_confidence_count": 1,
                     "corrected_count": 0,
                     "average_confidence": 65.0,
+                    "max_reindex_pages": 20,
                 },
                 "pages": [{
                     "page_number": 2,
@@ -263,6 +366,7 @@ class VectorIndexJobHealthTests(unittest.TestCase):
                     "index_version": 4,
                     "ocr_confidence": 40.0,
                     "ocr_quality": "low",
+                    "ocr_attempt": 1,
                     "needs_review": True,
                     "has_correction": False,
                     "correction_revision": 0,

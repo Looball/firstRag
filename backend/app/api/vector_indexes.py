@@ -26,7 +26,10 @@ from app.repositories.vector_index_job_repository import (
     get_user_vector_index_job,
     get_user_vector_index_job_health,
 )
-from app.schemas.knowledge import UpdatePdfOcrCorrectionRequest
+from app.schemas.knowledge import (
+    ReindexPdfOcrPagesRequest,
+    UpdatePdfOcrCorrectionRequest,
+)
 from app.services.documents.pdf_ocr_correction_service import (
     PdfOcrCorrectionConflictError,
     PdfOcrCorrectionValidationError,
@@ -58,6 +61,8 @@ from app.services.documents.pdf_ocr_reindex_service import (
     PdfOcrReindexConflictError,
     PdfOcrReindexValidationError,
     enqueue_pdf_page_ocr_reindex,
+    enqueue_pdf_pages_ocr_reindex,
+    retry_pdf_ocr_reindex_job,
 )
 from app.services.documents.pdf_ocr_quality_service import (
     PdfOcrQualityConflictError,
@@ -153,6 +158,55 @@ def index_knowledge_file_vectors(
 
 
 @router.post(
+    "/knowledge-files/{knowledge_file_id}/ocr/pages/reindex",
+)
+def reindex_knowledge_file_ocr_pages(
+    request: Request,
+    payload: ReindexPdfOcrPagesRequest,
+    knowledge_file_id: UUID,
+    user_id: int = Depends(get_current_user_id),
+):
+    """提交多个扫描 PDF 页面的单批次异步 OCR 重新识别任务。"""
+    if get_user_knowledge_file(user_id, knowledge_file_id) is None:
+        raise HTTPException(status_code=404, detail="文件不存在")
+    ensure_user_embedding_settings(user_id)
+    enforce_rate_limit(
+        "vector-index",
+        build_rate_limit_identifier(request, "user", user_id),
+        VECTOR_INDEX_RATE_LIMIT_MAX_REQUESTS,
+        API_RATE_LIMIT_WINDOW_SECONDS,
+        "向量化提交过于频繁，请稍后再试。",
+    )
+    try:
+        result = enqueue_pdf_pages_ocr_reindex(
+            user_id=user_id,
+            knowledge_file_id=knowledge_file_id,
+            page_numbers=payload.page_numbers,
+        )
+    except PdfOcrReindexValidationError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except PdfOcrReindexConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.exception(
+            "提交 PDF 批量 OCR 重新识别失败 user_id=%s file_id=%s",
+            user_id,
+            knowledge_file_id,
+        )
+        raise HTTPException(
+            status_code=500,
+            detail="提交批量 OCR 重新识别失败，请稍后重试。",
+        ) from exc
+    if result is None:
+        raise HTTPException(status_code=404, detail="文件不存在")
+    return {
+        "success": True,
+        "message": f"已提交 {result['page_count']} 页 OCR 重新识别批次",
+        **result,
+    }
+
+
+@router.post(
     "/knowledge-files/{knowledge_file_id}/ocr/pages/{page_number}/reindex",
 )
 def reindex_knowledge_file_ocr_page(
@@ -200,6 +254,56 @@ def reindex_knowledge_file_ocr_page(
     return {
         "success": True,
         "message": f"第 {page_number} 页 OCR 重新识别任务已提交",
+        **result,
+    }
+
+
+@router.post(
+    "/knowledge-files/{knowledge_file_id}/ocr/reindex-jobs/{job_id}/retry",
+)
+def retry_knowledge_file_ocr_reindex_job(
+    request: Request,
+    knowledge_file_id: UUID,
+    job_id: UUID,
+    user_id: int = Depends(get_current_user_id),
+):
+    """按失败 job 中保存的受控页码重新提交 OCR 批次。"""
+    if get_user_knowledge_file(user_id, knowledge_file_id) is None:
+        raise HTTPException(status_code=404, detail="文件不存在")
+    ensure_user_embedding_settings(user_id)
+    enforce_rate_limit(
+        "vector-index",
+        build_rate_limit_identifier(request, "user", user_id),
+        VECTOR_INDEX_RATE_LIMIT_MAX_REQUESTS,
+        API_RATE_LIMIT_WINDOW_SECONDS,
+        "向量化提交过于频繁，请稍后再试。",
+    )
+    try:
+        result = retry_pdf_ocr_reindex_job(
+            user_id=user_id,
+            knowledge_file_id=knowledge_file_id,
+            job_id=job_id,
+        )
+    except PdfOcrReindexValidationError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except PdfOcrReindexConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.exception(
+            "重试 PDF OCR 批次失败 user_id=%s file_id=%s job_id=%s",
+            user_id,
+            knowledge_file_id,
+            job_id,
+        )
+        raise HTTPException(
+            status_code=500,
+            detail="重试 OCR 重新识别失败，请稍后再试。",
+        ) from exc
+    if result is None:
+        raise HTTPException(status_code=404, detail="文件不存在")
+    return {
+        "success": True,
+        "message": f"已按原批次重试 {result['page_count']} 页 OCR 重新识别",
         **result,
     }
 

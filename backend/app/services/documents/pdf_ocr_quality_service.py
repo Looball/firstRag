@@ -5,6 +5,7 @@ import re
 from typing import Any
 from uuid import UUID
 
+from app.core.config import PDF_OCR_REINDEX_MAX_BATCH_PAGES
 from app.repositories.knowledge_chunk_repository import (
     list_user_pdf_ocr_page_rows,
 )
@@ -41,6 +42,12 @@ def _normalize_page_number(value: object) -> int | None:
     except (TypeError, ValueError):
         return None
     return normalized if normalized >= 1 else None
+
+
+def _normalize_positive_int(value: object, default: int = 1) -> int:
+    """把内部计数 metadata 规范化为正整数。"""
+    normalized = _normalize_page_number(value)
+    return normalized if normalized is not None else default
 
 
 def _build_excerpt(value: object) -> str:
@@ -104,6 +111,7 @@ def get_pdf_ocr_quality_report(
             "index_version": int(row["index_version"]),
             "ocr_confidence": confidence,
             "ocr_quality": quality,
+            "ocr_attempt": _normalize_positive_int(metadata.get("ocr_attempt")),
             "needs_review": quality == "low" and not has_correction,
             "has_correction": has_correction,
             "correction_revision": (
@@ -150,6 +158,7 @@ def get_pdf_ocr_quality_report(
                 if confidences
                 else None
             ),
+            "max_reindex_pages": max(1, PDF_OCR_REINDEX_MAX_BATCH_PAGES),
         },
         "pages": pages,
     }

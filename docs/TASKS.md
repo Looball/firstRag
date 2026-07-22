@@ -82,6 +82,7 @@
 | `PLAN-20260721-06` | 2026-07-21 | `Done` | 支持 OCR 页面人工校对、持久化修订和可撤销的异步索引重建。 | `T-074` |
 | `PLAN-20260722-01` | 2026-07-22 | `Done` | 将 OCR 校对扩展为原始 PDF 页面、编辑文本和差异结果一体化工作台。 | `T-075` |
 | `PLAN-20260722-02` | 2026-07-22 | `Done` | 建立文件级 OCR 质量巡检入口，集中发现低置信度页面并直接进入校对工作台。 | `T-076` |
+| `PLAN-20260722-03` | 2026-07-22 | `Doing` | 支持从 OCR 巡检中批量选择页面，以单次文件重建任务重新识别并提供进度与失败重试。 | `T-077` |
 
 ## 任务总览
 
@@ -163,6 +164,7 @@
 | `T-074` | `PLAN-20260721-06` | `P1` | `Done` | 支持 OCR 页面人工校对并重新索引 | 2026-07-21 | `e6cc52d` |
 | `T-075` | `PLAN-20260722-01` | `P1` | `Done` | 增加 PDF 与 OCR 校对文本并排工作台 | 2026-07-22 | `976214b` |
 | `T-076` | `PLAN-20260722-02` | `P1` | `Done` | 增加文件级 OCR 质量巡检 | 2026-07-22 | `ca92e0b` |
+| `T-077` | `PLAN-20260722-03` | `P1` | `Doing` | 支持批量 OCR 重新识别与失败重试 | — | — |
 
 ## 新计划接入流程
 
@@ -2990,6 +2992,40 @@ git diff --check
   - `cd frontend && npm test -- --run`：12 个 test files、80 tests passed；`npm run lint`：0 error、保留 2 个既有 `<img>` performance warnings；Next.js 16.2.10 production build 通过。
   - Docker Compose 最终重建通过：PostgreSQL、Redis、Chroma healthy，migration `applied=0 skipped=7`，backend、worker、frontend 正常启动；真实页面请求无本次新增错误。
   - production preflight、Chroma runtime health、migration dry-run 和 `git diff --check` 通过；npm production audit 门禁通过，仅保留截至 2026-08-20 的 PostCSS moderate 限时例外。
+- 建议验证命令：
+
+```bash
+cd backend && conda run -n firstrag env PYTHONPATH=. pytest -q
+cd ../frontend && npm test -- --run && npm run lint && npm run build
+cd .. && docker compose up -d --build
+docker compose ps -a
+docker compose logs --since=10m backend worker frontend
+conda run -n firstrag python scripts/production_preflight.py --env-file .env --migration-method compose --check-runtime-health
+git diff --check
+```
+
+## T-077 支持批量 OCR 重新识别与失败重试
+
+- 来源计划：`PLAN-20260722-03`
+- 优先级：`P1`
+- 状态：`Doing`
+- 目标：允许用户在文件级 OCR 巡检中一次选择多个页面，提交一个可追踪、可恢复的异步重新识别批次。
+- 技术边界：
+  - 多个目标页合并到同一个 `vector_index_job.options.force_ocr_page_numbers`，只递增一次 index version、只重建一次整份文件；禁止按页创建并发 job，避免版本竞争和重复 embedding。
+  - 批次只允许当前用户、已索引 PDF 的现有 OCR 页面；页码去重、排序并受可配置上限约束，原生文本页和越界页不能进入任务。
+  - 失败重试必须从当前用户原失败 job 恢复受控 options，不接受前端伪造或扩大重试页集合；不把内部 job options 直接暴露给前端。
+  - 继续复用 Redis 提交限流、PostgreSQL 队列、worker heartbeat、文件 advisory lock 和 T-073 的 OCR metadata，不新增同步 OCR 路径。
+- 范围：
+  - 新增批量 OCR 重新识别 API、批次校验/提交 service 和保留原参数的失败重试 API。
+  - 巡检弹窗支持选择待处理页、选择当前筛选、清空选择，并显示批次页码清单与选择上限。
+  - 提交后集中展示排队、处理中、成功、失败和查询异常状态；失败可用原 job 参数重试，成功后刷新文件级质量报告。
+  - 补齐跨用户、非 OCR 页、超限、重复页、活跃任务、非法失败重试和前端选择/进度测试，并同步文档。
+- 验收标准：
+  - 一个多页请求只创建一个新 index version 和一个 worker job，job options 包含规范化后的全部页码。
+  - 默认可一键选择待处理低置信度页；批量操作期间不能改变选择或重复提交，状态变化有明确、可访问的文字反馈。
+  - 失败 job 只能由原用户、原文件在同一 index version 下重试，且新 job 完整保留原批次页码。
+  - 成功后巡检报告刷新 OCR confidence/attempt；失败重试和查询重试不会重复创建活跃任务。
+  - 后端、前端测试、lint、production build、Docker Compose 多页 OCR smoke、production preflight 和 `git diff --check` 通过。
 - 建议验证命令：
 
 ```bash

@@ -73,7 +73,7 @@ FirstRAG/
 | 仓库层 | `backend/app/repositories` | 纯 SQL 数据访问。 |
 | 数据库工具 | `backend/app/db` | 连接、执行器、PostgreSQL advisory lock。 |
 | 基础设施 | `backend/app/core` | 配置、JWT、安全和密钥加密。 |
-| Worker | `backend/app/workers` | 异步向量化任务消费；扫描 PDF 页面在容器内通过 Tesseract OCR，保存页级置信度，消费受控重识别选项，并在切分前应用持久化人工修订。 |
+| Worker | `backend/app/workers` | 异步向量化任务消费；扫描 PDF 页面在容器内通过 Tesseract OCR，保存页级置信度，一次消费单页或多页受控重识别批次，并在切分前应用持久化人工修订。 |
 
 ## 存储组件
 

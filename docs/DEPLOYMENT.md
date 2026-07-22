@@ -29,7 +29,7 @@ cp .env.example .env
 | `VECTOR_STORE_PATH` | 单进程 embedded Chroma 的持久化路径，本地默认 `./vector_db/chroma`。 |
 | `CHROMA_HOST` / `CHROMA_PORT` / `CHROMA_SSL` | Chroma server 连接；Compose 默认使用内置 `chroma:8000`，本地单进程调试留空 `CHROMA_HOST` 可继续 embedded。 |
 | `RERANKER_MODEL_PATH` | 本地 reranker 模型路径；compose 会把 `./models` 只读挂载到 `/app/models`。 |
-| `PDF_OCR_*` | 扫描 PDF 本地 OCR 开关、语言、DPI、单页超时、原生文本阈值、低置信度阈值和单文件最大 OCR 页数；Compose 镜像内置 Tesseract `chi_sim/eng`。 |
+| `PDF_OCR_*` | 扫描 PDF 本地 OCR 开关、语言、DPI、单页超时、原生文本阈值、低置信度阈值、单文件最大 OCR 页数和单个重识别批次页数；Compose 镜像内置 Tesseract `chi_sim/eng`。 |
 | `UPLOADS_DIR` / `VECTOR_DB_DIR` / `MODELS_DIR` | Docker Compose 宿主机持久化目录；生产环境建议指向独立数据盘。 |
 | `DOCKER_LOG_MAX_SIZE` / `DOCKER_LOG_MAX_FILE` | Docker stdout/stderr 日志轮转参数。 |
 
@@ -491,7 +491,7 @@ MODELS_DIR=/srv/firstrag/models
 | `RATE_LIMIT_BACKEND` / `RATE_LIMIT_REDIS_FAILURE_MODE` | 公开 demo 使用 `redis` 和 `fail_closed`，确保多 backend 实例共享限流状态；本地调试可改为 `memory` 或 `fail_open`。 |
 | `LOGIN_FAILURE_RATE_LIMIT_*` / `*_RATE_LIMIT_MAX_REQUESTS` | 后端限流阈值；公网仍建议叠加网关或 WAF 做边缘 IP 级限流。 |
 | `VECTOR_INDEX_MAX_BATCH_FILES` | 单次知识库批量向量化可提交的最大文件数。 |
-| `PDF_OCR_ENABLED` / `PDF_OCR_MAX_PAGES` / `PDF_OCR_LOW_CONFIDENCE_THRESHOLD` | 公开 demo 建议保持本地 OCR 开启、限制最大 OCR 页数，并按样本质量校准低置信度警告阈值；默认阈值为 70。 |
+| `PDF_OCR_ENABLED` / `PDF_OCR_MAX_PAGES` / `PDF_OCR_REINDEX_MAX_BATCH_PAGES` / `PDF_OCR_LOW_CONFIDENCE_THRESHOLD` | 公开 demo 建议保持本地 OCR 开启、限制单文件 OCR 页数和单个重新识别批次页数，并按样本质量校准低置信度警告阈值；批次默认 20 页，质量默认阈值为 70。 |
 | `FRONTEND_PORT` / `BACKEND_PORT` / `POSTGRES_PORT` | 建议设为 `127.0.0.1:3000`、`127.0.0.1:8000`、`127.0.0.1:5432`，由反向代理暴露 HTTPS。 |
 
 公开 demo 推荐额外设置：

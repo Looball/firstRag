@@ -128,6 +128,7 @@ const pdfOcrQualityReportSchema = z
       low_confidence_count: z.number().int().nonnegative(),
       corrected_count: z.number().int().nonnegative(),
       average_confidence: z.number().nullable(),
+      max_reindex_pages: z.number().int().positive(),
     }),
     pages: z.array(z.object({
       page_number: z.number().int().positive(),
@@ -136,6 +137,7 @@ const pdfOcrQualityReportSchema = z
       index_version: z.number().int().nonnegative(),
       ocr_confidence: z.number().nullable(),
       ocr_quality: z.string(),
+      ocr_attempt: z.number().int().positive(),
       needs_review: z.boolean(),
       has_correction: z.boolean(),
       correction_revision: z.number().int().nonnegative(),
@@ -293,6 +295,7 @@ export async function loadPdfOcrQualityReport(
       lowConfidenceCount: parsed.data.summary.low_confidence_count,
       correctedCount: parsed.data.summary.corrected_count,
       averageConfidence: parsed.data.summary.average_confidence,
+      maxReindexPages: parsed.data.summary.max_reindex_pages,
     },
     pages: parsed.data.pages.map((page) => ({
       pageNumber: page.page_number,
@@ -301,6 +304,7 @@ export async function loadPdfOcrQualityReport(
       indexVersion: page.index_version,
       ocrConfidence: page.ocr_confidence,
       ocrQuality: page.ocr_quality,
+      ocrAttempt: page.ocr_attempt,
       needsReview: page.needs_review,
       hasCorrection: page.has_correction,
       correctionRevision: page.correction_revision,
@@ -572,6 +576,44 @@ export async function reindexKnowledgeFileOcrPage(
   const job = getVectorIndexJobs(data)[0];
   if (!job) {
     throw new Error("OCR 重新识别响应缺少任务信息。");
+  }
+  return job;
+}
+
+export async function reindexKnowledgeFileOcrPages(
+  fileId: string,
+  pageNumbers: number[],
+) {
+  const data = await authenticatedJson<VectorIndexResponse>(
+    `/api/chat/knowledge-files/${encodeURIComponent(fileId)}/ocr/pages/reindex`,
+    {
+      method: "POST",
+      headers: jsonHeaders(),
+      body: JSON.stringify({ page_numbers: pageNumbers }),
+    },
+    { fallbackMessage: "提交批量 OCR 重新识别失败，请稍后再试。" },
+  );
+  const job = getVectorIndexJobs(data)[0];
+  if (!job) {
+    throw new Error("批量 OCR 重新识别响应缺少任务信息。");
+  }
+  return job;
+}
+
+export async function retryKnowledgeFileOcrReindexBatch(
+  fileId: string,
+  failedJobId: string,
+) {
+  const data = await authenticatedJson<VectorIndexResponse>(
+    `/api/chat/knowledge-files/${encodeURIComponent(
+      fileId,
+    )}/ocr/reindex-jobs/${encodeURIComponent(failedJobId)}/retry`,
+    { method: "POST" },
+    { fallbackMessage: "重试 OCR 重新识别失败，请稍后再试。" },
+  );
+  const job = getVectorIndexJobs(data)[0];
+  if (!job) {
+    throw new Error("OCR 重新识别重试响应缺少任务信息。");
   }
   return job;
 }

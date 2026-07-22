@@ -1,7 +1,12 @@
 import { describe, expect, it } from "vitest";
 
 import type { KnowledgeFile, PdfOcrQualityPage } from "./types";
-import { buildOcrPageSource, filterAndSortOcrPages } from "./ocr-quality";
+import {
+  buildOcrPageSource,
+  filterAndSortOcrPages,
+  mergeOcrPageSelection,
+  toggleOcrPageSelection,
+} from "./ocr-quality";
 
 const pages: PdfOcrQualityPage[] = [
   {
@@ -11,6 +16,7 @@ const pages: PdfOcrQualityPage[] = [
     indexVersion: 4,
     ocrConfidence: 92,
     ocrQuality: "ok",
+    ocrAttempt: 1,
     needsReview: false,
     hasCorrection: false,
     correctionRevision: 0,
@@ -24,6 +30,7 @@ const pages: PdfOcrQualityPage[] = [
     indexVersion: 4,
     ocrConfidence: 38,
     ocrQuality: "low",
+    ocrAttempt: 1,
     needsReview: true,
     hasCorrection: false,
     correctionRevision: 0,
@@ -37,6 +44,7 @@ const pages: PdfOcrQualityPage[] = [
     indexVersion: 4,
     ocrConfidence: 44,
     ocrQuality: "low",
+    ocrAttempt: 1,
     needsReview: false,
     hasCorrection: true,
     correctionRevision: 2,
@@ -86,5 +94,16 @@ describe("OCR quality review helpers", () => {
         pdfParseMethod: "ocr",
       }),
     );
+  });
+
+  it("normalizes batch selection and respects its maximum", () => {
+    expect(mergeOcrPageSelection([3], [2, 1, 2, 4], 3)).toEqual([1, 2, 3]);
+  });
+
+  it("toggles pages without mutating the current selection", () => {
+    const current = [1, 2];
+    expect(toggleOcrPageSelection(current, 2, 20)).toEqual([1]);
+    expect(toggleOcrPageSelection(current, 3, 20)).toEqual([1, 2, 3]);
+    expect(current).toEqual([1, 2]);
   });
 });

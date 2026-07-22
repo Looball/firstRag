@@ -37,6 +37,7 @@ class PdfOcrQualityServiceTests(unittest.TestCase):
                     "page_count": 3,
                     "ocr_confidence": 38.5,
                     "ocr_quality": "low",
+                    "ocr_attempt": 2,
                 },
             },
             {
@@ -78,6 +79,7 @@ class PdfOcrQualityServiceTests(unittest.TestCase):
             [2, 3, 1],
         )
         self.assertTrue(report["pages"][0]["needs_review"])
+        self.assertEqual(report["pages"][0]["ocr_attempt"], 2)
         self.assertTrue(report["pages"][1]["has_correction"])
         self.assertEqual(report["pages"][1]["correction_revision"], 2)
         self.assertEqual(report["summary"]["document_page_count"], 3)
@@ -86,6 +88,7 @@ class PdfOcrQualityServiceTests(unittest.TestCase):
         self.assertEqual(report["summary"]["low_confidence_count"], 2)
         self.assertEqual(report["summary"]["corrected_count"], 1)
         self.assertEqual(report["summary"]["average_confidence"], 57.23)
+        self.assertGreaterEqual(report["summary"]["max_reindex_pages"], 1)
 
     def test_report_returns_empty_pages_for_native_text_pdf(self) -> None:
         """没有 OCR 页面的 PDF 应返回空清单而非错误。"""

@@ -7,6 +7,30 @@ import type {
 export type OcrQualityFilter = "all" | "corrected" | "review";
 export type OcrQualitySort = "confidence" | "page";
 
+/** 合并批量页选择并按上限截断，保持页码稳定有序。 */
+export function mergeOcrPageSelection(
+  current: number[],
+  candidates: number[],
+  maxPages: number,
+) {
+  return [...new Set([...current, ...candidates])]
+    .filter((pageNumber) => Number.isInteger(pageNumber) && pageNumber >= 1)
+    .sort((left, right) => left - right)
+    .slice(0, Math.max(1, maxPages));
+}
+
+/** 切换单页选择，同时复用批次上限约束。 */
+export function toggleOcrPageSelection(
+  current: number[],
+  pageNumber: number,
+  maxPages: number,
+) {
+  if (current.includes(pageNumber)) {
+    return current.filter((candidate) => candidate !== pageNumber);
+  }
+  return mergeOcrPageSelection(current, [pageNumber], maxPages);
+}
+
 /** 按巡检筛选和顺序返回新数组，不修改 query cache 中的原始页。 */
 export function filterAndSortOcrPages(
   pages: PdfOcrQualityPage[],

@@ -22,6 +22,12 @@ class UpdatePdfOcrCorrectionRequest(BaseModel):
     corrected_text: str = Field(min_length=1, max_length=50000)
 
 
+class ReindexPdfOcrPagesRequest(BaseModel):
+    """批量重新识别扫描 PDF 页面的请求。"""
+
+    page_numbers: list[int] = Field(min_length=1, max_length=100)
+
+
 class UpdateRetrievalSettingsRequest(BaseModel):
     """知识库级 RAG 检索策略设置。"""
 

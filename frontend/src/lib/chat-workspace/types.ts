@@ -95,6 +95,7 @@ export type PdfOcrQualityPage = {
   indexVersion: number;
   ocrConfidence: number | null;
   ocrQuality: string;
+  ocrAttempt: number;
   needsReview: boolean;
   hasCorrection: boolean;
   correctionRevision: number;
@@ -116,6 +117,7 @@ export type PdfOcrQualityReport = {
     lowConfidenceCount: number;
     correctedCount: number;
     averageConfidence: number | null;
+    maxReindexPages: number;
   };
   pages: PdfOcrQualityPage[];
 };

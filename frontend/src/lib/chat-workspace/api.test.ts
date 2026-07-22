@@ -24,6 +24,8 @@ import {
   permanentlyDeleteKnowledgeFile,
   deletePdfOcrPageCorrection,
   reindexKnowledgeFileOcrPage,
+  reindexKnowledgeFileOcrPages,
+  retryKnowledgeFileOcrReindexBatch,
   renameKnowledgeBase,
   restoreKnowledgeBase,
   savePdfOcrPageCorrection,
@@ -196,6 +198,7 @@ describe("chat workspace api", () => {
         low_confidence_count: 1,
         corrected_count: 0,
         average_confidence: 65.25,
+        max_reindex_pages: 20,
       },
       pages: [{
         page_number: 2,
@@ -204,6 +207,7 @@ describe("chat workspace api", () => {
         index_version: 4,
         ocr_confidence: 40.5,
         ocr_quality: "low",
+        ocr_attempt: 2,
         needs_review: true,
         has_correction: false,
         correction_revision: 0,
@@ -226,11 +230,13 @@ describe("chat workspace api", () => {
         lowConfidenceCount: 1,
         correctedCount: 0,
         averageConfidence: 65.25,
+        maxReindexPages: 20,
       },
       pages: [expect.objectContaining({
         pageNumber: 2,
         chunkIndex: 1,
         needsReview: true,
+        ocrAttempt: 2,
         excerpt: "Needs review",
       })],
     });
@@ -265,6 +271,56 @@ describe("chat workspace api", () => {
       `/api/chat/knowledge-files/${fileId}/ocr/pages/2/reindex`,
       { method: "POST" },
       { fallbackMessage: "提交 OCR 重新识别失败，请稍后再试。" },
+    );
+  });
+
+  it("submits one multi-page OCR reindex batch", async () => {
+    const fileId = "11111111-1111-4111-8111-111111111111";
+    const jobId = "22222222-2222-4222-8222-222222222222";
+    authenticatedJsonMock.mockResolvedValueOnce({
+      success: true,
+      page_numbers: [1, 3],
+      job: {
+        id: jobId,
+        knowledge_file_id: fileId,
+        status: "queued",
+      },
+    });
+
+    await expect(reindexKnowledgeFileOcrPages(fileId, [3, 1])).resolves.toEqual(
+      expect.objectContaining({ id: jobId, status: "queued" }),
+    );
+    expect(authenticatedJsonMock).toHaveBeenCalledWith(
+      `/api/chat/knowledge-files/${fileId}/ocr/pages/reindex`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ page_numbers: [3, 1] }),
+      },
+      { fallbackMessage: "提交批量 OCR 重新识别失败，请稍后再试。" },
+    );
+  });
+
+  it("retries an OCR batch by failed job id without client page options", async () => {
+    const fileId = "11111111-1111-4111-8111-111111111111";
+    const failedJobId = "22222222-2222-4222-8222-222222222222";
+    const retryJobId = "33333333-3333-4333-8333-333333333333";
+    authenticatedJsonMock.mockResolvedValueOnce({
+      success: true,
+      job: {
+        id: retryJobId,
+        knowledge_file_id: fileId,
+        status: "queued",
+      },
+    });
+
+    await expect(
+      retryKnowledgeFileOcrReindexBatch(fileId, failedJobId),
+    ).resolves.toEqual(expect.objectContaining({ id: retryJobId }));
+    expect(authenticatedJsonMock).toHaveBeenCalledWith(
+      `/api/chat/knowledge-files/${fileId}/ocr/reindex-jobs/${failedJobId}/retry`,
+      { method: "POST" },
+      { fallbackMessage: "重试 OCR 重新识别失败，请稍后再试。" },
     );
   });
 
