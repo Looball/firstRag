@@ -81,7 +81,7 @@
 | `PLAN-20260721-05` | 2026-07-21 | `Done` | 记录 OCR 置信度、提示低质量页面，并支持单页异步重新识别。 | `T-073` |
 | `PLAN-20260721-06` | 2026-07-21 | `Done` | 支持 OCR 页面人工校对、持久化修订和可撤销的异步索引重建。 | `T-074` |
 | `PLAN-20260722-01` | 2026-07-22 | `Done` | 将 OCR 校对扩展为原始 PDF 页面、编辑文本和差异结果一体化工作台。 | `T-075` |
-| `PLAN-20260722-02` | 2026-07-22 | `Doing` | 建立文件级 OCR 质量巡检入口，集中发现低置信度页面并直接进入校对工作台。 | `T-076` |
+| `PLAN-20260722-02` | 2026-07-22 | `Done` | 建立文件级 OCR 质量巡检入口，集中发现低置信度页面并直接进入校对工作台。 | `T-076` |
 
 ## 任务总览
 
@@ -162,7 +162,7 @@
 | `T-073` | `PLAN-20260721-05` | `P1` | `Done` | 增加 OCR 质量诊断与单页重新识别 | 2026-07-21 | `729e575` |
 | `T-074` | `PLAN-20260721-06` | `P1` | `Done` | 支持 OCR 页面人工校对并重新索引 | 2026-07-21 | `e6cc52d` |
 | `T-075` | `PLAN-20260722-01` | `P1` | `Done` | 增加 PDF 与 OCR 校对文本并排工作台 | 2026-07-22 | `976214b` |
-| `T-076` | `PLAN-20260722-02` | `P1` | `Doing` | 增加文件级 OCR 质量巡检 | — | — |
+| `T-076` | `PLAN-20260722-02` | `P1` | `Done` | 增加文件级 OCR 质量巡检 | 2026-07-22 | `ca92e0b` |
 
 ## 新计划接入流程
 
@@ -2961,7 +2961,8 @@ git diff --check
 
 - 来源计划：`PLAN-20260722-02`
 - 优先级：`P1`
-- 状态：`Doing`
+- 状态：`Done`
+- 完成日期：`2026-07-22`
 - 目标：让用户无需先通过问答命中某个页面，即可从知识文件入口发现并处理低置信度 OCR 页面。
 - 技术边界：
   - 只读取当前文件当前 index version 的 PostgreSQL chunk metadata 和现有 correction 记录，不扫描磁盘、不重新运行 OCR、不读取 Chroma。
@@ -2978,6 +2979,17 @@ git diff --check
   - 点击任一 OCR 页可直接看到 T-075 校对工作台和目标 PDF 页面，不要求先产生聊天引用。
   - 文件没有 OCR 页面时展示可理解空状态；加载失败可重试，不影响文件管理其他操作。
   - 后端、前端测试、lint、production build、Docker Compose 真实页面 smoke、production preflight 和 `git diff --check` 通过。
+- 相关提交：`ca92e0b`。
+- 完成记录：
+  - 新增当前用户文件级 OCR 质量清单 API，只汇总当前 index version 的 PostgreSQL OCR chunk metadata 与人工 correction；响应按页去重，提供置信度、质量、待处理/已校对状态和截断摘要，不读取磁盘、Chroma 或完整页正文。
+  - 文件管理为已索引 PDF 增加“OCR 巡检”入口；巡检弹窗提供待处理、已校对、OCR 页数和平均置信度统计，页码质量刻度、全部/待处理/已校对筛选，以及低分优先/按页码排序。
+  - 巡检页通过精确的 file、chunk、index version 和 page metadata 复用来源预览；点击页码或列表项无需聊天引用即可打开目标 PDF 页，并自动展开 T-075 校对工作台。
+  - 真实账号完成两页纯图片 PDF 上传与索引 smoke：巡检返回 2 个 OCR 页面、文档 2 页、平均置信度 90%，页码刻度分别显示 89% 与 92%；全部页筛选、低分排序和第 1 页直达校对均通过。
+  - 390px viewport 下巡检弹窗和直达校对工作台均满足 `clientWidth = scrollWidth = 390`；真实测试文件已通过生命周期服务永久删除，清理 1 个文件、1 个关联、2 个 chunks 和 1 个 job。
+  - `cd backend && conda run -n firstrag env PYTHONPATH=. pytest -q`：322 passed、8 warnings、30 subtests passed。
+  - `cd frontend && npm test -- --run`：12 个 test files、80 tests passed；`npm run lint`：0 error、保留 2 个既有 `<img>` performance warnings；Next.js 16.2.10 production build 通过。
+  - Docker Compose 最终重建通过：PostgreSQL、Redis、Chroma healthy，migration `applied=0 skipped=7`，backend、worker、frontend 正常启动；真实页面请求无本次新增错误。
+  - production preflight、Chroma runtime health、migration dry-run 和 `git diff --check` 通过；npm production audit 门禁通过，仅保留截至 2026-08-20 的 PostCSS moderate 限时例外。
 - 建议验证命令：
 
 ```bash
