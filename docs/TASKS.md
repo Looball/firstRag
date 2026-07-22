@@ -83,7 +83,7 @@
 | `PLAN-20260722-01` | 2026-07-22 | `Done` | 将 OCR 校对扩展为原始 PDF 页面、编辑文本和差异结果一体化工作台。 | `T-075` |
 | `PLAN-20260722-02` | 2026-07-22 | `Done` | 建立文件级 OCR 质量巡检入口，集中发现低置信度页面并直接进入校对工作台。 | `T-076` |
 | `PLAN-20260722-03` | 2026-07-22 | `Done` | 支持从 OCR 巡检中批量选择页面，以单次文件重建任务重新识别并提供进度与失败重试。 | `T-077` |
-| `PLAN-20260722-04` | 2026-07-22 | `Doing` | 持久化页级 OCR 识别历史，展示置信度趋势和相邻识别文本差异。 | `T-078` |
+| `PLAN-20260722-04` | 2026-07-22 | `Done` | 持久化页级 OCR 识别历史，展示置信度趋势和相邻识别文本差异。 | `T-078` |
 
 ## 任务总览
 
@@ -166,7 +166,7 @@
 | `T-075` | `PLAN-20260722-01` | `P1` | `Done` | 增加 PDF 与 OCR 校对文本并排工作台 | 2026-07-22 | `976214b` |
 | `T-076` | `PLAN-20260722-02` | `P1` | `Done` | 增加文件级 OCR 质量巡检 | 2026-07-22 | `ca92e0b` |
 | `T-077` | `PLAN-20260722-03` | `P1` | `Done` | 支持批量 OCR 重新识别与失败重试 | 2026-07-22 | `2de3486` |
-| `T-078` | `PLAN-20260722-04` | `P1` | `Doing` | 增加 OCR 识别历史、质量趋势与文本差异 | — | — |
+| `T-078` | `PLAN-20260722-04` | `P1` | `Done` | 增加 OCR 识别历史、质量趋势与文本差异 | 2026-07-22 | `ab9dd0d` |
 
 ## 新计划接入流程
 
@@ -3054,7 +3054,7 @@ git diff --check
 
 - 来源计划：`PLAN-20260722-04`
 - 优先级：`P1`
-- 状态：`Doing`
+- 状态：`Done`
 - 目标：保留扫描 PDF 页面的每次 OCR 结果，使用户能判断重新识别是否改善置信度和文字内容。
 - 技术边界：
   - 历史记录独立于会被替换的 `knowledge_file_chunks`，按当前用户、文件、页码和 index version 持久化；文件或用户永久删除时级联清理。
@@ -3072,6 +3072,18 @@ git diff --check
   - 用户只能读取自己的文件和页面历史，接口不返回 storage path、API Key 或内部异常。
   - 前端能切换相邻识别记录并查看差异，空历史、单次历史、加载失败和窄屏状态可理解且可恢复。
   - 后端、前端测试、lint、production build、Docker Compose 真实两次 OCR smoke、production preflight 和 `git diff --check` 通过。
+- 相关提交：`ab9dd0d`。
+- 完成记录：
+  - 新增 `knowledge_file_ocr_history` migration、页级 history repository 和当前用户查询 API；记录 index version、attempt、trigger、关联 job、Tesseract 原文与 SHA-256、confidence、quality 和 word count，每页默认保留最近 20 次，文件或用户永久删除时级联清理。
+  - Worker 在成功写入当前版本 chunks 后持久化 OCR 历史；批量重识别按已有页级记录单调递增 attempt，迁移前文件可从上一版 chunk metadata 衔接 baseline，人工校对仍保留独立的 Tesseract 原始文本。
+  - OCR 巡检列表新增历史数量和最近 confidence delta；按需加载的 Recognition Ledger 展示当前/最佳置信度、改善/下降/持平次数、运行时间线，以及相邻识别的 confidence、word count、文本 SHA 和行内差异。
+  - 真实账号完成两页纯图片 PDF 首次索引和两页批量重识别：每页从“第 1 次识别 / 识别历史 1”更新为“第 2 次识别 / 识别历史 2”，账本显示 Run 2 vs Run 1、置信度持平和文字未变化。
+  - PostgreSQL 确认两页历史的 index version 均为 `0,1`、attempt 均为 `1,2`、trigger 均为 `file_index,pdf_pages_ocr_reindex`，且全部关联 Worker job；测试文件随后通过生命周期服务永久删除，文件和 OCR history 残留均为 0。
+  - 390px viewport 下页面、外层巡检和历史弹窗均满足 `clientWidth = scrollWidth = 390`；浏览器 console 无 warning/error。
+  - `cd backend && conda run -n firstrag env PYTHONPATH=. pytest -q`：338 passed、8 warnings、30 subtests passed；历史相关增量测试 52 passed。
+  - `cd frontend && npm test -- --run`：12 个 test files、85 tests passed；`npm run lint`：0 error、保留 2 个既有 `<img>` performance warnings；Next.js 16.2.10 production build 通过。
+  - Docker Compose 最终重建通过：PostgreSQL、Redis、Chroma healthy，migration 成功应用 `007_create_pdf_ocr_history.sql`（`applied=1 skipped=7`），backend、worker、frontend 正常启动。
+  - production preflight、Chroma runtime health、migration dry-run 和 `git diff --check` 通过；npm 与 pip audit policy 均通过，仅保留截至 2026-08-20 的 PostCSS moderate 与 ChromaDB no-fix 限时例外。
 - 建议验证命令：
 
 ```bash
