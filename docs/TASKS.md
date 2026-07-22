@@ -82,7 +82,7 @@
 | `PLAN-20260721-06` | 2026-07-21 | `Done` | 支持 OCR 页面人工校对、持久化修订和可撤销的异步索引重建。 | `T-074` |
 | `PLAN-20260722-01` | 2026-07-22 | `Done` | 将 OCR 校对扩展为原始 PDF 页面、编辑文本和差异结果一体化工作台。 | `T-075` |
 | `PLAN-20260722-02` | 2026-07-22 | `Done` | 建立文件级 OCR 质量巡检入口，集中发现低置信度页面并直接进入校对工作台。 | `T-076` |
-| `PLAN-20260722-03` | 2026-07-22 | `Doing` | 支持从 OCR 巡检中批量选择页面，以单次文件重建任务重新识别并提供进度与失败重试。 | `T-077` |
+| `PLAN-20260722-03` | 2026-07-22 | `Done` | 支持从 OCR 巡检中批量选择页面，以单次文件重建任务重新识别并提供进度与失败重试。 | `T-077` |
 
 ## 任务总览
 
@@ -164,7 +164,7 @@
 | `T-074` | `PLAN-20260721-06` | `P1` | `Done` | 支持 OCR 页面人工校对并重新索引 | 2026-07-21 | `e6cc52d` |
 | `T-075` | `PLAN-20260722-01` | `P1` | `Done` | 增加 PDF 与 OCR 校对文本并排工作台 | 2026-07-22 | `976214b` |
 | `T-076` | `PLAN-20260722-02` | `P1` | `Done` | 增加文件级 OCR 质量巡检 | 2026-07-22 | `ca92e0b` |
-| `T-077` | `PLAN-20260722-03` | `P1` | `Doing` | 支持批量 OCR 重新识别与失败重试 | — | — |
+| `T-077` | `PLAN-20260722-03` | `P1` | `Done` | 支持批量 OCR 重新识别与失败重试 | 2026-07-22 | `2de3486` |
 
 ## 新计划接入流程
 
@@ -3008,7 +3008,7 @@ git diff --check
 
 - 来源计划：`PLAN-20260722-03`
 - 优先级：`P1`
-- 状态：`Doing`
+- 状态：`Done`
 - 目标：允许用户在文件级 OCR 巡检中一次选择多个页面，提交一个可追踪、可恢复的异步重新识别批次。
 - 技术边界：
   - 多个目标页合并到同一个 `vector_index_job.options.force_ocr_page_numbers`，只递增一次 index version、只重建一次整份文件；禁止按页创建并发 job，避免版本竞争和重复 embedding。
@@ -3026,6 +3026,16 @@ git diff --check
   - 失败 job 只能由原用户、原文件在同一 index version 下重试，且新 job 完整保留原批次页码。
   - 成功后巡检报告刷新 OCR confidence/attempt；失败重试和查询重试不会重复创建活跃任务。
   - 后端、前端测试、lint、production build、Docker Compose 多页 OCR smoke、production preflight 和 `git diff --check` 通过。
+- 相关提交：`2de3486`。
+- 完成记录：
+  - 新增批量重新识别与失败重试 API；服务端对页码去重、排序、校验 OCR metadata 和批次上限，只递增一次 index version，并把全部目标页写入一个 PostgreSQL job。失败重试绑定当前用户、原文件、原 index version，并只恢复原 job 的受控 options。
+  - OCR 巡检弹窗支持选择待处理、选择当前筛选、逐页勾选、清空选择和上限提示；批次面板集中显示 P01/P02 等页码清单、排队/处理中/成功/失败进度以及原参数重试入口。
+  - 真实账号完成两页纯图片 PDF 验收：两页一次提交后均从“第 1 次识别”更新为“第 2 次识别”；数据库确认只新增一个 `pdf_pages_ocr_reindex` job，文件 index version 从 0 增至 1，options 精确为 `[1, 2]`。
+  - 390px viewport 下 OCR 批次弹窗满足 `clientWidth = scrollWidth = 390`，页面无横向溢出；浏览器 console 无 error。验收 PDF 及索引随后通过文件生命周期服务永久删除，数据库确认残留记录为 0。
+  - `cd backend && conda run -n firstrag env PYTHONPATH=. pytest -q`：331 passed、8 warnings、30 subtests passed；批量 service/route 增量测试 31 passed。
+  - `cd frontend && npm test -- --run`：12 个 test files、84 tests passed；`npm run lint`：0 error、保留 2 个既有 `<img>` performance warnings；Next.js 16.2.10 production build 通过。
+  - Docker Compose 最终重建通过：PostgreSQL、Redis、Chroma healthy，migration `Exited (0)` 且 `applied=0 skipped=7`，backend、worker、frontend 正常运行；真实批量 API、job 轮询和报告刷新均返回 200。
+  - production preflight、Chroma runtime health、migration dry-run、`git diff --check` 和 npm audit policy 通过；依赖审计仅保留截至 2026-08-20 的 PostCSS moderate 限时例外。
 - 建议验证命令：
 
 ```bash
