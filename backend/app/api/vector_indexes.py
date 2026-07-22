@@ -69,6 +69,11 @@ from app.services.documents.pdf_ocr_quality_service import (
     PdfOcrQualityValidationError,
     get_pdf_ocr_quality_report,
 )
+from app.services.documents.pdf_ocr_history_service import (
+    PdfOcrHistoryConflictError,
+    PdfOcrHistoryValidationError,
+    get_pdf_ocr_page_history_report,
+)
 
 
 router = APIRouter(prefix="/chat", tags=["vector-indexes"])
@@ -89,6 +94,30 @@ def get_knowledge_file_ocr_quality_report(
     except PdfOcrQualityValidationError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except PdfOcrQualityConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    if result is None:
+        raise HTTPException(status_code=404, detail="文件不存在")
+    return {"success": True, **result}
+
+
+@router.get(
+    "/knowledge-files/{knowledge_file_id}/ocr/pages/{page_number}/history",
+)
+def get_knowledge_file_ocr_page_history(
+    knowledge_file_id: UUID,
+    page_number: int,
+    user_id: int = Depends(get_current_user_id),
+):
+    """读取当前用户指定 PDF 页面的 OCR 识别历史。"""
+    try:
+        result = get_pdf_ocr_page_history_report(
+            user_id=user_id,
+            knowledge_file_id=knowledge_file_id,
+            page_number=page_number,
+        )
+    except PdfOcrHistoryValidationError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except PdfOcrHistoryConflictError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     if result is None:
         raise HTTPException(status_code=404, detail="文件不存在")

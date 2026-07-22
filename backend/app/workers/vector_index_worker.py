@@ -181,6 +181,7 @@ def process_next_vector_index_job(worker_id: str) -> bool:
                 user_id,
                 index_version,
                 job_options=job.get("options"),
+                source_job_id=job_id,
             )
             mark_vector_index_job_succeeded(UUID(str(job_id)), result)
             record_worker_job_event("succeeded")

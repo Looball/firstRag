@@ -15,6 +15,7 @@ import {
   listDeletedKnowledgeBases,
   loadKnowledgeFileContent,
   loadKnowledgePdfPagePreview,
+  loadPdfOcrPageHistory,
   loadPdfOcrQualityReport,
   loadKnowledgeSourcePreview,
   loadPdfOcrPageCorrection,
@@ -212,6 +213,8 @@ describe("chat workspace api", () => {
         has_correction: false,
         correction_revision: 0,
         correction_updated_at: null,
+        history_count: 2,
+        latest_confidence_delta: 8.5,
         excerpt: "Needs review",
       }],
     });
@@ -237,6 +240,8 @@ describe("chat workspace api", () => {
         chunkIndex: 1,
         needsReview: true,
         ocrAttempt: 2,
+        historyCount: 2,
+        latestConfidenceDelta: 8.5,
         excerpt: "Needs review",
       })],
     });
@@ -271,6 +276,67 @@ describe("chat workspace api", () => {
       `/api/chat/knowledge-files/${fileId}/ocr/pages/2/reindex`,
       { method: "POST" },
       { fallbackMessage: "提交 OCR 重新识别失败，请稍后再试。" },
+    );
+  });
+
+  it("normalizes PDF OCR page history and deltas", async () => {
+    const fileId = "11111111-1111-4111-8111-111111111111";
+    const runId = "22222222-2222-4222-8222-222222222222";
+    authenticatedJsonMock.mockResolvedValueOnce({
+      success: true,
+      file: {
+        id: fileId,
+        original_name: "scan.pdf",
+        index_version: 2,
+      },
+      page_number: 1,
+      summary: {
+        run_count: 2,
+        retention_limit: 20,
+        latest_confidence: 82.5,
+        latest_delta: 12.5,
+        best_confidence: 82.5,
+        improved_count: 1,
+        degraded_count: 0,
+        unchanged_count: 0,
+      },
+      runs: [{
+        id: runId,
+        index_version: 2,
+        ocr_attempt: 2,
+        source_job_id: null,
+        trigger: "pdf_page_ocr_reindex",
+        ocr_engine: "tesseract",
+        ocr_confidence: 82.5,
+        ocr_quality: "good",
+        ocr_word_count: 12,
+        ocr_text: "LATEST OCR",
+        ocr_text_sha256: "a".repeat(64),
+        ocr_text_source: "tesseract",
+        correction_revision: null,
+        created_at: "2026-07-22T03:00:00+00:00",
+        previous_run_id: null,
+        confidence_delta: 12.5,
+        word_count_delta: 2,
+        text_changed: true,
+      }],
+    });
+
+    await expect(loadPdfOcrPageHistory(fileId, 1)).resolves.toEqual(
+      expect.objectContaining({
+        pageNumber: 1,
+        summary: expect.objectContaining({ latestDelta: 12.5 }),
+        runs: [expect.objectContaining({
+          id: runId,
+          ocrAttempt: 2,
+          textChanged: true,
+        })],
+      }),
+    );
+    expect(authenticatedJsonMock).toHaveBeenCalledWith(
+      `/api/chat/knowledge-files/${fileId}/ocr/pages/1/history`,
+      { method: "GET" },
+      { fallbackMessage: "读取 OCR 识别历史失败，请稍后再试。" },
     );
   });
 

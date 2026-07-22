@@ -25,6 +25,7 @@ import type {
   MessageSourceFeedback,
   MessageSourceFeedbackRating,
   MessageSourceFeedbackResponse,
+  PdfOcrHistoryReport,
   PdfOcrPageCorrection,
   PdfOcrQualityReport,
   QualityDashboard,
@@ -142,7 +143,50 @@ const pdfOcrQualityReportSchema = z
       has_correction: z.boolean(),
       correction_revision: z.number().int().nonnegative(),
       correction_updated_at: z.string().nullable(),
+      history_count: z.number().int().nonnegative(),
+      latest_confidence_delta: z.number().nullable(),
       excerpt: z.string(),
+    })),
+  })
+  .passthrough();
+
+const pdfOcrHistoryReportSchema = z
+  .object({
+    file: z.object({
+      id: z.string().min(1),
+      original_name: z.string().min(1),
+      index_version: z.number().int().nonnegative(),
+    }),
+    page_number: z.number().int().positive(),
+    summary: z.object({
+      run_count: z.number().int().nonnegative(),
+      retention_limit: z.number().int().positive(),
+      latest_confidence: z.number().nullable(),
+      latest_delta: z.number().nullable(),
+      best_confidence: z.number().nullable(),
+      improved_count: z.number().int().nonnegative(),
+      degraded_count: z.number().int().nonnegative(),
+      unchanged_count: z.number().int().nonnegative(),
+    }),
+    runs: z.array(z.object({
+      id: z.string().min(1),
+      index_version: z.number().int().nonnegative(),
+      ocr_attempt: z.number().int().positive(),
+      source_job_id: z.string().nullable(),
+      trigger: z.string(),
+      ocr_engine: z.string(),
+      ocr_confidence: z.number().nullable(),
+      ocr_quality: z.string(),
+      ocr_word_count: z.number().int().nonnegative(),
+      ocr_text: z.string(),
+      ocr_text_sha256: z.string().length(64),
+      ocr_text_source: z.string(),
+      correction_revision: z.number().int().positive().nullable(),
+      created_at: z.string(),
+      previous_run_id: z.string().nullable(),
+      confidence_delta: z.number().nullable(),
+      word_count_delta: z.number().int().nullable(),
+      text_changed: z.boolean().nullable(),
     })),
   })
   .passthrough();
@@ -309,7 +353,64 @@ export async function loadPdfOcrQualityReport(
       hasCorrection: page.has_correction,
       correctionRevision: page.correction_revision,
       correctionUpdatedAt: page.correction_updated_at,
+      historyCount: page.history_count,
+      latestConfidenceDelta: page.latest_confidence_delta,
       excerpt: page.excerpt,
+    })),
+  };
+}
+
+export async function loadPdfOcrPageHistory(
+  knowledgeFileId: string,
+  pageNumber: number,
+): Promise<PdfOcrHistoryReport> {
+  const data = await authenticatedJson<unknown>(
+    `/api/chat/knowledge-files/${encodeURIComponent(
+      knowledgeFileId,
+    )}/ocr/pages/${pageNumber}/history`,
+    { method: "GET" },
+    { fallbackMessage: "读取 OCR 识别历史失败，请稍后再试。" },
+  );
+  const parsed = pdfOcrHistoryReportSchema.safeParse(data);
+  if (!parsed.success) {
+    throw new Error("OCR 识别历史响应格式异常。");
+  }
+  return {
+    file: {
+      id: parsed.data.file.id,
+      originalName: parsed.data.file.original_name,
+      indexVersion: parsed.data.file.index_version,
+    },
+    pageNumber: parsed.data.page_number,
+    summary: {
+      runCount: parsed.data.summary.run_count,
+      retentionLimit: parsed.data.summary.retention_limit,
+      latestConfidence: parsed.data.summary.latest_confidence,
+      latestDelta: parsed.data.summary.latest_delta,
+      bestConfidence: parsed.data.summary.best_confidence,
+      improvedCount: parsed.data.summary.improved_count,
+      degradedCount: parsed.data.summary.degraded_count,
+      unchangedCount: parsed.data.summary.unchanged_count,
+    },
+    runs: parsed.data.runs.map((run) => ({
+      id: run.id,
+      indexVersion: run.index_version,
+      ocrAttempt: run.ocr_attempt,
+      sourceJobId: run.source_job_id,
+      trigger: run.trigger,
+      ocrEngine: run.ocr_engine,
+      ocrConfidence: run.ocr_confidence,
+      ocrQuality: run.ocr_quality,
+      ocrWordCount: run.ocr_word_count,
+      ocrText: run.ocr_text,
+      ocrTextSha256: run.ocr_text_sha256,
+      ocrTextSource: run.ocr_text_source,
+      correctionRevision: run.correction_revision,
+      createdAt: run.created_at,
+      previousRunId: run.previous_run_id,
+      confidenceDelta: run.confidence_delta,
+      wordCountDelta: run.word_count_delta,
+      textChanged: run.text_changed,
     })),
   };
 }

@@ -70,6 +70,15 @@ class PdfOcrQualityServiceTests(unittest.TestCase):
                 "revision": 2,
                 "updated_at": "2026-07-22T10:00:00+08:00",
             }],
+        ), patch(
+            "app.services.documents.pdf_ocr_quality_service.get_pdf_ocr_history_summaries",
+            return_value={
+                2: {
+                    "history_count": 2,
+                    "latest_confidence": 38.5,
+                    "previous_confidence": 31.0,
+                },
+            },
         ):
             report = get_pdf_ocr_quality_report(7, file_id)
 
@@ -80,6 +89,8 @@ class PdfOcrQualityServiceTests(unittest.TestCase):
         )
         self.assertTrue(report["pages"][0]["needs_review"])
         self.assertEqual(report["pages"][0]["ocr_attempt"], 2)
+        self.assertEqual(report["pages"][0]["history_count"], 2)
+        self.assertEqual(report["pages"][0]["latest_confidence_delta"], 7.5)
         self.assertTrue(report["pages"][1]["has_correction"])
         self.assertEqual(report["pages"][1]["correction_revision"], 2)
         self.assertEqual(report["summary"]["document_page_count"], 3)
@@ -107,6 +118,9 @@ class PdfOcrQualityServiceTests(unittest.TestCase):
         ), patch(
             "app.services.documents.pdf_ocr_quality_service.list_pdf_ocr_corrections",
             return_value=[],
+        ), patch(
+            "app.services.documents.pdf_ocr_quality_service.get_pdf_ocr_history_summaries",
+            return_value={},
         ):
             report = get_pdf_ocr_quality_report(7, file_id)
 

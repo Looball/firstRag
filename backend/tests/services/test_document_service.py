@@ -339,6 +339,33 @@ class DocumentServiceTests(unittest.TestCase):
         self.assertEqual(documents[0].metadata["ocr_quality"], "low")
         self.assertEqual(documents[0].metadata["ocr_confidence"], 52.5)
 
+    def test_pdf_ocr_attempt_continues_from_persisted_history(self) -> None:
+        """后续 OCR 应从页面历史 attempt 单调递增。"""
+        with TemporaryDirectory() as temporary_directory:
+            pdf_path = Path(temporary_directory) / "scanned.pdf"
+            create_scanned_pdf_fixture(pdf_path, ["T078 OCR HISTORY"])
+
+            with patch(
+                "app.services.documents.document_service.run_pdf_page_ocr",
+                return_value=PdfOcrResult(
+                    text="T078 OCR HISTORY RUN FOUR",
+                    confidence=76.25,
+                    word_count=5,
+                ),
+            ):
+                documents = load_document(
+                    pdf_path,
+                    file_id="ocr-history",
+                    user_id=7,
+                    previous_ocr_attempts={1: 3},
+                )
+
+        self.assertEqual(documents[0].metadata["ocr_attempt"], 4)
+        self.assertEqual(
+            documents[0].metadata["_ocr_history_text"],
+            "T078 OCR HISTORY RUN FOUR",
+        )
+
     def test_pdf_ocr_page_uses_manual_correction_and_keeps_confidence(self) -> None:
         """人工修订应覆盖正文，同时保留本次 OCR 质量与修订版本。"""
         with TemporaryDirectory() as temporary_directory:

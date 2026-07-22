@@ -13,6 +13,9 @@ from app.repositories.knowledge_file_repository import get_user_knowledge_file
 from app.repositories.pdf_ocr_correction_repository import (
     list_pdf_ocr_corrections,
 )
+from app.repositories.pdf_ocr_history_repository import (
+    get_pdf_ocr_history_summaries,
+)
 
 
 OCR_PAGE_EXCERPT_MAX_CHARACTERS = 220
@@ -80,6 +83,10 @@ def get_pdf_ocr_quality_report(
         index_version=index_version,
     )
     correction_rows = list_pdf_ocr_corrections(user_id, knowledge_file_id)
+    history_summaries = get_pdf_ocr_history_summaries(
+        user_id,
+        knowledge_file_id,
+    )
     corrections = {
         int(row["page_number"]): row
         for row in correction_rows
@@ -104,6 +111,13 @@ def get_pdf_ocr_quality_report(
         confidence = _normalize_confidence(metadata.get("ocr_confidence"))
         quality = str(metadata.get("ocr_quality") or "unknown")
         has_correction = correction is not None
+        history_summary = history_summaries.get(page_number, {})
+        latest_history_confidence = _normalize_confidence(
+            history_summary.get("latest_confidence"),
+        )
+        previous_history_confidence = _normalize_confidence(
+            history_summary.get("previous_confidence"),
+        )
         pages.append({
             "page_number": page_number,
             "page_count": page_count,
@@ -119,6 +133,16 @@ def get_pdf_ocr_quality_report(
             ),
             "correction_updated_at": (
                 correction.get("updated_at") if correction is not None else None
+            ),
+            "history_count": int(history_summary.get("history_count") or 0),
+            "latest_confidence_delta": (
+                round(
+                    latest_history_confidence - previous_history_confidence,
+                    2,
+                )
+                if latest_history_confidence is not None
+                and previous_history_confidence is not None
+                else None
             ),
             "excerpt": _build_excerpt(row.get("content")),
         })

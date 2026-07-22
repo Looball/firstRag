@@ -403,6 +403,77 @@ class VectorIndexJobHealthTests(unittest.TestCase):
         self.assertEqual(response.status_code, 404)
         self.assertEqual(response.json(), {"detail": "文件不存在"})
 
+    def test_get_pdf_ocr_page_history_returns_trend(self) -> None:
+        """OCR 历史接口应返回当前用户页面的相邻趋势。"""
+        file_id = uuid4()
+        run_id = uuid4()
+        with patch(
+            "app.api.vector_indexes.get_pdf_ocr_page_history_report",
+            return_value={
+                "file": {
+                    "id": str(file_id),
+                    "original_name": "scan.pdf",
+                    "index_version": 2,
+                },
+                "page_number": 1,
+                "summary": {
+                    "run_count": 2,
+                    "retention_limit": 20,
+                    "latest_confidence": 82.5,
+                    "latest_delta": 12.5,
+                    "best_confidence": 82.5,
+                    "improved_count": 1,
+                    "degraded_count": 0,
+                    "unchanged_count": 0,
+                },
+                "runs": [{
+                    "id": str(run_id),
+                    "index_version": 2,
+                    "ocr_attempt": 2,
+                    "source_job_id": None,
+                    "trigger": "pdf_page_ocr_reindex",
+                    "ocr_engine": "tesseract",
+                    "ocr_confidence": 82.5,
+                    "ocr_quality": "good",
+                    "ocr_word_count": 12,
+                    "ocr_text": "LATEST OCR",
+                    "ocr_text_sha256": "a" * 64,
+                    "ocr_text_source": "tesseract",
+                    "correction_revision": None,
+                    "created_at": "2026-07-22T03:00:00+00:00",
+                    "previous_run_id": None,
+                    "confidence_delta": 12.5,
+                    "word_count_delta": 2,
+                    "text_changed": True,
+                }],
+            },
+        ) as get_history:
+            response = self.client.get(
+                f"/chat/knowledge-files/{file_id}/ocr/pages/1/history",
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["summary"]["latest_delta"], 12.5)
+        get_history.assert_called_once_with(
+            user_id=1,
+            knowledge_file_id=file_id,
+            page_number=1,
+        )
+
+    def test_get_pdf_ocr_page_history_hides_inaccessible_file(self) -> None:
+        """跨用户文件不能通过 OCR 历史接口被探测。"""
+        file_id = uuid4()
+        with patch(
+            "app.api.vector_indexes.get_pdf_ocr_page_history_report",
+            return_value=None,
+        ):
+            response = self.client.get(
+                f"/chat/knowledge-files/{file_id}/ocr/pages/1/history",
+            )
+
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(response.json(), {"detail": "文件不存在"})
+
     def test_reindex_pdf_ocr_page_hides_inaccessible_file(self) -> None:
         """跨用户文件不能通过 OCR 页接口被探测。"""
         file_id = uuid4()

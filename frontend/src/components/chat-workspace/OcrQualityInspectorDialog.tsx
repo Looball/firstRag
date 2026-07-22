@@ -24,6 +24,7 @@ import {
 } from "@/lib/chat-workspace/ocr-quality";
 
 import { SourcePreviewDialog } from "./SourcePreviewDialog";
+import { OcrHistoryDialog } from "./OcrHistoryDialog";
 
 type OcrQualityInspectorDialogProps = {
   file: KnowledgeFile;
@@ -58,6 +59,7 @@ export function OcrQualityInspectorDialog({
   const [filter, setFilter] = useState<OcrQualityFilter>("review");
   const [sort, setSort] = useState<OcrQualitySort>("confidence");
   const [selectedPage, setSelectedPage] = useState<PdfOcrQualityPage | null>(null);
+  const [historyPage, setHistoryPage] = useState<PdfOcrQualityPage | null>(null);
   const [selectedPageNumbers, setSelectedPageNumbers] = useState<number[]>([]);
   const [batchPageNumbers, setBatchPageNumbers] = useState<number[]>([]);
   const [batchJobId, setBatchJobId] = useState("");
@@ -458,18 +460,35 @@ export function OcrQualityInspectorDialog({
                                 : "质量正常"}
                           </span>
                           <span className="text-[#8a9591]">第 {page.ocrAttempt} 次识别</span>
+                          {page.latestConfidenceDelta !== null ? (
+                            <span className={page.latestConfidenceDelta >= 0
+                              ? "font-utility text-[10px] font-semibold text-[#176b62]"
+                              : "font-utility text-[10px] font-semibold text-[#9b3c29]"}
+                            >
+                              最近 {page.latestConfidenceDelta > 0 ? "+" : ""}{page.latestConfidenceDelta.toFixed(2)}%
+                            </span>
+                          ) : null}
                         </div>
                         <p className="mt-2 line-clamp-2 text-xs leading-5 text-[#64716d]">
                           {page.excerpt || "此页没有可展示的 OCR 文本摘要。"}
                         </p>
                       </div>
-                      <button
-                        type="button"
-                        onClick={() => setSelectedPage(page)}
-                        className="font-utility w-full border border-[#176b62] bg-white px-4 py-2 text-[10px] font-semibold uppercase text-[#176b62] transition-colors duration-150 hover:bg-[#e7f1ed] sm:w-auto"
-                      >
-                        {page.hasCorrection ? "继续校对" : "校对这一页"}
-                      </button>
+                      <div className="flex w-full flex-wrap gap-2 sm:w-auto sm:justify-end">
+                        <button
+                          type="button"
+                          onClick={() => setHistoryPage(page)}
+                          className="font-utility flex-1 border border-[#8ca8a1] bg-[#eef5f2] px-3 py-2 text-[10px] font-semibold uppercase text-[#275f58] transition-colors duration-150 hover:border-[#176b62] sm:flex-none"
+                        >
+                          识别历史 {page.historyCount}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setSelectedPage(page)}
+                          className="font-utility flex-1 border border-[#176b62] bg-white px-4 py-2 text-[10px] font-semibold uppercase text-[#176b62] transition-colors duration-150 hover:bg-[#e7f1ed] sm:flex-none"
+                        >
+                          {page.hasCorrection ? "继续校对" : "校对这一页"}
+                        </button>
+                      </div>
                     </article>
                   ))}
                 </div>
@@ -500,6 +519,14 @@ export function OcrQualityInspectorDialog({
             setSelectedPage(null);
             void reportQuery.refetch();
           }}
+        />
+      ) : null}
+
+      {historyPage ? (
+        <OcrHistoryDialog
+          file={file}
+          page={historyPage}
+          onClose={() => setHistoryPage(null)}
         />
       ) : null}
     </div>

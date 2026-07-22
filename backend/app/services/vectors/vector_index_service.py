@@ -13,17 +13,23 @@ from app.core.config import (
     CHROMA_HOST,
     CHROMA_PORT,
     CHROMA_SSL,
+    PDF_OCR_HISTORY_MAX_RUNS_PER_PAGE,
     VECTOR_STORE_PATH,
 )
 from app.db.locks import file_index_lock
 from app.db.executor import Row
 from app.repositories.knowledge_chunk_repository import (
     delete_file_chunks,
+    list_user_pdf_ocr_page_history_rows,
     replace_file_chunks,
 )
 from app.repositories.knowledge_file_repository import update_knowledge_file_status
 from app.repositories.pdf_ocr_correction_repository import (
     list_pdf_ocr_corrections,
+)
+from app.repositories.pdf_ocr_history_repository import (
+    get_latest_pdf_ocr_attempts,
+    record_pdf_ocr_history_entries,
 )
 from app.services.documents.document_service import (
     EmptyDocumentError,
@@ -41,6 +47,7 @@ from app.services.vectors.embedding_settings_service import (
 
 
 logger = logging.getLogger(__name__)
+OCR_HISTORY_TEXT_MAX_CHARACTERS = 100_000
 
 
 def get_force_ocr_page_numbers(options: object) -> set[int]:
@@ -57,6 +64,168 @@ def get_force_ocr_page_numbers(options: object) -> set[int]:
         and not isinstance(page_number, bool)
         and page_number >= 1
     }
+
+
+def _normalize_ocr_history_confidence(value: object) -> float | None:
+    """将内部 OCR confidence 规范化为数据库约束允许的分数。"""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    return round(min(100.0, max(0.0, float(value))), 2)
+
+
+def _normalize_ocr_history_positive_int(
+    value: object,
+    default: int,
+) -> int:
+    """规范化 OCR attempt、word count 和 correction revision。"""
+    if isinstance(value, bool):
+        return default
+    try:
+        normalized = int(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return default
+    return normalized if normalized >= 1 else default
+
+
+def _build_pdf_ocr_history_entry(
+    *,
+    page_number: int,
+    index_version: int,
+    metadata: dict[str, Any],
+    ocr_text: str,
+    source_job_id: UUID | str | None,
+    trigger: str,
+    text_source: str,
+) -> dict[str, Any]:
+    """从页级 metadata 构造受约束、可持久化的 OCR 历史记录。"""
+    normalized_text = ocr_text[:OCR_HISTORY_TEXT_MAX_CHARACTERS]
+    quality = str(metadata.get("ocr_quality") or "unknown")
+    if quality not in {"good", "low", "unknown"}:
+        quality = "unknown"
+    word_count = metadata.get("ocr_word_count")
+    normalized_word_count = (
+        int(word_count)
+        if isinstance(word_count, int)
+        and not isinstance(word_count, bool)
+        and word_count >= 0
+        else 0
+    )
+    correction_revision = metadata.get("ocr_correction_revision")
+    normalized_revision = (
+        _normalize_ocr_history_positive_int(correction_revision, 1)
+        if correction_revision is not None
+        else None
+    )
+    return {
+        "page_number": page_number,
+        "index_version": index_version,
+        "ocr_attempt": _normalize_ocr_history_positive_int(
+            metadata.get("ocr_attempt"),
+            1,
+        ),
+        "source_job_id": str(source_job_id) if source_job_id else None,
+        "trigger": (trigger.strip() or "file_index")[:64],
+        "ocr_engine": str(metadata.get("ocr_engine") or "tesseract")[:64],
+        "ocr_confidence": _normalize_ocr_history_confidence(
+            metadata.get("ocr_confidence"),
+        ),
+        "ocr_quality": quality,
+        "ocr_word_count": normalized_word_count,
+        "ocr_text": normalized_text,
+        "ocr_text_sha256": hashlib.sha256(
+            normalized_text.encode("utf-8"),
+        ).hexdigest(),
+        "ocr_text_source": (text_source.strip() or "tesseract")[:32],
+        "correction_revision": normalized_revision,
+    }
+
+
+def build_pdf_ocr_history_entries(
+    documents: list[Document],
+    index_version: int,
+    source_job_id: UUID | str | None,
+    trigger: str,
+) -> list[dict[str, Any]]:
+    """提取本次解析的页级原始 OCR 文本，并移除内部 metadata。"""
+    entries: list[dict[str, Any]] = []
+    for document in documents:
+        metadata = document.metadata
+        raw_ocr_text = metadata.pop("_ocr_history_text", None)
+        if metadata.get("pdf_parse_method") != "ocr":
+            continue
+        page_number = metadata.get("page_number")
+        if (
+            isinstance(page_number, bool)
+            or not isinstance(page_number, int)
+            or page_number < 1
+        ):
+            continue
+        entries.append(_build_pdf_ocr_history_entry(
+            page_number=page_number,
+            index_version=index_version,
+            metadata=metadata,
+            ocr_text=str(raw_ocr_text or ""),
+            source_job_id=source_job_id,
+            trigger=trigger,
+            text_source="tesseract",
+        ))
+    return entries
+
+
+def _backfill_legacy_pdf_ocr_history(
+    user_id: int,
+    file_id: UUID | str,
+    index_version: int,
+    existing_attempts: dict[int, int],
+) -> dict[int, int]:
+    """从上一版 chunks 衔接迁移前的 OCR baseline 和 attempt。"""
+    if index_version <= 0:
+        return existing_attempts
+
+    previous_rows = list_user_pdf_ocr_page_history_rows(
+        user_id=user_id,
+        file_id=file_id,
+        index_version=index_version - 1,
+    )
+    baseline_entries: list[dict[str, Any]] = []
+    merged_attempts = dict(existing_attempts)
+    for row in previous_rows:
+        metadata = row.get("metadata")
+        page_number = row.get("page_number")
+        if (
+            not isinstance(metadata, dict)
+            or isinstance(page_number, bool)
+            or not isinstance(page_number, int)
+            or page_number < 1
+        ):
+            continue
+        attempt = _normalize_ocr_history_positive_int(
+            metadata.get("ocr_attempt"),
+            1,
+        )
+        merged_attempts[page_number] = max(
+            merged_attempts.get(page_number, 0),
+            attempt,
+        )
+        if page_number in existing_attempts:
+            continue
+        baseline_entries.append(_build_pdf_ocr_history_entry(
+            page_number=page_number,
+            index_version=int(row["index_version"]),
+            metadata=metadata,
+            ocr_text=str(row.get("content") or ""),
+            source_job_id=None,
+            trigger="legacy_snapshot",
+            text_source=str(metadata.get("ocr_text_source") or "legacy_chunk"),
+        ))
+
+    record_pdf_ocr_history_entries(
+        user_id=user_id,
+        knowledge_file_id=file_id,
+        entries=baseline_entries,
+        max_runs_per_page=PDF_OCR_HISTORY_MAX_RUNS_PER_PAGE,
+    )
+    return merged_attempts
 
 
 def _normalize_collection_name_part(value: str) -> str:
@@ -185,6 +354,9 @@ def index_file_vectors(
     collection_name: str = CHROMA_COLLECTION_NAME,
     force_ocr_page_numbers: set[int] | None = None,
     pdf_ocr_corrections: dict[int, dict[str, object]] | None = None,
+    previous_ocr_attempts: dict[int, int] | None = None,
+    source_job_id: UUID | str | None = None,
+    job_trigger: str = "file_index",
 ) -> dict[str, Any]:
     """将单个知识文件解析、切分并写入 Chroma。"""
     file_path = Path(storage_path)
@@ -198,6 +370,13 @@ def index_file_vectors(
         original_name=original_name or file_path.name,
         force_ocr_page_numbers=force_ocr_page_numbers,
         pdf_ocr_corrections=pdf_ocr_corrections,
+        previous_ocr_attempts=previous_ocr_attempts,
+    )
+    ocr_history_entries = build_pdf_ocr_history_entries(
+        documents=documents,
+        index_version=index_version,
+        source_job_id=source_job_id,
+        trigger=job_trigger,
     )
     chunks = split_documents(documents)
     if not chunks:
@@ -227,6 +406,12 @@ def index_file_vectors(
             chunks=chunks,
             chunk_ids=chunk_ids,
         )
+        record_pdf_ocr_history_entries(
+            user_id=user_id,
+            knowledge_file_id=file_id,
+            entries=ocr_history_entries,
+            max_runs_per_page=PDF_OCR_HISTORY_MAX_RUNS_PER_PAGE,
+        )
     except Exception:
         # 两套存储不能参与同一事务；失败时清空半成品并保持 failed 状态。
         compensate_failed_file_index(
@@ -254,6 +439,7 @@ def index_file_vectors(
         "ocr_correction_page_numbers": sorted(
             (pdf_ocr_corrections or {}).keys(),
         ),
+        "ocr_history_entry_count": len(ocr_history_entries),
     }
 
 
@@ -262,6 +448,7 @@ def index_knowledge_file_record(
     user_id: int,
     index_version: int,
     job_options: dict[str, Any] | None = None,
+    source_job_id: UUID | str | None = None,
 ) -> dict[str, Any]:
     """索引单条知识文件记录，并同步文件处理状态。
 
@@ -281,6 +468,16 @@ def index_knowledge_file_record(
         invalidate_file_knowledge_base_contexts(user_id, file_id)
 
         try:
+            previous_ocr_attempts = get_latest_pdf_ocr_attempts(
+                user_id,
+                file_id,
+            )
+            previous_ocr_attempts = _backfill_legacy_pdf_ocr_history(
+                user_id=user_id,
+                file_id=file_id,
+                index_version=index_version,
+                existing_attempts=previous_ocr_attempts,
+            )
             correction_rows = list_pdf_ocr_corrections(user_id, file_id)
             pdf_ocr_corrections = {
                 int(row["page_number"]): dict(row)
@@ -294,6 +491,13 @@ def index_knowledge_file_record(
                 original_name=str(file_record["original_name"]),
                 force_ocr_page_numbers=get_force_ocr_page_numbers(job_options),
                 pdf_ocr_corrections=pdf_ocr_corrections,
+                previous_ocr_attempts=previous_ocr_attempts,
+                source_job_id=source_job_id,
+                job_trigger=(
+                    str(job_options.get("trigger") or "file_index")
+                    if isinstance(job_options, dict)
+                    else "file_index"
+                ),
             )
         except Exception:
             update_knowledge_file_status(

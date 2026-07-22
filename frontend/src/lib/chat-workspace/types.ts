@@ -100,6 +100,8 @@ export type PdfOcrQualityPage = {
   hasCorrection: boolean;
   correctionRevision: number;
   correctionUpdatedAt: string | null;
+  historyCount: number;
+  latestConfidenceDelta: number | null;
   excerpt: string;
 };
 
@@ -120,6 +122,47 @@ export type PdfOcrQualityReport = {
     maxReindexPages: number;
   };
   pages: PdfOcrQualityPage[];
+};
+
+export type PdfOcrHistoryRun = {
+  id: string;
+  indexVersion: number;
+  ocrAttempt: number;
+  sourceJobId: string | null;
+  trigger: string;
+  ocrEngine: string;
+  ocrConfidence: number | null;
+  ocrQuality: string;
+  ocrWordCount: number;
+  ocrText: string;
+  ocrTextSha256: string;
+  ocrTextSource: string;
+  correctionRevision: number | null;
+  createdAt: string;
+  previousRunId: string | null;
+  confidenceDelta: number | null;
+  wordCountDelta: number | null;
+  textChanged: boolean | null;
+};
+
+export type PdfOcrHistoryReport = {
+  file: {
+    id: string;
+    originalName: string;
+    indexVersion: number;
+  };
+  pageNumber: number;
+  summary: {
+    runCount: number;
+    retentionLimit: number;
+    latestConfidence: number | null;
+    latestDelta: number | null;
+    bestConfidence: number | null;
+    improvedCount: number;
+    degradedCount: number;
+    unchangedCount: number;
+  };
+  runs: PdfOcrHistoryRun[];
 };
 
 export type KnowledgeSourcePreview = {

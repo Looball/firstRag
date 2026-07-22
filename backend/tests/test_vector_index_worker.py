@@ -210,6 +210,7 @@ class VectorIndexWorkerLoggingTests(unittest.TestCase):
             1,
             2,
             job_options=options,
+            source_job_id=job_id,
         )
 
     def test_lock_busy_defers_job_without_processing_file(self) -> None:

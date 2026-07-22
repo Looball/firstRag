@@ -13,6 +13,7 @@
 | `knowledge_base_files` | 知识库与文件多对多关联。 |
 | `knowledge_file_chunks` | 文本分块正文、metadata、全文检索索引和索引版本。 |
 | `knowledge_file_ocr_corrections` | 扫描 PDF 页级人工 OCR 修订、原始 OCR 文本和修订版本。 |
+| `knowledge_file_ocr_history` | 扫描 PDF 页级原始识别历史、质量指标和相邻趋势基线。 |
 | `conversations` | 会话，属于某个知识库。 |
 | `messages` | 会话消息，保存 role、content、status、sources、retrieval。 |
 | `message_attachments` | 聊天消息图片附件，保存用户、会话、消息绑定关系和文件 metadata。 |
@@ -48,6 +49,7 @@
 | `message_attachments` | `id`, `user_id`, `conversation_id`, `message_id`, `original_name`, `storage_path`, `mime_type`, `size_bytes`, `file_hash`, `status`, `created_at`, `updated_at` |
 | `knowledge_file_chunks` | `chunk_id`, `user_id`, `knowledge_file_id`, `chunk_index`, `content`, `metadata`, `created_at`, `updated_at`, `index_version` |
 | `knowledge_file_ocr_corrections` | `user_id`, `knowledge_file_id`, `page_number`, `original_ocr_text`, `corrected_text`, `revision`, `created_at`, `updated_at` |
+| `knowledge_file_ocr_history` | `id`, `user_id`, `knowledge_file_id`, `page_number`, `index_version`, `ocr_attempt`, `source_job_id`, `trigger`, `ocr_engine`, `ocr_confidence`, `ocr_quality`, `ocr_word_count`, `ocr_text`, `ocr_text_sha256`, `ocr_text_source`, `correction_revision`, `created_at` |
 | `vector_index_jobs` | `id`, `user_id`, `knowledge_file_id`, `knowledge_base_id`, `status`, `priority`, `attempts`, `max_attempts`, `locked_by`, `locked_at`, `started_at`, `finished_at`, `error_message`, `result`, `options`, `created_at`, `updated_at`, `available_at`, `heartbeat_at`, `index_version` |
 | `user_llm_settings` | `user_id`, `credential_mode`, `provider`, `model`, `base_url`, `api_key_ciphertext`, `encryption_key_version`, `temperature`, `max_tokens`, `timeout_seconds`, `max_retries`, `created_at`, `updated_at`, `api_key_hint` |
 | `user_llm_provider_credentials` | `user_id`, `provider`, `api_key_ciphertext`, `api_key_hint`, `encryption_key_version`, `created_at`, `updated_at` |
@@ -268,6 +270,8 @@ DOCX 额外保存 `location_type=docx_paragraphs` 以及 1-based
 扫描 PDF chunk 的 `metadata` 额外保存 `ocr_confidence`、`ocr_quality`、`ocr_word_count` 和 `ocr_attempt`。`ocr_confidence` 是 Tesseract TSV word confidence 按有效字符数加权后的 0-100 分数；没有有效 word 时不写入虚构分数，并将 `ocr_quality` 记为 `unknown`。低于 `PDF_OCR_LOW_CONFIDENCE_THRESHOLD` 时记为 `low`，否则为 `good`。
 
 人工校对按用户、文件和 1-based 页码唯一保存。首次修订固定记录 `original_ocr_text`，后续保存只更新 `corrected_text` 并递增 `revision`；知识文件永久删除时由外键级联清理。应用修订后的 chunk metadata 增加 `ocr_text_source=manual_correction`、`ocr_correction_applied=true`、revision、字符数和更新时间，同时继续保留本次 Tesseract OCR 置信度。
+
+OCR 识别历史按 `user_id + knowledge_file_id + page_number + index_version` 唯一保存，并以 `source_job_id` 关联产生该结果的 vector job。表中只保存本次 Tesseract 原始文本；人工校对存在时通过 `correction_revision` 标注，但不会覆盖 `ocr_text`。`ocr_attempt` 从已有历史或迁移前 chunk metadata 单调递增，`ocr_text_sha256` 用于快速判断相邻结果是否变化；每页保留数量由配置限制，用户或文件删除时由外键级联清理。
 
 ## 凭据安全结构
 

@@ -21,6 +21,8 @@ const pages: PdfOcrQualityPage[] = [
     hasCorrection: false,
     correctionRevision: 0,
     correctionUpdatedAt: null,
+    historyCount: 1,
+    latestConfidenceDelta: null,
     excerpt: "Clear page",
   },
   {
@@ -35,6 +37,8 @@ const pages: PdfOcrQualityPage[] = [
     hasCorrection: false,
     correctionRevision: 0,
     correctionUpdatedAt: null,
+    historyCount: 2,
+    latestConfidenceDelta: 4,
     excerpt: "Needs review",
   },
   {
@@ -49,6 +53,8 @@ const pages: PdfOcrQualityPage[] = [
     hasCorrection: true,
     correctionRevision: 2,
     correctionUpdatedAt: "2026-07-22T10:00:00+08:00",
+    historyCount: 3,
+    latestConfidenceDelta: -2,
     excerpt: "Corrected page",
   },
 ];

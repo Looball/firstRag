@@ -31,6 +31,8 @@
 
 文件级巡检可以把多个 OCR 页码合并为一次重新识别批次。后端校验页码属于当前 index version 后，只递增一次版本，并把规范化页码写入一个 job 的 `force_ocr_page_numbers`；worker 在一次整文件解析中强制 OCR 所选页，避免逐页 job 造成重复 embedding 和版本竞争。失败重试不接受新的页码，而是从原失败 job 恢复受控 options，在同一 index version 下重新排队。
 
+索引成功时，扫描页的本次 Tesseract 原始结果独立写入 `knowledge_file_ocr_history`，不随 `knowledge_file_chunks` 替换而丢失。页级 attempt 从最近历史递增；迁移前旧文件在下一次重建前从上一版 chunks 写入 baseline。历史保留 confidence、quality、word count、文本 SHA、trigger、source job 和 correction revision，前端据此判断重识别是改善、下降、持平还是仅文字发生变化。
+
 ## 聊天生成
 
 1. 前端发送 `POST /api/chat`，代理到后端 `POST /chat`。

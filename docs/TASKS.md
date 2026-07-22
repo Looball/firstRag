@@ -83,6 +83,7 @@
 | `PLAN-20260722-01` | 2026-07-22 | `Done` | 将 OCR 校对扩展为原始 PDF 页面、编辑文本和差异结果一体化工作台。 | `T-075` |
 | `PLAN-20260722-02` | 2026-07-22 | `Done` | 建立文件级 OCR 质量巡检入口，集中发现低置信度页面并直接进入校对工作台。 | `T-076` |
 | `PLAN-20260722-03` | 2026-07-22 | `Done` | 支持从 OCR 巡检中批量选择页面，以单次文件重建任务重新识别并提供进度与失败重试。 | `T-077` |
+| `PLAN-20260722-04` | 2026-07-22 | `Doing` | 持久化页级 OCR 识别历史，展示置信度趋势和相邻识别文本差异。 | `T-078` |
 
 ## 任务总览
 
@@ -165,6 +166,7 @@
 | `T-075` | `PLAN-20260722-01` | `P1` | `Done` | 增加 PDF 与 OCR 校对文本并排工作台 | 2026-07-22 | `976214b` |
 | `T-076` | `PLAN-20260722-02` | `P1` | `Done` | 增加文件级 OCR 质量巡检 | 2026-07-22 | `ca92e0b` |
 | `T-077` | `PLAN-20260722-03` | `P1` | `Done` | 支持批量 OCR 重新识别与失败重试 | 2026-07-22 | `2de3486` |
+| `T-078` | `PLAN-20260722-04` | `P1` | `Doing` | 增加 OCR 识别历史、质量趋势与文本差异 | — | — |
 
 ## 新计划接入流程
 
@@ -3036,6 +3038,40 @@ git diff --check
   - `cd frontend && npm test -- --run`：12 个 test files、84 tests passed；`npm run lint`：0 error、保留 2 个既有 `<img>` performance warnings；Next.js 16.2.10 production build 通过。
   - Docker Compose 最终重建通过：PostgreSQL、Redis、Chroma healthy，migration `Exited (0)` 且 `applied=0 skipped=7`，backend、worker、frontend 正常运行；真实批量 API、job 轮询和报告刷新均返回 200。
   - production preflight、Chroma runtime health、migration dry-run、`git diff --check` 和 npm audit policy 通过；依赖审计仅保留截至 2026-08-20 的 PostCSS moderate 限时例外。
+- 建议验证命令：
+
+```bash
+cd backend && conda run -n firstrag env PYTHONPATH=. pytest -q
+cd ../frontend && npm test -- --run && npm run lint && npm run build
+cd .. && docker compose up -d --build
+docker compose ps -a
+docker compose logs --since=10m backend worker frontend
+conda run -n firstrag python scripts/production_preflight.py --env-file .env --migration-method compose --check-runtime-health
+git diff --check
+```
+
+## T-078 增加 OCR 识别历史、质量趋势与文本差异
+
+- 来源计划：`PLAN-20260722-04`
+- 优先级：`P1`
+- 状态：`Doing`
+- 目标：保留扫描 PDF 页面的每次 OCR 结果，使用户能判断重新识别是否改善置信度和文字内容。
+- 技术边界：
+  - 历史记录独立于会被替换的 `knowledge_file_chunks`，按当前用户、文件、页码和 index version 持久化；文件或用户永久删除时级联清理。
+  - 每条记录保存 OCR 原始文本、SHA-256、confidence、quality、word count、attempt、触发来源和关联 job；人工校对文本不冒充 OCR 原始结果。
+  - 识别次数按页面历史单调递增；旧文件首次进入新流程时从现有 chunk metadata 衔接，不把重新识别次数重置为 1。
+  - 历史查询只允许当前用户的未删除 PDF；默认限制每页保留最近若干次，避免长期重新识别导致数据库无界增长。
+- 范围：
+  - 新增 OCR history migration、repository、索引成功记录逻辑和页级历史查询 API。
+  - 巡检列表展示历史数量和最近 confidence delta；新增历史面板，展示时间线、最佳/当前置信度、改善/下降次数和相邻文本差异。
+  - 复用现有线性空间 OCR diff，长文本差异延迟计算；历史仅在用户打开页面时按需请求。
+  - 覆盖首次识别、连续重识别、旧 metadata 衔接、人工校对、跨用户、无历史、保留上限和移动端布局。
+- 验收标准：
+  - 初次 OCR 建立 baseline；后续成功索引为同页新增一条历史，失败索引不产生伪成功记录。
+  - 相邻历史返回可信 confidence/word count delta，文本 SHA 相同则明确标记未变化；attempt 不因批量或人工校对重建而倒退。
+  - 用户只能读取自己的文件和页面历史，接口不返回 storage path、API Key 或内部异常。
+  - 前端能切换相邻识别记录并查看差异，空历史、单次历史、加载失败和窄屏状态可理解且可恢复。
+  - 后端、前端测试、lint、production build、Docker Compose 真实两次 OCR smoke、production preflight 和 `git diff --check` 通过。
 - 建议验证命令：
 
 ```bash

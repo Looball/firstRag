@@ -365,6 +365,7 @@ def build_pdf_page_documents(
     base_metadata: dict[str, str],
     force_ocr_page_numbers: set[int] | None = None,
     pdf_ocr_corrections: dict[int, dict[str, object]] | None = None,
+    previous_ocr_attempts: dict[int, int] | None = None,
 ) -> list[Document]:
     """逐页解析 PDF，并把真实 1-based 页码写入 Document metadata。"""
     page_chunks = pymupdf4llm.to_markdown(
@@ -443,6 +444,15 @@ def build_pdf_page_documents(
             continue
         parse_method = "ocr" if corrected_text or ocr_text else "native_text"
         if parse_method == "ocr":
+            page_number = page_index + 1
+            previous_attempt = (previous_ocr_attempts or {}).get(page_number)
+            ocr_attempt = (
+                max(1, int(previous_attempt)) + 1
+                if previous_attempt is not None
+                else 2
+                if page_index in forced_page_indexes
+                else 1
+            )
             confidence = ocr_result.confidence if ocr_result is not None else None
             low_confidence_threshold = normalize_pdf_ocr_confidence_threshold(
                 PDF_OCR_LOW_CONFIDENCE_THRESHOLD,
@@ -461,10 +471,11 @@ def build_pdf_page_documents(
                 "ocr_word_count": (
                     ocr_result.word_count if ocr_result is not None else 0
                 ),
-                "ocr_attempt": 2 if page_index in forced_page_indexes else 1,
+                "ocr_attempt": ocr_attempt,
                 "ocr_text_source": (
                     "manual_correction" if corrected_text else "tesseract"
                 ),
+                "_ocr_history_text": ocr_text,
             }
             if confidence is not None:
                 ocr_metadata["ocr_confidence"] = confidence
@@ -716,6 +727,7 @@ def load_document(
     original_name: str | None = None,
     force_ocr_page_numbers: set[int] | None = None,
     pdf_ocr_corrections: dict[int, dict[str, object]] | None = None,
+    previous_ocr_attempts: dict[int, int] | None = None,
 ) -> list[Document]:
     """根据文件类型加载单个本地文档。"""
     display_name = original_name or file_path.name
@@ -765,6 +777,7 @@ def load_document(
             base_metadata,
             force_ocr_page_numbers=force_ocr_page_numbers,
             pdf_ocr_corrections=pdf_ocr_corrections,
+            previous_ocr_attempts=previous_ocr_attempts,
         )
 
     if suffix == ".docx":

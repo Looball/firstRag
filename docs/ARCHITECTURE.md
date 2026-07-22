@@ -56,8 +56,9 @@ FirstRAG/
 
 文件级 OCR 质量巡检
   -> 当前用户选择已索引 PDF
-  -> PostgreSQL 当前 index_version 的 OCR 代表 chunks + corrections
-  -> 汇总待处理、已校对、页级置信度和安全摘要
+  -> PostgreSQL 当前 index_version 的 OCR 代表 chunks + corrections + history 摘要
+  -> 汇总待处理、已校对、页级置信度、安全摘要和最近质量变化
+  -> 按需读取单页 OCR history，展示识别账本与相邻原文差异
   -> 点击页码复用引用原文预览与校对工作台
 ```
 
@@ -73,12 +74,13 @@ FirstRAG/
 | 仓库层 | `backend/app/repositories` | 纯 SQL 数据访问。 |
 | 数据库工具 | `backend/app/db` | 连接、执行器、PostgreSQL advisory lock。 |
 | 基础设施 | `backend/app/core` | 配置、JWT、安全和密钥加密。 |
-| Worker | `backend/app/workers` | 异步向量化任务消费；扫描 PDF 页面在容器内通过 Tesseract OCR，保存页级置信度，一次消费单页或多页受控重识别批次，并在切分前应用持久化人工修订。 |
+| Worker | `backend/app/workers` | 异步向量化任务消费；扫描 PDF 页面在容器内通过 Tesseract OCR，保存页级置信度和原始识别历史，一次消费单页或多页受控重识别批次，并在切分前应用持久化人工修订。 |
 
 ## 存储组件
 
 - PostgreSQL：用户、知识库、文件、会话、消息、聊天附件 metadata、文本/图片解析分块、向量化任务队列。
 - PostgreSQL OCR corrections：按用户、文件和页码保存人工修订、原始 OCR 文本与 revision；知识文件永久删除时级联清理。
+- PostgreSQL OCR history：按用户、文件、页码和 index version 保存有上限的 Tesseract 原始识别记录、质量指标、文本 SHA 和来源 job；与 chunks 生命周期解耦，文件删除时级联清理。
 - Redis：提供基础设施健康检查、RAG 热点共享缓存、后端分布式限流和 vector worker 运行态，包括知识库画像、retrieval settings、query embedding、登录/业务 API sliding-window 计数、worker 心跳、单文件短租约和运行指标；不作为会话、消息或 vector index job 的持久存储。
 - Chroma：文档分块向量。Docker Compose 使用独立 `chroma` service，backend 与
   worker 通过 HTTP client 共享访问，数据持久化到根目录 `vector_db/chroma`；

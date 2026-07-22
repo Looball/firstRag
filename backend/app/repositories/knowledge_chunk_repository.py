@@ -269,6 +269,40 @@ def list_user_pdf_ocr_page_rows(
     )
 
 
+def list_user_pdf_ocr_page_history_rows(
+    user_id: int,
+    file_id: UUID | str,
+    index_version: int,
+) -> list[Row]:
+    """聚合当前版本每个 OCR 页的完整 chunks，供历史基线衔接。"""
+    return fetch_all(
+        """
+        SELECT
+            (chunk.metadata ->> 'page_number')::integer AS page_number,
+            chunk.index_version,
+            STRING_AGG(chunk.content, E'\n\n' ORDER BY chunk.chunk_index)
+                AS content,
+            (ARRAY_AGG(chunk.metadata ORDER BY chunk.chunk_index))[1]
+                AS metadata
+        FROM knowledge_file_chunks AS chunk
+        JOIN knowledge_files AS file
+          ON file.id = chunk.knowledge_file_id
+         AND file.user_id = chunk.user_id
+        WHERE chunk.user_id = %s
+          AND chunk.knowledge_file_id = %s
+          AND chunk.index_version = %s
+          AND chunk.metadata ->> 'location_type' = 'pdf_page'
+          AND chunk.metadata ->> 'pdf_parse_method' = 'ocr'
+          AND file.deleted_at IS NULL
+        GROUP BY
+            (chunk.metadata ->> 'page_number')::integer,
+            chunk.index_version
+        ORDER BY page_number ASC;
+        """,
+        (user_id, str(file_id), index_version),
+    )
+
+
 def get_user_pdf_page_chunks(
     user_id: int,
     file_id: UUID | str,

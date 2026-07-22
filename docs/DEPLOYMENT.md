@@ -491,7 +491,7 @@ MODELS_DIR=/srv/firstrag/models
 | `RATE_LIMIT_BACKEND` / `RATE_LIMIT_REDIS_FAILURE_MODE` | 公开 demo 使用 `redis` 和 `fail_closed`，确保多 backend 实例共享限流状态；本地调试可改为 `memory` 或 `fail_open`。 |
 | `LOGIN_FAILURE_RATE_LIMIT_*` / `*_RATE_LIMIT_MAX_REQUESTS` | 后端限流阈值；公网仍建议叠加网关或 WAF 做边缘 IP 级限流。 |
 | `VECTOR_INDEX_MAX_BATCH_FILES` | 单次知识库批量向量化可提交的最大文件数。 |
-| `PDF_OCR_ENABLED` / `PDF_OCR_MAX_PAGES` / `PDF_OCR_REINDEX_MAX_BATCH_PAGES` / `PDF_OCR_LOW_CONFIDENCE_THRESHOLD` | 公开 demo 建议保持本地 OCR 开启、限制单文件 OCR 页数和单个重新识别批次页数，并按样本质量校准低置信度警告阈值；批次默认 20 页，质量默认阈值为 70。 |
+| `PDF_OCR_ENABLED` / `PDF_OCR_MAX_PAGES` / `PDF_OCR_REINDEX_MAX_BATCH_PAGES` / `PDF_OCR_HISTORY_MAX_RUNS_PER_PAGE` / `PDF_OCR_LOW_CONFIDENCE_THRESHOLD` | 公开 demo 建议保持本地 OCR 开启、限制单文件 OCR 页数、单个重新识别批次页数和每页历史保留数，并按样本质量校准低置信度警告阈值；批次和历史默认均为 20，质量默认阈值为 70。 |
 | `FRONTEND_PORT` / `BACKEND_PORT` / `POSTGRES_PORT` | 建议设为 `127.0.0.1:3000`、`127.0.0.1:8000`、`127.0.0.1:5432`，由反向代理暴露 HTTPS。 |
 
 公开 demo 推荐额外设置：
