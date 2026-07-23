@@ -85,7 +85,7 @@
 | `PLAN-20260722-03` | 2026-07-22 | `Done` | 支持从 OCR 巡检中批量选择页面，以单次文件重建任务重新识别并提供进度与失败重试。 | `T-077` |
 | `PLAN-20260722-04` | 2026-07-22 | `Done` | 持久化页级 OCR 识别历史，展示置信度趋势和相邻识别文本差异。 | `T-078` |
 | `PLAN-20260722-05` | 2026-07-22 | `Done` | 为主动 OCR 重识别增加自适应预处理、页面旋转和多 PSM 候选选优。 | `T-079` |
-| `PLAN-20260723-01` | 2026-07-23 | `Doing` | 建立覆盖多类扫描质量的 OCR 评测集和真实 Tesseract 回归门禁。 | `T-080` |
+| `PLAN-20260723-01` | 2026-07-23 | `Done` | 建立覆盖多类扫描质量的 OCR 评测集和真实 Tesseract 回归门禁。 | `T-080` |
 
 ## 任务总览
 
@@ -170,7 +170,7 @@
 | `T-077` | `PLAN-20260722-03` | `P1` | `Done` | 支持批量 OCR 重新识别与失败重试 | 2026-07-22 | `2de3486` |
 | `T-078` | `PLAN-20260722-04` | `P1` | `Done` | 增加 OCR 识别历史、质量趋势与文本差异 | 2026-07-22 | `ab9dd0d` |
 | `T-079` | `PLAN-20260722-05` | `P1` | `Done` | 增加 OCR 自适应预处理与参数选优 | 2026-07-22 | `005758c` |
-| `T-080` | `PLAN-20260723-01` | `P1` | `Doing` | 建立 OCR 评测集与自动回归门禁 | — | — |
+| `T-080` | `PLAN-20260723-01` | `P1` | `Done` | 建立 OCR 评测集与自动回归门禁 | 2026-07-23 | `175cc61` |
 
 ## 新计划接入流程
 
@@ -3152,7 +3152,7 @@ git diff --check
 
 - 来源计划：`PLAN-20260723-01`
 - 优先级：`P1`
-- 状态：`Doing`
+- 状态：`Done`
 - 目标：用可重复的多场景真实 Tesseract 评测约束 OCR 策略调整，避免后续参数只改善单一样本或静默降低其他扫描质量。
 - 技术边界：
   - 评测样本由代码按 versioned manifest 生成，仅包含合成测试文字，不读取用户文件、不提交大体积二进制 PDF。
@@ -3169,6 +3169,16 @@ git diff --check
   - 本机和 Docker backend 镜像都能运行同一 benchmark；旋转样本必须实际完成 90°/270° 候选比较、采用允许的获胜策略、满足最低相似度且不显著弱于基线，其余样本满足独立质量阈值。
   - 任一逐样本阈值、宏平均质量或总耗时超限时命令返回非零，并在报告中指出失败原因。
   - 后端全量测试、CI YAML/Action pin 检查、Docker Compose build、production preflight 和 `git diff --check` 通过。
+- 相关提交：`175cc61`。
+- 完成记录：
+  - 新增 versioned `pdf_ocr_eval_v1.json` 与 `pdf_ocr_benchmark.py`，按固定文字生成方向正确、90° 旋转、低对比度、轻度模糊和中英文混排五类无文本层单页 PDF；样本仅在运行期生成，不读取用户文件或提交二进制 fixture。
+  - 门禁直接调用生产 `run_pdf_page_ocr` 的基线与自适应模式，使用 Unicode NFKC 字符相似度检查逐样本质量、相对基线变化、允许的获胜策略、必需候选执行状态、宏平均质量和总耗时；JSON/Markdown 报告及退出码 `0/1/2` 分别表达通过、质量失败和配置/运行错误。
+  - 真实跨版本验证发现 Tesseract 会对旋转页采用不同最优策略：本机 5.5.2 采用 `rotate_270_gray`，Compose 5.5.0 已能由 `baseline_auto` 正确识别。门禁因此允许高质量基线获胜，但仍强制 90°/270° 候选实际执行成功，避免把版本差异误报为回归。
+  - GitHub Actions backend job 安装 `tesseract-ocr`、`eng`、`chi_sim` 并执行同一门禁；`scripts/acceptance_check.sh` 默认加入 OCR regression gate，同时提供 `--skip-ocr-eval` 供与 OCR 无关且 runtime 不可用的检查显式跳过。
+  - 本机真实门禁：5/5 case 通过，宏平均相似度 `1.0000`，总耗时 `22.349s`；Compose backend 真实门禁：5/5 case 通过，宏平均相似度 `1.0000`，总耗时 `15.665s`。
+  - 五份运行期 PDF 通过 Poppler 渲染与人工视觉检查，均为 A4 单页、无原生文本层、无裁切/重叠/黑块；压缩后大小约 36–92 KB，旋转页 910×1287 渲染画布中文字边界为 `(466,101)–(658,1026)`，保留安全页边距。临时 PDF 与本地报告在验收后已清理。
+  - `scripts/acceptance_check.sh --skip-real-eval` 全链路通过：infrastructure preflight、migration 列表、backend compileall、357 个 backend tests、OCR gate、frontend lint、87 个 frontend tests 和 Next.js production build 均通过；lint 仅保留 2 个既有 `<img>` performance warning。
+  - Docker Compose backend/frontend 镜像重建成功，PostgreSQL、Redis、Chroma healthy，migration `applied=0 skipped=9`，backend、worker、frontend 正常启动；production preflight、Chroma runtime health、migration dry-run、Compose config、CI YAML、7 个 GitHub Actions SHA pin 和 `git diff --check` 均通过。
 - 建议验证命令：
 
 ```bash
