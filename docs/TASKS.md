@@ -86,7 +86,7 @@
 | `PLAN-20260722-04` | 2026-07-22 | `Done` | 持久化页级 OCR 识别历史，展示置信度趋势和相邻识别文本差异。 | `T-078` |
 | `PLAN-20260722-05` | 2026-07-22 | `Done` | 为主动 OCR 重识别增加自适应预处理、页面旋转和多 PSM 候选选优。 | `T-079` |
 | `PLAN-20260723-01` | 2026-07-23 | `Done` | 建立覆盖多类扫描质量的 OCR 评测集和真实 Tesseract 回归门禁。 | `T-080` |
-| `PLAN-20260723-02` | 2026-07-23 | `Doing` | 保存 OCR CI 评测历史并展示跨运行质量与耗时趋势。 | `T-081` |
+| `PLAN-20260723-02` | 2026-07-23 | `Done` | 保存 OCR CI 评测历史并展示跨运行质量与耗时趋势。 | `T-081` |
 
 ## 任务总览
 
@@ -172,7 +172,7 @@
 | `T-078` | `PLAN-20260722-04` | `P1` | `Done` | 增加 OCR 识别历史、质量趋势与文本差异 | 2026-07-22 | `ab9dd0d` |
 | `T-079` | `PLAN-20260722-05` | `P1` | `Done` | 增加 OCR 自适应预处理与参数选优 | 2026-07-22 | `005758c` |
 | `T-080` | `PLAN-20260723-01` | `P1` | `Done` | 建立 OCR 评测集与自动回归门禁 | 2026-07-23 | `175cc61` |
-| `T-081` | `PLAN-20260723-02` | `P1` | `Doing` | 持久化 OCR CI 评测历史并展示趋势 | — | — |
+| `T-081` | `PLAN-20260723-02` | `P1` | `Done` | 持久化 OCR CI 评测历史并展示趋势 | 2026-07-23 | `12852ff` |
 
 ## 新计划接入流程
 
@@ -3196,7 +3196,7 @@ git diff --check
 
 - 来源计划：`PLAN-20260723-02`
 - 优先级：`P1`
-- 状态：`Doing`
+- 状态：`Done`
 - 目标：让每次 CI OCR benchmark 都留下可下载的原始报告，并基于同一 runner/Tesseract 环境的历史展示质量与耗时变化，及时发现未触发硬超时的缓慢性能漂移。
 - 技术边界：
   - 历史记录只保存合成 OCR benchmark 指标、commit/run 标识和非敏感 runtime 信息，不保存用户文件、账号、API Key、环境变量全集或临时 PDF。
@@ -3213,11 +3213,19 @@ git diff --check
   - 不同 OS、架构或 Tesseract 版本不进入可比基线；损坏或旧 schema 文件只产生安全 warning，不阻断当前 OCR benchmark。
   - CI Action 全部固定到官方 release 完整 SHA；Artifact 即使 OCR 门禁失败也尽量上传已生成报告，历史目录有总量上限。
   - OCR 专项、后端全量测试、CI YAML/Action pin、Docker Compose benchmark、production preflight 和 `git diff --check` 通过。
+- 相关提交：`12852ff`。
+- 完成记录：
+  - OCR report schema 升级为 v2，增加经过字段白名单限制的 runner OS、架构、run/attempt、commit 和 ref context；历史 JSON 再执行独立 allowlist 投影，只保留整体/逐 case 质量、耗时、策略和 gate 状态，不保存期望正文、OCR 正文或任意扩展字段。
+  - 新增 `pdf_ocr_trend.py`，支持历史校验、CI rerun 去重、最多 50 条有界清理、损坏文件 warning、同 runner OS/架构/Tesseract 完整版本过滤，以及以本次运行锚定的最近 5 次中位数趋势；耗时 `1.25x/1.50x` 和质量下降 `0.01/0.02` 分别显示 `WATCH/REGRESSED`，但不取代当前硬门禁退出码。
+  - GitHub Actions backend job 用 cache 恢复同 runner 历史，把当前 JSON、Markdown、trend 作为 artifact 保留 30 天，并把趋势写入 Step Summary；cache 与 artifact Action 分别固定到官方 `v4.2.4`、`v4.6.2` 完整 commit SHA，Action pin policy 通过 `9` 个引用。
+  - 本机 Tesseract 5.5.2 连续两轮真实评测均为 5/5 case、宏平均相似度 `1.0000`，总耗时 `21.708s -> 21.651s`；第二轮趋势为 `STABLE`、可比运行 `2`、耗时比 `1.00x`。最终 Compose backend 评测同样 5/5 通过、宏平均相似度 `1.0000`、总耗时 `16.190s`，并成功生成 baseline 历史和趋势。
+  - 新增 7 个趋势专项测试，覆盖跨环境过滤、未来时间戳锚定、质量/耗时阈值、硬门禁失败、损坏/未来 schema 降级、rerun 去重、有界清理和敏感扩展字段拒绝；OCR 专项 15 项、后端全量 364 项测试均通过。
+  - 完整 Compose 镜像重建成功，PostgreSQL、Redis、Chroma healthy，migration `applied=0 skipped=9`，backend、worker、frontend 正常；production preflight、Chroma runtime health、migration dry-run、Compose config、CI YAML、compileall 和 `git diff --check` 均通过。
 - 建议验证命令：
 
 ```bash
 conda run -n firstrag python scripts/eval_pdf_ocr.py --history-dir docs/evals/ocr_runs --trend-report docs/evals/latest_pdf_ocr_trend.md
-cd backend && conda run -n firstrag env PYTHONPATH=. python -m unittest tests.services.test_pdf_ocr_benchmark -v
+cd backend && conda run -n firstrag env PYTHONPATH=. python -m unittest tests.services.test_pdf_ocr_benchmark tests.services.test_pdf_ocr_trend -v
 cd .. && conda run -n firstrag python scripts/check_github_actions_pins.py
 docker compose up -d --build backend worker
 docker compose exec -T backend python -m app.services.documents.pdf_ocr_benchmark --history-dir /tmp/ocr-runs --trend-report /tmp/pdf-ocr-trend.md
