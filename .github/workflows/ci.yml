@@ -41,6 +41,14 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install --prefer-binary -r backend/requirements.txt
 
+      - name: Install OCR regression runtime
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            tesseract-ocr \
+            tesseract-ocr-eng \
+            tesseract-ocr-chi-sim
+
       - name: Install Python dependency auditor
         run: python -m pip install pip-audit==2.10.1
 
@@ -54,6 +62,13 @@ jobs:
       - name: Run backend tests
         working-directory: backend
         run: python -m unittest discover tests -v
+
+      - name: Run PDF OCR regression gate
+        working-directory: backend
+        run: |
+          python -m app.services.documents.pdf_ocr_benchmark \
+            --json-report /tmp/pdf-ocr-eval-report.json \
+            --markdown-report /tmp/pdf-ocr-eval-report.md
 
       - name: Check migration files
         run: python scripts/migrate_db.py --list

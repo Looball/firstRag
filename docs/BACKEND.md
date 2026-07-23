@@ -92,3 +92,5 @@ OCR 校对工作台不依赖浏览器内置 PDF plugin。`pdf_page_preview_servi
 `pdf_ocr_quality_service.py` 为文件管理提供只读巡检清单。它只读取当前用户文件当前 `index_version` 的 PostgreSQL OCR 代表 chunks，并合并 `knowledge_file_ocr_corrections` revision；摘要折叠空白并限制为 220 字符。该路径不触发 OCR、Chroma 或磁盘访问，未索引状态返回 `409`，以避免展示旧版本质量数据。
 
 `pdf_ocr_history_service.py` 按需读取单页最近历史，计算相邻 confidence/word count delta、文本 SHA 是否变化以及改善/下降次数；默认只在用户打开历史面板时请求。repository 查询同时关联未删除文件和 `user_id`，每页保留上限由 `PDF_OCR_HISTORY_MAX_RUNS_PER_PAGE` 控制。
+
+`pdf_ocr_benchmark.py` 根据 versioned JSON manifest 动态生成无文本层的图片型 PDF，覆盖正常、旋转、低对比度、模糊和中英文混排页面。评测同时调用生产 `run_pdf_page_ocr` 的基线与自适应模式，不复制候选选择逻辑；逐样本相似度、改善量、允许策略、宏平均质量和总耗时任一超限都会返回非零。样本只包含固定合成文字，不读取用户上传文件，也不依赖数据库、账号或模型 API。

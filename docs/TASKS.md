@@ -85,6 +85,7 @@
 | `PLAN-20260722-03` | 2026-07-22 | `Done` | 支持从 OCR 巡检中批量选择页面，以单次文件重建任务重新识别并提供进度与失败重试。 | `T-077` |
 | `PLAN-20260722-04` | 2026-07-22 | `Done` | 持久化页级 OCR 识别历史，展示置信度趋势和相邻识别文本差异。 | `T-078` |
 | `PLAN-20260722-05` | 2026-07-22 | `Done` | 为主动 OCR 重识别增加自适应预处理、页面旋转和多 PSM 候选选优。 | `T-079` |
+| `PLAN-20260723-01` | 2026-07-23 | `Doing` | 建立覆盖多类扫描质量的 OCR 评测集和真实 Tesseract 回归门禁。 | `T-080` |
 
 ## 任务总览
 
@@ -169,6 +170,7 @@
 | `T-077` | `PLAN-20260722-03` | `P1` | `Done` | 支持批量 OCR 重新识别与失败重试 | 2026-07-22 | `2de3486` |
 | `T-078` | `PLAN-20260722-04` | `P1` | `Done` | 增加 OCR 识别历史、质量趋势与文本差异 | 2026-07-22 | `ab9dd0d` |
 | `T-079` | `PLAN-20260722-05` | `P1` | `Done` | 增加 OCR 自适应预处理与参数选优 | 2026-07-22 | `005758c` |
+| `T-080` | `PLAN-20260723-01` | `P1` | `Doing` | 建立 OCR 评测集与自动回归门禁 | — | — |
 
 ## 新计划接入流程
 
@@ -3142,6 +3144,38 @@ cd ../frontend && npm test -- --run && npm run lint && npm run build
 cd .. && docker compose up -d --build
 docker compose ps -a
 docker compose logs --since=10m backend worker frontend
+conda run -n firstrag python scripts/production_preflight.py --env-file .env --migration-method compose --check-runtime-health
+git diff --check
+```
+
+## T-080 建立 OCR 评测集与自动回归门禁
+
+- 来源计划：`PLAN-20260723-01`
+- 优先级：`P1`
+- 状态：`Doing`
+- 目标：用可重复的多场景真实 Tesseract 评测约束 OCR 策略调整，避免后续参数只改善单一样本或静默降低其他扫描质量。
+- 技术边界：
+  - 评测样本由代码按 versioned manifest 生成，仅包含合成测试文字，不读取用户文件、不提交大体积二进制 PDF。
+  - 覆盖正常页面、90° 旋转、低对比度、模糊和中英文混排；所有样本都是无文本层的图片型 PDF。
+  - 门禁直接复用生产 `pdf_ocr_engine`，同时运行基线与自适应模式；不在 benchmark 中复制候选选择算法。
+  - 回归判断同时包含逐样本最低相似度、相对基线不退化、允许的选中策略、旋转候选确实执行成功、宏平均质量和总耗时上限；阈值保留跨 Tesseract 小版本的合理容差。
+- 范围：
+  - 新增 OCR eval manifest、确定性样本生成、文本规范化/相似度、真实识别执行、JSON/Markdown 报告和稳定退出码。
+  - 为 manifest 校验、图片型 PDF 生成、评分、门禁失败和报告序列化增加单元测试。
+  - 在 GitHub Actions backend job 安装本地 Tesseract 与中英文语言包，并执行真实 OCR regression gate。
+  - 更新 README、backend、RAG workflow、deployment 与 Agent 验收文档。
+- 验收标准：
+  - 每个合成 PDF 均无可提取文本层，Poppler 渲染后没有裁切、重叠、黑块或不可读文字。
+  - 本机和 Docker backend 镜像都能运行同一 benchmark；旋转样本必须实际完成 90°/270° 候选比较、采用允许的获胜策略、满足最低相似度且不显著弱于基线，其余样本满足独立质量阈值。
+  - 任一逐样本阈值、宏平均质量或总耗时超限时命令返回非零，并在报告中指出失败原因。
+  - 后端全量测试、CI YAML/Action pin 检查、Docker Compose build、production preflight 和 `git diff --check` 通过。
+- 建议验证命令：
+
+```bash
+conda run -n firstrag env PYTHONPATH=backend python scripts/eval_pdf_ocr.py
+cd backend && conda run -n firstrag env PYTHONPATH=. pytest -q
+cd .. && docker compose up -d --build
+docker compose exec -T backend python -m app.services.documents.pdf_ocr_benchmark --json-report /tmp/pdf-ocr-eval-report.json --markdown-report /tmp/pdf-ocr-eval-report.md
 conda run -n firstrag python scripts/production_preflight.py --env-file .env --migration-method compose --check-runtime-health
 git diff --check
 ```

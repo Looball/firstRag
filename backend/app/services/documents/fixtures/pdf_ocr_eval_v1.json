@@ -1,0 +1,87 @@
+{
+  "schema_version": 1,
+  "aggregate": {
+    "min_average_adaptive_similarity": 0.88,
+    "max_total_seconds": 180
+  },
+  "cases": [
+    {
+      "id": "clean_latin",
+      "description": "方向正确、对比度正常的英文基线页",
+      "lines": [
+        "FIRST RAG OCR QUALITY",
+        "CLEAN PAGE ALPHA 2026"
+      ],
+      "rotation": 0,
+      "contrast": 1.0,
+      "blur_radius": 0.0,
+      "min_adaptive_similarity": 0.96,
+      "min_improvement": -0.02,
+      "allowed_strategies": []
+    },
+    {
+      "id": "rotated_90_latin",
+      "description": "顺时针旋转 90 度的英文扫描页",
+      "lines": [
+        "FIRST RAG ROTATION TEST",
+        "SIDEWAYS PAGE BETA 2026"
+      ],
+      "rotation": 90,
+      "contrast": 1.0,
+      "blur_radius": 0.0,
+      "min_adaptive_similarity": 0.94,
+      "min_improvement": -0.02,
+      "allowed_strategies": [
+        "baseline_auto",
+        "rotate_90_gray",
+        "rotate_270_gray"
+      ],
+      "required_candidate_strategies": [
+        "rotate_90_gray",
+        "rotate_270_gray"
+      ]
+    },
+    {
+      "id": "low_contrast_latin",
+      "description": "低对比度英文扫描页",
+      "lines": [
+        "FIRST RAG LOW CONTRAST",
+        "FADED PAGE GAMMA 2026"
+      ],
+      "rotation": 0,
+      "contrast": 0.28,
+      "blur_radius": 0.0,
+      "min_adaptive_similarity": 0.90,
+      "min_improvement": -0.04,
+      "allowed_strategies": []
+    },
+    {
+      "id": "blurred_latin",
+      "description": "轻度高斯模糊英文扫描页",
+      "lines": [
+        "FIRST RAG BLURRED SCAN",
+        "SOFT PAGE DELTA 2026"
+      ],
+      "rotation": 0,
+      "contrast": 0.82,
+      "blur_radius": 1.35,
+      "min_adaptive_similarity": 0.86,
+      "min_improvement": -0.05,
+      "allowed_strategies": []
+    },
+    {
+      "id": "mixed_chinese_english",
+      "description": "简体中文、英文和数字混排扫描页",
+      "lines": [
+        "第一RAG识别评测",
+        "中英文 MIXED OCR 2026"
+      ],
+      "rotation": 0,
+      "contrast": 0.9,
+      "blur_radius": 0.35,
+      "min_adaptive_similarity": 0.74,
+      "min_improvement": -0.06,
+      "allowed_strategies": []
+    }
+  ]
+}

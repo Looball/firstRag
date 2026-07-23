@@ -20,7 +20,7 @@ trap on_error ERR
 show_help() {
   cat <<'EOF'
 Usage:
-  scripts/acceptance_check.sh [--skip-real-eval] [--skip-infrastructure-check] [--skip-migration-check] [--skip-frontend-tests] [--skip-frontend-build]
+  scripts/acceptance_check.sh [--skip-real-eval] [--skip-ocr-eval] [--skip-infrastructure-check] [--skip-migration-check] [--skip-frontend-tests] [--skip-frontend-build]
 
 Environment variables:
   FIRSTRAG_CONDA_ENV              Conda env name. Default: firstrag
@@ -37,6 +37,7 @@ Environment variables:
                                   Set to 1 only for static checks without Docker services.
   FIRSTRAG_SKIP_BACKEND_COMPILE   Set to 1 to skip backend compileall.
   FIRSTRAG_SKIP_BACKEND_TESTS     Set to 1 to skip backend unittest.
+  FIRSTRAG_SKIP_OCR_EVAL          Set to 1 to skip the local Tesseract regression gate.
   FIRSTRAG_SKIP_FRONTEND_LINT     Set to 1 to skip frontend lint.
   FIRSTRAG_SKIP_FRONTEND_TESTS    Set to 1 to skip frontend unit tests.
   FIRSTRAG_SKIP_FRONTEND_BUILD    Set to 1 to skip frontend build.
@@ -114,6 +115,10 @@ run_backend_unittest() {
   )
 }
 
+run_ocr_eval_gate() {
+  conda run -n "${CONDA_ENV}" python "${SCRIPT_DIR}/eval_pdf_ocr.py"
+}
+
 run_frontend_lint() {
   (
     cd "${REPO_ROOT}/frontend"
@@ -154,6 +159,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --skip-real-eval)
       SKIP_REAL_EVAL=1
+      shift
+      ;;
+    --skip-ocr-eval)
+      FIRSTRAG_SKIP_OCR_EVAL=1
       shift
       ;;
     --skip-migration-check)
@@ -202,6 +211,10 @@ fi
 
 if [[ "${FIRSTRAG_SKIP_BACKEND_TESTS:-0}" != "1" ]]; then
   run_step "Backend unittest" run_backend_unittest
+fi
+
+if [[ "${FIRSTRAG_SKIP_OCR_EVAL:-0}" != "1" ]]; then
+  run_step "PDF OCR regression gate" run_ocr_eval_gate
 fi
 
 if [[ "${FIRSTRAG_SKIP_FRONTEND_LINT:-0}" != "1" ]]; then

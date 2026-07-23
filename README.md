@@ -65,6 +65,14 @@ conda run -n firstrag python scripts/production_preflight.py --env-file .env --m
 5. 对当前知识库提问，检查回答和引用来源；如果当前聊天模型支持 vision，也可以在聊天框附加 PNG、JPEG 或 WebP 图片进行单轮多模态提问。
 6. 如需调试检索效果，切换到高级模式后查看 retrieval diagnostics、提交反馈或打开质量看板。
 
+修改 PDF OCR engine、预处理参数或 Tesseract runtime 后，运行不依赖账号、API Key 或用户文件的合成扫描页回归门禁：
+
+```bash
+conda run -n firstrag python scripts/eval_pdf_ocr.py
+```
+
+门禁覆盖正常页、90° 旋转、低对比度、模糊和中英文混排，直接复用生产 OCR engine，并同时约束逐样本相似度、旋转策略、宏平均质量和总耗时。
+
 Docker 中的 `backend`、`migrate` 和 `worker` 复用精简后的 Python runtime 镜像；worker 不单独安装 `torch`、`transformers` 等可选 rerank 依赖。
 
 ## 技术栈

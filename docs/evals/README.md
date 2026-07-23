@@ -48,11 +48,12 @@ scripts/acceptance_check.sh
 2. migration 文件检查，存在数据库连接时额外执行 dry-run。
 3. 后端 `compileall`。
 4. 后端 `unittest discover`。
-5. 前端 `npm run lint`。
-6. 前端 `npm run test`。
-7. 前端 `npm run build`。
-8. RAG eval gate。
-9. Indexing eval。
+5. PDF OCR regression gate，不需要评测账号、数据库或外部模型 API Key。
+6. 前端 `npm run lint`。
+7. 前端 `npm run test`。
+8. 前端 `npm run build`。
+9. RAG eval gate。
+10. Indexing eval。
 
 只做补充静态检查、不访问真实后端时可跳过真实 eval：
 
@@ -64,6 +65,35 @@ scripts/acceptance_check.sh --skip-real-eval
 `--skip-infrastructure-check`；常规验收不应跳过 Chroma runtime health。
 
 如果本地沙箱限制 Turbopack 创建辅助进程或绑定本地端口，`npm run build` 可能需要在非沙箱环境或提权环境中重跑确认。常规构建和启动验证仍以 Docker Compose 为准。
+
+## PDF OCR 回归门禁
+
+`T-080` 增加了 versioned manifest 驱动的合成扫描页评测。默认五个 case 覆盖方向正确、90° 旋转、低对比度、轻度模糊和中英文混排；生成的 PDF 只有栅格图片，没有原生文本层，因此会真实进入与 worker 相同的 Tesseract OCR fallback。
+
+本地运行：
+
+```bash
+conda run -n firstrag python scripts/eval_pdf_ocr.py
+```
+
+Compose backend 镜像内运行：
+
+```bash
+docker compose exec -T backend \
+  python -m app.services.documents.pdf_ocr_benchmark \
+  --json-report /tmp/pdf-ocr-eval-report.json \
+  --markdown-report /tmp/pdf-ocr-eval-report.md
+```
+
+门禁直接复用生产 `run_pdf_page_ocr`，每个 case 都运行一次基线和一次自适应识别，并检查：
+
+- 自适应文本与期望正文的最低规范化字符相似度。
+- 相比基线的最低改善量，所有页面均不得显著退化；不同 Tesseract 版本可能已经在基线模式正确识别旋转文字。
+- 旋转页选中策略是否属于 manifest 允许集合，并确认 90°/270° 旋转候选都实际执行成功；允许新版 Tesseract 的基线候选在质量更高时获胜。
+- 是否确实比较了多个自适应候选。
+- 全部 case 的宏平均相似度和总耗时。
+
+退出码 `0` 表示通过，`1` 表示质量或耗时门禁失败，`2` 表示 manifest 或运行环境错误。默认 JSON 与 Markdown 报告写入 `docs/evals/latest_pdf_ocr_eval_report.*` 并由 `.gitignore` 忽略；临时 PDF 默认自动删除。修改 `pdf_ocr_engine.py`、OCR 参数、字体/语言包或 Tesseract 版本时都应复跑；GitHub Actions backend job 默认安装 `eng`、`chi_sim` 并自动执行同一门禁。
 
 ## 历史趋势摘要
 

@@ -118,7 +118,7 @@ python -m app.workers.vector_index_worker
 3. 运行 `docker compose ps` 和 `docker compose logs --tail=100 redis postgres chroma migrate backend worker frontend` 检查状态。
 4. 完成代码或文档修改。
 5. 基于 Compose 容器完成相关 smoke test。
-6. 涉及真实链路时再运行 eval / acceptance 脚本作为补充验收。
+6. 修改 OCR engine、参数或 runtime 时运行 PDF OCR regression gate；涉及真实链路时再运行其他 eval / acceptance 脚本作为补充验收。
 7. 检查 `git status --short`，只提交当前任务相关文件。
 8. push 前确认没有 `.env`、上传文件、向量库、模型缓存或 eval 历史 JSON 被提交。
 
@@ -129,7 +129,7 @@ scripts/acceptance_check.sh --skip-real-eval
 ```
 
 该脚本会先运行 infrastructure preflight，检查 Redis/Chroma 配置、Compose 拓扑和
-Chroma runtime health，再运行 migration 文件检查、后端 compileall、后端 unittest、前端
+Chroma runtime health，再运行 migration 文件检查、后端 compileall、后端 unittest、PDF OCR regression gate、前端
 lint、前端单测和前端 build，作为 Compose 验证后的补充检查。如果当前环境配置了 `DATABASE_URL` 或
 `COMPOSE_DATABASE_URL`，脚本会额外执行 migration dry-run；如果没有数据库连接，
 则只检查本地 migration 文件列表并提示跳过 dry-run。
@@ -175,6 +175,7 @@ scripts/acceptance_check.sh
 | `--skip-frontend-build` | 跳过 Next build。 |
 | `FIRSTRAG_SKIP_BACKEND_COMPILE=1` | 跳过后端 compileall。 |
 | `FIRSTRAG_SKIP_BACKEND_TESTS=1` | 跳过后端 unittest。 |
+| `--skip-ocr-eval` / `FIRSTRAG_SKIP_OCR_EVAL=1` | 跳过本地 Tesseract OCR 回归门禁；仅用于与 OCR 无关且 runtime 不可用的检查。 |
 | `FIRSTRAG_REQUIRE_MIGRATION_DRY_RUN=1` | 没有数据库连接时让 migration dry-run 阶段失败。 |
 
 ## GitHub Actions CI
@@ -184,7 +185,7 @@ scripts/acceptance_check.sh
 
 CI 覆盖：
 
-- 后端：安装 `backend/requirements.txt`、Python production dependency audit policy、`python -m compileall app`、`python -m unittest discover tests -v`、`python scripts/migrate_db.py --list` 和 `docker compose config --quiet`。
+- 后端：安装 `backend/requirements.txt` 与 Tesseract 中英文 runtime、执行 Python production dependency audit policy、`python -m compileall app`、`python -m unittest discover tests -v`、PDF OCR regression gate、`python scripts/migrate_db.py --list` 和 `docker compose config --quiet`。
 - 前端：`npm ci`、production dependency audit policy、`npm run lint`、`npm run test` 和 `npm run build`。
 - 容器：从当前 Dockerfile 构建 backend/frontend 第一方镜像，使用 Trivy 扫描 OS packages。
 - Workflow supply chain：检查所有外部 GitHub Action 都固定到官方 release 的 40 位 commit SHA，并保留同一行版本注释。
@@ -194,7 +195,7 @@ dependency audit policy 在 PR、`main` push、手动触发和每周一计划任
 `.github/dependabot.yml` 每周检查 `github-actions` ecosystem，将 Action version update 聚合为一个 PR。Dependabot 只负责提出 SHA 更新；仓库不会自动合并，仍需核对官方 release、同一行版本注释和完整 CI 结果。GitHub repository settings 还可额外开启“Require actions to be pinned to a full-length commit SHA”，形成平台侧强制策略。
 
 默认 CI 不运行真实 RAG eval 和 indexing eval，因为它们需要后端服务、真实账号、
-外部模型 API Key 和可用数据库。发布前仍按本地验收流程显式运行真实评估。
+外部模型 API Key 和可用数据库。合成 PDF OCR regression gate 不需要这些外部条件，因此默认运行。发布前仍按本地验收流程显式运行真实 RAG 与 indexing 评估。
 
 ## Docker Compose
 

@@ -32,6 +32,8 @@ backend/buffer
 docs/evals/latest_rag_eval_report.md
 docs/evals/latest_indexing_eval_report.md
 docs/evals/latest_summary.md
+docs/evals/latest_pdf_ocr_eval_report.json
+docs/evals/latest_pdf_ocr_eval_report.md
 docs/evals/runs
 docs/evals/indexing_runs
 
