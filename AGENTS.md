@@ -249,7 +249,7 @@ conda run -n firstrag python scripts/production_preflight.py --env-file .env --m
 ```
 
 - 涉及后端 API、前端页面、RAG、上传、向量化或认证改动时，应基于已启动的容器做 smoke test；至少覆盖相关服务健康、登录、上传小文件、向量化、提问和 sources 展示中受影响的链路。
-- 修改 PDF OCR engine、预处理、候选策略、语言包或 Tesseract runtime 时，运行 `conda run -n firstrag python scripts/eval_pdf_ocr.py`，并在 Compose backend 容器内复跑同一模块门禁。
+- 修改 PDF OCR engine、预处理、候选策略、语言包或 Tesseract runtime 时，运行 `conda run -n firstrag python scripts/eval_pdf_ocr.py`，需要验证缓慢漂移时同时传入 `--history-dir docs/evals/ocr_runs --trend-report docs/evals/latest_pdf_ocr_trend.md`，并在 Compose backend 容器内复跑同一模块门禁。
 - 本地 conda / npm 命令仅作为补充排查手段或在用户明确要求时运行，不再作为每次验证的默认构建方式。
 - 如果 Docker、依赖、服务、数据库或外部 API Key 不可用，应在最终回复中明确说明未运行或失败的检查和原因。
 

@@ -72,6 +72,7 @@ conda run -n firstrag python scripts/eval_pdf_ocr.py
 ```
 
 门禁覆盖正常页、90° 旋转、低对比度、模糊和中英文混排，直接复用生产 OCR engine，并同时约束逐样本相似度、旋转策略、宏平均质量和总耗时。
+CI 会保留每次 OCR 报告 artifact，并按相同 runner/Tesseract 环境在 job summary 展示最近质量和耗时趋势；本地趋势命令与阈值见 [`docs/evals/README.md`](docs/evals/README.md#pdf-ocr-回归门禁)。
 
 Docker 中的 `backend`、`migrate` 和 `worker` 复用精简后的 Python runtime 镜像；worker 不单独安装 `torch`、`transformers` 等可选 rerank 依赖。
 

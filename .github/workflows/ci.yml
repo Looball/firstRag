@@ -63,12 +63,40 @@ jobs:
         working-directory: backend
         run: python -m unittest discover tests -v
 
+      - name: Restore PDF OCR history
+        id: pdf-ocr-history
+        continue-on-error: true
+        uses: actions/cache@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
+        with:
+          path: docs/evals/ocr_runs
+          key: pdf-ocr-${{ runner.os }}-${{ runner.arch }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            pdf-ocr-${{ runner.os }}-${{ runner.arch }}-
+
       - name: Run PDF OCR regression gate
-        working-directory: backend
         run: |
-          python -m app.services.documents.pdf_ocr_benchmark \
-            --json-report /tmp/pdf-ocr-eval-report.json \
-            --markdown-report /tmp/pdf-ocr-eval-report.md
+          python scripts/eval_pdf_ocr.py \
+            --history-dir docs/evals/ocr_runs \
+            --trend-report docs/evals/latest_pdf_ocr_trend.md
+
+      - name: Publish PDF OCR trend to job summary
+        if: always()
+        run: |
+          if [[ -f docs/evals/latest_pdf_ocr_trend.md ]]; then
+            cat docs/evals/latest_pdf_ocr_trend.md >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload PDF OCR reports
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: pdf-ocr-reports-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            docs/evals/latest_pdf_ocr_eval_report.json
+            docs/evals/latest_pdf_ocr_eval_report.md
+            docs/evals/latest_pdf_ocr_trend.md
+          if-no-files-found: warn
+          retention-days: 30
 
       - name: Check migration files
         run: python scripts/migrate_db.py --list

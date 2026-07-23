@@ -8,7 +8,9 @@ from datetime import datetime, timezone
 from difflib import SequenceMatcher
 from io import BytesIO
 import json
+import os
 from pathlib import Path
+import platform as runtime_platform
 import subprocess
 from tempfile import TemporaryDirectory
 import time
@@ -19,6 +21,11 @@ from PIL import Image, ImageEnhance, ImageFilter
 import pymupdf
 
 from app.services.documents.pdf_ocr_engine import PdfOcrResult, run_pdf_page_ocr
+from app.services.documents.pdf_ocr_trend import (
+    OCR_HISTORY_MAX_RECORDS,
+    OcrTrendError,
+    update_ocr_history_and_trend,
+)
 
 
 DEFAULT_MANIFEST_PATH = (
@@ -26,7 +33,9 @@ DEFAULT_MANIFEST_PATH = (
 )
 DEFAULT_JSON_REPORT_PATH = Path("docs/evals/latest_pdf_ocr_eval_report.json")
 DEFAULT_MARKDOWN_REPORT_PATH = Path("docs/evals/latest_pdf_ocr_eval_report.md")
-OCR_BENCHMARK_SCHEMA_VERSION = 1
+DEFAULT_TREND_REPORT_PATH = Path("docs/evals/latest_pdf_ocr_trend.md")
+OCR_BENCHMARK_MANIFEST_SCHEMA_VERSION = 1
+OCR_BENCHMARK_REPORT_SCHEMA_VERSION = 2
 
 
 class OcrBenchmarkConfigError(ValueError):
@@ -98,12 +107,25 @@ class OcrBenchmarkCaseResult:
 
 
 @dataclass(frozen=True)
+class OcrBenchmarkExecution:
+    """用于同环境历史比较的非敏感 CI/runtime 上下文。"""
+
+    runner_os: str
+    runner_arch: str
+    run_id: str
+    run_attempt: str
+    commit_sha: str
+    ref_name: str
+
+
+@dataclass(frozen=True)
 class OcrBenchmarkReport:
     """整次 OCR benchmark 的机器可读结果。"""
 
     schema_version: int
     generated_at: str
     tesseract_version: str
+    execution: OcrBenchmarkExecution
     average_adaptive_similarity: float
     total_seconds: float
     violations: tuple[str, ...]
@@ -146,7 +168,7 @@ def load_ocr_benchmark_manifest(path: Path) -> OcrBenchmarkManifest:
         raise OcrBenchmarkConfigError("OCR benchmark manifest 不是有效 JSON") from exc
     if not isinstance(payload, dict):
         raise OcrBenchmarkConfigError("OCR benchmark manifest 顶层必须是对象")
-    if payload.get("schema_version") != OCR_BENCHMARK_SCHEMA_VERSION:
+    if payload.get("schema_version") != OCR_BENCHMARK_MANIFEST_SCHEMA_VERSION:
         raise OcrBenchmarkConfigError("OCR benchmark manifest schema version 不受支持")
 
     aggregate_payload = payload.get("aggregate")
@@ -249,7 +271,7 @@ def load_ocr_benchmark_manifest(path: Path) -> OcrBenchmarkManifest:
             required_candidate_strategies=tuple(raw_required_strategies),
         ))
     return OcrBenchmarkManifest(
-        schema_version=OCR_BENCHMARK_SCHEMA_VERSION,
+        schema_version=OCR_BENCHMARK_MANIFEST_SCHEMA_VERSION,
         aggregate=aggregate,
         cases=tuple(cases),
     )
@@ -430,6 +452,23 @@ def get_tesseract_version() -> str:
     return first_line.strip() or "unknown"
 
 
+def _execution_value(name: str, fallback: str, maximum: int = 160) -> str:
+    """读取白名单 runtime 字段并限制长度。"""
+    return str(os.environ.get(name) or fallback).strip()[:maximum] or fallback
+
+
+def build_ocr_benchmark_execution() -> OcrBenchmarkExecution:
+    """构造只包含 runner 和 GitHub run 标识的非敏感上下文。"""
+    return OcrBenchmarkExecution(
+        runner_os=_execution_value("RUNNER_OS", runtime_platform.system()),
+        runner_arch=_execution_value("RUNNER_ARCH", runtime_platform.machine()),
+        run_id=_execution_value("GITHUB_RUN_ID", "local"),
+        run_attempt=_execution_value("GITHUB_RUN_ATTEMPT", "1", 32),
+        commit_sha=_execution_value("GITHUB_SHA", "", 64),
+        ref_name=_execution_value("GITHUB_REF_NAME", "", 200),
+    )
+
+
 def run_ocr_benchmark(
     manifest: OcrBenchmarkManifest,
     artifacts_directory: Path,
@@ -475,9 +514,10 @@ def run_ocr_benchmark(
             f"{manifest.aggregate.max_total_seconds:.3f}",
         )
     return OcrBenchmarkReport(
-        schema_version=OCR_BENCHMARK_SCHEMA_VERSION,
+        schema_version=OCR_BENCHMARK_REPORT_SCHEMA_VERSION,
         generated_at=datetime.now(timezone.utc).isoformat(),
         tesseract_version=get_tesseract_version(),
+        execution=build_ocr_benchmark_execution(),
         average_adaptive_similarity=average_similarity,
         total_seconds=total_seconds,
         violations=tuple(aggregate_violations),
@@ -488,21 +528,37 @@ def run_ocr_benchmark(
 def serialize_ocr_benchmark_report(report: OcrBenchmarkReport) -> dict[str, Any]:
     """将 benchmark 报告转换为稳定 JSON 对象。"""
     payload = asdict(report)
+    payload["violations"] = list(payload["violations"])
+    payload["cases"] = [dict(case_payload) for case_payload in payload["cases"]]
     payload["passed"] = report.passed
     for case_payload, case in zip(payload["cases"], report.cases, strict=True):
+        case_payload["violations"] = list(case_payload["violations"])
         case_payload["passed"] = case.passed
     return payload
 
 
 def render_ocr_benchmark_markdown(report: OcrBenchmarkReport) -> str:
     """生成适合 CI artifact 和人工复核的 Markdown 报告。"""
+    def safe_metadata(value: object) -> str:
+        """移除运行时元数据中的 Markdown 控制字符。"""
+        return (
+            str(value or "-")
+            .replace("\r", " ")
+            .replace("\n", " ")
+            .replace("`", "'")[:160]
+        )
+
     status = "PASS" if report.passed else "FAIL"
     lines = [
         "# PDF OCR Regression Report",
         "",
         f"- Status: **{status}**",
-        f"- Generated at: `{report.generated_at}`",
-        f"- Tesseract: `{report.tesseract_version}`",
+        f"- Generated at: `{safe_metadata(report.generated_at)}`",
+        f"- Tesseract: `{safe_metadata(report.tesseract_version)}`",
+        f"- Runtime: `{safe_metadata(report.execution.runner_os)} / "
+        f"{safe_metadata(report.execution.runner_arch)}`",
+        f"- Run: `{safe_metadata(report.execution.run_id)}/"
+        f"{safe_metadata(report.execution.run_attempt)}`",
         f"- Average adaptive similarity: `{report.average_adaptive_similarity:.4f}`",
         f"- Total time: `{report.total_seconds:.3f}s`",
         "",
@@ -564,6 +620,28 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         type=Path,
         default=DEFAULT_MARKDOWN_REPORT_PATH,
     )
+    parser.add_argument(
+        "--history-dir",
+        type=Path,
+        help="Optional directory for bounded OCR JSON history.",
+    )
+    parser.add_argument(
+        "--trend-report",
+        type=Path,
+        help=f"Trend Markdown path, recommended: {DEFAULT_TREND_REPORT_PATH}",
+    )
+    parser.add_argument(
+        "--history-limit",
+        type=int,
+        default=OCR_HISTORY_MAX_RECORDS,
+        help=f"Maximum history records, default: {OCR_HISTORY_MAX_RECORDS}.",
+    )
+    parser.add_argument(
+        "--trend-limit",
+        type=int,
+        default=10,
+        help="Maximum recent comparable runs in trend report, default: 10.",
+    )
     return parser.parse_args(argv)
 
 
@@ -571,6 +649,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     """运行 benchmark，打印摘要并以稳定退出码表示门禁结果。"""
     args = parse_args(argv)
     try:
+        if (args.history_dir is None) != (args.trend_report is None):
+            raise OcrBenchmarkConfigError(
+                "--history-dir 与 --trend-report 必须同时提供",
+            )
         manifest = load_ocr_benchmark_manifest(args.manifest)
         if args.artifacts_dir is not None:
             report = run_ocr_benchmark(manifest, args.artifacts_dir)
@@ -585,6 +667,22 @@ def main(argv: Sequence[str] | None = None) -> int:
     except (OcrBenchmarkConfigError, OSError, ValueError) as exc:
         print(f"PDF OCR regression gate: ERROR\n- {exc}")
         return 2
+
+    trend_warning: str | None = None
+    if args.history_dir is not None and args.trend_report is not None:
+        try:
+            history_path, history_warnings = update_ocr_history_and_trend(
+                serialize_ocr_benchmark_report(report),
+                args.history_dir,
+                args.trend_report,
+                max_records=args.history_limit,
+                limit=args.trend_limit,
+            )
+            print(f"OCR history saved: {history_path}")
+            for warning in history_warnings:
+                print(f"OCR trend warning: {warning}")
+        except (OcrTrendError, OSError, ValueError) as exc:
+            trend_warning = str(exc)
 
     print(
         "PDF OCR regression gate: "
@@ -605,6 +703,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             print(f"  - {violation}")
     for violation in report.violations:
         print(f"- {violation}")
+    if trend_warning is not None:
+        print(f"OCR trend warning: {trend_warning}")
     return 0 if report.passed else 1
 
 

@@ -68,12 +68,20 @@ scripts/acceptance_check.sh --skip-real-eval
 
 ## PDF OCR 回归门禁
 
-`T-080` 增加了 versioned manifest 驱动的合成扫描页评测。默认五个 case 覆盖方向正确、90° 旋转、低对比度、轻度模糊和中英文混排；生成的 PDF 只有栅格图片，没有原生文本层，因此会真实进入与 worker 相同的 Tesseract OCR fallback。
+`T-080` 增加了 versioned manifest 驱动的合成扫描页评测。默认五个 case 覆盖方向正确、90° 旋转、低对比度、轻度模糊和中英文混排；生成的 PDF 只有栅格图片，没有原生文本层，因此会真实进入与 worker 相同的 Tesseract OCR fallback。`T-081` 继续保存每次 CI 报告，并按相同 runner OS、CPU arch 和 Tesseract 完整版本生成质量、耗时趋势。
 
 本地运行：
 
 ```bash
 conda run -n firstrag python scripts/eval_pdf_ocr.py
+```
+
+需要在本地积累可比较历史并生成趋势时：
+
+```bash
+conda run -n firstrag python scripts/eval_pdf_ocr.py \
+  --history-dir docs/evals/ocr_runs \
+  --trend-report docs/evals/latest_pdf_ocr_trend.md
 ```
 
 Compose backend 镜像内运行：
@@ -94,6 +102,10 @@ docker compose exec -T backend \
 - 全部 case 的宏平均相似度和总耗时。
 
 退出码 `0` 表示通过，`1` 表示质量或耗时门禁失败，`2` 表示 manifest 或运行环境错误。默认 JSON 与 Markdown 报告写入 `docs/evals/latest_pdf_ocr_eval_report.*` 并由 `.gitignore` 忽略；临时 PDF 默认自动删除。修改 `pdf_ocr_engine.py`、OCR 参数、字体/语言包或 Tesseract 版本时都应复跑；GitHub Actions backend job 默认安装 `eng`、`chi_sim` 并自动执行同一门禁。
+
+CI 使用 GitHub Actions cache 在运行间传递最多 50 条非敏感 JSON 记录，每次运行还会上传当前 JSON、Markdown 和趋势报告 artifact，保留 30 天；趋势正文同步写入 backend job summary。cache 丢失、过期或个别历史 JSON 损坏时，当前硬门禁仍照常执行，趋势降级为新 baseline 或显示 warning。
+
+趋势以最近最多 5 次同环境记录的中位数为基线：总耗时达到 `1.25x` 显示 `WATCH`、达到 `1.50x` 显示 `REGRESSED`；平均相似度下降超过 `0.01` 显示 `WATCH`、下降超过 `0.02` 显示 `REGRESSED`。这些状态用于观察缓慢漂移，不单独改变退出码；当前运行的逐 case、宏平均质量和绝对总耗时硬门禁仍是 CI blocker。历史和趋势只记录合成 case 指标、受控 CI run metadata 与版本信息，不写 API Key、账号或用户文档正文。
 
 ## 历史趋势摘要
 
