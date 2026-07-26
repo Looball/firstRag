@@ -91,6 +91,7 @@
 | `PLAN-20260726-02` | 2026-07-26 | `Done` | 为原生文本页与扫描页混合的多页 PDF 增加真实索引、OCR、引用页码和原文上下文回归。 | `T-083` |
 | `PLAN-20260726-03` | 2026-07-26 | `Done` | 验证 OCR 引用页 PNG 预览内容，并让引用弹窗直接展示所引用的扫描页面。 | `T-084` |
 | `PLAN-20260726-04` | 2026-07-26 | `Done` | 将 OCR source 第 2 页 PNG 点击流程固化为可在 CI 重复执行的前端 E2E 回归。 | `T-085` |
+| `PLAN-20260726-05` | 2026-07-26 | `Doing` | 固化 OCR source PNG 预览失败、用户重试和 Blob URL 释放的浏览器回归。 | `T-086` |
 
 ## 任务总览
 
@@ -181,6 +182,7 @@
 | `T-083` | `PLAN-20260726-02` | `P1` | `Done` | 增加混合多页 PDF 端到端索引回归 | 2026-07-26 | `749ac0b` |
 | `T-084` | `PLAN-20260726-03` | `P1` | `Done` | 验证引用页 PNG 预览并直接展示扫描页面 | 2026-07-26 | `2613fd5` |
 | `T-085` | `PLAN-20260726-04` | `P1` | `Done` | 固化 OCR source 第 2 页 PNG 前端 E2E 回归 | 2026-07-26 | `2724b8b` |
+| `T-086` | `PLAN-20260726-05` | `P1` | `Doing` | 覆盖 PNG 预览失败、重试和 Blob URL 释放 E2E | — | — |
 
 ## 新计划接入流程
 
@@ -3393,6 +3395,36 @@ git diff --check
   - 前端 87 项单测和 E2E 1/1 通过；lint 0 error（保留 2 个既有 `<img>` warning），本机与 Compose production build 通过，Action pin policy 9 个引用全部合规。
   - Compose PostgreSQL、Redis、Chroma healthy，migration `applied=0 skipped=9`，backend、worker、frontend 正常；production preflight 通过。
   - 应用内浏览器打开 Compose frontend 后自动恢复 admin 登录态，工作台、知识库、会话、聊天输入和图片入口正常渲染，console error 为 0。
+- 建议验证命令：
+
+```bash
+cd frontend && npm run test:e2e
+npm test && npm run lint && npm run build
+cd .. && docker compose up -d --build
+conda run -n firstrag python scripts/production_preflight.py --env-file .env --migration-method compose --check-runtime-health
+git diff --check
+```
+
+## T-086 覆盖 PNG 预览失败、重试和 Blob URL 释放 E2E
+
+- 来源计划：`PLAN-20260726-05`
+- 优先级：`P1`
+- 状态：`Doing`
+- 目标：自动验证 OCR source 页面预览首次失败时给出可恢复反馈，用户重试后能正常显示 PNG，并在关闭弹窗时释放已创建的 Blob URL。
+- 技术边界：
+  - 继续复用 T-085 的本地受控 fixture，不依赖真实账号、API Key、后端或外部网络。
+  - 测试必须观察真实的 `URL.createObjectURL` 与 `URL.revokeObjectURL` 调用，不能只断言 React state 或静态文案。
+  - 失败只作用于首次第 2 页 preview 请求；重试必须再次携带 Authorization 并请求相同目标页。
+- 范围：
+  - 让 Playwright preview fixture 支持确定性的前 N 次失败。
+  - 增加首次失败、错误反馈、手动重试、PNG 解码和请求次数断言。
+  - 记录 Blob URL 创建与撤销事件，确认关闭来源弹窗后释放当前图像 URL。
+  - 更新前端测试文档与任务台账。
+- 验收标准：
+  - 首次 preview 失败后显示“扫描页面未能加载”和“重新加载”，且尚未创建 Blob URL。
+  - 点击重试后第二次 `/pages/2/preview` 成功，图像 `complete=true` 且 natural size 大于 0。
+  - 两次请求均携带测试 Bearer token；关闭弹窗后，当前图像 Blob URL 出现对应 revoke 事件。
+  - E2E、前端单测、lint、production build、Compose 和 production preflight 通过。
 - 建议验证命令：
 
 ```bash

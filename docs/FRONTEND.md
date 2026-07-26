@@ -51,7 +51,7 @@ npm run dev
 - `npm test` 使用 Vitest 运行 `src/` 内的单元与组件测试。
 - `npm run test:e2e` 使用 Playwright 启动独立 Next.js dev server，并在 Chromium 中运行 `e2e/` 下的浏览器回归。
 
-OCR source 预览 E2E 使用同源 API fixture 注入合成知识库、会话、chunk context 和 1×1 PNG，不读取真实账号、API Key、后端或外部网络。测试仍会经过真实工作台、`SourcePreviewDialog`、鉴权 header、preview fetch、Blob URL 和浏览器图像解码链路，明确检查点击 source 后访问 `/pages/2/preview`，并确认第 2 页 PNG 完成加载。
+OCR source 预览 E2E 使用同源 API fixture 注入合成知识库、会话、chunk context 和 1×1 PNG，不读取真实账号、API Key、后端或外部网络。测试仍会经过真实工作台、`SourcePreviewDialog`、鉴权 header、preview fetch、Blob URL 和浏览器图像解码链路，明确检查点击 source 后访问 `/pages/2/preview`，并确认第 2 页 PNG 完成加载。失败恢复用例让首次 preview 返回受控 `502`，验证错误反馈和手动重试后，再监听 `URL.createObjectURL` / `URL.revokeObjectURL`，确保关闭弹窗会释放当前图像 URL。
 
 首次在本机运行 E2E 前需要安装对应版本的 Chromium：
 

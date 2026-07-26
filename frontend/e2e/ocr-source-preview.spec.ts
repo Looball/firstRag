@@ -12,9 +12,19 @@ const PNG_BYTES = Buffer.from(
 );
 
 type PreviewRequestEvidence = {
+  attempt: number;
   authorization: string;
   pathname: string;
-} | null;
+};
+
+type BlobUrlEvent = {
+  type: "create" | "revoke";
+  url: string;
+};
+
+type OcrSourceFixtureOptions = {
+  previewFailuresBeforeSuccess?: number;
+};
 
 /** 返回 JSON fixture，并显式禁止浏览器缓存测试响应。 */
 async function fulfillJson(route: Route, body: unknown) {
@@ -30,9 +40,37 @@ async function fulfillJson(route: Route, body: unknown) {
 async function installOcrSourceFixtures(
   page: Page,
   recordPreviewRequest: (evidence: PreviewRequestEvidence) => void,
+  options: OcrSourceFixtureOptions = {},
 ) {
+  const previewFailuresBeforeSuccess =
+    options.previewFailuresBeforeSuccess ?? 0;
+  let previewRequestCount = 0;
+
   await page.addInitScript(
     ({ storageKey, token }) => {
+      const instrumentedWindow = window as typeof window & {
+        __firstragBlobUrlEvents: BlobUrlEvent[];
+      };
+      const createObjectUrl = URL.createObjectURL.bind(URL);
+      const revokeObjectUrl = URL.revokeObjectURL.bind(URL);
+
+      instrumentedWindow.__firstragBlobUrlEvents = [];
+      URL.createObjectURL = (object: Blob | MediaSource) => {
+        const url = createObjectUrl(object);
+        instrumentedWindow.__firstragBlobUrlEvents.push({
+          type: "create",
+          url,
+        });
+        return url;
+      };
+      URL.revokeObjectURL = (url: string) => {
+        instrumentedWindow.__firstragBlobUrlEvents.push({
+          type: "revoke",
+          url,
+        });
+        revokeObjectUrl(url);
+      };
+
       window.localStorage.setItem(
         storageKey,
         JSON.stringify({
@@ -239,7 +277,22 @@ async function installOcrSourceFixtures(
       url.pathname ===
       `/api/chat/knowledge-files/${FILE_ID}/pages/2/preview`
     ) {
-      recordPreviewRequest({ authorization, pathname: url.pathname });
+      previewRequestCount += 1;
+      recordPreviewRequest({
+        attempt: previewRequestCount,
+        authorization,
+        pathname: url.pathname,
+      });
+      if (previewRequestCount <= previewFailuresBeforeSuccess) {
+        await route.fulfill({
+          body: JSON.stringify({
+            detail: "T086 synthetic page preview failure",
+          }),
+          contentType: "application/json",
+          status: 502,
+        });
+        return;
+      }
       await route.fulfill({
         body: PNG_BYTES,
         contentType: "image/png",
@@ -260,7 +313,7 @@ async function installOcrSourceFixtures(
 }
 
 test("点击 OCR source 后加载第 2 页 PNG", async ({ page }) => {
-  let previewRequest: PreviewRequestEvidence = null;
+  let previewRequest: PreviewRequestEvidence | null = null;
   await installOcrSourceFixtures(page, (evidence) => {
     previewRequest = evidence;
   });
@@ -301,7 +354,112 @@ test("点击 OCR source 后加载第 2 页 PNG", async ({ page }) => {
     });
 
   expect(previewRequest).toEqual({
+    attempt: 1,
     authorization: `Bearer ${TEST_TOKEN}`,
     pathname: `/api/chat/knowledge-files/${FILE_ID}/pages/2/preview`,
   });
+});
+
+test("PNG 预览失败后可重试，并在关闭弹窗时释放 Blob URL", async ({
+  page,
+}) => {
+  const previewRequests: PreviewRequestEvidence[] = [];
+  await installOcrSourceFixtures(
+    page,
+    (evidence) => {
+      previewRequests.push(evidence);
+    },
+    { previewFailuresBeforeSuccess: 1 },
+  );
+
+  await page.goto("/");
+  await expect(
+    page.getByRole("heading", { name: "OCR Page Preview E2E" }),
+  ).toBeVisible();
+
+  const sourceButton = page.getByRole("button", { name: "查看原文 →" });
+  await expect(sourceButton).toHaveCount(1);
+  await sourceButton.click();
+
+  const dialog = page.getByRole("dialog");
+  await expect(dialog).toBeVisible();
+  await expect(dialog).toContainText("扫描页面未能加载");
+  await expect(dialog).toContainText("T086 synthetic page preview failure");
+
+  const reloadButton = dialog.getByRole("button", {
+    name: "重新加载",
+    exact: true,
+  });
+  await expect(reloadButton).toHaveCount(1);
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () =>
+          (
+            window as typeof window & {
+              __firstragBlobUrlEvents: BlobUrlEvent[];
+            }
+          ).__firstragBlobUrlEvents,
+      ),
+    )
+    .toEqual([]);
+
+  await reloadButton.click();
+
+  const pageImage = dialog.getByRole("img", {
+    name: "引用扫描原页第 2 页",
+  });
+  await expect(pageImage).toBeVisible();
+  await expect
+    .poll(() =>
+      pageImage.evaluate((image: HTMLImageElement) => ({
+        complete: image.complete,
+        height: image.naturalHeight,
+        source: image.currentSrc,
+        width: image.naturalWidth,
+      })),
+    )
+    .toMatchObject({
+      complete: true,
+      height: 1,
+      width: 1,
+    });
+
+  const pageImageUrl = await pageImage.evaluate(
+    (image: HTMLImageElement) => image.currentSrc,
+  );
+  expect(pageImageUrl).toMatch(/^blob:/);
+  expect(previewRequests).toEqual([
+    {
+      attempt: 1,
+      authorization: `Bearer ${TEST_TOKEN}`,
+      pathname: `/api/chat/knowledge-files/${FILE_ID}/pages/2/preview`,
+    },
+    {
+      attempt: 2,
+      authorization: `Bearer ${TEST_TOKEN}`,
+      pathname: `/api/chat/knowledge-files/${FILE_ID}/pages/2/preview`,
+    },
+  ]);
+
+  const closeButton = dialog.getByRole("button", {
+    name: "关闭",
+    exact: true,
+  });
+  await expect(closeButton).toHaveCount(1);
+  await closeButton.click();
+  await expect(dialog).toBeHidden();
+
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () =>
+          (
+            window as typeof window & {
+              __firstragBlobUrlEvents: BlobUrlEvent[];
+            }
+          ).__firstragBlobUrlEvents,
+      ),
+    )
+    .toContainEqual({ type: "revoke", url: pageImageUrl });
 });
