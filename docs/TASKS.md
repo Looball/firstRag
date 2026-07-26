@@ -89,7 +89,7 @@
 | `PLAN-20260723-02` | 2026-07-23 | `Done` | 保存 OCR CI 评测历史并展示跨运行质量与耗时趋势。 | `T-081` |
 | `PLAN-20260726-01` | 2026-07-26 | `Done` | 扩展 OCR 评测集，覆盖更接近真实扫描件的几何、光照、噪点、字号和表格退化。 | `T-082` |
 | `PLAN-20260726-02` | 2026-07-26 | `Done` | 为原生文本页与扫描页混合的多页 PDF 增加真实索引、OCR、引用页码和原文上下文回归。 | `T-083` |
-| `PLAN-20260726-03` | 2026-07-26 | `Doing` | 验证 OCR 引用页 PNG 预览内容，并让引用弹窗直接展示所引用的扫描页面。 | `T-084` |
+| `PLAN-20260726-03` | 2026-07-26 | `Done` | 验证 OCR 引用页 PNG 预览内容，并让引用弹窗直接展示所引用的扫描页面。 | `T-084` |
 
 ## 任务总览
 
@@ -178,7 +178,7 @@
 | `T-081` | `PLAN-20260723-02` | `P1` | `Done` | 持久化 OCR CI 评测历史并展示趋势 | 2026-07-23 | `12852ff` |
 | `T-082` | `PLAN-20260726-01` | `P1` | `Done` | 扩展 OCR 真实扫描退化评测集 | 2026-07-26 | `11fc7f4` |
 | `T-083` | `PLAN-20260726-02` | `P1` | `Done` | 增加混合多页 PDF 端到端索引回归 | 2026-07-26 | `749ac0b` |
-| `T-084` | `PLAN-20260726-03` | `P1` | `Doing` | 验证引用页 PNG 预览并直接展示扫描页面 | — | — |
+| `T-084` | `PLAN-20260726-03` | `P1` | `Done` | 验证引用页 PNG 预览并直接展示扫描页面 | 2026-07-26 | `2613fd5` |
 
 ## 新计划接入流程
 
@@ -3325,7 +3325,7 @@ git diff --check
 
 - 来源计划：`PLAN-20260726-03`
 - 优先级：`P1`
-- 状态：`Doing`
+- 状态：`Done`
 - 目标：真实验证第 2 页 OCR source 对应的 PNG 预览内容，并让用户点击该引用后无需先进入校对模式即可核对正确的扫描页面。
 - 技术边界：
   - 预览必须继续经过当前用户权限校验，不暴露原始磁盘路径。
@@ -3341,6 +3341,16 @@ git diff --check
   - 点击第 2 页 OCR source 后，弹窗直接显示标记为“第 2 页”的扫描图像，且图像请求成功完成。
   - 预览失败时用户可重试，关闭弹窗后 object URL 被释放。
   - 专项/全量测试、production build、Docker Compose、真实 mixed PDF eval、浏览器点击和 production preflight 通过。
+- 相关提交：`2613fd5`。
+- 完成记录：
+  - mixed PDF indexing eval 的 report schema 升级为 v3；第 2 页 preview 响应除校验 `image/png`、私有缓存和 1800px 尺寸上限外，还会与原 PDF 三页的 RGB 渲染结果逐像素比较，要求第 2 页为具有明确差值间隔的最近匹配。
+  - `SourcePreviewDialog` 在 OCR source context 加载完成后直接读取目标页 PNG，展示明确页码、加载骨架、错误提示与重试入口；页码切换、重试或关闭弹窗时释放 Blob URL，人工校对模式继续使用原有并排工作台。
+  - Compose 真实 mixed PDF 验收通过：job `5d6bd5c7-1b37-4d20-8acb-77c76c2f0ab9` 成功，source 指向第 2 页 OCR，置信度 `93.15`，检索通道为 `fulltext+vector`，回答耗时 `2.93s`，retrieval settings 已恢复。
+  - preview API 返回 `image/png`、`private, max-age=60` 和 `1190×1684` 图像；各页平均像素差为第 1 页 `0.008`、第 2 页 `0.0`、第 3 页 `0.007173`，明确匹配第 2 页。
+  - 浏览器登录真实前端并点击本轮回答中的第 2 页 OCR source；弹窗显示“第 2 / 3 页”和“引用扫描原页 · 第 2 页”，Blob 图像完成加载且 natural size 为 `1190×1684`，画面可读并包含唯一扫描标识，无 preview console error。
+  - 浏览器验收后已解除本轮临时文件关联并重新查询确认不存在；测试凭据、token、API Key 和合成 PNG 均未写入报告或仓库。
+  - 后端专项 19 项、后端全量 373 项及 33 subtests、前端 87 项测试通过；lint 0 error（保留 2 个既有 `<img>` warning），本机和 Compose production build 均通过。
+  - Compose PostgreSQL、Redis、Chroma healthy，migration `applied=0 skipped=9`，backend、worker、frontend 正常；production preflight 与 `git diff --check` 通过。
 - 建议验证命令：
 
 ```bash
