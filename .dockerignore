@@ -28,6 +28,7 @@ backend/vector_db
 models
 buffer
 backend/buffer
+tmp/pdfs
 
 docs/evals/latest_rag_eval_report.md
 docs/evals/latest_indexing_eval_report.md

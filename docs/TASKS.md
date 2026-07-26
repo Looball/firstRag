@@ -87,6 +87,7 @@
 | `PLAN-20260722-05` | 2026-07-22 | `Done` | 为主动 OCR 重识别增加自适应预处理、页面旋转和多 PSM 候选选优。 | `T-079` |
 | `PLAN-20260723-01` | 2026-07-23 | `Done` | 建立覆盖多类扫描质量的 OCR 评测集和真实 Tesseract 回归门禁。 | `T-080` |
 | `PLAN-20260723-02` | 2026-07-23 | `Done` | 保存 OCR CI 评测历史并展示跨运行质量与耗时趋势。 | `T-081` |
+| `PLAN-20260726-01` | 2026-07-26 | `Doing` | 扩展 OCR 评测集，覆盖更接近真实扫描件的几何、光照、噪点、字号和表格退化。 | `T-082` |
 
 ## 任务总览
 
@@ -173,6 +174,7 @@
 | `T-079` | `PLAN-20260722-05` | `P1` | `Done` | 增加 OCR 自适应预处理与参数选优 | 2026-07-22 | `005758c` |
 | `T-080` | `PLAN-20260723-01` | `P1` | `Done` | 建立 OCR 评测集与自动回归门禁 | 2026-07-23 | `175cc61` |
 | `T-081` | `PLAN-20260723-02` | `P1` | `Done` | 持久化 OCR CI 评测历史并展示趋势 | 2026-07-23 | `12852ff` |
+| `T-082` | `PLAN-20260726-01` | `P1` | `Doing` | 扩展 OCR 真实扫描退化评测集 | — | — |
 
 ## 新计划接入流程
 
@@ -3229,6 +3231,39 @@ cd backend && conda run -n firstrag env PYTHONPATH=. python -m unittest tests.se
 cd .. && conda run -n firstrag python scripts/check_github_actions_pins.py
 docker compose up -d --build backend worker
 docker compose exec -T backend python -m app.services.documents.pdf_ocr_benchmark --history-dir /tmp/ocr-runs --trend-report /tmp/pdf-ocr-trend.md
+conda run -n firstrag python scripts/production_preflight.py --env-file .env --migration-method compose --check-runtime-health
+git diff --check
+```
+
+## T-082 扩展 OCR 真实扫描退化评测集
+
+- 来源计划：`PLAN-20260726-01`
+- 优先级：`P1`
+- 状态：`Doing`
+- 目标：在现有五类合成样本之外，增加倾斜、盐椒噪点、侧边阴影、小字号和表格布局，避免 OCR 参数只对干净的大字号段落有效。
+- 技术边界：
+  - 全部样本继续由 versioned manifest 和内置代码确定性生成，只包含固定测试文字，不读取或提交用户文档。
+  - 几何、噪点和光照参数必须有服务端范围上限，固定随机种子；不得从 manifest 接收代码、文件路径、字体路径或任意图像处理表达式。
+  - 表格保持有限行列、稳定 row-major 期望文本和清晰网格；生成 PDF 仍只有单页栅格图片，没有原生文本层。
+  - 报告增加 benchmark suite fingerprint，历史趋势仅比较相同 suite、runner OS、架构和 Tesseract 版本，避免把五样本与扩展后的耗时直接比较。
+- 范围：
+  - 新增 v2 OCR manifest，保留原五类并增加五类真实扫描退化 case。
+  - 扩展 benchmark case schema、参数校验、确定性图像处理、表格绘制和 suite fingerprint。
+  - 更新报告/历史趋势兼容逻辑、测试和 OCR 文档。
+  - 按 PDF skill 渲染全部新增样本，检查可读性、裁切、重叠、黑块、表格边界和原生文本层。
+- 验收标准：
+  - 默认 manifest 至少覆盖十类独立样本，新增五类在本机与 Compose Tesseract 上满足各自质量阈值。
+  - 相同 manifest 的 suite fingerprint 稳定，任何 case 或退化参数改变时 fingerprint 改变；旧历史不进入新 suite 趋势。
+  - 参数越界、非法 layout、非法表格行列和非确定性生成都有自动测试保护。
+  - 新增 PDF 的 Poppler PNG 渲染无裁切、重叠、黑块或不可读内容，表格网格与文字清楚，PDF 无原生文本层。
+  - OCR 专项、后端全量测试、Docker Compose build/benchmark、production preflight 和 `git diff --check` 通过。
+- 建议验证命令：
+
+```bash
+conda run -n firstrag python scripts/eval_pdf_ocr.py --artifacts-dir tmp/pdfs/t082
+cd backend && conda run -n firstrag python -m unittest tests.services.test_pdf_ocr_benchmark tests.services.test_pdf_ocr_trend -v
+cd .. && docker compose up -d --build
+docker compose exec -T backend python -m app.services.documents.pdf_ocr_benchmark --json-report /tmp/t082-report.json --markdown-report /tmp/t082-report.md
 conda run -n firstrag python scripts/production_preflight.py --env-file .env --migration-method compose --check-runtime-health
 git diff --check
 ```

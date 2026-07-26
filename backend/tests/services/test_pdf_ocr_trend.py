@@ -23,13 +23,15 @@ def build_record(
     runner_os: str = "Linux",
     runner_arch: str = "X64",
     tesseract_version: str = "tesseract 5.5.0",
+    benchmark_suite: str = "manifest-v2-current",
     passed: bool = True,
 ) -> dict[str, object]:
-    """构造不包含用户正文的最小 schema v2 历史记录。"""
+    """构造不包含用户正文的最小 schema v3 历史记录。"""
     return {
-        "schema_version": 2,
+        "schema_version": 3,
         "generated_at": generated_at,
         "tesseract_version": tesseract_version,
+        "benchmark_suite": benchmark_suite,
         "execution": {
             "runner_os": runner_os,
             "runner_arch": runner_arch,
@@ -58,7 +60,7 @@ class PdfOcrTrendTests(unittest.TestCase):
     """验证历史趋势只比较相同 runtime 且不会污染硬门禁。"""
 
     def test_trend_uses_only_same_runtime_and_recent_median(self) -> None:
-        """其他 OS 或 Tesseract 版本不得进入当前趋势基线。"""
+        """其他 OS、Tesseract 或 suite 不得进入当前趋势基线。"""
         records = [
             build_record("1", "2026-07-23T00:00:00+00:00", seconds=10),
             build_record(
@@ -67,7 +69,13 @@ class PdfOcrTrendTests(unittest.TestCase):
                 seconds=100,
                 runner_os="macOS",
             ),
-            build_record("3", "2026-07-23T00:02:00+00:00", seconds=11),
+            build_record(
+                "3",
+                "2026-07-23T00:02:00+00:00",
+                seconds=90,
+                benchmark_suite="manifest-v1-legacy",
+            ),
+            build_record("4", "2026-07-23T00:03:00+00:00", seconds=11),
         ]
 
         markdown = render_ocr_trend_markdown(records)
@@ -76,6 +84,7 @@ class PdfOcrTrendTests(unittest.TestCase):
         self.assertIn("Comparable runs: `2`; baseline window: `1`", markdown)
         self.assertIn("baseline median: `10.000s`", markdown)
         self.assertNotIn("100.000s", markdown)
+        self.assertNotIn("90.000s", markdown)
 
     def test_current_run_remains_anchor_when_cache_has_future_record(self) -> None:
         """异常未来时间戳不能让旧 cache 记录取代本次运行。"""

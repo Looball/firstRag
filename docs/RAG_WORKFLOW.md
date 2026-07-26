@@ -31,7 +31,7 @@
 
 文件级巡检可以把多个 OCR 页码合并为一次重新识别批次。后端校验页码属于当前 index version 后，只递增一次版本，并把规范化页码写入一个 job 的 `force_ocr_page_numbers`；worker 在一次整文件解析中强制 OCR 所选页，避免逐页 job 造成重复 embedding 和版本竞争。失败重试不接受新的页码，而是从原失败 job 恢复受控 options，在同一 index version 下重新排队。
 
-OCR 参数回归由 `pdf_ocr_eval_v1.json` 定义的合成评测集约束。门禁生成没有原生文本层的正常、90° 旋转、低对比度、模糊和中英文混排 PDF，并直接复用生产 OCR engine 比较基线与自适应结果；质量、策略和耗时不满足阈值时 CI 失败。该评测不进入上传、数据库、chunk 或 embedding 链路。
+OCR 参数回归默认由 `pdf_ocr_eval_v2.json` 定义的合成评测集约束。门禁生成没有原生文本层的正常、90° 旋转、低对比度、模糊、中英文混排、轻度倾斜、盐椒噪点、侧边阴影、小字号和表格 PDF，并直接复用生产 OCR engine 比较基线与自适应结果；质量、策略和耗时不满足阈值时 CI 失败。报告的 suite fingerprint 随 case、阈值或退化参数变化，历史趋势只比较相同 suite。该评测不进入上传、数据库、chunk 或 embedding 链路。
 
 索引成功时，扫描页的本次 Tesseract 原始结果独立写入 `knowledge_file_ocr_history`，不随 `knowledge_file_chunks` 替换而丢失。页级 attempt 从最近历史递增；迁移前旧文件在下一次重建前从上一版 chunks 写入 baseline。历史保留 confidence、quality、word count、文本 SHA、trigger、source job 和 correction revision，前端据此判断重识别是改善、下降、持平还是仅文字发生变化。
 

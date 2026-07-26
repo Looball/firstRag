@@ -17,7 +17,7 @@ OCR_TREND_WATCH_TIME_RATIO = 1.25
 OCR_TREND_REGRESSED_TIME_RATIO = 1.50
 OCR_TREND_WATCH_QUALITY_DELTA = -0.01
 OCR_TREND_REGRESSED_QUALITY_DELTA = -0.02
-SUPPORTED_REPORT_SCHEMA_VERSIONS = {1, 2}
+SUPPORTED_REPORT_SCHEMA_VERSIONS = {1, 2, 3}
 _SAFE_FILENAME_PATTERN = re.compile(r"[^A-Za-z0-9_.-]+")
 
 
@@ -85,13 +85,14 @@ def _execution(record: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def ocr_runtime_key(record: dict[str, Any]) -> tuple[str, str, str]:
+def ocr_runtime_key(record: dict[str, Any]) -> tuple[str, str, str, str]:
     """返回只包含可比 OCR runtime 的稳定分组键。"""
     execution = _execution(record)
     return (
         str(execution.get("runner_os") or "unknown").casefold(),
         str(execution.get("runner_arch") or "unknown").casefold(),
         str(record.get("tesseract_version") or "unknown").casefold(),
+        str(record.get("benchmark_suite") or "legacy").casefold(),
     )
 
 
@@ -115,6 +116,11 @@ def _validate_history_record(record: object) -> str | None:
         return "generated_at is invalid"
     if not str(record.get("tesseract_version") or "").strip():
         return "tesseract_version is invalid"
+    if (
+        record.get("schema_version") == 3
+        and not str(record.get("benchmark_suite") or "").strip()
+    ):
+        return "benchmark_suite is invalid"
     if _number(record.get("average_adaptive_similarity")) is None:
         return "average_adaptive_similarity is invalid"
     if _number(record.get("total_seconds")) is None:
@@ -146,6 +152,7 @@ def _history_payload(payload: dict[str, Any]) -> dict[str, Any]:
         "schema_version": payload["schema_version"],
         "generated_at": payload["generated_at"],
         "tesseract_version": payload["tesseract_version"],
+        "benchmark_suite": str(payload.get("benchmark_suite") or "legacy")[:160],
         "execution": {
             key: str(execution.get(key) or "")[:160]
             for key in (
@@ -392,6 +399,7 @@ def render_ocr_trend_markdown(
         f"- Runtime: `{_markdown(execution.get('runner_os'))} / "
         f"{_markdown(execution.get('runner_arch'))} / "
         f"{_markdown(latest.get('tesseract_version'))}`",
+        f"- Benchmark suite: `{_markdown(latest.get('benchmark_suite') or 'legacy')}`",
         f"- Comparable runs: `{assessment['comparable_runs']}`; "
         f"baseline window: `{assessment['baseline_runs']}`",
         f"- Latest quality: `{_format_number(latest.get('average_adaptive_similarity'), 4)}`; "

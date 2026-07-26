@@ -6,18 +6,20 @@ import argparse
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from difflib import SequenceMatcher
+import hashlib
 from io import BytesIO
 import json
 import os
 from pathlib import Path
 import platform as runtime_platform
+import random
 import subprocess
 from tempfile import TemporaryDirectory
 import time
 from typing import Any, Sequence
 import unicodedata
 
-from PIL import Image, ImageEnhance, ImageFilter
+from PIL import Image, ImageDraw, ImageEnhance, ImageFilter
 import pymupdf
 
 from app.services.documents.pdf_ocr_engine import PdfOcrResult, run_pdf_page_ocr
@@ -29,13 +31,14 @@ from app.services.documents.pdf_ocr_trend import (
 
 
 DEFAULT_MANIFEST_PATH = (
-    Path(__file__).with_name("fixtures") / "pdf_ocr_eval_v1.json"
+    Path(__file__).with_name("fixtures") / "pdf_ocr_eval_v2.json"
 )
 DEFAULT_JSON_REPORT_PATH = Path("docs/evals/latest_pdf_ocr_eval_report.json")
 DEFAULT_MARKDOWN_REPORT_PATH = Path("docs/evals/latest_pdf_ocr_eval_report.md")
 DEFAULT_TREND_REPORT_PATH = Path("docs/evals/latest_pdf_ocr_trend.md")
-OCR_BENCHMARK_MANIFEST_SCHEMA_VERSION = 1
-OCR_BENCHMARK_REPORT_SCHEMA_VERSION = 2
+SUPPORTED_OCR_BENCHMARK_MANIFEST_SCHEMA_VERSIONS = {1, 2}
+OCR_BENCHMARK_REPORT_SCHEMA_VERSION = 3
+OCR_BENCHMARK_LAYOUTS = {"lines", "table"}
 
 
 class OcrBenchmarkConfigError(ValueError):
@@ -56,10 +59,18 @@ class OcrBenchmarkCase:
     min_improvement: float
     allowed_strategies: tuple[str, ...]
     required_candidate_strategies: tuple[str, ...]
+    layout: str = "lines"
+    table_rows: tuple[tuple[str, ...], ...] = ()
+    font_size: float = 40.0
+    skew_degrees: float = 0.0
+    noise_density: float = 0.0
+    shadow_strength: float = 0.0
 
     @property
     def expected_text(self) -> str:
         """返回用于相似度比较的完整期望正文。"""
+        if self.layout == "table":
+            return "\n".join(" ".join(row) for row in self.table_rows)
         return "\n".join(self.lines)
 
 
@@ -125,6 +136,7 @@ class OcrBenchmarkReport:
     schema_version: int
     generated_at: str
     tesseract_version: str
+    benchmark_suite: str
     execution: OcrBenchmarkExecution
     average_adaptive_similarity: float
     total_seconds: float
@@ -168,7 +180,11 @@ def load_ocr_benchmark_manifest(path: Path) -> OcrBenchmarkManifest:
         raise OcrBenchmarkConfigError("OCR benchmark manifest 不是有效 JSON") from exc
     if not isinstance(payload, dict):
         raise OcrBenchmarkConfigError("OCR benchmark manifest 顶层必须是对象")
-    if payload.get("schema_version") != OCR_BENCHMARK_MANIFEST_SCHEMA_VERSION:
+    schema_version = payload.get("schema_version")
+    if (
+        isinstance(schema_version, bool)
+        or schema_version not in SUPPORTED_OCR_BENCHMARK_MANIFEST_SCHEMA_VERSIONS
+    ):
         raise OcrBenchmarkConfigError("OCR benchmark manifest schema version 不受支持")
 
     aggregate_payload = payload.get("aggregate")
@@ -206,16 +222,56 @@ def load_ocr_benchmark_manifest(path: Path) -> OcrBenchmarkManifest:
         if case_id in case_ids:
             raise OcrBenchmarkConfigError(f"OCR benchmark case id 重复：{case_id}")
         case_ids.add(case_id)
-        raw_lines = raw_case.get("lines")
-        if (
-            not isinstance(raw_lines, list)
-            or not raw_lines
-            or len(raw_lines) > 6
-            or any(not isinstance(line, str) or not line.strip() for line in raw_lines)
-        ):
-            raise OcrBenchmarkConfigError(f"cases[{index}].lines 无效")
-        if any(len(line) > 80 for line in raw_lines):
-            raise OcrBenchmarkConfigError(f"cases[{index}].lines 单行过长")
+        layout = str(raw_case.get("layout") or "lines").strip()
+        if layout not in OCR_BENCHMARK_LAYOUTS:
+            raise OcrBenchmarkConfigError(f"cases[{index}].layout 无效")
+        raw_lines = raw_case.get("lines", [])
+        raw_table_rows = raw_case.get("table_rows", [])
+        if layout == "lines":
+            if (
+                not isinstance(raw_lines, list)
+                or not raw_lines
+                or len(raw_lines) > 6
+                or any(
+                    not isinstance(line, str) or not line.strip()
+                    for line in raw_lines
+                )
+            ):
+                raise OcrBenchmarkConfigError(f"cases[{index}].lines 无效")
+            if any(len(line) > 80 for line in raw_lines):
+                raise OcrBenchmarkConfigError(f"cases[{index}].lines 单行过长")
+            table_rows: tuple[tuple[str, ...], ...] = ()
+        else:
+            if (
+                not isinstance(raw_table_rows, list)
+                or not 2 <= len(raw_table_rows) <= 6
+                or any(
+                    not isinstance(row, list)
+                    or not 2 <= len(row) <= 4
+                    for row in raw_table_rows
+                )
+            ):
+                raise OcrBenchmarkConfigError(f"cases[{index}].table_rows 无效")
+            column_count = len(raw_table_rows[0])
+            if any(len(row) != column_count for row in raw_table_rows):
+                raise OcrBenchmarkConfigError(
+                    f"cases[{index}].table_rows 列数不一致",
+                )
+            if any(
+                not isinstance(cell, str)
+                or not cell.strip()
+                or len(cell) > 24
+                for row in raw_table_rows
+                for cell in row
+            ):
+                raise OcrBenchmarkConfigError(
+                    f"cases[{index}].table_rows 单元格无效",
+                )
+            raw_lines = []
+            table_rows = tuple(
+                tuple(cell.strip() for cell in row)
+                for row in raw_table_rows
+            )
         rotation = raw_case.get("rotation")
         if isinstance(rotation, bool) or rotation not in {0, 90, 180, 270}:
             raise OcrBenchmarkConfigError(f"cases[{index}].rotation 无效")
@@ -269,12 +325,50 @@ def load_ocr_benchmark_manifest(path: Path) -> OcrBenchmarkManifest:
             ),
             allowed_strategies=tuple(raw_strategies),
             required_candidate_strategies=tuple(raw_required_strategies),
+            layout=layout,
+            table_rows=table_rows,
+            font_size=_read_float(
+                raw_case.get("font_size", 40),
+                f"cases[{index}].font_size",
+                minimum=14,
+                maximum=48,
+            ),
+            skew_degrees=_read_float(
+                raw_case.get("skew_degrees", 0),
+                f"cases[{index}].skew_degrees",
+                minimum=-8,
+                maximum=8,
+            ),
+            noise_density=_read_float(
+                raw_case.get("noise_density", 0),
+                f"cases[{index}].noise_density",
+                minimum=0,
+                maximum=0.05,
+            ),
+            shadow_strength=_read_float(
+                raw_case.get("shadow_strength", 0),
+                f"cases[{index}].shadow_strength",
+                minimum=0,
+                maximum=0.7,
+            ),
         ))
     return OcrBenchmarkManifest(
-        schema_version=OCR_BENCHMARK_MANIFEST_SCHEMA_VERSION,
+        schema_version=int(schema_version),
         aggregate=aggregate,
         cases=tuple(cases),
     )
+
+
+def build_ocr_benchmark_suite(manifest: OcrBenchmarkManifest) -> str:
+    """返回随 case、阈值和退化参数变化的稳定 suite fingerprint。"""
+    serialized = json.dumps(
+        asdict(manifest),
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    digest = hashlib.sha256(serialized).hexdigest()[:16]
+    return f"manifest-v{manifest.schema_version}-{digest}"
 
 
 def normalize_ocr_benchmark_text(text: str) -> str:
@@ -295,35 +389,173 @@ def calculate_ocr_text_similarity(expected: str, actual: str) -> float:
     )
 
 
+def _render_line_layout(page: pymupdf.Page, case: OcrBenchmarkCase) -> None:
+    """按固定坐标绘制普通段落布局。"""
+    if len(case.lines) <= 2 and case.font_size == 40:
+        positions = [125 + index * 82 for index in range(len(case.lines))]
+    else:
+        desired_gap = max(42.0, case.font_size * 1.55)
+        desired_height = desired_gap * (len(case.lines) - 1)
+        if desired_height <= 280:
+            first_baseline = (430 - desired_height) / 2
+            line_gap = desired_gap
+        else:
+            first_baseline = 70.0
+            line_gap = 300 / max(1, len(case.lines) - 1)
+        positions = [
+            first_baseline + index * line_gap
+            for index in range(len(case.lines))
+        ]
+    for line, baseline_y in zip(case.lines, positions, strict=True):
+        is_cjk = any(ord(character) > 127 for character in line)
+        font_name = "china-s" if is_cjk else "helv"
+        font_size = max(14.0, case.font_size - 3) if is_cjk else case.font_size
+        text_width = pymupdf.get_text_length(
+            line,
+            fontname=font_name,
+            fontsize=font_size,
+        )
+        if text_width > 644:
+            font_size *= 644 / text_width
+        page.insert_text(
+            (58, baseline_y),
+            line,
+            fontname=font_name,
+            fontsize=font_size,
+            color=(0, 0, 0),
+        )
+
+
+def _render_table_layout(page: pymupdf.Page, case: OcrBenchmarkCase) -> None:
+    """绘制有限行列、row-major 文本顺序稳定的表格。"""
+    rows = len(case.table_rows)
+    columns = len(case.table_rows[0])
+    left, top, right, bottom = 45.0, 55.0, 715.0, 375.0
+    row_height = (bottom - top) / rows
+    column_width = (right - left) / columns
+    for row_index in range(rows + 1):
+        y = top + row_index * row_height
+        page.draw_line((left, y), (right, y), color=(0, 0, 0), width=1.2)
+    for column_index in range(columns + 1):
+        x = left + column_index * column_width
+        page.draw_line((x, top), (x, bottom), color=(0, 0, 0), width=1.2)
+    for row_index, row in enumerate(case.table_rows):
+        for column_index, cell in enumerate(row):
+            x = left + column_index * column_width + 12
+            y = top + row_index * row_height + row_height * 0.62
+            available_width = column_width - 24
+            desired_width = pymupdf.get_text_length(
+                cell,
+                fontname="helv",
+                fontsize=case.font_size,
+            )
+            font_size = (
+                case.font_size
+                if desired_width <= available_width
+                else case.font_size * available_width / desired_width
+            )
+            font_size = min(font_size, row_height * 0.45)
+            page.insert_text(
+                (x, y),
+                cell,
+                fontname="helv",
+                fontsize=font_size,
+                color=(0, 0, 0),
+            )
+
+
+def _apply_deterministic_noise(
+    image: Image.Image,
+    case: OcrBenchmarkCase,
+) -> Image.Image:
+    """按 case id 固定种子加入有界盐椒噪点。"""
+    if case.noise_density <= 0:
+        return image
+    noisy = image.copy()
+    pixels = noisy.load()
+    randomizer = random.Random(
+        int.from_bytes(
+            hashlib.sha256(case.case_id.encode("utf-8")).digest()[:8],
+            "big",
+        ),
+    )
+    sample_count = int(noisy.width * noisy.height * case.noise_density)
+    for _ in range(sample_count):
+        x = randomizer.randrange(noisy.width)
+        y = randomizer.randrange(noisy.height)
+        shade = 0 if randomizer.random() < 0.72 else 255
+        pixels[x, y] = (shade, shade, shade)
+    return noisy
+
+
+def _apply_edge_shadow(
+    image: Image.Image,
+    strength: float,
+) -> Image.Image:
+    """在右侧绘制平滑渐变阴影，模拟书页边缘光照不均。"""
+    if strength <= 0:
+        return image
+    mask = Image.new("L", image.size, 0)
+    draw = ImageDraw.Draw(mask)
+    start_x = int(image.width * 0.55)
+    shadow_width = image.width - start_x
+    bands = 64
+    for band in range(bands):
+        ratio = (band + 1) / bands
+        x0 = start_x + int(shadow_width * band / bands)
+        x1 = start_x + int(shadow_width * (band + 1) / bands)
+        alpha = int(255 * strength * ratio * ratio)
+        draw.rectangle((x0, 0, x1, image.height), fill=alpha)
+    shadow_color = Image.new("RGB", image.size, (28, 28, 28))
+    return Image.composite(shadow_color, image, mask)
+
+
+def _apply_case_degradations(
+    image: Image.Image,
+    case: OcrBenchmarkCase,
+) -> Image.Image:
+    """按固定顺序应用光照、模糊、噪点和几何退化。"""
+    degraded = image
+    if case.contrast != 1:
+        degraded = ImageEnhance.Contrast(degraded).enhance(case.contrast)
+    if case.blur_radius > 0:
+        degraded = degraded.filter(
+            ImageFilter.GaussianBlur(radius=case.blur_radius),
+        )
+    degraded = _apply_edge_shadow(degraded, case.shadow_strength)
+    degraded = _apply_deterministic_noise(degraded, case)
+    if case.skew_degrees:
+        degraded = degraded.rotate(
+            -case.skew_degrees,
+            resample=Image.Resampling.BICUBIC,
+            expand=True,
+            fillcolor="white",
+        )
+    if case.rotation:
+        degraded = degraded.rotate(
+            -case.rotation,
+            resample=Image.Resampling.BICUBIC,
+            expand=True,
+            fillcolor="white",
+        )
+    return degraded
+
+
 def _render_case_image(case: OcrBenchmarkCase) -> bytes:
-    """用嵌入式 CJK 字体生成测试文字并施加确定性图像退化。"""
+    """用嵌入式字体生成布局并施加确定性图像退化。"""
     source = pymupdf.open()
     try:
         page = source.new_page(width=760, height=430)
-        for line_index, line in enumerate(case.lines):
-            font_name = (
-                "china-s"
-                if any(ord(character) > 127 for character in line)
-                else "helv"
-            )
-            page.insert_text(
-                (58, 125 + line_index * 82),
-                line,
-                fontname=font_name,
-                fontsize=40 if font_name == "helv" else 37,
-                color=(0, 0, 0),
-            )
+        if case.layout == "table":
+            _render_table_layout(page, case)
+        else:
+            _render_line_layout(page, case)
         image_bytes = page.get_pixmap(dpi=180, alpha=False).tobytes("png")
     finally:
         source.close()
     with Image.open(BytesIO(image_bytes)) as raw_image:
         image = raw_image.convert("RGB")
-        if case.contrast != 1:
-            image = ImageEnhance.Contrast(image).enhance(case.contrast)
-        if case.blur_radius > 0:
-            image = image.filter(ImageFilter.GaussianBlur(radius=case.blur_radius))
-        if case.rotation:
-            image = image.rotate(-case.rotation, expand=True, fillcolor="white")
+        image = _apply_case_degradations(image, case)
         output = BytesIO()
         image.save(output, format="PNG", optimize=False)
         return output.getvalue()
@@ -517,6 +749,7 @@ def run_ocr_benchmark(
         schema_version=OCR_BENCHMARK_REPORT_SCHEMA_VERSION,
         generated_at=datetime.now(timezone.utc).isoformat(),
         tesseract_version=get_tesseract_version(),
+        benchmark_suite=build_ocr_benchmark_suite(manifest),
         execution=build_ocr_benchmark_execution(),
         average_adaptive_similarity=average_similarity,
         total_seconds=total_seconds,
@@ -555,6 +788,7 @@ def render_ocr_benchmark_markdown(report: OcrBenchmarkReport) -> str:
         f"- Status: **{status}**",
         f"- Generated at: `{safe_metadata(report.generated_at)}`",
         f"- Tesseract: `{safe_metadata(report.tesseract_version)}`",
+        f"- Benchmark suite: `{safe_metadata(report.benchmark_suite)}`",
         f"- Runtime: `{safe_metadata(report.execution.runner_os)} / "
         f"{safe_metadata(report.execution.runner_arch)}`",
         f"- Run: `{safe_metadata(report.execution.run_id)}/"

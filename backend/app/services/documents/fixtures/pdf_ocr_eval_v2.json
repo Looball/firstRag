@@ -1,0 +1,168 @@
+{
+  "schema_version": 2,
+  "aggregate": {
+    "min_average_adaptive_similarity": 0.86,
+    "max_total_seconds": 360
+  },
+  "cases": [
+    {
+      "id": "clean_latin",
+      "description": "方向正确、对比度正常的英文基线页",
+      "lines": [
+        "FIRST RAG OCR QUALITY",
+        "CLEAN PAGE ALPHA 2026"
+      ],
+      "rotation": 0,
+      "contrast": 1.0,
+      "blur_radius": 0.0,
+      "min_adaptive_similarity": 0.96,
+      "min_improvement": -0.02,
+      "allowed_strategies": []
+    },
+    {
+      "id": "rotated_90_latin",
+      "description": "顺时针旋转 90 度的英文扫描页",
+      "lines": [
+        "FIRST RAG ROTATION TEST",
+        "SIDEWAYS PAGE BETA 2026"
+      ],
+      "rotation": 90,
+      "contrast": 1.0,
+      "blur_radius": 0.0,
+      "min_adaptive_similarity": 0.94,
+      "min_improvement": -0.02,
+      "allowed_strategies": [
+        "baseline_auto",
+        "rotate_90_gray",
+        "rotate_270_gray"
+      ],
+      "required_candidate_strategies": [
+        "rotate_90_gray",
+        "rotate_270_gray"
+      ]
+    },
+    {
+      "id": "low_contrast_latin",
+      "description": "低对比度英文扫描页",
+      "lines": [
+        "FIRST RAG LOW CONTRAST",
+        "FADED PAGE GAMMA 2026"
+      ],
+      "rotation": 0,
+      "contrast": 0.28,
+      "blur_radius": 0.0,
+      "min_adaptive_similarity": 0.90,
+      "min_improvement": -0.04,
+      "allowed_strategies": []
+    },
+    {
+      "id": "blurred_latin",
+      "description": "轻度高斯模糊英文扫描页",
+      "lines": [
+        "FIRST RAG BLURRED SCAN",
+        "SOFT PAGE DELTA 2026"
+      ],
+      "rotation": 0,
+      "contrast": 0.82,
+      "blur_radius": 1.35,
+      "min_adaptive_similarity": 0.86,
+      "min_improvement": -0.05,
+      "allowed_strategies": []
+    },
+    {
+      "id": "mixed_chinese_english",
+      "description": "简体中文、英文和数字混排扫描页",
+      "lines": [
+        "第一RAG识别评测",
+        "中英文 MIXED OCR 2026"
+      ],
+      "rotation": 0,
+      "contrast": 0.9,
+      "blur_radius": 0.35,
+      "min_adaptive_similarity": 0.74,
+      "min_improvement": -0.06,
+      "allowed_strategies": []
+    },
+    {
+      "id": "skewed_latin",
+      "description": "轻度倾斜的英文扫描页",
+      "lines": [
+        "FIRST RAG SKEW TEST",
+        "TILTED SCAN EPSILON 2026"
+      ],
+      "rotation": 0,
+      "contrast": 0.94,
+      "blur_radius": 0.2,
+      "skew_degrees": 3.2,
+      "min_adaptive_similarity": 0.90,
+      "min_improvement": -0.06,
+      "allowed_strategies": []
+    },
+    {
+      "id": "noisy_latin",
+      "description": "带确定性盐椒噪点的英文扫描页",
+      "lines": [
+        "FIRST RAG NOISE TEST",
+        "SPECKLED SCAN ZETA 2026"
+      ],
+      "rotation": 0,
+      "contrast": 0.9,
+      "blur_radius": 0.15,
+      "noise_density": 0.008,
+      "min_adaptive_similarity": 0.88,
+      "min_improvement": -0.08,
+      "allowed_strategies": []
+    },
+    {
+      "id": "shadowed_latin",
+      "description": "带右侧渐变阴影的英文扫描页",
+      "lines": [
+        "FIRST RAG SHADOW TEST",
+        "DARK EDGE ETA 2026"
+      ],
+      "rotation": 0,
+      "contrast": 0.92,
+      "blur_radius": 0.2,
+      "shadow_strength": 0.5,
+      "min_adaptive_similarity": 0.88,
+      "min_improvement": -0.08,
+      "allowed_strategies": []
+    },
+    {
+      "id": "small_font_latin",
+      "description": "四行小字号英文扫描页",
+      "lines": [
+        "FIRST RAG SMALL FONT",
+        "RETRIEVAL QUALITY THETA",
+        "VECTOR RERANK SOURCE",
+        "PAGE NUMBER 2026"
+      ],
+      "layout": "lines",
+      "font_size": 18,
+      "rotation": 0,
+      "contrast": 0.9,
+      "blur_radius": 0.25,
+      "min_adaptive_similarity": 0.84,
+      "min_improvement": -0.08,
+      "allowed_strategies": []
+    },
+    {
+      "id": "table_latin",
+      "description": "带网格线的三列表格扫描页",
+      "layout": "table",
+      "table_rows": [
+        ["ITEM", "QTY", "CODE"],
+        ["VECTOR", "16", "A102"],
+        ["RERANK", "08", "B204"],
+        ["SOURCE", "04", "C306"]
+      ],
+      "font_size": 22,
+      "rotation": 0,
+      "contrast": 0.94,
+      "blur_radius": 0.15,
+      "min_adaptive_similarity": 0.76,
+      "min_improvement": -0.12,
+      "allowed_strategies": []
+    }
+  ]
+}
