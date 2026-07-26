@@ -13,7 +13,7 @@ FirstRAG 使用 `scripts/npm_audit_policy.py` 校验前端 production dependenci
 - 上游修复使 finding 消失后，遗留例外也会让 CI 失败，要求同步删除例外。
 - npm registry、网络或 JSON 解析异常属于审计失败，不会被当作“无漏洞”放行。
 
-当前 PostCSS 例外记录在 `npm-audit-exceptions.json`。它只覆盖 `GHSA-QX2V-QP2M-JG93 / postcss / moderate`，不覆盖 Next.js 的其它 advisory，也不能覆盖 severity 上升后的同一 finding。
+当前 `npm-audit-exceptions.json` 没有有效例外。Next.js 使用兼容安全补丁版本，并通过 package override 固定已修复的 PostCSS；发现新的 production finding 时仍按上述策略直接阻断。
 
 本地复核：
 

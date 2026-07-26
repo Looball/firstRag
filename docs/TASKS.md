@@ -90,6 +90,7 @@
 | `PLAN-20260726-01` | 2026-07-26 | `Done` | 扩展 OCR 评测集，覆盖更接近真实扫描件的几何、光照、噪点、字号和表格退化。 | `T-082` |
 | `PLAN-20260726-02` | 2026-07-26 | `Done` | 为原生文本页与扫描页混合的多页 PDF 增加真实索引、OCR、引用页码和原文上下文回归。 | `T-083` |
 | `PLAN-20260726-03` | 2026-07-26 | `Done` | 验证 OCR 引用页 PNG 预览内容，并让引用弹窗直接展示所引用的扫描页面。 | `T-084` |
+| `PLAN-20260726-04` | 2026-07-26 | `Doing` | 将 OCR source 第 2 页 PNG 点击流程固化为可在 CI 重复执行的前端 E2E 回归。 | `T-085` |
 
 ## 任务总览
 
@@ -179,6 +180,7 @@
 | `T-082` | `PLAN-20260726-01` | `P1` | `Done` | 扩展 OCR 真实扫描退化评测集 | 2026-07-26 | `11fc7f4` |
 | `T-083` | `PLAN-20260726-02` | `P1` | `Done` | 增加混合多页 PDF 端到端索引回归 | 2026-07-26 | `749ac0b` |
 | `T-084` | `PLAN-20260726-03` | `P1` | `Done` | 验证引用页 PNG 预览并直接展示扫描页面 | 2026-07-26 | `2613fd5` |
+| `T-085` | `PLAN-20260726-04` | `P1` | `Doing` | 固化 OCR source 第 2 页 PNG 前端 E2E 回归 | — | — |
 
 ## 新计划接入流程
 
@@ -3358,6 +3360,36 @@ cd backend && conda run -n firstrag python -m pytest tests/test_eval_indexing_sc
 cd ../frontend && npm test -- --run && npm run lint && npm run build
 cd .. && docker compose up -d --build
 FIRSTRAG_EVAL_USERNAME=你的用户名 FIRSTRAG_EVAL_PASSWORD=你的密码 conda run -n firstrag python scripts/eval_indexing.py --file-kind mixed-pdf
+conda run -n firstrag python scripts/production_preflight.py --env-file .env --migration-method compose --check-runtime-health
+git diff --check
+```
+
+## T-085 固化 OCR source 第 2 页 PNG 前端 E2E 回归
+
+- 来源计划：`PLAN-20260726-04`
+- 优先级：`P1`
+- 状态：`Doing`
+- 目标：把 T-084 的人工浏览器验收固化为确定性 E2E，自动验证用户点击 OCR source 后会请求并完整加载第 2 页 PNG。
+- 技术边界：
+  - E2E 使用合成知识库、会话、source、chunk context 和 PNG fixture，不依赖真实账号、API Key、LLM、embedding 或外部网络。
+  - 测试必须经过真实 Next.js 页面和浏览器 Blob URL 加载链路，不能只调用工具函数或断言静态文案。
+  - API mock 必须检查 Authorization 与目标页请求路径，避免错误页或未鉴权请求被误判为通过。
+- 范围：
+  - 增加 Playwright 配置、前端 E2E 命令和 OCR source fixture。
+  - 自动进入合成会话、点击唯一 OCR source，校验第 2 页标题、目标 chunk、PNG 请求和图像加载完成。
+  - 在 GitHub Actions frontend job 安装 Chromium 并执行 E2E。
+  - 更新 Frontend、eval/CI 文档和回归说明。
+- 验收标准：
+  - E2E 能在无后端、无用户凭据情况下独立运行，并只使用受控本地 fixture。
+  - 测试明确观察到 `/pages/2/preview` 请求，Authorization 为测试 bearer token。
+  - 弹窗显示第 2 页 OCR 定位，Blob PNG `complete=true` 且 `naturalWidth/naturalHeight > 0`。
+  - E2E、前端单测、lint、production build、Compose 和 production preflight 通过。
+- 建议验证命令：
+
+```bash
+cd frontend && npm run test:e2e
+npm test && npm run lint && npm run build
+cd .. && docker compose up -d --build
 conda run -n firstrag python scripts/production_preflight.py --env-file .env --migration-method compose --check-runtime-health
 git diff --check
 ```

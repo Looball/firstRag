@@ -141,6 +141,14 @@ jobs:
           NEXT_TELEMETRY_DISABLED: "1"
         run: npm run build
 
+      - name: Install Playwright Chromium
+        working-directory: frontend
+        run: npx --no-install playwright install --with-deps chromium
+
+      - name: Run frontend E2E
+        working-directory: frontend
+        run: npm run test:e2e
+
   container-security:
     name: Container OS Security
     runs-on: ubuntu-latest

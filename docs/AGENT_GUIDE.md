@@ -40,6 +40,7 @@
 - 默认先运行 `docker compose up -d --build`，再检查 `docker compose ps` 和 Redis、PostgreSQL、Chroma、migration、backend、worker、frontend 日志。
 - 涉及部署、RAG、上传或向量化时，运行 `scripts/production_preflight.py --check-runtime-health`，确认独立 Chroma server 的配置、Compose 拓扑和容器健康状态。
 - `scripts/acceptance_check.sh` 默认执行 infrastructure preflight；只有无 Docker、明确只做纯静态检查时才使用 `--skip-infrastructure-check`。
+- 修改聊天引用、原文弹窗或 PDF 页面预览交互时，除 Vitest 外运行 `cd frontend && npm run test:e2e`，确保真实浏览器中的鉴权请求、Blob URL 和图像解码链路通过。
 - 修改 PDF OCR engine、预处理、候选策略、语言包或 Tesseract runtime 时，必须运行 `conda run -n firstrag python scripts/eval_pdf_ocr.py`；需要验证缓慢漂移时同时传入 `--history-dir docs/evals/ocr_runs --trend-report docs/evals/latest_pdf_ocr_trend.md`。一键验收默认包含硬门禁，只有与 OCR 完全无关且本机没有 Tesseract 时才使用 `--skip-ocr-eval`。
 
 ## 文档约定
