@@ -92,6 +92,7 @@
 | `PLAN-20260726-03` | 2026-07-26 | `Done` | 验证 OCR 引用页 PNG 预览内容，并让引用弹窗直接展示所引用的扫描页面。 | `T-084` |
 | `PLAN-20260726-04` | 2026-07-26 | `Done` | 将 OCR source 第 2 页 PNG 点击流程固化为可在 CI 重复执行的前端 E2E 回归。 | `T-085` |
 | `PLAN-20260726-05` | 2026-07-26 | `Done` | 固化 OCR source PNG 预览失败、用户重试和 Blob URL 释放的浏览器回归。 | `T-086` |
+| `PLAN-20260726-06` | 2026-07-26 | `Doing` | 固化 OCR source preview 请求进行中关闭弹窗时的异步清理回归。 | `T-087` |
 
 ## 任务总览
 
@@ -183,6 +184,7 @@
 | `T-084` | `PLAN-20260726-03` | `P1` | `Done` | 验证引用页 PNG 预览并直接展示扫描页面 | 2026-07-26 | `2613fd5` |
 | `T-085` | `PLAN-20260726-04` | `P1` | `Done` | 固化 OCR source 第 2 页 PNG 前端 E2E 回归 | 2026-07-26 | `2724b8b` |
 | `T-086` | `PLAN-20260726-05` | `P1` | `Done` | 覆盖 PNG 预览失败、重试和 Blob URL 释放 E2E | 2026-07-26 | `c09a469` |
+| `T-087` | `PLAN-20260726-06` | `P1` | `Doing` | 覆盖 preview 请求中关闭弹窗的异步清理 E2E | — | — |
 
 ## 新计划接入流程
 
@@ -3433,6 +3435,35 @@ git diff --check
   - 两条 E2E 并行运行 2/2 通过，前端 87 项单测通过；lint 0 error（保留 2 个既有 `<img>` warning），production build、production npm audit policy 和 Action pin policy 通过。
   - Compose PostgreSQL、Redis、Chroma healthy，migration `applied=0 skipped=9`，backend、worker、frontend 正常；production preflight 通过。
   - 应用内浏览器打开重新构建的 Compose frontend，admin 工作台正常渲染，console error 为 0。
+- 建议验证命令：
+
+```bash
+cd frontend && npm run test:e2e
+npm test && npm run lint && npm run build
+cd .. && docker compose up -d --build
+conda run -n firstrag python scripts/production_preflight.py --env-file .env --migration-method compose --check-runtime-health
+git diff --check
+```
+
+## T-087 覆盖 preview 请求中关闭弹窗的异步清理 E2E
+
+- 来源计划：`PLAN-20260726-06`
+- 优先级：`P1`
+- 状态：`Doing`
+- 目标：自动验证 OCR source preview 请求尚未返回时关闭弹窗，延迟响应生成的 Blob URL 仍会立即释放，且不会向已关闭界面回写状态。
+- 技术边界：
+  - 使用测试控制的 Promise gate 暂停 preview 响应，不依赖固定 sleep 或外部网络延迟。
+  - 必须先观察到带 Authorization 的第 2 页请求，再关闭弹窗并释放响应。
+  - 必须同时验证 create/revoke 使用同一个 Blob URL、弹窗保持关闭且没有浏览器 runtime error。
+- 范围：
+  - 为 Playwright preview fixture 增加可控的响应前等待 hook。
+  - 增加请求进行中关闭弹窗、延迟成功响应和 URL 清理断言。
+  - 更新前端测试文档与任务台账。
+- 验收标准：
+  - preview 请求已发出但响应 gate 未释放时，来源弹窗可正常关闭。
+  - gate 释放后恰好记录一次 Blob URL create 和一次对应 revoke。
+  - 页面不会重新显示来源弹窗或失败提示，浏览器 console/page error 为空。
+  - E2E、前端单测、lint、production build、Compose 和 production preflight 通过。
 - 建议验证命令：
 
 ```bash

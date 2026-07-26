@@ -24,6 +24,7 @@ type BlobUrlEvent = {
 
 type OcrSourceFixtureOptions = {
   previewFailuresBeforeSuccess?: number;
+  waitBeforePreviewResponse?: () => Promise<void>;
 };
 
 /** 返回 JSON fixture，并显式禁止浏览器缓存测试响应。 */
@@ -293,6 +294,7 @@ async function installOcrSourceFixtures(
         });
         return;
       }
+      await options.waitBeforePreviewResponse?.();
       await route.fulfill({
         body: PNG_BYTES,
         contentType: "image/png",
@@ -462,4 +464,91 @@ test("PNG 预览失败后可重试，并在关闭弹窗时释放 Blob URL", asyn
       ),
     )
     .toContainEqual({ type: "revoke", url: pageImageUrl });
+});
+
+test("preview 请求中关闭弹窗后释放延迟生成的 Blob URL", async ({
+  page,
+}) => {
+  const previewRequests: PreviewRequestEvidence[] = [];
+  const runtimeErrors: string[] = [];
+  let releasePreviewResponse = () => {};
+  const previewResponseGate = new Promise<void>((resolve) => {
+    releasePreviewResponse = resolve;
+  });
+
+  page.on("console", (message) => {
+    if (message.type() === "error") runtimeErrors.push(message.text());
+  });
+  page.on("pageerror", (error) => {
+    runtimeErrors.push(error.message);
+  });
+  await installOcrSourceFixtures(
+    page,
+    (evidence) => {
+      previewRequests.push(evidence);
+    },
+    { waitBeforePreviewResponse: () => previewResponseGate },
+  );
+
+  await page.goto("/");
+  await expect(
+    page.getByRole("heading", { name: "OCR Page Preview E2E" }),
+  ).toBeVisible();
+
+  const sourceButton = page.getByRole("button", { name: "查看原文 →" });
+  await expect(sourceButton).toHaveCount(1);
+  await sourceButton.click();
+
+  const dialog = page.getByRole("dialog");
+  await expect(dialog).toBeVisible();
+  await expect.poll(() => previewRequests.length).toBe(1);
+  expect(previewRequests).toEqual([
+    {
+      attempt: 1,
+      authorization: `Bearer ${TEST_TOKEN}`,
+      pathname: `/api/chat/knowledge-files/${FILE_ID}/pages/2/preview`,
+    },
+  ]);
+
+  const closeButton = dialog.getByRole("button", {
+    name: "关闭",
+    exact: true,
+  });
+  await expect(closeButton).toHaveCount(1);
+  await closeButton.click();
+  await expect(dialog).toBeHidden();
+
+  releasePreviewResponse();
+
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () =>
+          (
+            window as typeof window & {
+              __firstragBlobUrlEvents: BlobUrlEvent[];
+            }
+          ).__firstragBlobUrlEvents.length,
+      ),
+    )
+    .toBe(2);
+  const blobUrlEvents = await page.evaluate(
+    () =>
+      (
+        window as typeof window & {
+          __firstragBlobUrlEvents: BlobUrlEvent[];
+        }
+      ).__firstragBlobUrlEvents,
+  );
+  expect(blobUrlEvents[0]).toMatchObject({
+    type: "create",
+    url: expect.stringMatching(/^blob:/),
+  });
+  expect(blobUrlEvents[1]).toEqual({
+    type: "revoke",
+    url: blobUrlEvents[0].url,
+  });
+  await expect(dialog).toBeHidden();
+  await expect(page.getByText("扫描页面未能加载")).toHaveCount(0);
+  expect(runtimeErrors).toEqual([]);
 });
