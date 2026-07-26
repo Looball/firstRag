@@ -1,6 +1,7 @@
 "use client";
 
 import { useMutation, useQuery } from "@tanstack/react-query";
+import Image from "next/image";
 import { useEffect, useRef, useState } from "react";
 
 import * as chatApi from "@/lib/chat-workspace/api";
@@ -76,6 +77,12 @@ export function SourcePreviewDialog({
   const targetChunkRef = useRef<HTMLElement | null>(null);
   const [isOpeningFile, setIsOpeningFile] = useState(false);
   const [fileOpenError, setFileOpenError] = useState("");
+  const [pagePreviewState, setPagePreviewState] = useState({
+    requestKey: "",
+    previewUrl: "",
+    error: "",
+  });
+  const [pagePreviewReloadVersion, setPagePreviewReloadVersion] = useState(0);
   const [ocrReindexJobId, setOcrReindexJobId] = useState("");
   const [isCorrectionEditorOpen, setIsCorrectionEditorOpen] = useState(false);
   const [autoCorrectionDismissed, setAutoCorrectionDismissed] = useState(false);
@@ -142,6 +149,18 @@ export function SourcePreviewDialog({
       ? targetChunk.location.ocr_quality
       : "";
   const targetOcrConfidenceLabel = formatOcrConfidence(targetOcrConfidence);
+  const pagePreviewRequestKey =
+    targetIsOcrPage && targetPageNumber !== undefined
+      ? `${fileId}:${targetPageNumber}:${pagePreviewReloadVersion}`
+      : "";
+  const pagePreviewUrl =
+    pagePreviewState.requestKey === pagePreviewRequestKey
+      ? pagePreviewState.previewUrl
+      : "";
+  const pagePreviewError =
+    pagePreviewState.requestKey === pagePreviewRequestKey
+      ? pagePreviewState.error
+      : "";
   const correctionQuery = useQuery({
     queryKey: ["pdf-ocr-page-correction", fileId, targetPageNumber],
     queryFn: () =>
@@ -316,6 +335,59 @@ export function SourcePreviewDialog({
       });
     }
   }, [previewQuery.data]);
+
+  useEffect(() => {
+    if (
+      !fileId ||
+      !targetIsOcrPage ||
+      targetPageNumber === undefined ||
+      !pagePreviewRequestKey
+    ) {
+      return;
+    }
+
+    let active = true;
+    let objectUrl = "";
+    const requestKey = pagePreviewRequestKey;
+    void chatApi
+      .loadKnowledgePdfPagePreview(fileId, targetPageNumber)
+      .then((blob) => {
+        if (blob.type && !blob.type.toLowerCase().includes("png")) {
+          throw new Error("PDF 页面预览响应不是有效的 PNG。");
+        }
+        objectUrl = URL.createObjectURL(blob);
+        if (!active) {
+          URL.revokeObjectURL(objectUrl);
+          return;
+        }
+        setPagePreviewState({
+          requestKey,
+          previewUrl: objectUrl,
+          error: "",
+        });
+      })
+      .catch((error: unknown) => {
+        if (!active) return;
+        setPagePreviewState({
+          requestKey,
+          previewUrl: "",
+          error:
+            error instanceof Error
+              ? error.message
+              : "扫描页面加载失败，请稍后重试。",
+        });
+      });
+
+    return () => {
+      active = false;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [
+    fileId,
+    pagePreviewRequestKey,
+    targetIsOcrPage,
+    targetPageNumber,
+  ]);
 
   /** 先同步打开空白页，再异步加载带 Authorization 的原始文件。 */
   async function handleOpenOriginalFile() {
@@ -527,6 +599,63 @@ export function SourcePreviewDialog({
                         )
                       }
                     />
+                  ) : null}
+                  {!correctionEditorVisible ? (
+                    <section
+                      className="mt-4 overflow-hidden border border-[#b8c8c3] bg-[#dfe7e3]"
+                      aria-label={`第 ${targetPageNumber} 页扫描预览`}
+                    >
+                      <div className="flex items-center justify-between border-b border-[#b8c8c3] bg-[#edf2ef] px-3 py-2">
+                        <p className="font-utility text-[10px] font-semibold uppercase tracking-[0.12em] text-[#52605c]">
+                          引用扫描原页 · 第 {targetPageNumber} 页
+                        </p>
+                        {pagePreviewError ? (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setPagePreviewReloadVersion(
+                                (version) => version + 1,
+                              )
+                            }
+                            className="font-utility border border-[#a46b5e] px-2 py-1 text-[9px] font-semibold uppercase text-[#8f3d2d]"
+                          >
+                            重新加载
+                          </button>
+                        ) : null}
+                      </div>
+                      {pagePreviewUrl ? (
+                        <div className="research-scroll max-h-[52vh] overflow-auto p-3">
+                          <Image
+                            src={pagePreviewUrl}
+                            alt={`引用扫描原页第 ${targetPageNumber} 页`}
+                            width={1800}
+                            height={2546}
+                            unoptimized
+                            className="mx-auto h-auto w-full max-w-[48rem] border border-[#c5cfcb] bg-white shadow-sm"
+                          />
+                        </div>
+                      ) : pagePreviewError ? (
+                        <div className="px-5 py-8 text-center">
+                          <p className="text-sm font-semibold text-[#8f3d2d]">
+                            扫描页面未能加载
+                          </p>
+                          <p className="mt-2 text-xs leading-5 text-[#6f4b43]">
+                            {pagePreviewError}
+                          </p>
+                        </div>
+                      ) : (
+                        <div
+                          className="flex min-h-48 flex-col items-center justify-center bg-[#e7ece9]"
+                          aria-live="polite"
+                        >
+                          <div className="h-3 w-40 animate-pulse bg-[#c2d0cb]" />
+                          <div className="mt-3 h-2 w-28 animate-pulse bg-[#ccd8d4]" />
+                          <p className="mt-4 text-xs text-[#64716d]">
+                            正在安全读取第 {targetPageNumber} 页扫描图像...
+                          </p>
+                        </div>
+                      )}
+                    </section>
                   ) : null}
                   {hasCorrection && !correctionEditorVisible ? (
                     <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-current/25 pt-3">

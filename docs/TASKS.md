@@ -89,6 +89,7 @@
 | `PLAN-20260723-02` | 2026-07-23 | `Done` | 保存 OCR CI 评测历史并展示跨运行质量与耗时趋势。 | `T-081` |
 | `PLAN-20260726-01` | 2026-07-26 | `Done` | 扩展 OCR 评测集，覆盖更接近真实扫描件的几何、光照、噪点、字号和表格退化。 | `T-082` |
 | `PLAN-20260726-02` | 2026-07-26 | `Done` | 为原生文本页与扫描页混合的多页 PDF 增加真实索引、OCR、引用页码和原文上下文回归。 | `T-083` |
+| `PLAN-20260726-03` | 2026-07-26 | `Doing` | 验证 OCR 引用页 PNG 预览内容，并让引用弹窗直接展示所引用的扫描页面。 | `T-084` |
 
 ## 任务总览
 
@@ -177,6 +178,7 @@
 | `T-081` | `PLAN-20260723-02` | `P1` | `Done` | 持久化 OCR CI 评测历史并展示趋势 | 2026-07-23 | `12852ff` |
 | `T-082` | `PLAN-20260726-01` | `P1` | `Done` | 扩展 OCR 真实扫描退化评测集 | 2026-07-26 | `11fc7f4` |
 | `T-083` | `PLAN-20260726-02` | `P1` | `Done` | 增加混合多页 PDF 端到端索引回归 | 2026-07-26 | `749ac0b` |
+| `T-084` | `PLAN-20260726-03` | `P1` | `Doing` | 验证引用页 PNG 预览并直接展示扫描页面 | — | — |
 
 ## 新计划接入流程
 
@@ -3315,6 +3317,37 @@ git diff --check
 FIRSTRAG_EVAL_USERNAME=你的用户名 FIRSTRAG_EVAL_PASSWORD=你的密码 conda run -n firstrag python scripts/eval_indexing.py --file-kind mixed-pdf --no-history --report tmp/t083-report.md
 cd backend && conda run -n firstrag python -m pytest tests/test_eval_indexing_script.py tests/services/test_document_service.py -q
 cd .. && docker compose up -d --build
+conda run -n firstrag python scripts/production_preflight.py --env-file .env --migration-method compose --check-runtime-health
+git diff --check
+```
+
+## T-084 验证引用页 PNG 预览并直接展示扫描页面
+
+- 来源计划：`PLAN-20260726-03`
+- 优先级：`P1`
+- 状态：`Doing`
+- 目标：真实验证第 2 页 OCR source 对应的 PNG 预览内容，并让用户点击该引用后无需先进入校对模式即可核对正确的扫描页面。
+- 技术边界：
+  - 预览必须继续经过当前用户权限校验，不暴露原始磁盘路径。
+  - 自动门禁不能只检查 HTTP 状态和 `image/png`；必须证明返回图像与 fixture 第 2 页最匹配，而不是第 1、3 页或空白页。
+  - 前端对象 URL 必须在弹窗关闭、页码切换或重试时释放，避免持续占用浏览器内存。
+- 范围：
+  - 扩展 mixed PDF indexing eval，读取第 2 页 PNG 预览并比较三页图像内容。
+  - 在 OCR source 原文弹窗中直接加载并展示目标页 PNG，保留加载失败重试和打开原始 PDF 的能力。
+  - 增加后端评测脚本与前端交互回归测试，并更新相关文档。
+  - 使用 Compose 真实上传、索引、问答和浏览器点击完成验收。
+- 验收标准：
+  - 第 2 页 preview API 返回私有缓存的有效 PNG，图像尺寸符合上限且与原 PDF 第 2 页最接近。
+  - 点击第 2 页 OCR source 后，弹窗直接显示标记为“第 2 页”的扫描图像，且图像请求成功完成。
+  - 预览失败时用户可重试，关闭弹窗后 object URL 被释放。
+  - 专项/全量测试、production build、Docker Compose、真实 mixed PDF eval、浏览器点击和 production preflight 通过。
+- 建议验证命令：
+
+```bash
+cd backend && conda run -n firstrag python -m pytest tests/test_eval_indexing_script.py tests/test_source_preview.py tests/services/test_pdf_page_preview_service.py -q
+cd ../frontend && npm test -- --run && npm run lint && npm run build
+cd .. && docker compose up -d --build
+FIRSTRAG_EVAL_USERNAME=你的用户名 FIRSTRAG_EVAL_PASSWORD=你的密码 conda run -n firstrag python scripts/eval_indexing.py --file-kind mixed-pdf
 conda run -n firstrag python scripts/production_preflight.py --env-file .env --migration-method compose --check-runtime-health
 git diff --check
 ```

@@ -373,7 +373,7 @@ conda run -n firstrag python scripts/eval_indexing.py \
   --file-kind mixed-pdf
 ```
 
-`mixed-pdf` 会生成三页 `native_text -> ocr -> native_text` fixture，并查询只存在于第 2 页栅格图中的唯一标识。除通用 indexing 检查外，门禁还要求回答引用明确指向第 2 页且 `pdf_parse_method=ocr`，source chunk context 同时包含第 1、3 页 native 标识，并保持全局 chunk index 页序。报告只保存合成标识、受控 source metadata 和每页最多 300 字符预览，不保存账号、token 或 API Key。
+`mixed-pdf` 会生成三页 `native_text -> ocr -> native_text` fixture，并查询只存在于第 2 页栅格图中的唯一标识。除通用 indexing 检查外，门禁还要求回答引用明确指向第 2 页且 `pdf_parse_method=ocr`，source chunk context 同时包含第 1、3 页 native 标识，并保持全局 chunk index 页序。评测还会携带登录态读取第 2 页 PNG 预览，检查私有缓存、PNG 类型、最长边限制，并把返回图像与原 PDF 三页逐像素比较；只有第 2 页是具有明确差值间隔的最近匹配才通过。报告只保存合成标识、受控 source metadata、图像尺寸/差值和每页最多 300 字符预览，不保存账号、token、API Key 或图像正文。
 
 默认情况下，脚本只会解除临时文件和知识库的关联，不会删除全局文件记录、上传目录、chunks 或 Chroma 数据，避免误删用户数据。如果需要保留临时文件关联，可加：
 

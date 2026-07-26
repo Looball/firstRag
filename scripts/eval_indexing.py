@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+from io import BytesIO
 import json
 import os
 import sys
@@ -17,6 +18,7 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 import pymupdf
+from PIL import Image, ImageChops, ImageStat
 
 
 DEFAULT_REPORT_PATH = Path("docs/evals/latest_indexing_eval_report.md")
@@ -58,6 +60,19 @@ class ChatResult:
     retrieval: dict[str, Any]
     done: dict[str, Any]
     elapsed_seconds: float
+
+
+@dataclass
+class PdfPagePreviewEvidence:
+    """记录 PNG 页预览的响应属性和三页图像比对结果。"""
+
+    content_type: str
+    cache_control: str
+    content_disposition: str
+    width: int
+    height: int
+    closest_page_number: int
+    page_mean_differences: dict[int, float]
 
 
 def parse_args() -> argparse.Namespace:
@@ -181,6 +196,37 @@ def request_json(
         return json.loads(raw)
     except json.JSONDecodeError as exc:
         raise EvalError(f"{method} {path} returned non-JSON response") from exc
+
+
+def request_binary(
+    method: str,
+    base_url: str,
+    path: str,
+    token: str | None = None,
+    timeout: int = 180,
+) -> tuple[bytes, dict[str, str]]:
+    """发送二进制请求，并返回响应体与小写响应头。"""
+    headers = {"Accept": "image/png"}
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    req = Request(
+        f"{base_url}{path}",
+        headers=headers,
+        method=method,
+    )
+    try:
+        with urlopen(req, timeout=timeout) as resp:
+            return resp.read(), {
+                key.lower(): value
+                for key, value in resp.headers.items()
+            }
+    except HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="replace")
+        raise EvalError(
+            f"{method} {path} failed: HTTP {exc.code} {detail}",
+        ) from exc
+    except URLError as exc:
+        raise EvalError(f"{method} {path} failed: {exc}") from exc
 
 
 def request_multipart_upload(
@@ -531,6 +577,66 @@ def get_source_chunk_context(
     )
 
 
+def inspect_pdf_page_preview(
+    *,
+    preview_content: bytes,
+    response_headers: dict[str, str],
+    pdf_content: bytes,
+) -> PdfPagePreviewEvidence:
+    """将预览 PNG 与原 PDF 各页渲染结果比较，确认返回的真实页码。"""
+    try:
+        with Image.open(BytesIO(preview_content)) as preview_source:
+            if preview_source.format != "PNG":
+                raise EvalError(
+                    f"PDF 页面预览不是 PNG：format={preview_source.format}",
+                )
+            preview = preview_source.convert("RGB")
+    except (OSError, ValueError) as exc:
+        raise EvalError("PDF 页面预览无法解析为有效 PNG") from exc
+
+    page_differences: dict[int, float] = {}
+    document = pymupdf.open(stream=pdf_content, filetype="pdf")
+    try:
+        for page_index in range(document.page_count):
+            page = document.load_page(page_index)
+            max_edge = max(page.rect.width, page.rect.height)
+            scale = min(2.0, 1800 / max_edge) if max_edge > 0 else 1.0
+            pixmap = page.get_pixmap(
+                matrix=pymupdf.Matrix(scale, scale),
+                colorspace=pymupdf.csRGB,
+                alpha=False,
+            )
+            with Image.open(BytesIO(pixmap.tobytes("png"))) as reference_source:
+                reference = reference_source.convert("RGB")
+                if reference.size != preview.size:
+                    reference = reference.resize(
+                        preview.size,
+                        Image.Resampling.LANCZOS,
+                    )
+                channel_means = ImageStat.Stat(
+                    ImageChops.difference(preview, reference),
+                ).mean
+                page_differences[page_index + 1] = round(
+                    sum(channel_means) / len(channel_means) / 255,
+                    6,
+                )
+    finally:
+        document.close()
+
+    if not page_differences:
+        raise EvalError("原 PDF 没有可用于预览比对的页面")
+    closest_page_number = min(page_differences, key=page_differences.__getitem__)
+    return PdfPagePreviewEvidence(
+        content_type=response_headers.get("content-type", ""),
+        cache_control=response_headers.get("cache-control", ""),
+        content_disposition=response_headers.get("content-disposition", ""),
+        width=preview.width,
+        height=preview.height,
+        closest_page_number=closest_page_number,
+        page_mean_differences=page_differences,
+    )
+
+
 def build_temp_markdown_file(run_id: str) -> tuple[str, str, str, str]:
     """构建本轮评测专用的唯一 Markdown 文件名、正文和查询关键词。"""
     keyword = f"FirstRAGIndexingEval-{run_id}"
@@ -704,6 +810,7 @@ def evaluate_mixed_pdf_result(
     source_context: dict[str, Any] | None,
     expected_filename: str,
     expected_keywords: tuple[str, str, str],
+    page_preview: PdfPagePreviewEvidence | None,
 ) -> list[dict[str, Any]]:
     """生成 mixed PDF 页码、解析方式和 chunk 页序检查项。"""
     native_start, scanned_keyword, native_end = expected_keywords
@@ -754,6 +861,16 @@ def evaluate_mixed_pdf_result(
         all(page_number in page_chunk_indexes for page_number in (1, 2, 3))
         and max(page_chunk_indexes[1]) < min(page_chunk_indexes[2])
         and max(page_chunk_indexes[2]) < min(page_chunk_indexes[3])
+    )
+    preview_differences = (
+        page_preview.page_mean_differences
+        if page_preview is not None
+        else {}
+    )
+    sorted_preview_differences = sorted(preview_differences.values())
+    preview_has_clear_page_match = (
+        len(sorted_preview_differences) >= 2
+        and sorted_preview_differences[1] - sorted_preview_differences[0] >= 0.002
     )
 
     return [
@@ -827,6 +944,54 @@ def evaluate_mixed_pdf_result(
             "expected": "page 1 chunks < page 2 chunks < page 3 chunks",
             "actual": page_chunk_indexes,
         },
+        {
+            "name": "mixed_pdf_page_preview_is_private_png",
+            "passed": bool(
+                page_preview is not None
+                and page_preview.content_type.lower().startswith("image/png")
+                and "private" in page_preview.cache_control.lower()
+                and page_preview.width > 0
+                and page_preview.height > 0
+                and max(page_preview.width, page_preview.height) <= 1800
+            ),
+            "expected": {
+                "content_type": "image/png",
+                "cache_control": "private",
+                "max_dimension": 1800,
+            },
+            "actual": (
+                {
+                    "content_type": page_preview.content_type,
+                    "cache_control": page_preview.cache_control,
+                    "content_disposition": page_preview.content_disposition,
+                    "width": page_preview.width,
+                    "height": page_preview.height,
+                }
+                if page_preview is not None
+                else None
+            ),
+        },
+        {
+            "name": "mixed_pdf_page_preview_matches_page_2",
+            "passed": bool(
+                page_preview is not None
+                and page_preview.closest_page_number
+                == MIXED_PDF_SCANNED_PAGE_NUMBER
+                and preview_has_clear_page_match
+            ),
+            "expected": {
+                "closest_page_number": MIXED_PDF_SCANNED_PAGE_NUMBER,
+                "minimum_difference_margin": 0.002,
+            },
+            "actual": (
+                {
+                    "closest_page_number": page_preview.closest_page_number,
+                    "page_mean_differences": preview_differences,
+                }
+                if page_preview is not None
+                else None
+            ),
+        },
     ]
 
 
@@ -841,6 +1006,7 @@ def evaluate_result(
     file_kind: str = "markdown",
     source_context: dict[str, Any] | None = None,
     mixed_pdf_keywords: tuple[str, str, str] | None = None,
+    page_preview: PdfPagePreviewEvidence | None = None,
 ) -> list[dict[str, Any]]:
     """生成本轮 indexing eval 检查项。"""
     source_names = [
@@ -931,6 +1097,7 @@ def evaluate_result(
                 if mixed_pdf_keywords is not None
                 else ("", expected_keyword, "")
             ),
+            page_preview=page_preview,
         ))
     return checks
 
@@ -948,11 +1115,12 @@ def serialize_run_record(
     cleanup_done: bool,
     file_kind: str = "markdown",
     source_context: dict[str, Any] | None = None,
+    page_preview: PdfPagePreviewEvidence | None = None,
 ) -> dict[str, Any]:
     """构建历史 JSON 记录。"""
     diagnostics = compact_diagnostics(chat_result.retrieval)
     return {
-        "schema_version": 2,
+        "schema_version": 3,
         "generated_at": generated_at.isoformat(timespec="seconds"),
         "base_url": base_url,
         "knowledge_base": {
@@ -1000,6 +1168,19 @@ def serialize_run_record(
                 if isinstance(chunk, dict)
             ],
         } if isinstance(source_context, dict) else None,
+        "page_preview": (
+            {
+                "content_type": page_preview.content_type,
+                "cache_control": page_preview.cache_control,
+                "content_disposition": page_preview.content_disposition,
+                "width": page_preview.width,
+                "height": page_preview.height,
+                "closest_page_number": page_preview.closest_page_number,
+                "page_mean_differences": page_preview.page_mean_differences,
+            }
+            if page_preview is not None
+            else None
+        ),
         "checks": checks,
         "passed": all(check["passed"] for check in checks),
         "cleanup_done": cleanup_done,
@@ -1113,6 +1294,22 @@ def write_report(
                 ),
             )
 
+    page_preview = run_record.get("page_preview")
+    if isinstance(page_preview, dict):
+        lines.extend([
+            "",
+            "## PDF 页预览",
+            "",
+            f"- Content-Type：{page_preview.get('content_type') or '—'}",
+            f"- Cache-Control：{page_preview.get('cache_control') or '—'}",
+            "- 尺寸：{width}×{height}".format(
+                width=page_preview.get("width"),
+                height=page_preview.get("height"),
+            ),
+            f"- 最匹配原始页：第 {page_preview.get('closest_page_number')} 页",
+            f"- 各页平均像素差：{page_preview.get('page_mean_differences')}",
+        ])
+
     lines.extend([
         "",
         "## 答案预览",
@@ -1160,6 +1357,7 @@ def main() -> int:
     uploaded_file_id: str | None = None
     original_retrieval_settings: dict[str, Any] | None = None
     source_context: dict[str, Any] | None = None
+    page_preview: PdfPagePreviewEvidence | None = None
     retrieval_settings_restored = False
     cleanup_verified = False
     cleanup_done = False
@@ -1251,6 +1449,23 @@ def main() -> int:
                     chunk_index=int(scanned_source["chunk_index"]),
                     timeout=args.timeout,
                 )
+                preview_content, preview_headers = request_binary(
+                    "GET",
+                    base_url,
+                    (
+                        f"/chat/knowledge-files/{uploaded_file_id}/pages/"
+                        f"{MIXED_PDF_SCANNED_PAGE_NUMBER}/preview"
+                    ),
+                    token=token,
+                    timeout=args.timeout,
+                )
+                if not isinstance(file_content, bytes):
+                    raise EvalError("mixed PDF fixture 不是二进制内容")
+                page_preview = inspect_pdf_page_preview(
+                    preview_content=preview_content,
+                    response_headers=preview_headers,
+                    pdf_content=file_content,
+                )
         checks = evaluate_result(
             upload_response=upload_response,
             file_record=file_record,
@@ -1261,6 +1476,7 @@ def main() -> int:
             file_kind=args.file_kind,
             source_context=source_context,
             mixed_pdf_keywords=mixed_pdf_keywords,
+            page_preview=page_preview,
         )
     finally:
         if original_retrieval_settings is not None:
@@ -1332,6 +1548,7 @@ def main() -> int:
         cleanup_done=cleanup_done,
         file_kind=args.file_kind,
         source_context=source_context,
+        page_preview=page_preview,
     )
     history_path = None
     if not args.no_history:
