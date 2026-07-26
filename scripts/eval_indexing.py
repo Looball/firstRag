@@ -16,6 +16,8 @@ from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
+import pymupdf
+
 
 DEFAULT_REPORT_PATH = Path("docs/evals/latest_indexing_eval_report.md")
 DEFAULT_RUNS_DIR = Path("docs/evals/indexing_runs")
@@ -39,6 +41,8 @@ MINIMAL_PNG_BYTES = (
     b"\x00\x03\x03\x02\x00\xef\xbf\xa7\xdb"
     b"\x00\x00\x00\x00IEND\xaeB`\x82"
 )
+MIXED_PDF_FILE_KIND = "mixed-pdf"
+MIXED_PDF_SCANNED_PAGE_NUMBER = 2
 
 
 class EvalError(RuntimeError):
@@ -123,10 +127,11 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--file-kind",
-        choices=("markdown", "image"),
+        choices=("markdown", "image", MIXED_PDF_FILE_KIND),
         default=os.getenv("FIRSTRAG_INDEXING_EVAL_FILE_KIND", "markdown"),
         help=(
-            "Temporary file kind. Use image to exercise PNG + vision parsing; "
+            "Temporary file kind. Use image for vision parsing or mixed-pdf "
+            "for native text + OCR page and source-location checks; "
             "default: markdown."
         ),
     )
@@ -509,6 +514,23 @@ def update_retrieval_settings(
     )
 
 
+def get_source_chunk_context(
+    base_url: str,
+    token: str,
+    file_id: str,
+    chunk_index: int,
+    timeout: int,
+) -> dict[str, Any]:
+    """读取引用目标及前后三个 chunk，验证页码与解析方式。"""
+    return request_json(
+        "GET",
+        base_url,
+        f"/chat/knowledge-files/{file_id}/chunks/{chunk_index}?radius=3",
+        token=token,
+        timeout=timeout,
+    )
+
+
 def build_temp_markdown_file(run_id: str) -> tuple[str, str, str, str]:
     """构建本轮评测专用的唯一 Markdown 文件名、正文和查询关键词。"""
     keyword = f"FirstRAGIndexingEval-{run_id}"
@@ -530,10 +552,101 @@ def build_temp_image_file(run_id: str) -> tuple[str, bytes, str, str]:
     return filename, MINIMAL_PNG_BYTES, "image/png", keyword
 
 
+def build_mixed_pdf_keywords(run_id: str) -> tuple[str, str, str]:
+    """返回三页 PDF 的 native、scan、native 唯一标识。"""
+    short_code = run_id.rsplit("-", maxsplit=1)[-1].upper()
+    return (
+        f"T083 NATIVE START {short_code}",
+        f"T083 SCAN CODE {short_code}",
+        f"T083 NATIVE END {short_code}",
+    )
+
+
+def _insert_pdf_text_lines(
+    page: pymupdf.Page,
+    title: str,
+    lines: tuple[str, ...],
+) -> None:
+    """以安全页边距绘制清晰的验收页标题和正文。"""
+    page.insert_text(
+        (54, 86),
+        title,
+        fontname="helv",
+        fontsize=22,
+        color=(0.05, 0.13, 0.18),
+    )
+    for line_index, line in enumerate(lines):
+        page.insert_text(
+            (54, 150 + line_index * 48),
+            line,
+            fontname="helv",
+            fontsize=22 if line_index == 0 else 18,
+            color=(0, 0, 0),
+        )
+    page.draw_line(
+        (54, 108),
+        (541, 108),
+        color=(0.16, 0.45, 0.40),
+        width=1.4,
+    )
+
+
+def build_temp_mixed_pdf_file(run_id: str) -> tuple[str, bytes, str, str]:
+    """创建 native、scan、native 三页混合 PDF fixture。"""
+    native_start, scanned_keyword, native_end = build_mixed_pdf_keywords(run_id)
+    document = pymupdf.open()
+    scan_source = pymupdf.open()
+    try:
+        native_start_page = document.new_page(width=595, height=842)
+        _insert_pdf_text_lines(
+            native_start_page,
+            "FirstRAG Mixed PDF - Native Page 1",
+            (
+                native_start,
+                "This page must use the native text parser.",
+            ),
+        )
+
+        scan_source_page = scan_source.new_page(width=595, height=842)
+        _insert_pdf_text_lines(
+            scan_source_page,
+            "FirstRAG Mixed PDF - Scanned Page 2",
+            (
+                scanned_keyword,
+                "This target exists only in the raster image.",
+            ),
+        )
+        scan_image = scan_source_page.get_pixmap(
+            dpi=220,
+            alpha=False,
+        ).tobytes("png")
+        scanned_page = document.new_page(width=595, height=842)
+        scanned_page.insert_image(scanned_page.rect, stream=scan_image)
+
+        native_end_page = document.new_page(width=595, height=842)
+        _insert_pdf_text_lines(
+            native_end_page,
+            "FirstRAG Mixed PDF - Native Page 3",
+            (
+                native_end,
+                "This page must remain after the OCR page.",
+            ),
+        )
+        pdf_bytes = document.tobytes(garbage=4, deflate=True)
+    finally:
+        scan_source.close()
+        document.close()
+
+    filename = f"firstrag-mixed-pdf-indexing-eval-{run_id}.pdf"
+    return filename, pdf_bytes, "application/pdf", scanned_keyword
+
+
 def build_temp_file(run_id: str, file_kind: str) -> tuple[str, str | bytes, str, str]:
     """按评测类型构建临时文件。"""
     if file_kind == "image":
         return build_temp_image_file(run_id)
+    if file_kind == MIXED_PDF_FILE_KIND:
+        return build_temp_mixed_pdf_file(run_id)
     return build_temp_markdown_file(run_id)
 
 
@@ -566,6 +679,157 @@ def compact_diagnostics(retrieval: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _context_page_matches(
+    chunks: list[dict[str, Any]],
+    *,
+    page_number: int,
+    parse_method: str,
+    expected_keyword: str,
+) -> bool:
+    """判断 chunk context 是否包含指定页、解析方式和唯一标识。"""
+    expected_keyword = expected_keyword.casefold()
+    return any(
+        chunk.get("location", {}).get("page_number") == page_number
+        and chunk.get("location", {}).get("pdf_parse_method") == parse_method
+        and expected_keyword in str(chunk.get("content") or "").casefold()
+        for chunk in chunks
+        if isinstance(chunk, dict)
+        and isinstance(chunk.get("location"), dict)
+    )
+
+
+def evaluate_mixed_pdf_result(
+    *,
+    chat_result: ChatResult,
+    source_context: dict[str, Any] | None,
+    expected_filename: str,
+    expected_keywords: tuple[str, str, str],
+) -> list[dict[str, Any]]:
+    """生成 mixed PDF 页码、解析方式和 chunk 页序检查项。"""
+    native_start, scanned_keyword, native_end = expected_keywords
+    uploaded_sources = [
+        source
+        for source in chat_result.sources
+        if str(source.get("file_name") or "") == expected_filename
+    ]
+    scanned_sources = [
+        source
+        for source in uploaded_sources
+        if source.get("page_number") == MIXED_PDF_SCANNED_PAGE_NUMBER
+        and source.get("pdf_parse_method") == "ocr"
+    ]
+    chunks = (
+        list(source_context.get("chunks") or [])
+        if isinstance(source_context, dict)
+        else []
+    )
+    target_chunks = [
+        chunk
+        for chunk in chunks
+        if isinstance(chunk, dict) and chunk.get("is_target") is True
+    ]
+    target_is_scanned_page = any(
+        isinstance(chunk.get("location"), dict)
+        and chunk["location"].get("page_number") == MIXED_PDF_SCANNED_PAGE_NUMBER
+        and chunk["location"].get("pdf_parse_method") == "ocr"
+        for chunk in target_chunks
+    )
+    page_chunk_indexes: dict[int, list[int]] = {}
+    for chunk in chunks:
+        if not isinstance(chunk, dict) or not isinstance(
+            chunk.get("location"),
+            dict,
+        ):
+            continue
+        page_number = chunk["location"].get("page_number")
+        chunk_index = chunk.get("chunk_index")
+        if (
+            isinstance(page_number, int)
+            and not isinstance(page_number, bool)
+            and isinstance(chunk_index, int)
+            and not isinstance(chunk_index, bool)
+        ):
+            page_chunk_indexes.setdefault(page_number, []).append(chunk_index)
+    page_order_is_stable = (
+        all(page_number in page_chunk_indexes for page_number in (1, 2, 3))
+        and max(page_chunk_indexes[1]) < min(page_chunk_indexes[2])
+        and max(page_chunk_indexes[2]) < min(page_chunk_indexes[3])
+    )
+
+    return [
+        {
+            "name": "mixed_pdf_source_points_to_scanned_page",
+            "passed": bool(scanned_sources),
+            "expected": {
+                "page_number": MIXED_PDF_SCANNED_PAGE_NUMBER,
+                "pdf_parse_method": "ocr",
+            },
+            "actual": [
+                {
+                    "page_number": source.get("page_number"),
+                    "pdf_parse_method": source.get("pdf_parse_method"),
+                    "chunk_index": source.get("chunk_index"),
+                }
+                for source in uploaded_sources
+            ],
+        },
+        {
+            "name": "mixed_pdf_context_target_is_scanned_page",
+            "passed": target_is_scanned_page,
+            "expected": {
+                "page_number": MIXED_PDF_SCANNED_PAGE_NUMBER,
+                "pdf_parse_method": "ocr",
+            },
+            "actual": [
+                {
+                    "chunk_index": chunk.get("chunk_index"),
+                    "location": chunk.get("location"),
+                }
+                for chunk in target_chunks
+            ],
+        },
+        {
+            "name": "mixed_pdf_context_has_native_page_1",
+            "passed": _context_page_matches(
+                chunks,
+                page_number=1,
+                parse_method="native_text",
+                expected_keyword=native_start,
+            ),
+            "expected": native_start,
+            "actual": page_chunk_indexes.get(1, []),
+        },
+        {
+            "name": "mixed_pdf_context_has_ocr_page_2",
+            "passed": _context_page_matches(
+                chunks,
+                page_number=2,
+                parse_method="ocr",
+                expected_keyword=scanned_keyword,
+            ),
+            "expected": scanned_keyword,
+            "actual": page_chunk_indexes.get(2, []),
+        },
+        {
+            "name": "mixed_pdf_context_has_native_page_3",
+            "passed": _context_page_matches(
+                chunks,
+                page_number=3,
+                parse_method="native_text",
+                expected_keyword=native_end,
+            ),
+            "expected": native_end,
+            "actual": page_chunk_indexes.get(3, []),
+        },
+        {
+            "name": "mixed_pdf_context_preserves_page_order",
+            "passed": page_order_is_stable,
+            "expected": "page 1 chunks < page 2 chunks < page 3 chunks",
+            "actual": page_chunk_indexes,
+        },
+    ]
+
+
 def evaluate_result(
     *,
     upload_response: dict[str, Any],
@@ -574,6 +838,9 @@ def evaluate_result(
     chat_result: ChatResult,
     expected_filename: str,
     expected_keyword: str,
+    file_kind: str = "markdown",
+    source_context: dict[str, Any] | None = None,
+    mixed_pdf_keywords: tuple[str, str, str] | None = None,
 ) -> list[dict[str, Any]]:
     """生成本轮 indexing eval 检查项。"""
     source_names = [
@@ -595,7 +862,7 @@ def evaluate_result(
     )
     answer = chat_result.answer
     diagnostics = compact_diagnostics(chat_result.retrieval)
-    return [
+    checks = [
         {
             "name": "upload_success",
             "passed": bool(upload_response.get("success")),
@@ -654,6 +921,18 @@ def evaluate_result(
             "actual": answer[:500],
         },
     ]
+    if file_kind == MIXED_PDF_FILE_KIND:
+        checks.extend(evaluate_mixed_pdf_result(
+            chat_result=chat_result,
+            source_context=source_context,
+            expected_filename=expected_filename,
+            expected_keywords=(
+                mixed_pdf_keywords
+                if mixed_pdf_keywords is not None
+                else ("", expected_keyword, "")
+            ),
+        ))
+    return checks
 
 
 def serialize_run_record(
@@ -667,11 +946,13 @@ def serialize_run_record(
     chat_result: ChatResult,
     checks: list[dict[str, Any]],
     cleanup_done: bool,
+    file_kind: str = "markdown",
+    source_context: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """构建历史 JSON 记录。"""
     diagnostics = compact_diagnostics(chat_result.retrieval)
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "generated_at": generated_at.isoformat(timespec="seconds"),
         "base_url": base_url,
         "knowledge_base": {
@@ -681,6 +962,7 @@ def serialize_run_record(
         "file": {
             "id": file_id,
             "original_name": filename,
+            "kind": file_kind,
         },
         "job": {
             "id": job.get("id"),
@@ -697,12 +979,27 @@ def serialize_run_record(
                     "file_id": source.get("file_id"),
                     "file_name": source.get("file_name"),
                     "chunk_index": source.get("chunk_index"),
+                    "page_number": source.get("page_number"),
+                    "pdf_parse_method": source.get("pdf_parse_method"),
                     "retrieval_sources": source.get("retrieval_sources") or [],
                     "rerank_score": source.get("rerank_score"),
                 }
                 for source in chat_result.sources
             ],
         },
+        "source_context": {
+            "target_chunk_index": source_context.get("target_chunk_index"),
+            "chunks": [
+                {
+                    "chunk_index": chunk.get("chunk_index"),
+                    "location": chunk.get("location") or {},
+                    "content_preview": str(chunk.get("content") or "")[:300],
+                    "is_target": chunk.get("is_target") is True,
+                }
+                for chunk in source_context.get("chunks") or []
+                if isinstance(chunk, dict)
+            ],
+        } if isinstance(source_context, dict) else None,
         "checks": checks,
         "passed": all(check["passed"] for check in checks),
         "cleanup_done": cleanup_done,
@@ -737,6 +1034,7 @@ def write_report(
         f"- 结果：{'通过' if run_record['passed'] else '未通过'}",
         f"- 知识库：{run_record['knowledge_base']['name']}",
         f"- 文件：{run_record['file']['original_name']}",
+        f"- 文件类型：{run_record['file'].get('kind', 'markdown')}",
         f"- 文件 ID：{run_record['file']['id']}",
         f"- Job：{run_record['job']['id']} / {run_record['job']['status']}",
         f"- 清理关联：{'是' if run_record['cleanup_done'] else '否'}",
@@ -768,7 +1066,11 @@ def write_report(
         f"- 检索通道：{diagnostics['retrieval_sources'] or '—'}",
         f"- 向量降级：{diagnostics['vector_degraded']}",
         f"- 向量错误：{diagnostics['vector_errors'] or '—'}",
-        f"- LLM：provider={diagnostics['llm'].get('provider', '—')}，model={diagnostics['llm'].get('model', '—')}，tokens={diagnostics['llm'].get('total_tokens') or '—'}",
+        "- LLM：provider={provider}，model={model}，tokens={tokens}".format(
+            provider=diagnostics["llm"].get("provider", "—"),
+            model=diagnostics["llm"].get("model", "—"),
+            tokens=diagnostics["llm"].get("total_tokens") or "—",
+        ),
         f"- 判断原因：{diagnostics['reason'] or '—'}",
         "",
         "## 引用",
@@ -777,16 +1079,39 @@ def write_report(
     if chat["sources"]:
         for index, source in enumerate(chat["sources"], 1):
             lines.append(
-                "- {index}. {file_name} / chunk #{chunk_index} / sources={sources} / rerank={rerank}".format(
+                "- {index}. {file_name} / chunk #{chunk_index} / page={page_number} "
+                "/ method={parse_method} / sources={sources} / rerank={rerank}".format(
                     index=index,
                     file_name=source.get("file_name") or "未知文件",
                     chunk_index=source.get("chunk_index", "—"),
+                    page_number=source.get("page_number", "—"),
+                    parse_method=source.get("pdf_parse_method", "—"),
                     sources=source.get("retrieval_sources") or [],
                     rerank=source.get("rerank_score", "—"),
                 ),
             )
     else:
         lines.append("- 无")
+
+    source_context = run_record.get("source_context")
+    if isinstance(source_context, dict):
+        lines.extend([
+            "",
+            "## 引用原文上下文",
+            "",
+            f"- Target chunk: {source_context.get('target_chunk_index')}",
+        ])
+        for chunk in source_context.get("chunks") or []:
+            location = chunk.get("location") or {}
+            lines.append(
+                "- chunk #{chunk_index}: page={page_number}, "
+                "method={parse_method}, target={is_target}".format(
+                    chunk_index=chunk.get("chunk_index"),
+                    page_number=location.get("page_number"),
+                    parse_method=location.get("pdf_parse_method"),
+                    is_target=chunk.get("is_target"),
+                ),
+            )
 
     lines.extend([
         "",
@@ -812,6 +1137,11 @@ def main() -> int:
         run_id,
         args.file_kind,
     )
+    mixed_pdf_keywords = (
+        build_mixed_pdf_keywords(run_id)
+        if args.file_kind == MIXED_PDF_FILE_KIND
+        else None
+    )
     token = login(base_url, args.username, args.password, args.timeout)
 
     knowledge_base_data = request_json(
@@ -829,6 +1159,9 @@ def main() -> int:
 
     uploaded_file_id: str | None = None
     original_retrieval_settings: dict[str, Any] | None = None
+    source_context: dict[str, Any] | None = None
+    retrieval_settings_restored = False
+    cleanup_verified = False
     cleanup_done = False
     try:
         original_retrieval_settings = get_retrieval_settings(
@@ -897,6 +1230,27 @@ def main() -> int:
             question=question,
             timeout=args.timeout,
         )
+        if args.file_kind == MIXED_PDF_FILE_KIND:
+            scanned_source = next(
+                (
+                    source
+                    for source in chat_result.sources
+                    if str(source.get("file_name") or "") == filename
+                    and source.get("page_number")
+                    == MIXED_PDF_SCANNED_PAGE_NUMBER
+                    and isinstance(source.get("chunk_index"), int)
+                    and not isinstance(source.get("chunk_index"), bool)
+                ),
+                None,
+            )
+            if scanned_source is not None:
+                source_context = get_source_chunk_context(
+                    base_url=base_url,
+                    token=token,
+                    file_id=uploaded_file_id,
+                    chunk_index=int(scanned_source["chunk_index"]),
+                    timeout=args.timeout,
+                )
         checks = evaluate_result(
             upload_response=upload_response,
             file_record=file_record,
@@ -904,6 +1258,9 @@ def main() -> int:
             chat_result=chat_result,
             expected_filename=filename,
             expected_keyword=keyword,
+            file_kind=args.file_kind,
+            source_context=source_context,
+            mixed_pdf_keywords=mixed_pdf_keywords,
         )
     finally:
         if original_retrieval_settings is not None:
@@ -914,6 +1271,15 @@ def main() -> int:
                     knowledge_base_id=knowledge_base_id,
                     settings=original_retrieval_settings,
                     timeout=args.timeout,
+                )
+                restored_settings = get_retrieval_settings(
+                    base_url=base_url,
+                    token=token,
+                    knowledge_base_id=knowledge_base_id,
+                    timeout=args.timeout,
+                )
+                retrieval_settings_restored = (
+                    restored_settings == original_retrieval_settings
                 )
             except Exception as exc:
                 print(
@@ -929,9 +1295,30 @@ def main() -> int:
                     file_id=uploaded_file_id,
                     timeout=args.timeout,
                 )
-                cleanup_done = True
+                cleanup_verified = find_file_in_knowledge_base(
+                    base_url=base_url,
+                    token=token,
+                    knowledge_base_id=knowledge_base_id,
+                    file_id=uploaded_file_id,
+                    timeout=args.timeout,
+                ) is None
+                cleanup_done = cleanup_verified
             except EvalError as exc:
                 print(f"清理临时文件关联失败：{exc}", file=sys.stderr)
+
+    checks.append({
+        "name": "retrieval_settings_restored",
+        "passed": retrieval_settings_restored,
+        "expected": True,
+        "actual": retrieval_settings_restored,
+    })
+    if not args.keep_file:
+        checks.append({
+            "name": "temporary_file_relation_removed",
+            "passed": cleanup_verified,
+            "expected": True,
+            "actual": cleanup_verified,
+        })
 
     run_record = serialize_run_record(
         generated_at=generated_at,
@@ -943,6 +1330,8 @@ def main() -> int:
         chat_result=chat_result,
         checks=checks,
         cleanup_done=cleanup_done,
+        file_kind=args.file_kind,
+        source_context=source_context,
     )
     history_path = None
     if not args.no_history:

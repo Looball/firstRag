@@ -88,6 +88,7 @@
 | `PLAN-20260723-01` | 2026-07-23 | `Done` | 建立覆盖多类扫描质量的 OCR 评测集和真实 Tesseract 回归门禁。 | `T-080` |
 | `PLAN-20260723-02` | 2026-07-23 | `Done` | 保存 OCR CI 评测历史并展示跨运行质量与耗时趋势。 | `T-081` |
 | `PLAN-20260726-01` | 2026-07-26 | `Done` | 扩展 OCR 评测集，覆盖更接近真实扫描件的几何、光照、噪点、字号和表格退化。 | `T-082` |
+| `PLAN-20260726-02` | 2026-07-26 | `Doing` | 为原生文本页与扫描页混合的多页 PDF 增加真实索引、OCR、引用页码和原文上下文回归。 | `T-083` |
 
 ## 任务总览
 
@@ -175,6 +176,7 @@
 | `T-080` | `PLAN-20260723-01` | `P1` | `Done` | 建立 OCR 评测集与自动回归门禁 | 2026-07-23 | `175cc61` |
 | `T-081` | `PLAN-20260723-02` | `P1` | `Done` | 持久化 OCR CI 评测历史并展示趋势 | 2026-07-23 | `12852ff` |
 | `T-082` | `PLAN-20260726-01` | `P1` | `Done` | 扩展 OCR 真实扫描退化评测集 | 2026-07-26 | `11fc7f4` |
+| `T-083` | `PLAN-20260726-02` | `P1` | `Doing` | 增加混合多页 PDF 端到端索引回归 | — | — |
 
 ## 新计划接入流程
 
@@ -3273,6 +3275,38 @@ conda run -n firstrag python scripts/eval_pdf_ocr.py --artifacts-dir tmp/pdfs/t0
 cd backend && conda run -n firstrag python -m unittest tests.services.test_pdf_ocr_benchmark tests.services.test_pdf_ocr_trend -v
 cd .. && docker compose up -d --build
 docker compose exec -T backend python -m app.services.documents.pdf_ocr_benchmark --json-report /tmp/t082-report.json --markdown-report /tmp/t082-report.md
+conda run -n firstrag python scripts/production_preflight.py --env-file .env --migration-method compose --check-runtime-health
+git diff --check
+```
+
+## T-083 增加混合多页 PDF 端到端索引回归
+
+- 来源计划：`PLAN-20260726-02`
+- 优先级：`P1`
+- 状态：`Doing`
+- 目标：用同一份三页 PDF 验证原生文本页、扫描页 OCR、异步索引、向量/全文检索、回答引用和原文预览元数据能够协同工作，避免单元测试或单页 OCR 门禁通过但真实链路丢失页码。
+- 技术边界：
+  - fixture 只包含固定格式和本轮随机验收标识，不读取、复制或持久化用户文档。
+  - PDF 页序固定为 native text、scanned image、native text；只有第 2 页没有原生文本层，且上传后默认清理知识库关联。
+  - 真实验收继续复用用户已保存的 embedding/LLM 设置，不读取或输出 API Key；临时放宽 retrieval settings 后必须恢复原值。
+  - source 验收必须同时检查文件、页码、`pdf_parse_method`、chunk 上下文和检索通道，不以 job `succeeded` 代替可检索性。
+- 范围：
+  - 为 `scripts/eval_indexing.py` 增加 `mixed-pdf` fixture、查询和 source chunk context 检查。
+  - 报告保存文件类型、目标页引用和三页解析证据，不保存账号、token、API Key 或完整环境变量。
+  - 为 fixture 文本层、页序、引用检查、报告序列化和失败场景增加自动测试。
+  - 更新 indexing eval、OCR/RAG 工作流和部署验收文档。
+- 验收标准：
+  - 生成的三页 PDF 视觉清楚；第 1、3 页可直接提取文字，第 2 页只能通过 OCR 获得目标标识。
+  - Compose worker 完成真实上传和异步索引；第 1、3 页 metadata 为 `native_text`，第 2 页为 `ocr`。
+  - 聊天检索命中临时 PDF，回答包含扫描页标识，引用明确指向第 2 页且至少使用 vector 通道，retrieval 未降级。
+  - source chunk context 同时包含按页序排列的 native/OCR/native 证据，临时 retrieval settings 和文件关联均恢复或清理。
+  - 专项与后端全量测试、Docker Compose、production preflight 和 `git diff --check` 通过。
+- 建议验证命令：
+
+```bash
+FIRSTRAG_EVAL_USERNAME=你的用户名 FIRSTRAG_EVAL_PASSWORD=你的密码 conda run -n firstrag python scripts/eval_indexing.py --file-kind mixed-pdf --no-history --report tmp/t083-report.md
+cd backend && conda run -n firstrag python -m pytest tests/test_eval_indexing_script.py tests/services/test_document_service.py -q
+cd .. && docker compose up -d --build
 conda run -n firstrag python scripts/production_preflight.py --env-file .env --migration-method compose --check-runtime-health
 git diff --check
 ```

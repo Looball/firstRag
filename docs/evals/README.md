@@ -318,13 +318,14 @@ scripts/rag_eval_gate.sh
 ```text
 登录
   -> 选择默认知识库
-  -> 上传临时 Markdown 文件，或通过 `--file-kind image` 上传最小 PNG 图片样例
+  -> 上传临时 Markdown、最小 PNG 或 native/scan/native 三页混合 PDF
   -> auto_index 提交 vector index job
   -> 等待 worker 完成
   -> 确认文件状态为 indexed
   -> 发起聊天
   -> 确认 Sources 命中刚上传的临时文件，且该 source 包含 vector 通道
   -> 确认本轮聊天没有 vector_degraded 或 vector_errors
+  -> mixed PDF 模式额外确认第 2 页 OCR 引用和三页 chunk context
   -> 默认解除临时文件与知识库关联
 ```
 
@@ -361,6 +362,18 @@ conda run -n firstrag python scripts/eval_indexing.py \
 ```
 
 也可以通过 `FIRSTRAG_INDEXING_EVAL_FILE_KIND=image` 设置默认文件类型。图片模式会上传一个最小 PNG 样例，验证图片上传、vision 解析、向量化、Sources 命中和 vector 通道；若当前聊天模型不支持 vision，评测会失败并暴露相应恢复提示。
+
+需要覆盖 PDF 原生文本与 OCR 混合链路时运行：
+
+```bash
+FIRSTRAG_EVAL_USERNAME=你的用户名 \
+FIRSTRAG_EVAL_PASSWORD=你的密码 \
+conda run -n firstrag python scripts/eval_indexing.py \
+  --base-url http://127.0.0.1:8000 \
+  --file-kind mixed-pdf
+```
+
+`mixed-pdf` 会生成三页 `native_text -> ocr -> native_text` fixture，并查询只存在于第 2 页栅格图中的唯一标识。除通用 indexing 检查外，门禁还要求回答引用明确指向第 2 页且 `pdf_parse_method=ocr`，source chunk context 同时包含第 1、3 页 native 标识，并保持全局 chunk index 页序。报告只保存合成标识、受控 source metadata 和每页最多 300 字符预览，不保存账号、token 或 API Key。
 
 默认情况下，脚本只会解除临时文件和知识库的关联，不会删除全局文件记录、上传目录、chunks 或 Chroma 数据，避免误删用户数据。如果需要保留临时文件关联，可加：
 

@@ -33,6 +33,8 @@
 
 OCR 参数回归默认由 `pdf_ocr_eval_v2.json` 定义的合成评测集约束。门禁生成没有原生文本层的正常、90° 旋转、低对比度、模糊、中英文混排、轻度倾斜、盐椒噪点、侧边阴影、小字号和表格 PDF，并直接复用生产 OCR engine 比较基线与自适应结果；质量、策略和耗时不满足阈值时 CI 失败。报告的 suite fingerprint 随 case、阈值或退化参数变化，历史趋势只比较相同 suite。该评测不进入上传、数据库、chunk 或 embedding 链路。
 
+真实混合 PDF 回归由 `scripts/eval_indexing.py --file-kind mixed-pdf` 执行。fixture 固定为三页 `native_text -> scanned image -> native_text`，上传后等待 Compose worker 完成真实 OCR、chunk、embedding、Chroma 和 PostgreSQL 写入，再查询只存在于第 2 页扫描图中的唯一标识。门禁要求 source 指向第 2 页且 `pdf_parse_method=ocr`，同时通过 source chunk context 验证第 1、3 页仍为 `native_text`、全局 chunk index 按页递增；该模式需要登录账号及已保存的 LLM/embedding 配置，结束时恢复 retrieval settings 并默认解除临时文件关联。
+
 索引成功时，扫描页的本次 Tesseract 原始结果独立写入 `knowledge_file_ocr_history`，不随 `knowledge_file_chunks` 替换而丢失。页级 attempt 从最近历史递增；迁移前旧文件在下一次重建前从上一版 chunks 写入 baseline。历史保留 confidence、quality、word count、文本 SHA、trigger、source job 和 correction revision，前端据此判断重识别是改善、下降、持平还是仅文字发生变化。
 
 ## 聊天生成

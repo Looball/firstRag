@@ -166,6 +166,17 @@ scripts/acceptance_check.sh
 - 修改 eval 脚本、case 或质量门禁。
 - 修改用户模型配置或 API Key 加密链路。
 
+修改 PDF 分页解析、OCR fallback、chunk 页码 metadata、source 引用或原文预览链路时，额外运行混合 PDF 模式：
+
+```bash
+FIRSTRAG_EVAL_USERNAME=你的用户名 \
+FIRSTRAG_EVAL_PASSWORD=你的密码 \
+conda run -n firstrag python scripts/eval_indexing.py \
+  --file-kind mixed-pdf
+```
+
+该模式要求 Compose worker 可用，并验证三页 `native_text -> ocr -> native_text` 的解析方式、第 2 页 source 引用、vector 通道和 source chunk context。
+
 常用跳过开关：
 
 | 开关 | 说明 |
