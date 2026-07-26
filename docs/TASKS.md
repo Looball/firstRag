@@ -87,7 +87,7 @@
 | `PLAN-20260722-05` | 2026-07-22 | `Done` | 为主动 OCR 重识别增加自适应预处理、页面旋转和多 PSM 候选选优。 | `T-079` |
 | `PLAN-20260723-01` | 2026-07-23 | `Done` | 建立覆盖多类扫描质量的 OCR 评测集和真实 Tesseract 回归门禁。 | `T-080` |
 | `PLAN-20260723-02` | 2026-07-23 | `Done` | 保存 OCR CI 评测历史并展示跨运行质量与耗时趋势。 | `T-081` |
-| `PLAN-20260726-01` | 2026-07-26 | `Doing` | 扩展 OCR 评测集，覆盖更接近真实扫描件的几何、光照、噪点、字号和表格退化。 | `T-082` |
+| `PLAN-20260726-01` | 2026-07-26 | `Done` | 扩展 OCR 评测集，覆盖更接近真实扫描件的几何、光照、噪点、字号和表格退化。 | `T-082` |
 
 ## 任务总览
 
@@ -174,7 +174,7 @@
 | `T-079` | `PLAN-20260722-05` | `P1` | `Done` | 增加 OCR 自适应预处理与参数选优 | 2026-07-22 | `005758c` |
 | `T-080` | `PLAN-20260723-01` | `P1` | `Done` | 建立 OCR 评测集与自动回归门禁 | 2026-07-23 | `175cc61` |
 | `T-081` | `PLAN-20260723-02` | `P1` | `Done` | 持久化 OCR CI 评测历史并展示趋势 | 2026-07-23 | `12852ff` |
-| `T-082` | `PLAN-20260726-01` | `P1` | `Doing` | 扩展 OCR 真实扫描退化评测集 | — | — |
+| `T-082` | `PLAN-20260726-01` | `P1` | `Done` | 扩展 OCR 真实扫描退化评测集 | 2026-07-26 | `11fc7f4` |
 
 ## 新计划接入流程
 
@@ -3239,7 +3239,7 @@ git diff --check
 
 - 来源计划：`PLAN-20260726-01`
 - 优先级：`P1`
-- 状态：`Doing`
+- 状态：`Done`
 - 目标：在现有五类合成样本之外，增加倾斜、盐椒噪点、侧边阴影、小字号和表格布局，避免 OCR 参数只对干净的大字号段落有效。
 - 技术边界：
   - 全部样本继续由 versioned manifest 和内置代码确定性生成，只包含固定测试文字，不读取或提交用户文档。
@@ -3257,6 +3257,15 @@ git diff --check
   - 参数越界、非法 layout、非法表格行列和非确定性生成都有自动测试保护。
   - 新增 PDF 的 Poppler PNG 渲染无裁切、重叠、黑块或不可读内容，表格网格与文字清楚，PDF 无原生文本层。
   - OCR 专项、后端全量测试、Docker Compose build/benchmark、production preflight 和 `git diff --check` 通过。
+- 相关提交：`11fc7f4`。
+- 完成记录：
+  - 新增 `pdf_ocr_eval_v2.json`，保留原五类 case，并加入 3.2° 倾斜、固定种子盐椒噪点、64 级侧边阴影、四行 18pt 小字号和 4×3 网格表格；v1 manifest 仍可显式加载复跑。
+  - benchmark schema 支持受限 `lines/table` layout、14–48pt 字号、±8° 倾斜、0–0.05 噪点和 0–0.7 阴影；行文本和表格单元格会在安全边距内自动缩放，非法参数、列数不一致和重复 case id 在渲染前拒绝。
+  - report schema 升级为 v3，并根据完整 manifest 生成稳定 suite fingerprint `manifest-v2-222cf4fe9227eaa2`；历史趋势同时按 suite、runner OS、CPU arch 和 Tesseract 版本隔离，避免与旧五样本记录混算。
+  - 五个新增 PDF 经 Poppler 渲染后逐页视觉检查，文字、阴影、噪点、倾斜和表格网格均清晰，无裁切、重叠或黑块；PyMuPDF 验证全部十个 PDF 均为单页且原生文本长度为 0。
+  - 本机 Tesseract 5.5.2 真实评测 10/10 通过，宏平均相似度 `1.0000`、总耗时 `44.887s`；最终 Compose backend 评测 10/10 通过，宏平均相似度 `1.0000`、总耗时 `33.072s`。
+  - OCR 专项 19 项、后端全量 368 项测试均通过；compileall、Action pin policy（9 个引用）、`git diff --check`、Compose 服务健康、migration `applied=0 skipped=9` 和 production preflight 全部通过。
+  - `docker compose up -d --build` 已完成 backend 镜像构建，但 frontend 的 `node:22-slim` metadata 请求被本机阿里云 Docker mirror 以 HTTP 403 拒绝；随后使用新 backend 镜像和既有 frontend 镜像启动全部服务，不影响本次 OCR 容器门禁。
 - 建议验证命令：
 
 ```bash
