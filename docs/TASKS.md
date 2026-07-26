@@ -92,7 +92,7 @@
 | `PLAN-20260726-03` | 2026-07-26 | `Done` | 验证 OCR 引用页 PNG 预览内容，并让引用弹窗直接展示所引用的扫描页面。 | `T-084` |
 | `PLAN-20260726-04` | 2026-07-26 | `Done` | 将 OCR source 第 2 页 PNG 点击流程固化为可在 CI 重复执行的前端 E2E 回归。 | `T-085` |
 | `PLAN-20260726-05` | 2026-07-26 | `Done` | 固化 OCR source PNG 预览失败、用户重试和 Blob URL 释放的浏览器回归。 | `T-086` |
-| `PLAN-20260726-06` | 2026-07-26 | `Doing` | 固化 OCR source preview 请求进行中关闭弹窗时的异步清理回归。 | `T-087` |
+| `PLAN-20260726-06` | 2026-07-26 | `Done` | 固化 OCR source preview 请求进行中关闭弹窗时的异步清理回归。 | `T-087` |
 
 ## 任务总览
 
@@ -184,7 +184,7 @@
 | `T-084` | `PLAN-20260726-03` | `P1` | `Done` | 验证引用页 PNG 预览并直接展示扫描页面 | 2026-07-26 | `2613fd5` |
 | `T-085` | `PLAN-20260726-04` | `P1` | `Done` | 固化 OCR source 第 2 页 PNG 前端 E2E 回归 | 2026-07-26 | `2724b8b` |
 | `T-086` | `PLAN-20260726-05` | `P1` | `Done` | 覆盖 PNG 预览失败、重试和 Blob URL 释放 E2E | 2026-07-26 | `c09a469` |
-| `T-087` | `PLAN-20260726-06` | `P1` | `Doing` | 覆盖 preview 请求中关闭弹窗的异步清理 E2E | — | — |
+| `T-087` | `PLAN-20260726-06` | `P1` | `Done` | 覆盖 preview 请求中关闭弹窗的异步清理 E2E | 2026-07-26 | `fc5e1a3` |
 
 ## 新计划接入流程
 
@@ -3449,7 +3449,7 @@ git diff --check
 
 - 来源计划：`PLAN-20260726-06`
 - 优先级：`P1`
-- 状态：`Doing`
+- 状态：`Done`
 - 目标：自动验证 OCR source preview 请求尚未返回时关闭弹窗，延迟响应生成的 Blob URL 仍会立即释放，且不会向已关闭界面回写状态。
 - 技术边界：
   - 使用测试控制的 Promise gate 暂停 preview 响应，不依赖固定 sleep 或外部网络延迟。
@@ -3464,6 +3464,14 @@ git diff --check
   - gate 释放后恰好记录一次 Blob URL create 和一次对应 revoke。
   - 页面不会重新显示来源弹窗或失败提示，浏览器 console/page error 为空。
   - E2E、前端单测、lint、production build、Compose 和 production preflight 通过。
+- 相关提交：`fc5e1a3`。
+- 完成记录：
+  - Playwright fixture 新增 `waitBeforePreviewResponse` hook，以测试控制的 Promise gate 暂停成功响应，不使用固定延迟。
+  - 新增异步清理 E2E：确认第 2 页请求已携带 Bearer token 发出后关闭弹窗，再释放 PNG 响应；浏览器记录到同一 `blob:` URL 的一次 create 和一次 revoke。
+  - 延迟响应完成后来源弹窗保持关闭，页面没有错误提示回写，console 与 page error 均为空。
+  - 三条 E2E 并行运行 3/3 通过，前端 87 项单测通过；lint 0 error（保留 2 个既有 `<img>` warning），production build、production npm audit policy 和 Action pin policy 通过。
+  - Compose PostgreSQL、Redis、Chroma healthy，migration `applied=0 skipped=9`，backend、worker、frontend 正常；production preflight 通过。
+  - 应用内浏览器打开重新构建的 Compose frontend，“新对话”工作台唯一可见，console error 为 0。
 - 建议验证命令：
 
 ```bash
