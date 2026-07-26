@@ -91,7 +91,7 @@
 | `PLAN-20260726-02` | 2026-07-26 | `Done` | 为原生文本页与扫描页混合的多页 PDF 增加真实索引、OCR、引用页码和原文上下文回归。 | `T-083` |
 | `PLAN-20260726-03` | 2026-07-26 | `Done` | 验证 OCR 引用页 PNG 预览内容，并让引用弹窗直接展示所引用的扫描页面。 | `T-084` |
 | `PLAN-20260726-04` | 2026-07-26 | `Done` | 将 OCR source 第 2 页 PNG 点击流程固化为可在 CI 重复执行的前端 E2E 回归。 | `T-085` |
-| `PLAN-20260726-05` | 2026-07-26 | `Doing` | 固化 OCR source PNG 预览失败、用户重试和 Blob URL 释放的浏览器回归。 | `T-086` |
+| `PLAN-20260726-05` | 2026-07-26 | `Done` | 固化 OCR source PNG 预览失败、用户重试和 Blob URL 释放的浏览器回归。 | `T-086` |
 
 ## 任务总览
 
@@ -182,7 +182,7 @@
 | `T-083` | `PLAN-20260726-02` | `P1` | `Done` | 增加混合多页 PDF 端到端索引回归 | 2026-07-26 | `749ac0b` |
 | `T-084` | `PLAN-20260726-03` | `P1` | `Done` | 验证引用页 PNG 预览并直接展示扫描页面 | 2026-07-26 | `2613fd5` |
 | `T-085` | `PLAN-20260726-04` | `P1` | `Done` | 固化 OCR source 第 2 页 PNG 前端 E2E 回归 | 2026-07-26 | `2724b8b` |
-| `T-086` | `PLAN-20260726-05` | `P1` | `Doing` | 覆盖 PNG 预览失败、重试和 Blob URL 释放 E2E | — | — |
+| `T-086` | `PLAN-20260726-05` | `P1` | `Done` | 覆盖 PNG 预览失败、重试和 Blob URL 释放 E2E | 2026-07-26 | `c09a469` |
 
 ## 新计划接入流程
 
@@ -3409,7 +3409,7 @@ git diff --check
 
 - 来源计划：`PLAN-20260726-05`
 - 优先级：`P1`
-- 状态：`Doing`
+- 状态：`Done`
 - 目标：自动验证 OCR source 页面预览首次失败时给出可恢复反馈，用户重试后能正常显示 PNG，并在关闭弹窗时释放已创建的 Blob URL。
 - 技术边界：
   - 继续复用 T-085 的本地受控 fixture，不依赖真实账号、API Key、后端或外部网络。
@@ -3425,6 +3425,14 @@ git diff --check
   - 点击重试后第二次 `/pages/2/preview` 成功，图像 `complete=true` 且 natural size 大于 0。
   - 两次请求均携带测试 Bearer token；关闭弹窗后，当前图像 Blob URL 出现对应 revoke 事件。
   - E2E、前端单测、lint、production build、Compose 和 production preflight 通过。
+- 相关提交：`c09a469`。
+- 完成记录：
+  - Playwright fixture 支持通过 `previewFailuresBeforeSuccess` 精确控制前 N 次第 2 页 preview 失败，并为每次请求记录 attempt、Authorization 与 pathname。
+  - 新增失败恢复 E2E：首次返回受控 `502` 后显示错误和“重新加载”，确认失败阶段没有创建 Blob URL；点击后第二次请求成功并解码 `1×1` PNG。
+  - 浏览器启动前包装原生 `URL.createObjectURL` 与 `URL.revokeObjectURL`，测试记录成功图像的实际 Blob URL；关闭弹窗后确认同一 URL 出现 revoke 事件。
+  - 两条 E2E 并行运行 2/2 通过，前端 87 项单测通过；lint 0 error（保留 2 个既有 `<img>` warning），production build、production npm audit policy 和 Action pin policy 通过。
+  - Compose PostgreSQL、Redis、Chroma healthy，migration `applied=0 skipped=9`，backend、worker、frontend 正常；production preflight 通过。
+  - 应用内浏览器打开重新构建的 Compose frontend，admin 工作台正常渲染，console error 为 0。
 - 建议验证命令：
 
 ```bash
