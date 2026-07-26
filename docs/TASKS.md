@@ -88,7 +88,7 @@
 | `PLAN-20260723-01` | 2026-07-23 | `Done` | 建立覆盖多类扫描质量的 OCR 评测集和真实 Tesseract 回归门禁。 | `T-080` |
 | `PLAN-20260723-02` | 2026-07-23 | `Done` | 保存 OCR CI 评测历史并展示跨运行质量与耗时趋势。 | `T-081` |
 | `PLAN-20260726-01` | 2026-07-26 | `Done` | 扩展 OCR 评测集，覆盖更接近真实扫描件的几何、光照、噪点、字号和表格退化。 | `T-082` |
-| `PLAN-20260726-02` | 2026-07-26 | `Doing` | 为原生文本页与扫描页混合的多页 PDF 增加真实索引、OCR、引用页码和原文上下文回归。 | `T-083` |
+| `PLAN-20260726-02` | 2026-07-26 | `Done` | 为原生文本页与扫描页混合的多页 PDF 增加真实索引、OCR、引用页码和原文上下文回归。 | `T-083` |
 
 ## 任务总览
 
@@ -176,7 +176,7 @@
 | `T-080` | `PLAN-20260723-01` | `P1` | `Done` | 建立 OCR 评测集与自动回归门禁 | 2026-07-23 | `175cc61` |
 | `T-081` | `PLAN-20260723-02` | `P1` | `Done` | 持久化 OCR CI 评测历史并展示趋势 | 2026-07-23 | `12852ff` |
 | `T-082` | `PLAN-20260726-01` | `P1` | `Done` | 扩展 OCR 真实扫描退化评测集 | 2026-07-26 | `11fc7f4` |
-| `T-083` | `PLAN-20260726-02` | `P1` | `Doing` | 增加混合多页 PDF 端到端索引回归 | — | — |
+| `T-083` | `PLAN-20260726-02` | `P1` | `Done` | 增加混合多页 PDF 端到端索引回归 | 2026-07-26 | `749ac0b` |
 
 ## 新计划接入流程
 
@@ -3283,7 +3283,7 @@ git diff --check
 
 - 来源计划：`PLAN-20260726-02`
 - 优先级：`P1`
-- 状态：`Doing`
+- 状态：`Done`
 - 目标：用同一份三页 PDF 验证原生文本页、扫描页 OCR、异步索引、向量/全文检索、回答引用和原文预览元数据能够协同工作，避免单元测试或单页 OCR 门禁通过但真实链路丢失页码。
 - 技术边界：
   - fixture 只包含固定格式和本轮随机验收标识，不读取、复制或持久化用户文档。
@@ -3301,6 +3301,14 @@ git diff --check
   - 聊天检索命中临时 PDF，回答包含扫描页标识，引用明确指向第 2 页且至少使用 vector 通道，retrieval 未降级。
   - source chunk context 同时包含按页序排列的 native/OCR/native 证据，临时 retrieval settings 和文件关联均恢复或清理。
   - 专项与后端全量测试、Docker Compose、production preflight 和 `git diff --check` 通过。
+- 相关提交：`749ac0b`。
+- 完成记录：
+  - `scripts/eval_indexing.py` 新增 `--file-kind mixed-pdf`，确定性生成 A4 三页 `native_text -> scanned image -> native_text` fixture；扫描页使用短、全大写、分词清晰的 `T083 SCAN CODE XXXXXXXX`，避免长 CamelCase 标识产生不稳定 OCR 字符。
+  - mixed PDF 模式查询只存在于第 2 页栅格图中的标识，并增加 6 项专用门禁：source 第 2 页 OCR 定位、目标 chunk 定位、三页关键字/解析方式和跨页全局 chunk 顺序；通用门禁继续检查 job、file status、回答、vector 通道和 degradation。
+  - indexing report schema 升级为 v2，增加文件类型、source `page_number/pdf_parse_method` 和受控 chunk context；临时 retrieval settings 恢复和文件关联解除均在操作后重新 GET 验证，作为 2 项独立硬门禁。
+  - 最新三页 PDF 经 Poppler 逐页渲染，无裁切、重叠、黑块或不可读文字；PyMuPDF 验证第 1、3 页有原生文本层、第 2 页原生文本为空且只有一张栅格图。本机真实解析结果为 `native_text/ocr/native_text`，第 2 页 confidence `94.35`。
+  - Compose 真实验收最终 17/17 通过：job `bd7fbe2e-eee9-440b-8a1b-0e5bf6a5fb0e` 状态 `succeeded`，第 2 页 OCR confidence `93.30`，source 同时使用 `fulltext+vector`，回答耗时 `2.81s`，无 `vector_degraded/vector_errors`；chunk 页序为第 1 页 `[0,1]`、第 2 页 `[2]`、第 3 页 `[3,4]`，settings 与文件关联清理门禁通过。
+  - mixed PDF/indexing 与 document service 专项 20 项、后端全量 371 项测试通过；完整 backend/frontend Compose build 成功，PostgreSQL、Redis、Chroma healthy，migration `applied=0 skipped=9`，backend、worker、frontend 正常；production preflight、compileall、Action pin policy（9 个引用）和 `git diff --check` 均通过。
 - 建议验证命令：
 
 ```bash
