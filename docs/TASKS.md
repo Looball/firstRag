@@ -90,7 +90,7 @@
 | `PLAN-20260726-01` | 2026-07-26 | `Done` | 扩展 OCR 评测集，覆盖更接近真实扫描件的几何、光照、噪点、字号和表格退化。 | `T-082` |
 | `PLAN-20260726-02` | 2026-07-26 | `Done` | 为原生文本页与扫描页混合的多页 PDF 增加真实索引、OCR、引用页码和原文上下文回归。 | `T-083` |
 | `PLAN-20260726-03` | 2026-07-26 | `Done` | 验证 OCR 引用页 PNG 预览内容，并让引用弹窗直接展示所引用的扫描页面。 | `T-084` |
-| `PLAN-20260726-04` | 2026-07-26 | `Doing` | 将 OCR source 第 2 页 PNG 点击流程固化为可在 CI 重复执行的前端 E2E 回归。 | `T-085` |
+| `PLAN-20260726-04` | 2026-07-26 | `Done` | 将 OCR source 第 2 页 PNG 点击流程固化为可在 CI 重复执行的前端 E2E 回归。 | `T-085` |
 
 ## 任务总览
 
@@ -180,7 +180,7 @@
 | `T-082` | `PLAN-20260726-01` | `P1` | `Done` | 扩展 OCR 真实扫描退化评测集 | 2026-07-26 | `11fc7f4` |
 | `T-083` | `PLAN-20260726-02` | `P1` | `Done` | 增加混合多页 PDF 端到端索引回归 | 2026-07-26 | `749ac0b` |
 | `T-084` | `PLAN-20260726-03` | `P1` | `Done` | 验证引用页 PNG 预览并直接展示扫描页面 | 2026-07-26 | `2613fd5` |
-| `T-085` | `PLAN-20260726-04` | `P1` | `Doing` | 固化 OCR source 第 2 页 PNG 前端 E2E 回归 | — | — |
+| `T-085` | `PLAN-20260726-04` | `P1` | `Done` | 固化 OCR source 第 2 页 PNG 前端 E2E 回归 | 2026-07-26 | `2724b8b` |
 
 ## 新计划接入流程
 
@@ -3368,7 +3368,7 @@ git diff --check
 
 - 来源计划：`PLAN-20260726-04`
 - 优先级：`P1`
-- 状态：`Doing`
+- 状态：`Done`
 - 目标：把 T-084 的人工浏览器验收固化为确定性 E2E，自动验证用户点击 OCR source 后会请求并完整加载第 2 页 PNG。
 - 技术边界：
   - E2E 使用合成知识库、会话、source、chunk context 和 PNG fixture，不依赖真实账号、API Key、LLM、embedding 或外部网络。
@@ -3384,6 +3384,15 @@ git diff --check
   - 测试明确观察到 `/pages/2/preview` 请求，Authorization 为测试 bearer token。
   - 弹窗显示第 2 页 OCR 定位，Blob PNG `complete=true` 且 `naturalWidth/naturalHeight > 0`。
   - E2E、前端单测、lint、production build、Compose 和 production preflight 通过。
+- 相关提交：`2724b8b`。
+- 完成记录：
+  - 新增 Playwright Chromium E2E；测试以受控 fixture 注入知识库、会话、OCR source、chunk context 和 PNG，不依赖真实账号、API Key、后端或外部网络。
+  - 浏览器自动进入合成会话并点击唯一“查看原文”，确认弹窗定位第 `2 / 3` 页和目标 `Chunk #2`，`/pages/2/preview` 请求携带测试 Bearer token，Blob PNG 完成解码且 natural size 为 `1×1`。
+  - Vitest 与 Playwright 收集范围通过 `vitest.config.ts` 隔离；GitHub Actions 使用 lockfile 中的 Playwright 安装 Chromium 并执行 `npm run test:e2e`。
+  - 依赖审计发现上游新增公告后，将 Next.js/ESLint config 升级至 `16.2.12`，PostCSS 固定至 `8.5.23`，删除已失效例外；production npm audit policy 为 `0 findings / 0 exceptions`。
+  - 前端 87 项单测和 E2E 1/1 通过；lint 0 error（保留 2 个既有 `<img>` warning），本机与 Compose production build 通过，Action pin policy 9 个引用全部合规。
+  - Compose PostgreSQL、Redis、Chroma healthy，migration `applied=0 skipped=9`，backend、worker、frontend 正常；production preflight 通过。
+  - 应用内浏览器打开 Compose frontend 后自动恢复 admin 登录态，工作台、知识库、会话、聊天输入和图片入口正常渲染，console error 为 0。
 - 建议验证命令：
 
 ```bash
