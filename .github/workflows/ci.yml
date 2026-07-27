@@ -146,8 +146,20 @@ jobs:
         run: npx --no-install playwright install --with-deps chromium
 
       - name: Run frontend E2E
+        id: frontend_e2e
         working-directory: frontend
         run: npm run test:e2e
+
+      - name: Upload frontend E2E diagnostics
+        if: failure() && steps.frontend_e2e.outcome == 'failure'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: frontend-e2e-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            frontend/playwright-report
+            frontend/test-results
+          if-no-files-found: error
+          retention-days: 14
 
   container-security:
     name: Container OS Security

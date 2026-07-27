@@ -53,6 +53,8 @@ npm run dev
 
 OCR source 预览 E2E 使用同源 API fixture 注入合成知识库、会话、chunk context 和 1×1 PNG，不读取真实账号、API Key、后端或外部网络。测试仍会经过真实工作台、`SourcePreviewDialog`、鉴权 header、preview fetch、Blob URL 和浏览器图像解码链路，明确检查点击 source 后访问 `/pages/2/preview`，并确认第 2 页 PNG 完成加载。失败恢复用例让首次 preview 返回受控 `502`，验证错误反馈和手动重试后，再监听 `URL.createObjectURL` / `URL.revokeObjectURL`，确保关闭弹窗会释放当前图像 URL。异步清理用例使用 Promise gate 暂停成功响应，先关闭弹窗再放行 PNG，确认延迟创建的 URL 也会立即撤销，且不会向已关闭界面回写状态。
 
+CI 同时启用 GitHub 和 HTML reporter；E2E 失败时上传 `playwright-report/` 与 `test-results/`，其中包含 HTML report、失败截图和 trace，artifact 名称带 run ID/attempt 并保留 14 天。成功运行不上传诊断 artifact。
+
 首次在本机运行 E2E 前需要安装对应版本的 Chromium：
 
 ```bash

@@ -93,6 +93,7 @@
 | `PLAN-20260726-04` | 2026-07-26 | `Done` | 将 OCR source 第 2 页 PNG 点击流程固化为可在 CI 重复执行的前端 E2E 回归。 | `T-085` |
 | `PLAN-20260726-05` | 2026-07-26 | `Done` | 固化 OCR source PNG 预览失败、用户重试和 Blob URL 释放的浏览器回归。 | `T-086` |
 | `PLAN-20260726-06` | 2026-07-26 | `Done` | 固化 OCR source preview 请求进行中关闭弹窗时的异步清理回归。 | `T-087` |
+| `PLAN-20260727-01` | 2026-07-27 | `Doing` | 为 Playwright E2E 失败建立可下载的 CI 诊断 artifact。 | `T-088` |
 
 ## 任务总览
 
@@ -185,6 +186,7 @@
 | `T-085` | `PLAN-20260726-04` | `P1` | `Done` | 固化 OCR source 第 2 页 PNG 前端 E2E 回归 | 2026-07-26 | `2724b8b` |
 | `T-086` | `PLAN-20260726-05` | `P1` | `Done` | 覆盖 PNG 预览失败、重试和 Blob URL 释放 E2E | 2026-07-26 | `c09a469` |
 | `T-087` | `PLAN-20260726-06` | `P1` | `Done` | 覆盖 preview 请求中关闭弹窗的异步清理 E2E | 2026-07-26 | `fc5e1a3` |
+| `T-088` | `PLAN-20260727-01` | `P1` | `Doing` | 上传 Playwright E2E 失败诊断 artifact | — | — |
 
 ## 新计划接入流程
 
@@ -3478,6 +3480,37 @@ git diff --check
 cd frontend && npm run test:e2e
 npm test && npm run lint && npm run build
 cd .. && docker compose up -d --build
+conda run -n firstrag python scripts/production_preflight.py --env-file .env --migration-method compose --check-runtime-health
+git diff --check
+```
+
+## T-088 上传 Playwright E2E 失败诊断 artifact
+
+- 来源计划：`PLAN-20260727-01`
+- 优先级：`P1`
+- 状态：`Doing`
+- 目标：让 GitHub Actions 中的 Playwright E2E 失败可以下载 HTML report、截图和 trace，缩短 CI 浏览器问题定位时间。
+- 技术边界：
+  - artifact 仅在 frontend E2E step 本身失败时上传，不能因 lint、单测或 build 失败产生空诊断包。
+  - 复用已固定完整 commit SHA 的 `actions/upload-artifact@v4.6.2`，继续通过 Action pin policy。
+  - 产物名称必须包含 run ID 和 attempt，避免 rerun 命名冲突；保留期限制为 14 天。
+- 范围：
+  - CI 环境同时启用 Playwright GitHub 与 HTML reporter。
+  - 显式固定 `test-results/` 输出目录，并上传 HTML report、失败截图与 trace。
+  - 更新 frontend、deployment 和任务台账文档。
+- 验收标准：
+  - `CI=1 npm run test:e2e` 通过并生成 `playwright-report/index.html`。
+  - E2E step 具有稳定 ID，artifact step 只在该 step outcome 为 failure 时运行。
+  - artifact 缺少诊断文件时主动失败，名称唯一且 retention 为 14 天。
+  - E2E、前端单测、lint、production build、Action pin policy、Compose 和 production preflight 通过。
+- 建议验证命令：
+
+```bash
+cd frontend && CI=1 npm run test:e2e
+test -f playwright-report/index.html
+npm test && npm run lint && npm run build
+cd .. && python3 scripts/check_github_actions_pins.py
+docker compose up -d --build
 conda run -n firstrag python scripts/production_preflight.py --env-file .env --migration-method compose --check-runtime-health
 git diff --check
 ```
