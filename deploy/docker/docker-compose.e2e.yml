@@ -1,0 +1,60 @@
+services:
+  postgres:
+    volumes:
+      - e2e_postgres_data:/var/lib/postgresql/data
+
+  chroma:
+    volumes:
+      - e2e_chroma_data:/data
+
+  provider-stub:
+    image: firstrag-backend:latest
+    command: ["python", "/app/e2e-scripts/full_stack_e2e_provider.py"]
+    volumes:
+      - ./scripts:/app/e2e-scripts:ro
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "from urllib.request import urlopen; urlopen('http://127.0.0.1:8080/health', timeout=2)",
+        ]
+      interval: 2s
+      timeout: 3s
+      retries: 20
+
+  backend:
+    env_file: !reset []
+    environment:
+      PYTHONPATH: /app/backend
+      JWT_SECRET_KEY: firstrag-e2e-jwt-key-not-for-production
+      USER_SETTINGS_ENCRYPTION_KEY: MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA=
+      ALLOW_PUBLIC_REGISTRATION: "true"
+    volumes:
+      - e2e_uploads:/app/uploads
+      - ./scripts:/app/e2e-scripts:ro
+    depends_on:
+      provider-stub:
+        condition: service_healthy
+
+  worker:
+    env_file: !reset []
+    environment:
+      JWT_SECRET_KEY: firstrag-e2e-jwt-key-not-for-production
+      USER_SETTINGS_ENCRYPTION_KEY: MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA=
+    volumes:
+      - e2e_uploads:/app/uploads
+      - ./scripts:/app/e2e-scripts:ro
+    depends_on:
+      provider-stub:
+        condition: service_healthy
+
+  frontend:
+    environment:
+      BACKEND_ORIGIN: http://backend:8000
+
+volumes:
+  e2e_postgres_data:
+  e2e_chroma_data:
+  e2e_uploads:
