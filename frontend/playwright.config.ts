@@ -6,6 +6,7 @@ const E2E_ORIGIN = `http://127.0.0.1:${E2E_PORT}`;
 /** 在独立 Next.js dev server 中运行不依赖后端的浏览器回归。 */
 export default defineConfig({
   testDir: "./e2e",
+  testIgnore: "**/full-stack-core.spec.ts",
   fullyParallel: true,
   forbidOnly: Boolean(process.env.CI),
   retries: process.env.CI ? 2 : 0,
