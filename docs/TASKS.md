@@ -96,6 +96,7 @@
 | `PLAN-20260726-06` | 2026-07-26 | `Done` | 固化 OCR source preview 请求进行中关闭弹窗时的异步清理回归。 | `T-087` |
 | `PLAN-20260727-01` | 2026-07-27 | `Done` | 为 Playwright E2E 失败建立可下载的 CI 诊断 artifact。 | `T-088` |
 | `PLAN-20260727-02` | 2026-07-27 | `Done` | 建立不依赖真实 API Key 的全栈核心链路浏览器门禁。 | `T-089` |
+| `PLAN-20260727-03` | 2026-07-27 | `Doing` | 将已验证的 CI jobs 固化为 `main` 分支强制合并门禁。 | `T-090` |
 
 ## 任务总览
 
@@ -190,6 +191,7 @@
 | `T-087` | `PLAN-20260726-06` | `P1` | `Done` | 覆盖 preview 请求中关闭弹窗的异步清理 E2E | 2026-07-26 | `fc5e1a3` |
 | `T-088` | `PLAN-20260727-01` | `P1` | `Done` | 上传 Playwright E2E 失败诊断 artifact | 2026-07-27 | `9d85d60` |
 | `T-089` | `PLAN-20260727-02` | `P1` | `Done` | 建立无外部密钥的全栈核心链路 E2E | 2026-07-27 | `74b1fa2` |
+| `T-090` | `PLAN-20260727-03` | `P1` | `Doing` | 强制 `main` 合并前通过核心 CI | — | — |
 
 ## 新计划接入流程
 
@@ -3563,6 +3565,35 @@ python3 scripts/check_github_actions_pins.py
 docker compose -f docker-compose.yml -f deploy/docker/docker-compose.e2e.yml config --quiet
 docker compose up -d --build
 conda run -n firstrag python scripts/production_preflight.py --env-file .env --migration-method compose --check-runtime-health
+git diff --check
+```
+
+## T-090 强制 `main` 合并前通过核心 CI
+
+- 来源计划：`PLAN-20260727-03`
+- 优先级：`P1`
+- 状态：`Doing`
+- 目标：让 `main` 的 Pull Request 只有在核心 GitHub Actions jobs 全部成功后才能合并，避免仓库所有者或其他写入者绕过已经稳定运行的 CI 门禁。
+- 技术边界：
+  - 继续复用现有 active `Protect main` ruleset，不新建重叠规则。
+  - 保留禁止删除、禁止 non-fast-forward、必须经 Pull Request、只允许 squash merge 和 review thread 必须解决的现有约束。
+  - required status checks 精确使用当前 workflow 的稳定 job 名称：`Backend`、`Frontend`、`Full-stack E2E`、`Container OS Security`。
+  - 移除仓库所有者的常驻 bypass；紧急变更需要显式调整 ruleset，不允许日常合并静默绕过门禁。
+- 范围：
+  - 更新 GitHub repository ruleset，增加严格 required status checks，并移除常驻 owner bypass。
+  - 使用当前任务 PR 验证检查未完成时不能合并、检查全部成功后才能合并。
+  - 更新 deployment 与任务台账文档，记录平台侧门禁的真实配置。
+- 验收标准：
+  - `Protect main` ruleset 继续只作用于 `refs/heads/main` 且 enforcement 为 `active`。
+  - ruleset 没有 bypass actor，并要求四个核心 CI jobs 成功。
+  - 当前任务 PR 在 required checks 未完成时由 GitHub 判定为不可合并；全部通过后恢复可合并。
+  - 规则更新后完成一次 squash merge，并确认 `main` push CI 继续通过。
+- 建议验证命令：
+
+```bash
+gh api repos/Looball/firstRag/rulesets/17939122
+gh pr checks --watch
+gh pr view --json mergeStateStatus,statusCheckRollup
 git diff --check
 ```
 

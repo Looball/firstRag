@@ -206,6 +206,8 @@ dependency audit policy 在 PR、`main` push、手动触发和每周一计划任
 
 `.github/dependabot.yml` 每周检查 `github-actions` ecosystem，将 Action version update 聚合为一个 PR。Dependabot 只负责提出 SHA 更新；仓库不会自动合并，仍需核对官方 release、同一行版本注释和完整 CI 结果。GitHub repository settings 还可额外开启“Require actions to be pinned to a full-length commit SHA”，形成平台侧强制策略。
 
+仓库的 active `Protect main` ruleset 只作用于 `refs/heads/main`：禁止删除和 non-fast-forward 更新，要求通过 Pull Request 合并并解决 review thread，只允许 squash merge；同时要求 `Backend`、`Frontend`、`Full-stack E2E`、`Container OS Security` 四个 CI jobs 全部成功。ruleset 不配置常驻 bypass actor，仓库所有者的日常合并也必须经过相同门禁。
+
 默认 CI 不运行依赖公网 provider 的真实 RAG eval 和 indexing eval，因为它们需要真实账号、
 外部模型 API Key 和可用数据库。合成 PDF OCR regression gate 不需要这些外部条件，因此默认运行。发布前仍按本地验收流程显式运行真实 RAG 与 indexing 评估。
 
