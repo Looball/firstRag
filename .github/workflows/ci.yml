@@ -161,6 +161,46 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
+  full-stack-e2e:
+    name: Full-stack E2E
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Set up Node.js
+        uses: actions/setup-node@6044e13b5dc448c55e2357c09f80417699197238 # v6.2.0
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Install Playwright Chromium
+        working-directory: frontend
+        run: npx --no-install playwright install --with-deps chromium
+
+      - name: Run credential-free full-stack E2E
+        id: full_stack_e2e
+        run: scripts/run_full_stack_e2e.sh
+
+      - name: Upload full-stack E2E diagnostics
+        if: failure() && steps.full_stack_e2e.outcome == 'failure'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: full-stack-e2e-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            frontend/playwright-report
+            frontend/test-results
+            tmp/full-stack-e2e
+          if-no-files-found: error
+          retention-days: 14
+
   container-security:
     name: Container OS Security
     runs-on: ubuntu-latest

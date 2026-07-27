@@ -40,6 +40,7 @@
 
 ## 当前基线
 
+- 2026-07-27 已增加无外部密钥的全栈浏览器门禁：隔离 Compose project 使用临时 PostgreSQL、Chroma、uploads volumes 和本地 OpenAI-compatible stub，真实覆盖注册、前端登录、TXT 上传、worker 向量化、SSE 回答与 sources 展示；测试结束自动清理专用容器和数据。
 - 2026-07-21 已刷新静态回归验收：后端 311 个 pytest 用例和 30 个 subtests 通过、前端 lint 0 error（保留 2 个 `<img>` 性能 warning）、Vitest 69 个用例通过、Next 16.2.10 production build 通过。
 - 2026-07-20 已完成前端依赖安全审计：Next.js 从 16.2.2 升级到 16.2.10，已消除已确认的 high findings；Babel、brace-expansion 和 js-yaml 开发依赖补丁已更新。`npm audit` 仍报告 Next 内嵌 PostCSS 的 2 个 moderate 条目，当前项目没有用户可控 CSS 进入 stringify 的运行路径，且审计器只提供降级到 Next 9.3.3 的 breaking fix，因此保留为已 triage 的不可达例外。
 - 2026-07-20 已完成后端与镜像依赖安全审计：PyJWT、python-dotenv 和 python-multipart 已升级到安全补丁版本；`pip-audit` 只剩 ChromaDB 1.5.9 的 no-fix finding，由精确到版本且 2026-08-20 到期的内网不可达例外管理；Trivy 对当前 backend/frontend 镜像的可修复 high/critical OS finding 均为 0。
@@ -94,6 +95,7 @@
 | `PLAN-20260726-05` | 2026-07-26 | `Done` | 固化 OCR source PNG 预览失败、用户重试和 Blob URL 释放的浏览器回归。 | `T-086` |
 | `PLAN-20260726-06` | 2026-07-26 | `Done` | 固化 OCR source preview 请求进行中关闭弹窗时的异步清理回归。 | `T-087` |
 | `PLAN-20260727-01` | 2026-07-27 | `Done` | 为 Playwright E2E 失败建立可下载的 CI 诊断 artifact。 | `T-088` |
+| `PLAN-20260727-02` | 2026-07-27 | `Done` | 建立不依赖真实 API Key 的全栈核心链路浏览器门禁。 | `T-089` |
 
 ## 任务总览
 
@@ -187,6 +189,7 @@
 | `T-086` | `PLAN-20260726-05` | `P1` | `Done` | 覆盖 PNG 预览失败、重试和 Blob URL 释放 E2E | 2026-07-26 | `c09a469` |
 | `T-087` | `PLAN-20260726-06` | `P1` | `Done` | 覆盖 preview 请求中关闭弹窗的异步清理 E2E | 2026-07-26 | `fc5e1a3` |
 | `T-088` | `PLAN-20260727-01` | `P1` | `Done` | 上传 Playwright E2E 失败诊断 artifact | 2026-07-27 | `9d85d60` |
+| `T-089` | `PLAN-20260727-02` | `P1` | `Done` | 建立无外部密钥的全栈核心链路 E2E | 2026-07-27 | `74b1fa2` |
 
 ## 新计划接入流程
 
@@ -3518,6 +3521,46 @@ cd frontend && CI=1 npm run test:e2e
 test -f playwright-report/index.html
 npm test && npm run lint && npm run build
 cd .. && python3 scripts/check_github_actions_pins.py
+docker compose up -d --build
+conda run -n firstrag python scripts/production_preflight.py --env-file .env --migration-method compose --check-runtime-health
+git diff --check
+```
+
+## T-089 建立无外部密钥的全栈核心链路 E2E
+
+- 来源计划：`PLAN-20260727-02`
+- 优先级：`P1`
+- 状态：`Done`
+- 目标：在 CI 中不使用真实账号或外部 provider API Key，验证真实 frontend、backend、PostgreSQL、Redis、Chroma、worker 和 SSE 组成的核心用户链路。
+- 技术边界：
+  - provider stub 只能运行在隔离 Compose project 中；不会成为产品 API，也不会放宽自定义 provider 的 SSRF 防护。
+  - 测试使用独立 named volumes 和非默认宿主机端口，结束时只清理自身 project 与 volumes，不读取或修改开发环境数据。
+  - seed 脚本只接受固定的 `http://provider-stub:8080/v1`，测试凭据为公开的非生产占位值。
+- 范围：
+  - 增加确定性的 OpenAI-compatible chat/embedding provider stub 和受限 seed 脚本。
+  - 增加 Compose E2E override、隔离运行脚本和独立 Playwright 配置。
+  - Chromium 通过真实 frontend 完成登录、TXT 上传、worker 向量化、SSE 提问和 sources 展示。
+  - GitHub Actions 增加独立 Full-stack E2E job，失败时上传 Playwright 与 Compose 日志。
+- 验收标准：
+  - `scripts/run_full_stack_e2e.sh` 在没有真实 provider Key 的环境中通过。
+  - 真实注册 API、前端登录、文件上传、PostgreSQL job、worker embedding、Chroma vector/full-text retrieval、LLM SSE 和引用展示均被覆盖。
+  - E2E project 结束后对应容器和 named volumes 被清理，现有 FirstRAG Compose project 不受影响。
+  - backend 测试、frontend 测试/lint/build、Action pin policy、Compose config 和 production preflight 继续通过。
+- 相关提交：`74b1fa2`。
+- 完成记录：
+  - 新增隔离 Compose override，本地 provider stub 同时实现 OpenAI-compatible `/models`、`/embeddings` 和 streaming `/chat/completions`；seed 入口只接受固定 Compose hostname，不经过产品 route，也不放宽 SSRF 校验。
+  - 运行脚本用 `/dev/null` 作为 Compose env file，并通过 `!reset []` 清空 backend/worker 的基础 `env_file`；测试容器不会读取根目录 `.env` 或真实 provider Key，临时端口仅绑定 `127.0.0.1`。
+  - Chromium 真实链路 1/1 通过：注册 API、前端登录、TXT 上传、worker 向量化、PostgreSQL/Chroma 检索、SSE 回答和引用文件名均完成断言，浏览器 console/page error 为空。
+  - 全量后端 373 项测试通过；前端 87 项测试通过，lint 0 error（保留 2 个既有 `<img>` warning），宿主机与 Docker production build 均通过。
+  - GitHub Actions pin policy 通过（13 个引用）；默认 Compose PostgreSQL、Redis、Chroma healthy，migration `applied=0 skipped=9`，backend、worker、frontend 正常；production preflight 通过。
+- 建议验证命令：
+
+```bash
+scripts/run_full_stack_e2e.sh
+cd frontend && npm test && npm run lint && npm run build
+cd ..
+python3 scripts/check_github_actions_pins.py
+docker compose -f docker-compose.yml -f deploy/docker/docker-compose.e2e.yml config --quiet
 docker compose up -d --build
 conda run -n firstrag python scripts/production_preflight.py --env-file .env --migration-method compose --check-runtime-health
 git diff --check

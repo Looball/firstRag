@@ -34,6 +34,7 @@ yarn-error.log*
 /backend/buffer/
 /backups/
 /tmp/pdfs/
+/tmp/full-stack-e2e/
 
 # Local application settings
 .env

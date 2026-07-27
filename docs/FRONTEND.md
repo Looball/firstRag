@@ -55,6 +55,8 @@ OCR source 预览 E2E 使用同源 API fixture 注入合成知识库、会话、
 
 CI 同时启用 GitHub 和 HTML reporter；E2E 失败时上传 `playwright-report/` 与 `test-results/`，其中包含 HTML report、失败截图和 trace，artifact 名称带 run ID/attempt 并保留 14 天。成功运行不上传诊断 artifact。
 
+`npm run test:e2e:full-stack` 使用独立 Playwright 配置连接已启动的隔离 Compose 环境。标准入口为仓库根目录的 `scripts/run_full_stack_e2e.sh`：它会创建临时 PostgreSQL、Chroma 和 uploads volumes，使用本地确定性 OpenAI-compatible stub 提供 chat/embedding，先通过真实注册 API 创建测试账号，再由 Chromium 完成登录、TXT 上传、worker 向量化、SSE 回答和引用展示。该门禁不读取真实账号、`.env` provider Key 或公网模型服务，结束后只删除自己的 `firstrag-t089-*` Compose project。
+
 首次在本机运行 E2E 前需要安装对应版本的 Chromium：
 
 ```bash
