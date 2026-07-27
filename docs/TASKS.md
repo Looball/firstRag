@@ -96,7 +96,7 @@
 | `PLAN-20260726-06` | 2026-07-26 | `Done` | 固化 OCR source preview 请求进行中关闭弹窗时的异步清理回归。 | `T-087` |
 | `PLAN-20260727-01` | 2026-07-27 | `Done` | 为 Playwright E2E 失败建立可下载的 CI 诊断 artifact。 | `T-088` |
 | `PLAN-20260727-02` | 2026-07-27 | `Done` | 建立不依赖真实 API Key 的全栈核心链路浏览器门禁。 | `T-089` |
-| `PLAN-20260727-03` | 2026-07-27 | `Doing` | 将已验证的 CI jobs 固化为 `main` 分支强制合并门禁。 | `T-090` |
+| `PLAN-20260727-03` | 2026-07-27 | `Done` | 将已验证的 CI jobs 固化为 `main` 分支强制合并门禁。 | `T-090` |
 
 ## 任务总览
 
@@ -191,7 +191,7 @@
 | `T-087` | `PLAN-20260726-06` | `P1` | `Done` | 覆盖 preview 请求中关闭弹窗的异步清理 E2E | 2026-07-26 | `fc5e1a3` |
 | `T-088` | `PLAN-20260727-01` | `P1` | `Done` | 上传 Playwright E2E 失败诊断 artifact | 2026-07-27 | `9d85d60` |
 | `T-089` | `PLAN-20260727-02` | `P1` | `Done` | 建立无外部密钥的全栈核心链路 E2E | 2026-07-27 | `74b1fa2` |
-| `T-090` | `PLAN-20260727-03` | `P1` | `Doing` | 强制 `main` 合并前通过核心 CI | — | — |
+| `T-090` | `PLAN-20260727-03` | `P1` | `Done` | 强制 `main` 合并前通过核心 CI | 2026-07-27 | `2d76a87`、ruleset `17939122` |
 
 ## 新计划接入流程
 
@@ -3572,7 +3572,7 @@ git diff --check
 
 - 来源计划：`PLAN-20260727-03`
 - 优先级：`P1`
-- 状态：`Doing`
+- 状态：`Done`
 - 目标：让 `main` 的 Pull Request 只有在核心 GitHub Actions jobs 全部成功后才能合并，避免仓库所有者或其他写入者绕过已经稳定运行的 CI 门禁。
 - 技术边界：
   - 继续复用现有 active `Protect main` ruleset，不新建重叠规则。
@@ -3588,6 +3588,12 @@ git diff --check
   - ruleset 没有 bypass actor，并要求四个核心 CI jobs 成功。
   - 当前任务 PR 在 required checks 未完成时由 GitHub 判定为不可合并；全部通过后恢复可合并。
   - 规则更新后完成一次 squash merge，并确认 `main` push CI 继续通过。
+- 相关提交：`2d76a87`。
+- 完成记录：
+  - 复用 repository ruleset `17939122`；保留删除保护、non-fast-forward 保护、Pull Request、squash-only 和 review thread resolution，enforcement 继续为 `active`，作用范围继续精确为 `refs/heads/main`。
+  - 移除用户 `Looball` 的常驻 `exempt` bypass；required checks 固定为 GitHub Actions app `15368` 提交的 `Backend`、`Frontend`、`Full-stack E2E`、`Container OS Security`，并开启 strict up-to-date policy。
+  - PR #11 转为 Ready 后，在 required checks 尚未完成时无冲突但 `mergeStateStatus=BLOCKED`。
+  - 负向验证提交 `bfec6c5` 让 `Backend` 明确失败；GitHub 继续判定 PR 为 `BLOCKED`。提交 `1f16b14` 随即移除一次性故障，最终 squash 内容不包含失败逻辑。
 - 建议验证命令：
 
 ```bash
