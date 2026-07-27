@@ -93,7 +93,7 @@
 | `PLAN-20260726-04` | 2026-07-26 | `Done` | 将 OCR source 第 2 页 PNG 点击流程固化为可在 CI 重复执行的前端 E2E 回归。 | `T-085` |
 | `PLAN-20260726-05` | 2026-07-26 | `Done` | 固化 OCR source PNG 预览失败、用户重试和 Blob URL 释放的浏览器回归。 | `T-086` |
 | `PLAN-20260726-06` | 2026-07-26 | `Done` | 固化 OCR source preview 请求进行中关闭弹窗时的异步清理回归。 | `T-087` |
-| `PLAN-20260727-01` | 2026-07-27 | `Doing` | 为 Playwright E2E 失败建立可下载的 CI 诊断 artifact。 | `T-088` |
+| `PLAN-20260727-01` | 2026-07-27 | `Done` | 为 Playwright E2E 失败建立可下载的 CI 诊断 artifact。 | `T-088` |
 
 ## 任务总览
 
@@ -186,7 +186,7 @@
 | `T-085` | `PLAN-20260726-04` | `P1` | `Done` | 固化 OCR source 第 2 页 PNG 前端 E2E 回归 | 2026-07-26 | `2724b8b` |
 | `T-086` | `PLAN-20260726-05` | `P1` | `Done` | 覆盖 PNG 预览失败、重试和 Blob URL 释放 E2E | 2026-07-26 | `c09a469` |
 | `T-087` | `PLAN-20260726-06` | `P1` | `Done` | 覆盖 preview 请求中关闭弹窗的异步清理 E2E | 2026-07-26 | `fc5e1a3` |
-| `T-088` | `PLAN-20260727-01` | `P1` | `Doing` | 上传 Playwright E2E 失败诊断 artifact | — | — |
+| `T-088` | `PLAN-20260727-01` | `P1` | `Done` | 上传 Playwright E2E 失败诊断 artifact | 2026-07-27 | `9d85d60` |
 
 ## 新计划接入流程
 
@@ -3488,7 +3488,7 @@ git diff --check
 
 - 来源计划：`PLAN-20260727-01`
 - 优先级：`P1`
-- 状态：`Doing`
+- 状态：`Done`
 - 目标：让 GitHub Actions 中的 Playwright E2E 失败可以下载 HTML report、截图和 trace，缩短 CI 浏览器问题定位时间。
 - 技术边界：
   - artifact 仅在 frontend E2E step 本身失败时上传，不能因 lint、单测或 build 失败产生空诊断包。
@@ -3503,6 +3503,14 @@ git diff --check
   - E2E step 具有稳定 ID，artifact step 只在该 step outcome 为 failure 时运行。
   - artifact 缺少诊断文件时主动失败，名称唯一且 retention 为 14 天。
   - E2E、前端单测、lint、production build、Action pin policy、Compose 和 production preflight 通过。
+- 相关提交：`9d85d60`。
+- 完成记录：
+  - Playwright 在 CI 环境同时启用 GitHub 与 HTML reporter，显式将 HTML report 写入 `playwright-report/`、测试附件写入 `test-results/`。
+  - frontend E2E step 增加稳定 ID；诊断上传条件精确为该 step outcome `failure`，不会为 lint、单测、build 或安装失败创建空 artifact。
+  - 复用固定 SHA 的 `actions/upload-artifact@v4.6.2`；artifact 名称包含 run ID/attempt，缺少文件时失败并保留 14 天。
+  - `CI=1 npm run test:e2e` 3/3 通过并实际生成约 512 KB 的 `playwright-report/index.html`；workflow YAML 条件与 retention 解析检查通过。
+  - 前端 87 项单测通过；lint 0 error（保留 2 个既有 `<img>` warning），production build、production npm audit policy 和 Action pin policy（10 个引用）通过。
+  - Compose PostgreSQL、Redis、Chroma healthy，migration `applied=0 skipped=9`，backend、worker、frontend 正常；production preflight 通过。
 - 建议验证命令：
 
 ```bash
