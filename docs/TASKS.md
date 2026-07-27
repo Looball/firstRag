@@ -3597,7 +3597,8 @@ git diff --check
 - 建议验证命令：
 
 ```bash
-gh api repos/Looball/firstRag/rulesets/17939122
+gh api repos/Looball/firstRag/rulesets \
+  --jq '.[] | select(.name == "Protect main")'
 gh pr checks --watch
 gh pr view --json mergeStateStatus,statusCheckRollup
 git diff --check
