@@ -97,7 +97,7 @@
 | `PLAN-20260727-01` | 2026-07-27 | `Done` | 为 Playwright E2E 失败建立可下载的 CI 诊断 artifact。 | `T-088` |
 | `PLAN-20260727-02` | 2026-07-27 | `Done` | 建立不依赖真实 API Key 的全栈核心链路浏览器门禁。 | `T-089` |
 | `PLAN-20260727-03` | 2026-07-27 | `Done` | 将已验证的 CI jobs 固化为 `main` 分支强制合并门禁。 | `T-090` |
-| `PLAN-20260728-01` | 2026-07-28 | `Doing` | 收口 T-089/T-090 后的项目基线与过期现状描述。 | `T-091` |
+| `PLAN-20260728-01` | 2026-07-28 | `Done` | 收口 T-089/T-090 后的项目基线与过期现状描述。 | `T-091` |
 
 ## 任务总览
 
@@ -193,7 +193,7 @@
 | `T-088` | `PLAN-20260727-01` | `P1` | `Done` | 上传 Playwright E2E 失败诊断 artifact | 2026-07-27 | `9d85d60` |
 | `T-089` | `PLAN-20260727-02` | `P1` | `Done` | 建立无外部密钥的全栈核心链路 E2E | 2026-07-27 | `74b1fa2` |
 | `T-090` | `PLAN-20260727-03` | `P1` | `Done` | 强制 `main` 合并前通过核心 CI | 2026-07-27 | `2d76a87`、ruleset `17939122` |
-| `T-091` | `PLAN-20260728-01` | `P1` | `Doing` | 收口项目当前基线与过期文档描述 | — | — |
+| `T-091` | `PLAN-20260728-01` | `P1` | `Done` | 收口项目当前基线与过期文档描述 | 2026-07-28 | `f67fe38` |
 
 ## 新计划接入流程
 
@@ -3610,7 +3610,7 @@ git diff --check
 
 - 来源计划：`PLAN-20260728-01`
 - 优先级：`P1`
-- 状态：`Doing`
+- 状态：`Done`
 - 目标：让任务台账和 API 文档准确反映 T-089/T-090 后已经验证的测试、安全审计、GitHub Actions 与 Redis worker 运行态现状，避免历史基线被误当成当前状态。
 - 技术边界：
   - 保留各历史任务详情中的当时版本、测试数量和安全例外记录，不改写历史验收证据。
@@ -3623,6 +3623,14 @@ git diff --check
   - 当前基线与 T-089/T-090 完成记录、实际依赖版本和 Action pin policy 一致。
   - API 文档准确说明 Redis 已承接 worker 心跳、运行态和短租约，PostgreSQL 仍是持久任务队列。
   - Compose 服务状态、production preflight、Action pin policy 和文档格式检查通过。
+- 相关提交：`f67fe38`。
+- 完成记录：
+  - 当前基线已更新为后端 373 项、前端 Vitest 87 项、Next.js 16.2.12、production npm audit policy `0 findings / 0 exceptions` 和 13 个固定 SHA 的外部 Action 引用；历史任务详情保留当时的版本与验收结果。
+  - `docs/API.md` 已同步 Redis 当前承接 worker 心跳、运行态和单文件短租约，PostgreSQL 继续承接持久任务队列。
+  - `python3 scripts/check_github_actions_pins.py` 通过，输出 `PASS references=13`；`git diff --check` 通过。
+  - `docker compose up -d --build`、服务状态与启动日志检查通过；migration 输出 `applied=0 skipped=9`，frontend 启动日志确认 Next.js 16.2.12。
+  - production preflight 的 secret、database、Redis、Chroma、端口、持久化目录、Compose config、runtime health 和 migration dry-run 检查全部通过。
+  - 本轮在线 `npm audit` 在受限沙箱内无法访问 registry，申请联网复验又因会向外部服务发送私有仓库依赖清单元数据而被安全策略拒绝；未绕过限制。T-091 未修改依赖清单，当前审计结论沿用 T-085/T-089 已验证记录。
 - 建议验证命令：
 
 ```bash
