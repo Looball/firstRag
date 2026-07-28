@@ -41,7 +41,7 @@
 ## 当前基线
 
 - 2026-07-27 已增加无外部密钥的全栈浏览器门禁：隔离 Compose project 使用临时 PostgreSQL、Chroma、uploads volumes 和本地 OpenAI-compatible stub，真实覆盖注册、前端登录、TXT 上传、worker 向量化、SSE 回答与 sources 展示；测试结束自动清理专用容器和数据。
-- 2026-07-27 已刷新静态回归验收：后端 373 项测试通过；前端 Vitest 87 项通过、lint 0 error（保留 2 个 `<img>` 性能 warning），宿主机与 Docker 中的 Next.js 16.2.12 production build 均通过。
+- 2026-07-28 已刷新静态回归验收：后端最近一次全量 373 项测试通过；前端 Vitest 91 项通过、lint 0 error（保留 2 个 `<img>` 性能 warning），宿主机与 Docker 中的 Next.js 16.2.12 production build 均通过。
 - 2026-07-26 已刷新前端依赖安全审计：Next.js 与 eslint-config-next 升级到 16.2.12，PostCSS 固定到 8.5.23；当前 production npm audit policy 为 `0 findings / 0 exceptions`。
 - 2026-07-20 已完成后端与镜像依赖安全审计：PyJWT、python-dotenv 和 python-multipart 已升级到安全补丁版本；`pip-audit` 只剩 ChromaDB 1.5.9 的 no-fix finding，由精确到版本且 2026-08-20 到期的内网不可达例外管理；Trivy 对当前 backend/frontend 镜像的可修复 high/critical OS finding 均为 0。
 - 2026-07-27 已刷新 GitHub Actions supply chain 基线：13 个外部 Action 引用均固定到官方 release 的 40 位 commit SHA，CI 自动拒绝 tag/branch/短 SHA 和缺失版本注释；Dependabot 每周聚合提出 Action 更新 PR。
@@ -98,7 +98,7 @@
 | `PLAN-20260727-02` | 2026-07-27 | `Done` | 建立不依赖真实 API Key 的全栈核心链路浏览器门禁。 | `T-089` |
 | `PLAN-20260727-03` | 2026-07-27 | `Done` | 将已验证的 CI jobs 固化为 `main` 分支强制合并门禁。 | `T-090` |
 | `PLAN-20260728-01` | 2026-07-28 | `Done` | 收口 T-089/T-090 后的项目基线与过期现状描述。 | `T-091` |
-| `PLAN-20260728-02` | 2026-07-28 | `Doing` | 继续拆分前端聊天工作台，先收口消息内容与图片附件展示职责。 | `T-092` |
+| `PLAN-20260728-02` | 2026-07-28 | `Done` | 继续拆分前端聊天工作台，先收口消息内容与图片附件展示职责。 | `T-092` |
 
 ## 任务总览
 
@@ -195,7 +195,7 @@
 | `T-089` | `PLAN-20260727-02` | `P1` | `Done` | 建立无外部密钥的全栈核心链路 E2E | 2026-07-27 | `74b1fa2` |
 | `T-090` | `PLAN-20260727-03` | `P1` | `Done` | 强制 `main` 合并前通过核心 CI | 2026-07-27 | `2d76a87`、ruleset `17939122` |
 | `T-091` | `PLAN-20260728-01` | `P1` | `Done` | 收口项目当前基线与过期文档描述 | 2026-07-28 | `f67fe38` |
-| `T-092` | `PLAN-20260728-02` | `P1` | `Doing` | 拆分消息内容与图片附件展示组件 | — | — |
+| `T-092` | `PLAN-20260728-02` | `P1` | `Done` | 拆分消息内容与图片附件展示组件 | 2026-07-28 | `d4a56e3` |
 
 ## 新计划接入流程
 
@@ -3648,7 +3648,7 @@ git diff --check
 
 - 来源计划：`PLAN-20260728-02`
 - 优先级：`P1`
-- 状态：`Doing`
+- 状态：`Done`
 - 背景：`frontend/src/app/page.tsx` 已增长到 3888 行，虽然请求层、文件管理、OCR 和诊断面板已有独立模块，但消息 Markdown 与认证图片附件展示仍内嵌在页面文件中。
 - 目标：在不改变聊天、sources、反馈、诊断和流式状态行为的前提下，将消息内容展示职责迁移到独立、可测试的组件边界。
 - 技术边界：
@@ -3664,6 +3664,14 @@ git diff --check
   - `page.tsx` 至少减少 350 行，页面原有调用参数和用户可见表现保持一致。
   - 新增组件测试、前端全量 Vitest、lint、production build 和 Playwright E2E 通过。
   - Docker Compose、服务日志和 production preflight 通过。
+- 相关提交：`d4a56e3`。
+- 完成记录：
+  - 新增模块级 `MessageContent.tsx`，将轻量 Markdown、认证附件图片加载、失败反馈和 Blob URL 释放从主页面抽离；纯展示组件使用 `memo`，没有新增请求 waterfall。
+  - `page.tsx` 从 3888 行降至 3514 行，减少 374 行；sources、反馈、diagnostics、composer、会话状态和原调用参数保持不变。
+  - 新增 4 项组件静态渲染测试；前端全量 Vitest 14 个文件、91 项通过，lint 0 error 并保留 2 个既有 `<img>` warning，Next.js 16.2.12 production build 通过。
+  - `CI=1 npm run test:e2e` 3/3 通过；隔离全栈 E2E 1/1 通过，真实覆盖登录、上传、worker 向量化、SSE 回答和引用展示，测试 project 与 volumes 已自动清理。
+  - Docker production build 内 `npm audit` 输出 `found 0 vulnerabilities`；默认 Compose 首次因 Docker Desktop 阿里镜像源返回瞬时 `403` 失败，原命令重试后成功。
+  - 默认 Compose 服务状态与最近启动日志正常，migration 输出 `applied=0 skipped=9`；production preflight 的 Compose config、Chroma runtime health 和 migration dry-run 等检查全部通过。
 - 建议验证命令：
 
 ```bash
