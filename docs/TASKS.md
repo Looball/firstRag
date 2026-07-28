@@ -100,7 +100,7 @@
 | `PLAN-20260728-01` | 2026-07-28 | `Done` | 收口 T-089/T-090 后的项目基线与过期现状描述。 | `T-091` |
 | `PLAN-20260728-02` | 2026-07-28 | `Done` | 继续拆分前端聊天工作台，先收口消息内容与图片附件展示职责。 | `T-092` |
 | `PLAN-20260728-03` | 2026-07-28 | `Done` | 继续拆分前端聊天工作台，收口知识库管理弹窗的展示职责。 | `T-093` |
-| `PLAN-20260728-04` | 2026-07-28 | `Doing` | 继续拆分前端聊天工作台，收口会话索引侧栏的展示职责。 | `T-094` |
+| `PLAN-20260728-04` | 2026-07-28 | `Done` | 继续拆分前端聊天工作台，收口会话索引侧栏的展示职责。 | `T-094` |
 
 ## 任务总览
 
@@ -199,7 +199,7 @@
 | `T-091` | `PLAN-20260728-01` | `P1` | `Done` | 收口项目当前基线与过期文档描述 | 2026-07-28 | `f67fe38` |
 | `T-092` | `PLAN-20260728-02` | `P1` | `Done` | 拆分消息内容与图片附件展示组件 | 2026-07-28 | `d4a56e3` |
 | `T-093` | `PLAN-20260728-03` | `P1` | `Done` | 拆分知识库管理弹窗组件 | 2026-07-28 | `683c9f1` |
-| `T-094` | `PLAN-20260728-04` | `P1` | `Doing` | 拆分会话索引侧栏组件 | — | — |
+| `T-094` | `PLAN-20260728-04` | `P1` | `Done` | 拆分会话索引侧栏组件 | 2026-07-28 | `378f206` |
 
 ## 新计划接入流程
 
@@ -3739,7 +3739,7 @@ git diff --check
 
 - 来源计划：`PLAN-20260728-04`
 - 优先级：`P1`
-- 状态：`Doing`
+- 状态：`Done`
 - 背景：T-093 完成后 `frontend/src/app/page.tsx` 仍有 3133 行，新建会话按钮、会话计数、会话选择、重命名和删除列表继续以内联 JSX 形式位于左侧栏。
 - 目标：在不改变会话请求、选择、重命名和删除状态的前提下，将会话索引展示迁移到独立、可测试的组件边界。
 - 技术边界：
@@ -3755,7 +3755,13 @@ git diff --check
   - `page.tsx` 至少减少 100 行，会话请求和 lifecycle state 仍保留在页面层。
   - 新增组件测试、前端全量 Vitest、lint、production build 和 Playwright E2E 通过。
   - Docker Compose、服务日志和 production preflight 通过。
-- 相关提交：待完成。
+- 相关提交：`378f206`。
+- 完成记录：
+  - 新增 `ConversationSidebar.tsx`，将新建会话入口、会话计数、空状态、活动项、消息摘要、重命名和删除 UI 从主页面抽离；会话请求、选择和异步 lifecycle state 继续由 `page.tsx` 管理，没有新增 effect 或请求 waterfall。
+  - `page.tsx` 从 3133 行降至 3014 行，减少 119 行；新增 3 项组件静态渲染测试，覆盖空列表、活动会话、消息摘要、回退文案和编辑/等待状态。
+  - 前端全量 Vitest 16 个文件、96 项通过；lint 0 error 并保留 2 个既有 `<img>` warning；宿主机与 Docker 中的 Next.js 16.2.12 production build、Playwright E2E 3/3 均通过。
+  - 首次 Compose build 因 Docker Desktop 阿里镜像源对 `python:3.12-slim` 返回瞬时 `403` 中断；网络恢复后原命令重试成功，frontend、backend 镜像均完成构建。
+  - Compose 服务状态与最近启动日志正常，migration 输出 `applied=0 skipped=9`；production preflight 的 Compose config、Chroma runtime health 和 migration dry-run 等检查全部通过。
 - 建议验证命令：
 
 ```bash
