@@ -3627,7 +3627,7 @@ git diff --check
   - Compose 服务状态、production preflight、Action pin policy 和文档格式检查通过。
 - 相关提交：`f67fe38`。
 - 完成记录：
-  - 当前基线已更新为后端 373 项、前端 Vitest 87 项、Next.js 16.2.12、production npm audit policy `0 findings / 0 exceptions` 和 13 个固定 SHA 的外部 Action 引用；历史任务详情保留当时的版本与验收结果。
+  - T-091 完成时基线已更新为后端 373 项、前端 Vitest 87 项、Next.js 16.2.12、production npm audit policy `0 findings / 0 exceptions` 和 13 个固定 SHA 的外部 Action 引用；T-092 后新增 4 项组件测试，当前基线相应更新为 91 项，历史任务详情继续保留各自完成时的验收结果。
   - `docs/API.md` 已同步 Redis 当前承接 worker 心跳、运行态和单文件短租约，PostgreSQL 继续承接持久任务队列。
   - `python3 scripts/check_github_actions_pins.py` 通过，输出 `PASS references=13`；`git diff --check` 通过。
   - `docker compose up -d --build`、服务状态与启动日志检查通过；migration 输出 `applied=0 skipped=9`，frontend 启动日志确认 Next.js 16.2.12。
