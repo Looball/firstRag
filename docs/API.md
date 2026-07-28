@@ -16,7 +16,7 @@ Authorization: Bearer <access_token>
 | --- | --- | --- |
 | `GET` | `/health` | 返回后端进程和 Redis 基础设施的安全健康摘要。 |
 
-`GET /health` 不需要认证，只返回可公开的健康状态，不返回 Redis URL、密码、JWT、数据库连接串或用户数据。Redis 当前用于基础设施健康检查、RAG 热点缓存和后端分布式限流；worker 运行态迁移由后续 Redis 专项任务承接。
+`GET /health` 不需要认证，只返回可公开的健康状态，不返回 Redis URL、密码、JWT、数据库连接串或用户数据。Redis 当前用于基础设施健康检查、RAG 热点缓存、后端分布式限流，以及 vector worker 心跳、运行态和单文件短租约；PostgreSQL 仍是 vector index job 的持久任务队列。
 
 ```json
 {

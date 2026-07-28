@@ -41,10 +41,10 @@
 ## 当前基线
 
 - 2026-07-27 已增加无外部密钥的全栈浏览器门禁：隔离 Compose project 使用临时 PostgreSQL、Chroma、uploads volumes 和本地 OpenAI-compatible stub，真实覆盖注册、前端登录、TXT 上传、worker 向量化、SSE 回答与 sources 展示；测试结束自动清理专用容器和数据。
-- 2026-07-21 已刷新静态回归验收：后端 311 个 pytest 用例和 30 个 subtests 通过、前端 lint 0 error（保留 2 个 `<img>` 性能 warning）、Vitest 69 个用例通过、Next 16.2.10 production build 通过。
-- 2026-07-20 已完成前端依赖安全审计：Next.js 从 16.2.2 升级到 16.2.10，已消除已确认的 high findings；Babel、brace-expansion 和 js-yaml 开发依赖补丁已更新。`npm audit` 仍报告 Next 内嵌 PostCSS 的 2 个 moderate 条目，当前项目没有用户可控 CSS 进入 stringify 的运行路径，且审计器只提供降级到 Next 9.3.3 的 breaking fix，因此保留为已 triage 的不可达例外。
+- 2026-07-28 已刷新静态回归验收：后端最近一次全量 373 项测试通过；前端 Vitest 91 项通过、lint 0 error（保留 2 个 `<img>` 性能 warning），宿主机与 Docker 中的 Next.js 16.2.12 production build 均通过。
+- 2026-07-26 已刷新前端依赖安全审计：Next.js 与 eslint-config-next 升级到 16.2.12，PostCSS 固定到 8.5.23；当前 production npm audit policy 为 `0 findings / 0 exceptions`。
 - 2026-07-20 已完成后端与镜像依赖安全审计：PyJWT、python-dotenv 和 python-multipart 已升级到安全补丁版本；`pip-audit` 只剩 ChromaDB 1.5.9 的 no-fix finding，由精确到版本且 2026-08-20 到期的内网不可达例外管理；Trivy 对当前 backend/frontend 镜像的可修复 high/critical OS finding 均为 0。
-- 2026-07-20 已完成 GitHub Actions supply chain 固化：7 个外部 Action 引用均固定到官方 release 的 40 位 commit SHA，CI 自动拒绝 tag/branch/短 SHA 和缺失版本注释；Dependabot 每周聚合提出 Action 更新 PR。
+- 2026-07-27 已刷新 GitHub Actions supply chain 基线：13 个外部 Action 引用均固定到官方 release 的 40 位 commit SHA，CI 自动拒绝 tag/branch/短 SHA 和缺失版本注释；Dependabot 每周聚合提出 Action 更新 PR。
 - 2026-07-20 已完成 Chroma 跨进程索引可见性真实回归：Compose 使用独立 `chroma` service，worker 重建文件向量后 backend 无需重启即可召回 16 条 vector 结果，`vector_degraded=false`、`vector_errors=[]`，目标资料同时包含 `fulltext` 和 `vector` 来源。
 - 当前默认验证路径为 `docker compose up -d --build` 后检查 `docker compose ps` 与 Redis、PostgreSQL、Chroma、migration、backend、worker、frontend 关键日志；`scripts/acceptance_check.sh` 作为补充验收脚本，静态补充检查可运行 `scripts/acceptance_check.sh --skip-real-eval`。
 - 当前阶段优先做“可维护性 + 可观测性 + 验收自动化”，避免在关键链路刚稳定后继续堆叠大功能；前端工作台已开始引入 React Query 和 Zod 做请求层集中化与轻量响应校验。
@@ -97,6 +97,8 @@
 | `PLAN-20260727-01` | 2026-07-27 | `Done` | 为 Playwright E2E 失败建立可下载的 CI 诊断 artifact。 | `T-088` |
 | `PLAN-20260727-02` | 2026-07-27 | `Done` | 建立不依赖真实 API Key 的全栈核心链路浏览器门禁。 | `T-089` |
 | `PLAN-20260727-03` | 2026-07-27 | `Done` | 将已验证的 CI jobs 固化为 `main` 分支强制合并门禁。 | `T-090` |
+| `PLAN-20260728-01` | 2026-07-28 | `Done` | 收口 T-089/T-090 后的项目基线与过期现状描述。 | `T-091` |
+| `PLAN-20260728-02` | 2026-07-28 | `Done` | 继续拆分前端聊天工作台，先收口消息内容与图片附件展示职责。 | `T-092` |
 
 ## 任务总览
 
@@ -192,6 +194,8 @@
 | `T-088` | `PLAN-20260727-01` | `P1` | `Done` | 上传 Playwright E2E 失败诊断 artifact | 2026-07-27 | `9d85d60` |
 | `T-089` | `PLAN-20260727-02` | `P1` | `Done` | 建立无外部密钥的全栈核心链路 E2E | 2026-07-27 | `74b1fa2` |
 | `T-090` | `PLAN-20260727-03` | `P1` | `Done` | 强制 `main` 合并前通过核心 CI | 2026-07-27 | `2d76a87`、ruleset `17939122` |
+| `T-091` | `PLAN-20260728-01` | `P1` | `Done` | 收口项目当前基线与过期文档描述 | 2026-07-28 | `f67fe38` |
+| `T-092` | `PLAN-20260728-02` | `P1` | `Done` | 拆分消息内容与图片附件展示组件 | 2026-07-28 | `d4a56e3` |
 
 ## 新计划接入流程
 
@@ -3601,6 +3605,86 @@ gh api repos/Looball/firstRag/rulesets \
   --jq '.[] | select(.name == "Protect main")'
 gh pr checks --watch
 gh pr view --json mergeStateStatus,statusCheckRollup
+git diff --check
+```
+
+## T-091 收口项目当前基线与过期文档描述
+
+- 来源计划：`PLAN-20260728-01`
+- 优先级：`P1`
+- 状态：`Done`
+- 目标：让任务台账和 API 文档准确反映 T-089/T-090 后已经验证的测试、安全审计、GitHub Actions 与 Redis worker 运行态现状，避免历史基线被误当成当前状态。
+- 技术边界：
+  - 保留各历史任务详情中的当时版本、测试数量和安全例外记录，不改写历史验收证据。
+  - 只更新明确过期的当前基线和现状描述，不引入代码、依赖、架构或运行时行为变更。
+- 范围：
+  - 刷新 `docs/TASKS.md` 当前测试、Next.js、npm audit 和 GitHub Actions pin 基线。
+  - 修正 `docs/API.md` 将 Redis worker 运行态误写为后续任务的过期描述。
+  - 搜索同类过期现状描述，并区分历史记录与当前文档。
+- 验收标准：
+  - 当前基线与 T-089/T-090 完成记录、实际依赖版本和 Action pin policy 一致。
+  - API 文档准确说明 Redis 已承接 worker 心跳、运行态和短租约，PostgreSQL 仍是持久任务队列。
+  - Compose 服务状态、production preflight、Action pin policy 和文档格式检查通过。
+- 相关提交：`f67fe38`。
+- 完成记录：
+  - T-091 完成时基线已更新为后端 373 项、前端 Vitest 87 项、Next.js 16.2.12、production npm audit policy `0 findings / 0 exceptions` 和 13 个固定 SHA 的外部 Action 引用；T-092 后新增 4 项组件测试，当前基线相应更新为 91 项，历史任务详情继续保留各自完成时的验收结果。
+  - `docs/API.md` 已同步 Redis 当前承接 worker 心跳、运行态和单文件短租约，PostgreSQL 继续承接持久任务队列。
+  - `python3 scripts/check_github_actions_pins.py` 通过，输出 `PASS references=13`；`git diff --check` 通过。
+  - `docker compose up -d --build`、服务状态与启动日志检查通过；migration 输出 `applied=0 skipped=9`，frontend 启动日志确认 Next.js 16.2.12。
+  - production preflight 的 secret、database、Redis、Chroma、端口、持久化目录、Compose config、runtime health 和 migration dry-run 检查全部通过。
+  - 本轮在线 `npm audit` 在受限沙箱内无法访问 registry，申请联网复验又因会向外部服务发送私有仓库依赖清单元数据而被安全策略拒绝；未绕过限制。T-091 未修改依赖清单，当前审计结论沿用 T-085/T-089 已验证记录。
+- 建议验证命令：
+
+```bash
+python3 scripts/check_github_actions_pins.py
+docker compose up -d --build
+docker compose ps
+docker compose logs --tail=100 redis postgres chroma migrate backend worker frontend
+conda run -n firstrag python scripts/production_preflight.py --env-file .env --migration-method compose --check-runtime-health
+git diff --check
+```
+
+## T-092 拆分消息内容与图片附件展示组件
+
+- 来源计划：`PLAN-20260728-02`
+- 优先级：`P1`
+- 状态：`Done`
+- 背景：`frontend/src/app/page.tsx` 已增长到 3888 行，虽然请求层、文件管理、OCR 和诊断面板已有独立模块，但消息 Markdown 与认证图片附件展示仍内嵌在页面文件中。
+- 目标：在不改变聊天、sources、反馈、诊断和流式状态行为的前提下，将消息内容展示职责迁移到独立、可测试的组件边界。
+- 技术边界：
+  - 保持现有轻量 Markdown 语法、CSS class、附件认证请求、Blob URL 释放和加载失败反馈不变。
+  - 不在本任务拆分消息 sources、反馈、诊断、composer 或会话状态，避免一次引入大规模 prop drilling。
+  - 遵循 React 组件模块级定义和稳定 props 边界；对纯展示组件使用 memo，历史附件请求继续只在没有本地 preview 时发起。
+- 范围：
+  - 新增 `MessageContent.tsx`，承接 Markdown、认证附件图片和附件网格。
+  - `page.tsx` 改为复用独立组件并移除对应内联实现。
+  - 增加组件静态渲染测试，覆盖标题、行内样式、列表、代码块、本地附件与空附件。
+  - 更新前端结构文档，明确页面与消息展示组件的职责边界。
+- 验收标准：
+  - `page.tsx` 至少减少 350 行，页面原有调用参数和用户可见表现保持一致。
+  - 新增组件测试、前端全量 Vitest、lint、production build 和 Playwright E2E 通过。
+  - Docker Compose、服务日志和 production preflight 通过。
+- 相关提交：`d4a56e3`。
+- 完成记录：
+  - 新增模块级 `MessageContent.tsx`，将轻量 Markdown、认证附件图片加载、失败反馈和 Blob URL 释放从主页面抽离；纯展示组件使用 `memo`，没有新增请求 waterfall。
+  - `page.tsx` 从 3888 行降至 3514 行，减少 374 行；sources、反馈、diagnostics、composer、会话状态和原调用参数保持不变。
+  - 新增 4 项组件静态渲染测试；前端全量 Vitest 14 个文件、91 项通过，lint 0 error 并保留 2 个既有 `<img>` warning，Next.js 16.2.12 production build 通过。
+  - `CI=1 npm run test:e2e` 3/3 通过；隔离全栈 E2E 1/1 通过，真实覆盖登录、上传、worker 向量化、SSE 回答和引用展示，测试 project 与 volumes 已自动清理。
+  - Docker production build 内 `npm audit` 输出 `found 0 vulnerabilities`；默认 Compose 首次因 Docker Desktop 阿里镜像源返回瞬时 `403` 失败，原命令重试后成功。
+  - 默认 Compose 服务状态与最近启动日志正常，migration 输出 `applied=0 skipped=9`；production preflight 的 Compose config、Chroma runtime health 和 migration dry-run 等检查全部通过。
+- 建议验证命令：
+
+```bash
+cd frontend
+npm test
+npm run lint
+npm run build
+CI=1 npm run test:e2e
+cd ..
+docker compose up -d --build
+docker compose ps
+docker compose logs --since=5m redis postgres chroma migrate backend worker frontend
+conda run -n firstrag python scripts/production_preflight.py --env-file .env --migration-method compose --check-runtime-health
 git diff --check
 ```
 
