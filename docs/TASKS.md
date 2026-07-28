@@ -41,7 +41,7 @@
 ## 当前基线
 
 - 2026-07-27 已增加无外部密钥的全栈浏览器门禁：隔离 Compose project 使用临时 PostgreSQL、Chroma、uploads volumes 和本地 OpenAI-compatible stub，真实覆盖注册、前端登录、TXT 上传、worker 向量化、SSE 回答与 sources 展示；测试结束自动清理专用容器和数据。
-- 2026-07-28 已刷新静态回归验收：后端最近一次全量 373 项测试通过；前端 Vitest 93 项通过、lint 0 error（保留 2 个 `<img>` 性能 warning），宿主机与 Docker 中的 Next.js 16.2.12 production build 均通过。
+- 2026-07-28 已刷新静态回归验收：后端最近一次全量 373 项测试通过；前端 Vitest 101 项通过、lint 0 error（保留 2 个 `<img>` 性能 warning），宿主机与 Docker 中的 Next.js 16.2.12 production build 均通过。
 - 2026-07-26 已刷新前端依赖安全审计：Next.js 与 eslint-config-next 升级到 16.2.12，PostCSS 固定到 8.5.23；当前 production npm audit policy 为 `0 findings / 0 exceptions`。
 - 2026-07-20 已完成后端与镜像依赖安全审计：PyJWT、python-dotenv 和 python-multipart 已升级到安全补丁版本；`pip-audit` 只剩 ChromaDB 1.5.9 的 no-fix finding，由精确到版本且 2026-08-20 到期的内网不可达例外管理；Trivy 对当前 backend/frontend 镜像的可修复 high/critical OS finding 均为 0。
 - 2026-07-27 已刷新 GitHub Actions supply chain 基线：13 个外部 Action 引用均固定到官方 release 的 40 位 commit SHA，CI 自动拒绝 tag/branch/短 SHA 和缺失版本注释；Dependabot 每周聚合提出 Action 更新 PR。
@@ -101,7 +101,7 @@
 | `PLAN-20260728-02` | 2026-07-28 | `Done` | 继续拆分前端聊天工作台，先收口消息内容与图片附件展示职责。 | `T-092` |
 | `PLAN-20260728-03` | 2026-07-28 | `Done` | 继续拆分前端聊天工作台，收口知识库管理弹窗的展示职责。 | `T-093` |
 | `PLAN-20260728-04` | 2026-07-28 | `Done` | 继续拆分前端聊天工作台，收口会话索引侧栏的展示职责。 | `T-094` |
-| `PLAN-20260728-05` | 2026-07-28 | `Doing` | 继续拆分前端聊天工作台，收口高级模式质量看板的展示职责。 | `T-095` |
+| `PLAN-20260728-05` | 2026-07-28 | `Done` | 继续拆分前端聊天工作台，收口高级模式质量看板的展示职责。 | `T-095` |
 
 ## 任务总览
 
@@ -201,7 +201,7 @@
 | `T-092` | `PLAN-20260728-02` | `P1` | `Done` | 拆分消息内容与图片附件展示组件 | 2026-07-28 | `d4a56e3` |
 | `T-093` | `PLAN-20260728-03` | `P1` | `Done` | 拆分知识库管理弹窗组件 | 2026-07-28 | `683c9f1` |
 | `T-094` | `PLAN-20260728-04` | `P1` | `Done` | 拆分会话索引侧栏组件 | 2026-07-28 | `378f206` |
-| `T-095` | `PLAN-20260728-05` | `P1` | `Doing` | 拆分高级模式质量看板组件 | — | — |
+| `T-095` | `PLAN-20260728-05` | `P1` | `Done` | 拆分高级模式质量看板组件 | 2026-07-28 | `202c40e` |
 
 ## 新计划接入流程
 
@@ -3784,7 +3784,7 @@ git diff --check
 
 - 来源计划：`PLAN-20260728-05`
 - 优先级：`P1`
-- 状态：`Doing`
+- 状态：`Done`
 - 背景：T-094 完成后 `frontend/src/app/page.tsx` 仍有 3014 行，高级模式的质量看板、指标格式化、空数据说明、负反馈原因和无关引用来源继续以内联 JSX 与页面级 helper 形式存在。
 - 目标：在不改变质量数据请求、缓存、展开和刷新状态的前提下，将质量看板展示迁移到独立、可测试的组件边界。
 - 技术边界：
@@ -3800,7 +3800,13 @@ git diff --check
   - `page.tsx` 至少减少 120 行，质量看板请求和 lifecycle state 仍保留在页面层。
   - 新增组件测试、前端全量 Vitest、lint、production build 和 Playwright E2E 通过。
   - Docker Compose、服务日志和 production preflight 通过。
-- 相关提交：待完成。
+- 相关提交：`202c40e`。
+- 完成记录：
+  - 新增 `QualityDashboardPanel.tsx`，将展开入口、刷新、错误、空数据说明、核心指标、负反馈原因和无关引用来源从主页面抽离；dashboard、loading、error、open state 和 API 请求继续由 `page.tsx` 管理，没有新增 effect 或请求 waterfall。
+  - 将三个质量指标格式化 helper 移入组件模块；`page.tsx` 从 3014 行降至 2862 行，减少 152 行。
+  - 新增 5 项组件静态渲染测试；前端全量 Vitest 17 个文件、101 项通过，lint 0 error 并保留 2 个既有 `<img>` warning。
+  - 宿主机与 Docker 中的 Next.js 16.2.12 production build、Playwright E2E 3/3 均通过，Docker production audit 输出 `found 0 vulnerabilities`。
+  - Compose 服务状态与最近启动日志正常，migration 输出 `applied=0 skipped=9`；production preflight 的 Compose config、Chroma runtime health 和 migration dry-run 等检查全部通过。
 - 建议验证命令：
 
 ```bash
