@@ -98,6 +98,7 @@
 | `PLAN-20260727-02` | 2026-07-27 | `Done` | 建立不依赖真实 API Key 的全栈核心链路浏览器门禁。 | `T-089` |
 | `PLAN-20260727-03` | 2026-07-27 | `Done` | 将已验证的 CI jobs 固化为 `main` 分支强制合并门禁。 | `T-090` |
 | `PLAN-20260728-01` | 2026-07-28 | `Done` | 收口 T-089/T-090 后的项目基线与过期现状描述。 | `T-091` |
+| `PLAN-20260728-02` | 2026-07-28 | `Doing` | 继续拆分前端聊天工作台，先收口消息内容与图片附件展示职责。 | `T-092` |
 
 ## 任务总览
 
@@ -194,6 +195,7 @@
 | `T-089` | `PLAN-20260727-02` | `P1` | `Done` | 建立无外部密钥的全栈核心链路 E2E | 2026-07-27 | `74b1fa2` |
 | `T-090` | `PLAN-20260727-03` | `P1` | `Done` | 强制 `main` 合并前通过核心 CI | 2026-07-27 | `2d76a87`、ruleset `17939122` |
 | `T-091` | `PLAN-20260728-01` | `P1` | `Done` | 收口项目当前基线与过期文档描述 | 2026-07-28 | `f67fe38` |
+| `T-092` | `PLAN-20260728-02` | `P1` | `Doing` | 拆分消息内容与图片附件展示组件 | — | — |
 
 ## 新计划接入流程
 
@@ -3638,6 +3640,42 @@ python3 scripts/check_github_actions_pins.py
 docker compose up -d --build
 docker compose ps
 docker compose logs --tail=100 redis postgres chroma migrate backend worker frontend
+conda run -n firstrag python scripts/production_preflight.py --env-file .env --migration-method compose --check-runtime-health
+git diff --check
+```
+
+## T-092 拆分消息内容与图片附件展示组件
+
+- 来源计划：`PLAN-20260728-02`
+- 优先级：`P1`
+- 状态：`Doing`
+- 背景：`frontend/src/app/page.tsx` 已增长到 3888 行，虽然请求层、文件管理、OCR 和诊断面板已有独立模块，但消息 Markdown 与认证图片附件展示仍内嵌在页面文件中。
+- 目标：在不改变聊天、sources、反馈、诊断和流式状态行为的前提下，将消息内容展示职责迁移到独立、可测试的组件边界。
+- 技术边界：
+  - 保持现有轻量 Markdown 语法、CSS class、附件认证请求、Blob URL 释放和加载失败反馈不变。
+  - 不在本任务拆分消息 sources、反馈、诊断、composer 或会话状态，避免一次引入大规模 prop drilling。
+  - 遵循 React 组件模块级定义和稳定 props 边界；对纯展示组件使用 memo，历史附件请求继续只在没有本地 preview 时发起。
+- 范围：
+  - 新增 `MessageContent.tsx`，承接 Markdown、认证附件图片和附件网格。
+  - `page.tsx` 改为复用独立组件并移除对应内联实现。
+  - 增加组件静态渲染测试，覆盖标题、行内样式、列表、代码块、本地附件与空附件。
+  - 更新前端结构文档，明确页面与消息展示组件的职责边界。
+- 验收标准：
+  - `page.tsx` 至少减少 350 行，页面原有调用参数和用户可见表现保持一致。
+  - 新增组件测试、前端全量 Vitest、lint、production build 和 Playwright E2E 通过。
+  - Docker Compose、服务日志和 production preflight 通过。
+- 建议验证命令：
+
+```bash
+cd frontend
+npm test
+npm run lint
+npm run build
+CI=1 npm run test:e2e
+cd ..
+docker compose up -d --build
+docker compose ps
+docker compose logs --since=5m redis postgres chroma migrate backend worker frontend
 conda run -n firstrag python scripts/production_preflight.py --env-file .env --migration-method compose --check-runtime-health
 git diff --check
 ```

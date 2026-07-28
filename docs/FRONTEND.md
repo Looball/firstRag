@@ -16,6 +16,7 @@ frontend/
 │   │   ├── layout.tsx
 │   │   └── page.tsx      # 聊天工作台
 │   ├── components/
+│   │   ├── chat-workspace/ # 消息、文件、来源预览、OCR 与诊断组件
 │   │   └── settings/
 │   └── lib/
 ├── package.json
@@ -104,7 +105,7 @@ BACKEND_API_PREFIX=
 
 - `login/page.tsx`：登录并保存访问令牌。
 - `register/page.tsx`：注册新用户。
-- `page.tsx`：知识库、文件、会话和聊天主工作台；知识库管理支持重命名、移入回收站和恢复，文件管理支持解除单个知识库关联或经二次确认永久删除全局文件；知识文件上传支持 PDF、DOCX、Markdown、TXT、PNG、JPEG 和 WebP，图片入库向量化失败时展示 vision 模型配置恢复动作。
+- `page.tsx`：知识库、文件、会话和聊天主工作台；知识库管理支持重命名、移入回收站和恢复，文件管理支持解除单个知识库关联或经二次确认永久删除全局文件；知识文件上传支持 PDF、DOCX、Markdown、TXT、PNG、JPEG 和 WebP，图片入库向量化失败时展示 vision 模型配置恢复动作。消息 Markdown 与认证图片附件由 `components/chat-workspace/MessageContent.tsx` 独立渲染，页面保留 sources、反馈、诊断和流式状态编排。
 - `settings/page.tsx`：模型厂商、个人 API Key、模型列表和生成参数设置。
 
 ## 安全约定
