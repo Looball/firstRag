@@ -41,7 +41,7 @@
 ## 当前基线
 
 - 2026-07-27 已增加无外部密钥的全栈浏览器门禁：隔离 Compose project 使用临时 PostgreSQL、Chroma、uploads volumes 和本地 OpenAI-compatible stub，真实覆盖注册、前端登录、TXT 上传、worker 向量化、SSE 回答与 sources 展示；测试结束自动清理专用容器和数据。
-- 2026-07-28 已刷新静态回归验收：后端最近一次全量 373 项测试通过；前端 Vitest 113 项通过、lint 0 error（保留 2 个 `<img>` 性能 warning），宿主机与 Docker 中的 Next.js 16.2.12 production build 均通过。
+- 2026-07-28 已刷新静态回归验收：后端最近一次全量 373 项测试通过；前端 Vitest 116 项通过、lint 0 error（保留 2 个 `<img>` 性能 warning），宿主机与 Docker 中的 Next.js 16.2.12 production build 均通过。
 - 2026-07-26 已刷新前端依赖安全审计：Next.js 与 eslint-config-next 升级到 16.2.12，PostCSS 固定到 8.5.23；当前 production npm audit policy 为 `0 findings / 0 exceptions`。
 - 2026-07-20 已完成后端与镜像依赖安全审计：PyJWT、python-dotenv 和 python-multipart 已升级到安全补丁版本；`pip-audit` 只剩 ChromaDB 1.5.9 的 no-fix finding，由精确到版本且 2026-08-20 到期的内网不可达例外管理；Trivy 对当前 backend/frontend 镜像的可修复 high/critical OS finding 均为 0。
 - 2026-07-27 已刷新 GitHub Actions supply chain 基线：13 个外部 Action 引用均固定到官方 release 的 40 位 commit SHA，CI 自动拒绝 tag/branch/短 SHA 和缺失版本注释；Dependabot 每周聚合提出 Action 更新 PR。
@@ -106,7 +106,7 @@
 | `PLAN-20260728-07` | 2026-07-28 | `Done` | 继续拆分前端聊天工作台，收口侧栏用户身份、退出和模式切换的展示职责。 | `T-097` |
 | `PLAN-20260728-08` | 2026-07-28 | `Done` | 继续拆分前端聊天工作台，收口主工作区标题与消息/文件统计的展示职责。 | `T-098` |
 | `PLAN-20260728-09` | 2026-07-28 | `Done` | 继续拆分前端聊天工作台，收口聊天输入、图片附件预览和发送状态的展示职责。 | `T-099` |
-| `PLAN-20260728-10` | 2026-07-28 | `Doing` | 继续拆分前端聊天工作台，收口回答引用、原文入口和 source feedback 的展示职责。 | `T-100` |
+| `PLAN-20260728-10` | 2026-07-28 | `Done` | 继续拆分前端聊天工作台，收口回答引用、原文入口和 source feedback 的展示职责。 | `T-100` |
 
 ## 任务总览
 
@@ -211,7 +211,7 @@
 | `T-097` | `PLAN-20260728-07` | `P1` | `Done` | 拆分侧栏用户身份与模式控制组件 | 2026-07-28 | `2ed46af` |
 | `T-098` | `PLAN-20260728-08` | `P1` | `Done` | 拆分主工作区 header 组件 | 2026-07-28 | `e60e327` |
 | `T-099` | `PLAN-20260728-09` | `P1` | `Done` | 拆分聊天输入与图片附件组件 | 2026-07-28 | `0f9ee9b` |
-| `T-100` | `PLAN-20260728-10` | `P1` | `Doing` | 拆分消息引用来源列表组件 | — | — |
+| `T-100` | `PLAN-20260728-10` | `P1` | `Done` | 拆分消息引用来源列表组件 | 2026-07-28 | `d41d5aa` |
 
 ## 新计划接入流程
 
@@ -4011,7 +4011,7 @@ git diff --check
 
 - 来源计划：`PLAN-20260728-10`
 - 优先级：`P1`
-- 状态：`Doing`
+- 状态：`Done`
 - 背景：T-099 完成后 `frontend/src/app/page.tsx` 仍有 2587 行，回答引用的文件 metadata、OCR 状态、检索分数、原文入口和 source feedback 继续在消息循环内占据约 220 行。
 - 目标：在不改变原文预览、source feedback 请求和消息状态回写的前提下，将引用来源区域迁移到独立、可测试的组件边界。
 - 技术边界：
@@ -4028,7 +4028,14 @@ git diff --check
   - `page.tsx` 至少减少 170 行，preview 和 feedback 业务 state 与副作用仍保留在页面层。
   - 新增组件测试、前端全量 Vitest、lint、production build 和 Playwright E2E 通过。
   - Docker Compose、服务日志和 production preflight 通过。
-- 相关提交：待完成。
+- 相关提交：`d41d5aa`。
+- 完成记录：
+  - 新增 `MessageSourceList.tsx`，将引用摘要、文件位置、OCR 状态、检索 diagnostics、原文入口和 source feedback 从消息循环抽离；原文弹窗 state、feedback API、消息状态回写和临时提示计时继续由 `page.tsx` 管理。
+  - 将引用位置与 OCR confidence 格式化调用移入组件模块；子组件仅接收 sources、显示计数、feedback 状态和 callbacks，没有新增 state、effect 或数据请求。
+  - 保持普通/高级模式差异、检索分数四位小数、OCR 校对 metadata、原文入口条件及错误优先于成功提示的行为不变；`page.tsx` 从 2587 行降至 2410 行，减少 177 行。
+  - 新增 3 项组件静态渲染测试，覆盖普通/高级模式、OCR metadata、检索 diagnostics、预览入口以及已保存/提交中/成功/失败 feedback 状态。
+  - 前端全量 Vitest 22 个文件、116 项通过；lint 0 error 并保留 2 个既有 `<img>` warning；宿主机与 Docker 中的 Next.js 16.2.12 production build、Playwright E2E 3/3 均通过。
+  - Docker production audit 输出 `found 0 vulnerabilities`；Compose 服务状态与最近启动日志正常，migration 输出 `applied=0 skipped=9`，production preflight 全部通过。
 - 建议验证命令：
 
 ```bash
