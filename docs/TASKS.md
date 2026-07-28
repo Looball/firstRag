@@ -101,6 +101,7 @@
 | `PLAN-20260728-02` | 2026-07-28 | `Done` | 继续拆分前端聊天工作台，先收口消息内容与图片附件展示职责。 | `T-092` |
 | `PLAN-20260728-03` | 2026-07-28 | `Done` | 继续拆分前端聊天工作台，收口知识库管理弹窗的展示职责。 | `T-093` |
 | `PLAN-20260728-04` | 2026-07-28 | `Done` | 继续拆分前端聊天工作台，收口会话索引侧栏的展示职责。 | `T-094` |
+| `PLAN-20260728-05` | 2026-07-28 | `Doing` | 继续拆分前端聊天工作台，收口高级模式质量看板的展示职责。 | `T-095` |
 
 ## 任务总览
 
@@ -200,6 +201,7 @@
 | `T-092` | `PLAN-20260728-02` | `P1` | `Done` | 拆分消息内容与图片附件展示组件 | 2026-07-28 | `d4a56e3` |
 | `T-093` | `PLAN-20260728-03` | `P1` | `Done` | 拆分知识库管理弹窗组件 | 2026-07-28 | `683c9f1` |
 | `T-094` | `PLAN-20260728-04` | `P1` | `Done` | 拆分会话索引侧栏组件 | 2026-07-28 | `378f206` |
+| `T-095` | `PLAN-20260728-05` | `P1` | `Doing` | 拆分高级模式质量看板组件 | — | — |
 
 ## 新计划接入流程
 
@@ -3762,6 +3764,43 @@ git diff --check
   - 前端全量 Vitest 16 个文件、96 项通过；lint 0 error 并保留 2 个既有 `<img>` warning；宿主机与 Docker 中的 Next.js 16.2.12 production build、Playwright E2E 3/3 均通过。
   - 首次 Compose build 因 Docker Desktop 阿里镜像源对 `python:3.12-slim` 返回瞬时 `403` 中断；网络恢复后原命令重试成功，frontend、backend 镜像均完成构建。
   - Compose 服务状态与最近启动日志正常，migration 输出 `applied=0 skipped=9`；production preflight 的 Compose config、Chroma runtime health 和 migration dry-run 等检查全部通过。
+- 建议验证命令：
+
+```bash
+cd frontend
+npm test
+npm run lint
+npm run build
+CI=1 npm run test:e2e
+cd ..
+docker compose up -d --build
+docker compose ps
+docker compose logs --since=5m redis postgres chroma migrate backend worker frontend
+conda run -n firstrag python scripts/production_preflight.py --env-file .env --migration-method compose --check-runtime-health
+git diff --check
+```
+
+## T-095 拆分高级模式质量看板组件
+
+- 来源计划：`PLAN-20260728-05`
+- 优先级：`P1`
+- 状态：`Doing`
+- 背景：T-094 完成后 `frontend/src/app/page.tsx` 仍有 3014 行，高级模式的质量看板、指标格式化、空数据说明、负反馈原因和无关引用来源继续以内联 JSX 与页面级 helper 形式存在。
+- 目标：在不改变质量数据请求、缓存、展开和刷新状态的前提下，将质量看板展示迁移到独立、可测试的组件边界。
+- 技术边界：
+  - `page.tsx` 继续持有 dashboard、loading、error 和 open state，并负责调用质量看板 API。
+  - 子组件只接收数据、状态和 callbacks，不增加 effect、数据请求或重复 state。
+  - 不在本任务拆分高级/普通模式切换、用户信息或知识库选择区域。
+- 范围：
+  - 新增 `QualityDashboardPanel.tsx`，承接展开入口、时间窗口、刷新、错误、空数据、核心指标和分布列表。
+  - 将质量指标格式化 helper 移入组件模块，`page.tsx` 改为复用独立组件。
+  - 增加组件静态渲染测试，覆盖收起、加载、错误、空数据和完整指标状态。
+  - 更新前端结构文档，明确页面与质量看板组件的职责边界。
+- 验收标准：
+  - `page.tsx` 至少减少 120 行，质量看板请求和 lifecycle state 仍保留在页面层。
+  - 新增组件测试、前端全量 Vitest、lint、production build 和 Playwright E2E 通过。
+  - Docker Compose、服务日志和 production preflight 通过。
+- 相关提交：待完成。
 - 建议验证命令：
 
 ```bash
