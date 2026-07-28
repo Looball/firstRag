@@ -41,10 +41,10 @@
 ## 当前基线
 
 - 2026-07-27 已增加无外部密钥的全栈浏览器门禁：隔离 Compose project 使用临时 PostgreSQL、Chroma、uploads volumes 和本地 OpenAI-compatible stub，真实覆盖注册、前端登录、TXT 上传、worker 向量化、SSE 回答与 sources 展示；测试结束自动清理专用容器和数据。
-- 2026-07-21 已刷新静态回归验收：后端 311 个 pytest 用例和 30 个 subtests 通过、前端 lint 0 error（保留 2 个 `<img>` 性能 warning）、Vitest 69 个用例通过、Next 16.2.10 production build 通过。
-- 2026-07-20 已完成前端依赖安全审计：Next.js 从 16.2.2 升级到 16.2.10，已消除已确认的 high findings；Babel、brace-expansion 和 js-yaml 开发依赖补丁已更新。`npm audit` 仍报告 Next 内嵌 PostCSS 的 2 个 moderate 条目，当前项目没有用户可控 CSS 进入 stringify 的运行路径，且审计器只提供降级到 Next 9.3.3 的 breaking fix，因此保留为已 triage 的不可达例外。
+- 2026-07-27 已刷新静态回归验收：后端 373 项测试通过；前端 Vitest 87 项通过、lint 0 error（保留 2 个 `<img>` 性能 warning），宿主机与 Docker 中的 Next.js 16.2.12 production build 均通过。
+- 2026-07-26 已刷新前端依赖安全审计：Next.js 与 eslint-config-next 升级到 16.2.12，PostCSS 固定到 8.5.23；当前 production npm audit policy 为 `0 findings / 0 exceptions`。
 - 2026-07-20 已完成后端与镜像依赖安全审计：PyJWT、python-dotenv 和 python-multipart 已升级到安全补丁版本；`pip-audit` 只剩 ChromaDB 1.5.9 的 no-fix finding，由精确到版本且 2026-08-20 到期的内网不可达例外管理；Trivy 对当前 backend/frontend 镜像的可修复 high/critical OS finding 均为 0。
-- 2026-07-20 已完成 GitHub Actions supply chain 固化：7 个外部 Action 引用均固定到官方 release 的 40 位 commit SHA，CI 自动拒绝 tag/branch/短 SHA 和缺失版本注释；Dependabot 每周聚合提出 Action 更新 PR。
+- 2026-07-27 已刷新 GitHub Actions supply chain 基线：13 个外部 Action 引用均固定到官方 release 的 40 位 commit SHA，CI 自动拒绝 tag/branch/短 SHA 和缺失版本注释；Dependabot 每周聚合提出 Action 更新 PR。
 - 2026-07-20 已完成 Chroma 跨进程索引可见性真实回归：Compose 使用独立 `chroma` service，worker 重建文件向量后 backend 无需重启即可召回 16 条 vector 结果，`vector_degraded=false`、`vector_errors=[]`，目标资料同时包含 `fulltext` 和 `vector` 来源。
 - 当前默认验证路径为 `docker compose up -d --build` 后检查 `docker compose ps` 与 Redis、PostgreSQL、Chroma、migration、backend、worker、frontend 关键日志；`scripts/acceptance_check.sh` 作为补充验收脚本，静态补充检查可运行 `scripts/acceptance_check.sh --skip-real-eval`。
 - 当前阶段优先做“可维护性 + 可观测性 + 验收自动化”，避免在关键链路刚稳定后继续堆叠大功能；前端工作台已开始引入 React Query 和 Zod 做请求层集中化与轻量响应校验。
@@ -97,6 +97,7 @@
 | `PLAN-20260727-01` | 2026-07-27 | `Done` | 为 Playwright E2E 失败建立可下载的 CI 诊断 artifact。 | `T-088` |
 | `PLAN-20260727-02` | 2026-07-27 | `Done` | 建立不依赖真实 API Key 的全栈核心链路浏览器门禁。 | `T-089` |
 | `PLAN-20260727-03` | 2026-07-27 | `Done` | 将已验证的 CI jobs 固化为 `main` 分支强制合并门禁。 | `T-090` |
+| `PLAN-20260728-01` | 2026-07-28 | `Doing` | 收口 T-089/T-090 后的项目基线与过期现状描述。 | `T-091` |
 
 ## 任务总览
 
@@ -192,6 +193,7 @@
 | `T-088` | `PLAN-20260727-01` | `P1` | `Done` | 上传 Playwright E2E 失败诊断 artifact | 2026-07-27 | `9d85d60` |
 | `T-089` | `PLAN-20260727-02` | `P1` | `Done` | 建立无外部密钥的全栈核心链路 E2E | 2026-07-27 | `74b1fa2` |
 | `T-090` | `PLAN-20260727-03` | `P1` | `Done` | 强制 `main` 合并前通过核心 CI | 2026-07-27 | `2d76a87`、ruleset `17939122` |
+| `T-091` | `PLAN-20260728-01` | `P1` | `Doing` | 收口项目当前基线与过期文档描述 | — | — |
 
 ## 新计划接入流程
 
@@ -3601,6 +3603,34 @@ gh api repos/Looball/firstRag/rulesets \
   --jq '.[] | select(.name == "Protect main")'
 gh pr checks --watch
 gh pr view --json mergeStateStatus,statusCheckRollup
+git diff --check
+```
+
+## T-091 收口项目当前基线与过期文档描述
+
+- 来源计划：`PLAN-20260728-01`
+- 优先级：`P1`
+- 状态：`Doing`
+- 目标：让任务台账和 API 文档准确反映 T-089/T-090 后已经验证的测试、安全审计、GitHub Actions 与 Redis worker 运行态现状，避免历史基线被误当成当前状态。
+- 技术边界：
+  - 保留各历史任务详情中的当时版本、测试数量和安全例外记录，不改写历史验收证据。
+  - 只更新明确过期的当前基线和现状描述，不引入代码、依赖、架构或运行时行为变更。
+- 范围：
+  - 刷新 `docs/TASKS.md` 当前测试、Next.js、npm audit 和 GitHub Actions pin 基线。
+  - 修正 `docs/API.md` 将 Redis worker 运行态误写为后续任务的过期描述。
+  - 搜索同类过期现状描述，并区分历史记录与当前文档。
+- 验收标准：
+  - 当前基线与 T-089/T-090 完成记录、实际依赖版本和 Action pin policy 一致。
+  - API 文档准确说明 Redis 已承接 worker 心跳、运行态和短租约，PostgreSQL 仍是持久任务队列。
+  - Compose 服务状态、production preflight、Action pin policy 和文档格式检查通过。
+- 建议验证命令：
+
+```bash
+python3 scripts/check_github_actions_pins.py
+docker compose up -d --build
+docker compose ps
+docker compose logs --tail=100 redis postgres chroma migrate backend worker frontend
+conda run -n firstrag python scripts/production_preflight.py --env-file .env --migration-method compose --check-runtime-health
 git diff --check
 ```
 
