@@ -106,6 +106,7 @@
 | `PLAN-20260728-07` | 2026-07-28 | `Done` | 继续拆分前端聊天工作台，收口侧栏用户身份、退出和模式切换的展示职责。 | `T-097` |
 | `PLAN-20260728-08` | 2026-07-28 | `Done` | 继续拆分前端聊天工作台，收口主工作区标题与消息/文件统计的展示职责。 | `T-098` |
 | `PLAN-20260728-09` | 2026-07-28 | `Done` | 继续拆分前端聊天工作台，收口聊天输入、图片附件预览和发送状态的展示职责。 | `T-099` |
+| `PLAN-20260728-10` | 2026-07-28 | `Doing` | 继续拆分前端聊天工作台，收口回答引用、原文入口和 source feedback 的展示职责。 | `T-100` |
 
 ## 任务总览
 
@@ -210,6 +211,7 @@
 | `T-097` | `PLAN-20260728-07` | `P1` | `Done` | 拆分侧栏用户身份与模式控制组件 | 2026-07-28 | `2ed46af` |
 | `T-098` | `PLAN-20260728-08` | `P1` | `Done` | 拆分主工作区 header 组件 | 2026-07-28 | `e60e327` |
 | `T-099` | `PLAN-20260728-09` | `P1` | `Done` | 拆分聊天输入与图片附件组件 | 2026-07-28 | `0f9ee9b` |
+| `T-100` | `PLAN-20260728-10` | `P1` | `Doing` | 拆分消息引用来源列表组件 | — | — |
 
 ## 新计划接入流程
 
@@ -3989,6 +3991,44 @@ git diff --check
   - 新增 3 项组件静态渲染测试，覆盖基础输入、图片预览与计数、发送禁用、进度状态和多路限流最大 Retry-After。
   - 前端全量 Vitest 21 个文件、113 项通过；lint 0 error 并保留 2 个既有 `<img>` warning；宿主机与 Docker 中的 Next.js 16.2.12 production build、Playwright E2E 3/3 均通过。
   - Docker production audit 输出 `found 0 vulnerabilities`；Compose 服务状态与最近启动日志正常，migration 输出 `applied=0 skipped=9`，production preflight 全部通过。
+- 建议验证命令：
+
+```bash
+cd frontend
+npm test
+npm run lint
+npm run build
+CI=1 npm run test:e2e
+cd ..
+docker compose up -d --build
+docker compose ps
+docker compose logs --since=5m redis postgres chroma migrate backend worker frontend
+conda run -n firstrag python scripts/production_preflight.py --env-file .env --migration-method compose --check-runtime-health
+git diff --check
+```
+
+## T-100 拆分消息引用来源列表组件
+
+- 来源计划：`PLAN-20260728-10`
+- 优先级：`P1`
+- 状态：`Doing`
+- 背景：T-099 完成后 `frontend/src/app/page.tsx` 仍有 2587 行，回答引用的文件 metadata、OCR 状态、检索分数、原文入口和 source feedback 继续在消息循环内占据约 220 行。
+- 目标：在不改变原文预览、source feedback 请求和消息状态回写的前提下，将引用来源区域迁移到独立、可测试的组件边界。
+- 技术边界：
+  - 原文弹窗 state、feedback API、session/message 状态回写和临时提示计时继续由 `page.tsx` 管理。
+  - 子组件只接收 sources、显示计数、feedback 状态和 callbacks，不增加 state、effect 或数据请求。
+  - 保持普通/高级模式差异、OCR metadata、检索分数精度、原文入口条件和 feedback 文案优先级不变。
+- 范围：
+  - 新增 `MessageSourceList.tsx`，承接引用摘要、文件位置、OCR 状态、检索 diagnostics、原文入口和 source feedback。
+  - 将引用位置和 OCR confidence 格式化调用移入组件模块，页面改为传递原始 source 数据。
+  - `page.tsx` 保留 preview 与 feedback 业务流程，通过 callbacks 接收用户操作。
+  - 增加组件静态渲染测试，覆盖普通/高级模式、OCR metadata、检索分数、预览入口和 feedback 状态。
+  - 更新前端结构文档，明确页面与引用来源组件的职责边界。
+- 验收标准：
+  - `page.tsx` 至少减少 170 行，preview 和 feedback 业务 state 与副作用仍保留在页面层。
+  - 新增组件测试、前端全量 Vitest、lint、production build 和 Playwright E2E 通过。
+  - Docker Compose、服务日志和 production preflight 通过。
+- 相关提交：待完成。
 - 建议验证命令：
 
 ```bash
