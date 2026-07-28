@@ -108,7 +108,7 @@
 | `PLAN-20260728-09` | 2026-07-28 | `Done` | 继续拆分前端聊天工作台，收口聊天输入、图片附件预览和发送状态的展示职责。 | `T-099` |
 | `PLAN-20260728-10` | 2026-07-28 | `Done` | 继续拆分前端聊天工作台，收口回答引用、原文入口和 source feedback 的展示职责。 | `T-100` |
 | `PLAN-20260728-11` | 2026-07-28 | `Done` | 继续拆分前端聊天工作台，收口回答反馈、Eval 草稿、diagnostics 和复制操作的展示职责。 | `T-101` |
-| `PLAN-20260728-12` | 2026-07-28 | `Doing` | 继续拆分前端聊天工作台，收口单条消息容器与派生展示逻辑。 | `T-102` |
+| `PLAN-20260728-12` | 2026-07-28 | `Done` | 继续拆分前端聊天工作台，收口单条消息容器与派生展示逻辑。 | `T-102` |
 
 ## 任务总览
 
@@ -215,7 +215,7 @@
 | `T-099` | `PLAN-20260728-09` | `P1` | `Done` | 拆分聊天输入与图片附件组件 | 2026-07-28 | `0f9ee9b` |
 | `T-100` | `PLAN-20260728-10` | `P1` | `Done` | 拆分消息引用来源列表组件 | 2026-07-28 | `d41d5aa` |
 | `T-101` | `PLAN-20260728-11` | `P1` | `Done` | 拆分回答反馈与操作组件 | 2026-07-28 | `90b61cc` |
-| `T-102` | `PLAN-20260728-12` | `P1` | `Doing` | 拆分单条会话消息组件 |  |  |
+| `T-102` | `PLAN-20260728-12` | `P1` | `Done` | 拆分单条会话消息组件 | 2026-07-28 | `081041f` |
 
 ## 新计划接入流程
 
@@ -4105,7 +4105,7 @@ git diff --check
 
 - 来源计划：`PLAN-20260728-12`
 - 优先级：`P1`
-- 状态：`Doing`
+- 状态：`Done`
 - 背景：T-101 完成后 `frontend/src/app/page.tsx` 仍有 2271 行，消息循环继续负责角色外观、流式占位、检索空态、引用计数、feedback draft fallback 和多个消息子组件的组合。
 - 目标：在不改变消息请求、diagnostics 缓存、feedback state 和流式流程的前提下，将单条消息的展示派生与组件组合迁移到独立、可测试的边界。
 - 技术边界：
@@ -4122,6 +4122,14 @@ git diff --check
   - `page.tsx` 至少减少 100 行，业务 state 与副作用仍保留在页面层。
   - 新增组件测试、前端全量 Vitest、lint、production build 和 Playwright E2E 通过。
   - Docker Compose、服务日志和 production preflight 通过。
+- 相关提交：`081041f`。
+- 完成记录：
+  - 新增 `ConversationMessageItem.tsx`，统一承接消息序号与角色外观，并组合 `MessageContent`、`MessageSourceList` 和 `AssistantMessageActions`。
+  - 将流式占位、检索空态、来源计数、feedback reason/note fallback 和 development-only Eval 可见性迁入组件 render；组件没有新增 state、effect 或数据请求。
+  - session/message API、diagnostics 请求与缓存、feedback drafts、消息状态回写、Eval 导出、复制实现和提示计时继续由 `page.tsx` 管理；`page.tsx` 从 2271 行降至 2161 行，减少 110 行。
+  - 新增 5 项组件静态渲染测试，覆盖用户消息、流式占位、检索空态、引用与高级操作组合，以及既有负向反馈 fallback。
+  - 前端全量 Vitest 24 个文件、126 项通过；lint 0 error 并保留 2 个既有 `<img>` warning；宿主机与 Docker 中的 Next.js 16.2.12 production build、Playwright E2E 3/3 均通过。
+  - Docker production audit 输出 `found 0 vulnerabilities`；Compose 服务状态与最近启动日志正常，migration 输出 `applied=0 skipped=9`，production preflight 全部通过。
 - 建议验证命令：
 
 ```bash
