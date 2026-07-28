@@ -107,7 +107,7 @@
 | `PLAN-20260728-08` | 2026-07-28 | `Done` | 继续拆分前端聊天工作台，收口主工作区标题与消息/文件统计的展示职责。 | `T-098` |
 | `PLAN-20260728-09` | 2026-07-28 | `Done` | 继续拆分前端聊天工作台，收口聊天输入、图片附件预览和发送状态的展示职责。 | `T-099` |
 | `PLAN-20260728-10` | 2026-07-28 | `Done` | 继续拆分前端聊天工作台，收口回答引用、原文入口和 source feedback 的展示职责。 | `T-100` |
-| `PLAN-20260728-11` | 2026-07-28 | `Doing` | 继续拆分前端聊天工作台，收口回答反馈、Eval 草稿、diagnostics 和复制操作的展示职责。 | `T-101` |
+| `PLAN-20260728-11` | 2026-07-28 | `Done` | 继续拆分前端聊天工作台，收口回答反馈、Eval 草稿、diagnostics 和复制操作的展示职责。 | `T-101` |
 
 ## 任务总览
 
@@ -213,7 +213,7 @@
 | `T-098` | `PLAN-20260728-08` | `P1` | `Done` | 拆分主工作区 header 组件 | 2026-07-28 | `e60e327` |
 | `T-099` | `PLAN-20260728-09` | `P1` | `Done` | 拆分聊天输入与图片附件组件 | 2026-07-28 | `0f9ee9b` |
 | `T-100` | `PLAN-20260728-10` | `P1` | `Done` | 拆分消息引用来源列表组件 | 2026-07-28 | `d41d5aa` |
-| `T-101` | `PLAN-20260728-11` | `P1` | `Doing` | 拆分回答反馈与操作组件 |  |  |
+| `T-101` | `PLAN-20260728-11` | `P1` | `Done` | 拆分回答反馈与操作组件 | 2026-07-28 | `90b61cc` |
 
 ## 新计划接入流程
 
@@ -4058,7 +4058,7 @@ git diff --check
 
 - 来源计划：`PLAN-20260728-11`
 - 优先级：`P1`
-- 状态：`Doing`
+- 状态：`Done`
 - 背景：T-100 完成后 `frontend/src/app/page.tsx` 仍有 2410 行，回答反馈、Eval 草稿、diagnostics 展开和复制操作继续在消息循环内占据约 170 行。
 - 目标：在不改变 feedback 请求、diagnostics 加载、Eval 草稿导出和复制行为的前提下，将回答操作区域迁移到独立、可测试的组件边界。
 - 技术边界：
@@ -4075,6 +4075,14 @@ git diff --check
   - `page.tsx` 至少减少 120 行，业务 state 与副作用仍保留在页面层。
   - 新增组件测试、前端全量 Vitest、lint、production build 和 Playwright E2E 通过。
   - Docker Compose、服务日志和 production preflight 通过。
+- 相关提交：`90b61cc`。
+- 完成记录：
+  - 新增 `AssistantMessageActions.tsx`，将回答反馈、负向原因表单、Eval 草稿、diagnostics 和复制操作从消息循环抽离；feedback API、消息状态回写、diagnostics 请求与缓存、文件导出、复制实现和提示计时继续由 `page.tsx` 管理。
+  - 复用 `MessageDiagnosticsPanel` 并将其内部 import 调整为 Vitest 可直接解析的相对路径；新组件仅接收显示状态和 callbacks，没有新增 state、effect 或数据请求。
+  - 保持普通/高级模式差异、feedback 文案优先级、按钮禁用条件、development-only Eval 行为和 diagnostics 展开位置不变；`page.tsx` 从 2410 行降至 2271 行，减少 139 行。
+  - 新增 5 项组件静态渲染测试，覆盖普通/高级模式、feedback 草稿与保存状态、Eval 导出、diagnostics 展开、复制状态和错误提示。
+  - 前端全量 Vitest 23 个文件、121 项通过；lint 0 error 并保留 2 个既有 `<img>` warning；宿主机与 Docker 中的 Next.js 16.2.12 production build、Playwright E2E 3/3 均通过。
+  - Docker production audit 输出 `found 0 vulnerabilities`；Compose 服务状态与最近启动日志正常，migration 输出 `applied=0 skipped=9`，production preflight 全部通过。
 - 建议验证命令：
 
 ```bash
