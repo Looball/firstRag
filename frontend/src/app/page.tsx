@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import dynamic from "next/dynamic";
 import { ConversationSidebar } from "@/components/chat-workspace/ConversationSidebar";
 import { FileManagerDialog } from "@/components/chat-workspace/FileManagerDialog";
@@ -12,6 +11,7 @@ import {
 } from "@/components/chat-workspace/MessageContent";
 import { MessageDiagnosticsPanel } from "@/components/chat-workspace/MessageDiagnosticsPanel";
 import { QualityDashboardPanel } from "@/components/chat-workspace/QualityDashboardPanel";
+import { SidebarAccountModeControls } from "@/components/chat-workspace/SidebarAccountModeControls";
 import {
   type ClipboardEvent,
   useCallback,
@@ -1829,61 +1829,12 @@ export default function Home() {
     <main className="research-canvas min-h-screen px-3 py-3 md:px-5 md:py-5 lg:h-screen lg:overflow-hidden">
       <div className="mx-auto grid min-w-0 w-full max-w-[1440px] gap-4 lg:h-full lg:grid-cols-[304px_minmax(0,1fr)]">
         <aside className="research-enter flex min-w-0 max-h-[calc(100vh-1.5rem)] flex-col border border-[#bdcac5] bg-[#edf2ef] p-4 lg:sticky lg:top-5 lg:h-[calc(100vh-2.5rem)] lg:max-h-none">
-          <div className="flex items-center justify-between gap-3 border-b border-[#c7d1cd] px-1 pb-4">
-            <div className="min-w-0">
-              <p className="font-utility text-[10px] font-semibold uppercase text-[#72807b]">
-                FirstRAG
-              </p>
-              <Link
-                href="/settings"
-                title="打开用户设置"
-                className="font-display mt-1 block truncate text-lg font-semibold text-[#17201f] underline decoration-[#d5a83b] decoration-2 underline-offset-4 transition hover:text-[#176b62]"
-              >
-                {currentUsername || "已登录"}
-              </Link>
-            </div>
-            <button
-              type="button"
-              onClick={handleLogout}
-              className="font-utility shrink-0 border-b border-[#9eaaa6] px-1 py-1 text-[11px] font-semibold text-[#64716d] transition hover:border-[#e36b4f] hover:text-[#9b3c29]"
-            >
-              退出
-            </button>
-          </div>
-
-          <div className="border-b border-[#c7d1cd] py-4">
-            <div className="flex items-center justify-between gap-3">
-              <p className="font-utility text-[10px] font-semibold uppercase text-[#72807b]">
-                模式
-              </p>
-              <div className="grid grid-cols-2 border border-[#cbd5d1] bg-[#f8faf8] p-0.5 text-[11px] font-semibold text-[#64716d]">
-                <button
-                  type="button"
-                  aria-pressed={!isAdvancedMode}
-                  onClick={() => handleAdvancedModeChange(false)}
-                  className={`px-2 py-1 transition ${
-                    !isAdvancedMode
-                      ? "bg-[#176b62] text-white"
-                      : "hover:text-[#176b62]"
-                  }`}
-                >
-                  普通
-                </button>
-                <button
-                  type="button"
-                  aria-pressed={isAdvancedMode}
-                  onClick={() => handleAdvancedModeChange(true)}
-                  className={`px-2 py-1 transition ${
-                    isAdvancedMode
-                      ? "bg-[#176b62] text-white"
-                      : "hover:text-[#176b62]"
-                  }`}
-                >
-                  高级
-                </button>
-              </div>
-            </div>
-          </div>
+          <SidebarAccountModeControls
+            currentUsername={currentUsername}
+            isAdvancedMode={isAdvancedMode}
+            onLogout={handleLogout}
+            onAdvancedModeChange={handleAdvancedModeChange}
+          />
 
           {isAdvancedMode && (
             <QualityDashboardPanel
