@@ -107,6 +107,7 @@
 | `PLAN-20260728-08` | 2026-07-28 | `Done` | 继续拆分前端聊天工作台，收口主工作区标题与消息/文件统计的展示职责。 | `T-098` |
 | `PLAN-20260728-09` | 2026-07-28 | `Done` | 继续拆分前端聊天工作台，收口聊天输入、图片附件预览和发送状态的展示职责。 | `T-099` |
 | `PLAN-20260728-10` | 2026-07-28 | `Done` | 继续拆分前端聊天工作台，收口回答引用、原文入口和 source feedback 的展示职责。 | `T-100` |
+| `PLAN-20260728-11` | 2026-07-28 | `Doing` | 继续拆分前端聊天工作台，收口回答反馈、Eval 草稿、diagnostics 和复制操作的展示职责。 | `T-101` |
 
 ## 任务总览
 
@@ -212,6 +213,7 @@
 | `T-098` | `PLAN-20260728-08` | `P1` | `Done` | 拆分主工作区 header 组件 | 2026-07-28 | `e60e327` |
 | `T-099` | `PLAN-20260728-09` | `P1` | `Done` | 拆分聊天输入与图片附件组件 | 2026-07-28 | `0f9ee9b` |
 | `T-100` | `PLAN-20260728-10` | `P1` | `Done` | 拆分消息引用来源列表组件 | 2026-07-28 | `d41d5aa` |
+| `T-101` | `PLAN-20260728-11` | `P1` | `Doing` | 拆分回答反馈与操作组件 |  |  |
 
 ## 新计划接入流程
 
@@ -4036,6 +4038,43 @@ git diff --check
   - 新增 3 项组件静态渲染测试，覆盖普通/高级模式、OCR metadata、检索 diagnostics、预览入口以及已保存/提交中/成功/失败 feedback 状态。
   - 前端全量 Vitest 22 个文件、116 项通过；lint 0 error 并保留 2 个既有 `<img>` warning；宿主机与 Docker 中的 Next.js 16.2.12 production build、Playwright E2E 3/3 均通过。
   - Docker production audit 输出 `found 0 vulnerabilities`；Compose 服务状态与最近启动日志正常，migration 输出 `applied=0 skipped=9`，production preflight 全部通过。
+- 建议验证命令：
+
+```bash
+cd frontend
+npm test
+npm run lint
+npm run build
+CI=1 npm run test:e2e
+cd ..
+docker compose up -d --build
+docker compose ps
+docker compose logs --since=5m redis postgres chroma migrate backend worker frontend
+conda run -n firstrag python scripts/production_preflight.py --env-file .env --migration-method compose --check-runtime-health
+git diff --check
+```
+
+## T-101 拆分回答反馈与操作组件
+
+- 来源计划：`PLAN-20260728-11`
+- 优先级：`P1`
+- 状态：`Doing`
+- 背景：T-100 完成后 `frontend/src/app/page.tsx` 仍有 2410 行，回答反馈、Eval 草稿、diagnostics 展开和复制操作继续在消息循环内占据约 170 行。
+- 目标：在不改变 feedback 请求、diagnostics 加载、Eval 草稿导出和复制行为的前提下，将回答操作区域迁移到独立、可测试的组件边界。
+- 技术边界：
+  - feedback API、消息状态回写、diagnostics 请求与缓存、Eval 文件导出、复制实现和提示计时继续由 `page.tsx` 管理。
+  - 子组件只接收显示状态和 callbacks，不增加 state、effect 或数据请求。
+  - 保持普通/高级模式差异、feedback 文案优先级、按钮禁用条件和 diagnostics 展开行为不变。
+- 范围：
+  - 新增 `AssistantMessageActions.tsx`，承接回答反馈、负向原因表单、Eval 草稿、diagnostics 和复制操作。
+  - 复用 `MessageDiagnosticsPanel`，由新组件控制其展示位置，页面继续传入原始状态。
+  - `page.tsx` 保留全部业务流程，通过 callbacks 接收用户操作。
+  - 增加组件静态渲染测试，覆盖普通/高级模式、feedback 草稿与保存状态、Eval 导出、diagnostics 展开和复制状态。
+  - 更新前端结构文档，明确页面与回答操作组件的职责边界。
+- 验收标准：
+  - `page.tsx` 至少减少 120 行，业务 state 与副作用仍保留在页面层。
+  - 新增组件测试、前端全量 Vitest、lint、production build 和 Playwright E2E 通过。
+  - Docker Compose、服务日志和 production preflight 通过。
 - 建议验证命令：
 
 ```bash
