@@ -1,11 +1,11 @@
-import type { MessageDiagnostic } from "@/lib/chat-workspace/types";
+import type { MessageDiagnostic } from "../../lib/chat-workspace/types";
 import {
   formatDiagnosticCount,
   formatDiagnosticScore,
   formatDiagnosticTiming,
   formatDiagnosticValue,
   formatRetrievalDecision,
-} from "@/lib/chat-workspace/utils";
+} from "../../lib/chat-workspace/utils";
 
 type MessageDiagnosticsPanelProps = {
   messageKey: string;
