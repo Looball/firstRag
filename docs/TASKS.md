@@ -99,6 +99,7 @@
 | `PLAN-20260727-03` | 2026-07-27 | `Done` | 将已验证的 CI jobs 固化为 `main` 分支强制合并门禁。 | `T-090` |
 | `PLAN-20260728-01` | 2026-07-28 | `Done` | 收口 T-089/T-090 后的项目基线与过期现状描述。 | `T-091` |
 | `PLAN-20260728-02` | 2026-07-28 | `Done` | 继续拆分前端聊天工作台，先收口消息内容与图片附件展示职责。 | `T-092` |
+| `PLAN-20260728-03` | 2026-07-28 | `Doing` | 继续拆分前端聊天工作台，收口知识库管理弹窗的展示职责。 | `T-093` |
 
 ## 任务总览
 
@@ -196,6 +197,7 @@
 | `T-090` | `PLAN-20260727-03` | `P1` | `Done` | 强制 `main` 合并前通过核心 CI | 2026-07-27 | `2d76a87`、ruleset `17939122` |
 | `T-091` | `PLAN-20260728-01` | `P1` | `Done` | 收口项目当前基线与过期文档描述 | 2026-07-28 | `f67fe38` |
 | `T-092` | `PLAN-20260728-02` | `P1` | `Done` | 拆分消息内容与图片附件展示组件 | 2026-07-28 | `d4a56e3` |
+| `T-093` | `PLAN-20260728-03` | `P1` | `Doing` | 拆分知识库管理弹窗组件 | — | — |
 
 ## 新计划接入流程
 
@@ -3672,6 +3674,43 @@ git diff --check
   - `CI=1 npm run test:e2e` 3/3 通过；隔离全栈 E2E 1/1 通过，真实覆盖登录、上传、worker 向量化、SSE 回答和引用展示，测试 project 与 volumes 已自动清理。
   - Docker production build 内 `npm audit` 输出 `found 0 vulnerabilities`；默认 Compose 首次因 Docker Desktop 阿里镜像源返回瞬时 `403` 失败，原命令重试后成功。
   - 默认 Compose 服务状态与最近启动日志正常，migration 输出 `applied=0 skipped=9`；production preflight 的 Compose config、Chroma runtime health 和 migration dry-run 等检查全部通过。
+- 建议验证命令：
+
+```bash
+cd frontend
+npm test
+npm run lint
+npm run build
+CI=1 npm run test:e2e
+cd ..
+docker compose up -d --build
+docker compose ps
+docker compose logs --since=5m redis postgres chroma migrate backend worker frontend
+conda run -n firstrag python scripts/production_preflight.py --env-file .env --migration-method compose --check-runtime-health
+git diff --check
+```
+
+## T-093 拆分知识库管理弹窗组件
+
+- 来源计划：`PLAN-20260728-03`
+- 优先级：`P1`
+- 状态：`Doing`
+- 背景：T-092 完成后 `frontend/src/app/page.tsx` 仍有 3514 行，知识库列表、回收站、检索设置和创建表单组成的管理弹窗继续以内联 JSX 形式占据约 420 行。
+- 目标：在不改变知识库请求、生命周期状态、检索设置和选择行为的前提下，将知识库管理弹窗迁移到独立、可测试的组件边界。
+- 技术边界：
+  - API 请求、异步状态和知识库选择继续由 `page.tsx` 管理，弹窗组件只接收数据、状态和 callbacks。
+  - 不复制 React state，不在子组件增加数据请求或 effect，避免请求 waterfall 和状态同步。
+  - 保持列表计数、默认知识库限制、回收站恢复、检索设置和创建表单的用户可见行为不变。
+- 范围：
+  - 新增 `KnowledgeBaseManagerDialog.tsx`，承接完整知识库管理弹窗。
+  - `page.tsx` 改为复用独立组件并移除对应内联 JSX。
+  - 增加组件静态渲染测试，覆盖知识库计数、默认标记、回收站和高级检索设置。
+  - 更新前端结构文档，明确页面与知识库管理弹窗的职责边界。
+- 验收标准：
+  - `page.tsx` 至少减少 380 行，知识库管理相关请求和状态仍保留在页面层。
+  - 新增组件测试、前端全量 Vitest、lint、production build 和 Playwright E2E 通过。
+  - Docker Compose、服务日志和 production preflight 通过。
+- 相关提交：待完成。
 - 建议验证命令：
 
 ```bash
