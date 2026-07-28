@@ -8,17 +8,12 @@ import {
   ChatComposer,
   type PendingChatImage,
 } from "@/components/chat-workspace/ChatComposer";
-import { AssistantMessageActions } from "@/components/chat-workspace/AssistantMessageActions";
 import { ChatWorkspaceHeader } from "@/components/chat-workspace/ChatWorkspaceHeader";
+import { ConversationMessageItem } from "@/components/chat-workspace/ConversationMessageItem";
 import { ConversationSidebar } from "@/components/chat-workspace/ConversationSidebar";
 import { FileManagerDialog } from "@/components/chat-workspace/FileManagerDialog";
 import { KnowledgeBaseManagerDialog } from "@/components/chat-workspace/KnowledgeBaseManagerDialog";
 import { KnowledgeBaseSidebarControls } from "@/components/chat-workspace/KnowledgeBaseSidebarControls";
-import {
-  MarkdownContent,
-  MessageAttachmentGrid,
-} from "@/components/chat-workspace/MessageContent";
-import { MessageSourceList } from "@/components/chat-workspace/MessageSourceList";
 import { QualityDashboardPanel } from "@/components/chat-workspace/QualityDashboardPanel";
 import { SidebarAccountModeControls } from "@/components/chat-workspace/SidebarAccountModeControls";
 import {
@@ -72,8 +67,6 @@ const SourcePreviewDialog = dynamic(
     ),
   { ssr: false },
 );
-
-const isDevelopmentEnvironment = process.env.NODE_ENV === "development";
 
 export default function Home() {
   const [sessions, setSessions] = useState<ChatSession[]>([]);
@@ -1899,9 +1892,6 @@ export default function Home() {
               {currentSession?.messages.map((message, index) => {
                 const messageKey = `${currentSession.id}-${index}`;
                 const diagnosticPanelKey = `${currentSession.id}:${messageKey}`;
-                const isDiagnosticExpanded = Boolean(
-                  expandedDiagnosticPanels[diagnosticPanelKey]
-                );
                 const cachedDiagnostics =
                   conversationDiagnostics[currentSession.id];
                 const diagnostic = message.id
@@ -1909,202 +1899,102 @@ export default function Home() {
                       (item) => item.messageId === message.id
                     ) ?? null)
                   : null;
-                const isDiagnosticLoading = Boolean(
-                  loadingDiagnostics[currentSession.id]
-                );
-                const diagnosticError =
-                  diagnosticErrors[currentSession.id] || "";
-                const isStreamingPlaceholder =
-                  message.role === "assistant" &&
-                  index === currentSession.messages.length - 1 &&
-                  isCurrentSessionLoading &&
-                  !message.content;
-                const sourceCount = message.sources?.length ?? 0;
-                const shouldShowSources =
-                  message.role === "assistant" && sourceCount > 0;
-                const displaySourceCount =
-                  message.retrieval && message.retrieval.source_count > 0
-                    ? message.retrieval.source_count
-                    : sourceCount;
-                const retrievedCount =
-                  message.retrieval && message.retrieval.retrieved_count > 0
-                    ? message.retrieval.retrieved_count
-                    : null;
-                const shouldShowRetrievalEmptyHint =
-                  message.role === "assistant" &&
-                  message.retrieval?.need_retrieval === true &&
-                  message.retrieval.source_count === 0 &&
-                  !shouldShowSources;
-                const feedbackReason =
-                  feedbackReasonDrafts[messageKey] ||
-                  message.feedback?.reason ||
-                  "missing_answer";
-                const feedbackNote =
-                  feedbackNoteDrafts[messageKey] ?? message.feedback?.note ?? "";
-                const isFeedbackPanelOpen =
-                  activeFeedbackMessageKey === messageKey;
-                const isFeedbackSubmitting = Boolean(
-                  submittingFeedback[messageKey]
-                );
-                const feedbackError = feedbackErrors[messageKey] || "";
-                const feedbackMessage = feedbackMessages[messageKey] || "";
-                const messageFeedbackRating = message.feedback?.rating;
-                const isExportingEvalDraft = Boolean(
-                  exportingEvalDrafts[messageKey]
-                );
-                const evalDraftError = evalDraftErrors[messageKey] || "";
-                const canExportEvalDraft =
-                  isAdvancedMode &&
-                  isDevelopmentEnvironment &&
-                  message.role === "assistant" &&
-                  message.feedback?.rating === "negative";
 
                 return (
-                  <div
+                  <ConversationMessageItem
                     key={messageKey}
-                    className={`relative grid min-w-0 gap-3 border-l-2 pl-5 md:grid-cols-[74px_minmax(0,1fr)] md:gap-5 md:pl-6 ${
-                      message.role === "user"
-                        ? "border-[#e36b4f]"
-                        : "border-[#176b62]"
-                    }`}
-                  >
-                    <div className="font-utility pt-1 text-[10px] font-semibold uppercase text-[#72807b]">
-                      <span className="block text-[#17201f]">
-                        {String(index + 1).padStart(2, "0")}
-                      </span>
-                      {message.role === "user" ? "问题" : "回答"}
-                    </div>
-                    <article
-                      className={`min-w-0 px-5 py-4 ${
-                        message.role === "user"
-                          ? "bg-[#17201f] text-white"
-                          : "border border-[#d5ded9] bg-[#f5f8f6] text-[#26312f]"
-                      }`}
-                    >
-                      <MarkdownContent
-                        content={
-                          isStreamingPlaceholder
-                            ? "AI 正在思考中..."
-                            : message.content
-                        }
-                        isUserMessage={message.role === "user"}
-                      />
-
-                      {message.attachments && message.attachments.length > 0 && (
-                        <MessageAttachmentGrid
-                          attachments={message.attachments}
-                          isUserMessage={message.role === "user"}
-                        />
-                      )}
-
-                      {shouldShowRetrievalEmptyHint && (
-                        <div className="mt-4 border-t border-[#d6dedb] pt-3">
-                          <p className="text-xs leading-5 text-[#64716d]">
-                            已检索知识库，但没有找到高相关引用
-                          </p>
-                        </div>
-                      )}
-
-                      {shouldShowSources && message.sources && (
-                        <MessageSourceList
-                          messageKey={messageKey}
-                          sources={message.sources}
-                          displaySourceCount={displaySourceCount}
-                          retrievedCount={retrievedCount}
-                          isAdvancedMode={isAdvancedMode}
-                          submittingFeedback={submittingSourceFeedback}
-                          feedbackErrors={sourceFeedbackErrors}
-                          feedbackMessages={sourceFeedbackMessages}
-                          onOpenSource={setActiveSourcePreview}
-                          onSubmitFeedback={({
-                            sourceKey,
-                            sourceIndex,
-                            rating,
-                          }) =>
-                            handleSubmitSourceFeedback({
-                              sessionId: currentSession.id,
-                              messageId: message.id,
-                              sourceKey,
-                              sourceIndex,
-                              rating,
-                            })
-                          }
-                        />
-                      )}
-
-                      {message.role === "assistant" && message.content && (
-                        <AssistantMessageActions
-                          messageKey={messageKey}
-                          feedbackRating={messageFeedbackRating}
-                          feedbackReason={feedbackReason}
-                          feedbackNote={feedbackNote}
-                          isAdvancedMode={isAdvancedMode}
-                          isFeedbackPanelOpen={isFeedbackPanelOpen}
-                          isFeedbackSubmitting={isFeedbackSubmitting}
-                          feedbackError={feedbackError}
-                          feedbackMessage={feedbackMessage}
-                          canExportEvalDraft={canExportEvalDraft}
-                          isExportingEvalDraft={isExportingEvalDraft}
-                          evalDraftError={
-                            isDevelopmentEnvironment ? evalDraftError : ""
-                          }
-                          isDiagnosticExpanded={isDiagnosticExpanded}
-                          diagnostic={diagnostic}
-                          isDiagnosticLoading={isDiagnosticLoading}
-                          hasLoadedDiagnostics={Boolean(cachedDiagnostics)}
-                          diagnosticError={diagnosticError}
-                          isCopied={copiedMessageKey === messageKey}
-                          onPositiveFeedback={() =>
-                            handleSubmitMessageFeedback({
-                              sessionId: currentSession.id,
-                              messageKey,
-                              messageId: message.id,
-                              rating: "positive",
-                            })
-                          }
-                          onToggleNegativeFeedback={() =>
-                            setActiveFeedbackMessageKey((current) =>
-                              current === messageKey ? "" : messageKey
-                            )
-                          }
-                          onFeedbackReasonChange={(reason) =>
-                            setFeedbackReasonDrafts((prev) => ({
-                              ...prev,
-                              [messageKey]: reason,
-                            }))
-                          }
-                          onFeedbackNoteChange={(note) =>
-                            setFeedbackNoteDrafts((prev) => ({
-                              ...prev,
-                              [messageKey]: note,
-                            }))
-                          }
-                          onSubmitNegativeFeedback={() =>
-                            handleSubmitMessageFeedback({
-                              sessionId: currentSession.id,
-                              messageKey,
-                              messageId: message.id,
-                              rating: "negative",
-                              reason: feedbackReason,
-                              note: feedbackNote,
-                            })
-                          }
-                          onExportEvalDraft={() =>
-                            handleExportEvalDraft(messageKey, message.id)
-                          }
-                          onToggleDiagnostics={() =>
-                            handleToggleDiagnostics(
-                              currentSession.id,
-                              messageKey
-                            )
-                          }
-                          onCopy={() =>
-                            handleCopyMessage(messageKey, message.content)
-                          }
-                        />
-                      )}
-                    </article>
-                  </div>
+                    messageKey={messageKey}
+                    message={message}
+                    position={index + 1}
+                    isLatestMessage={
+                      index === currentSession.messages.length - 1
+                    }
+                    isCurrentSessionLoading={isCurrentSessionLoading}
+                    isAdvancedMode={isAdvancedMode}
+                    isCopied={copiedMessageKey === messageKey}
+                    feedbackState={{
+                      reasonDraft: feedbackReasonDrafts[messageKey],
+                      noteDraft: feedbackNoteDrafts[messageKey],
+                      isPanelOpen: activeFeedbackMessageKey === messageKey,
+                      isSubmitting: Boolean(submittingFeedback[messageKey]),
+                      errorMessage: feedbackErrors[messageKey] || "",
+                      successMessage: feedbackMessages[messageKey] || "",
+                    }}
+                    diagnosticState={{
+                      isExpanded: Boolean(
+                        expandedDiagnosticPanels[diagnosticPanelKey]
+                      ),
+                      diagnostic,
+                      isLoading: Boolean(
+                        loadingDiagnostics[currentSession.id]
+                      ),
+                      hasLoaded: Boolean(cachedDiagnostics),
+                      errorMessage:
+                        diagnosticErrors[currentSession.id] || "",
+                    }}
+                    evalDraftState={{
+                      isExporting: Boolean(
+                        exportingEvalDrafts[messageKey]
+                      ),
+                      errorMessage: evalDraftErrors[messageKey] || "",
+                    }}
+                    sourceFeedbackState={{
+                      submitting: submittingSourceFeedback,
+                      errors: sourceFeedbackErrors,
+                      messages: sourceFeedbackMessages,
+                    }}
+                    onOpenSource={setActiveSourcePreview}
+                    onSubmitSourceFeedback={({
+                      sourceKey,
+                      sourceIndex,
+                      rating,
+                    }) =>
+                      handleSubmitSourceFeedback({
+                        sessionId: currentSession.id,
+                        messageId: message.id,
+                        sourceKey,
+                        sourceIndex,
+                        rating,
+                      })
+                    }
+                    onSubmitMessageFeedback={(request) =>
+                      handleSubmitMessageFeedback({
+                        sessionId: currentSession.id,
+                        messageKey,
+                        messageId: message.id,
+                        ...request,
+                      })
+                    }
+                    onToggleNegativeFeedback={() =>
+                      setActiveFeedbackMessageKey((current) =>
+                        current === messageKey ? "" : messageKey
+                      )
+                    }
+                    onFeedbackReasonChange={(reason) =>
+                      setFeedbackReasonDrafts((prev) => ({
+                        ...prev,
+                        [messageKey]: reason,
+                      }))
+                    }
+                    onFeedbackNoteChange={(note) =>
+                      setFeedbackNoteDrafts((prev) => ({
+                        ...prev,
+                        [messageKey]: note,
+                      }))
+                    }
+                    onExportEvalDraft={() =>
+                      handleExportEvalDraft(messageKey, message.id)
+                    }
+                    onToggleDiagnostics={() =>
+                      handleToggleDiagnostics(
+                        currentSession.id,
+                        messageKey
+                      )
+                    }
+                    onCopy={() =>
+                      handleCopyMessage(messageKey, message.content)
+                    }
+                  />
                 );
               })}
 
