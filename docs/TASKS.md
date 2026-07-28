@@ -41,7 +41,7 @@
 ## 当前基线
 
 - 2026-07-27 已增加无外部密钥的全栈浏览器门禁：隔离 Compose project 使用临时 PostgreSQL、Chroma、uploads volumes 和本地 OpenAI-compatible stub，真实覆盖注册、前端登录、TXT 上传、worker 向量化、SSE 回答与 sources 展示；测试结束自动清理专用容器和数据。
-- 2026-07-28 已刷新静态回归验收：后端最近一次全量 373 项测试通过；前端 Vitest 110 项通过、lint 0 error（保留 2 个 `<img>` 性能 warning），宿主机与 Docker 中的 Next.js 16.2.12 production build 均通过。
+- 2026-07-28 已刷新静态回归验收：后端最近一次全量 373 项测试通过；前端 Vitest 113 项通过、lint 0 error（保留 2 个 `<img>` 性能 warning），宿主机与 Docker 中的 Next.js 16.2.12 production build 均通过。
 - 2026-07-26 已刷新前端依赖安全审计：Next.js 与 eslint-config-next 升级到 16.2.12，PostCSS 固定到 8.5.23；当前 production npm audit policy 为 `0 findings / 0 exceptions`。
 - 2026-07-20 已完成后端与镜像依赖安全审计：PyJWT、python-dotenv 和 python-multipart 已升级到安全补丁版本；`pip-audit` 只剩 ChromaDB 1.5.9 的 no-fix finding，由精确到版本且 2026-08-20 到期的内网不可达例外管理；Trivy 对当前 backend/frontend 镜像的可修复 high/critical OS finding 均为 0。
 - 2026-07-27 已刷新 GitHub Actions supply chain 基线：13 个外部 Action 引用均固定到官方 release 的 40 位 commit SHA，CI 自动拒绝 tag/branch/短 SHA 和缺失版本注释；Dependabot 每周聚合提出 Action 更新 PR。
@@ -105,6 +105,7 @@
 | `PLAN-20260728-06` | 2026-07-28 | `Done` | 继续拆分前端聊天工作台，收口知识库选择、上传和文件入口的展示职责。 | `T-096` |
 | `PLAN-20260728-07` | 2026-07-28 | `Done` | 继续拆分前端聊天工作台，收口侧栏用户身份、退出和模式切换的展示职责。 | `T-097` |
 | `PLAN-20260728-08` | 2026-07-28 | `Done` | 继续拆分前端聊天工作台，收口主工作区标题与消息/文件统计的展示职责。 | `T-098` |
+| `PLAN-20260728-09` | 2026-07-28 | `Done` | 继续拆分前端聊天工作台，收口聊天输入、图片附件预览和发送状态的展示职责。 | `T-099` |
 
 ## 任务总览
 
@@ -208,6 +209,7 @@
 | `T-096` | `PLAN-20260728-06` | `P1` | `Done` | 拆分知识库侧栏控制组件 | 2026-07-28 | `32c0b99` |
 | `T-097` | `PLAN-20260728-07` | `P1` | `Done` | 拆分侧栏用户身份与模式控制组件 | 2026-07-28 | `2ed46af` |
 | `T-098` | `PLAN-20260728-08` | `P1` | `Done` | 拆分主工作区 header 组件 | 2026-07-28 | `e60e327` |
+| `T-099` | `PLAN-20260728-09` | `P1` | `Done` | 拆分聊天输入与图片附件组件 | 2026-07-28 | `0f9ee9b` |
 
 ## 新计划接入流程
 
@@ -3941,6 +3943,51 @@ git diff --check
   - 子组件只接收名称、标题和计数等 primitive props，没有新增 state、effect、memo 或数据请求；空知识库、空会话回退文案和计数格式保持不变。
   - `page.tsx` 从 2755 行降至 2728 行，减少 27 行；新增 3 项组件静态渲染测试，覆盖活动内容、空状态、单数字补零和三位数不截断。
   - 前端全量 Vitest 20 个文件、110 项通过；lint 0 error 并保留 2 个既有 `<img>` warning；宿主机与 Docker 中的 Next.js 16.2.12 production build、Playwright E2E 3/3 均通过。
+  - Docker production audit 输出 `found 0 vulnerabilities`；Compose 服务状态与最近启动日志正常，migration 输出 `applied=0 skipped=9`，production preflight 全部通过。
+- 建议验证命令：
+
+```bash
+cd frontend
+npm test
+npm run lint
+npm run build
+CI=1 npm run test:e2e
+cd ..
+docker compose up -d --build
+docker compose ps
+docker compose logs --since=5m redis postgres chroma migrate backend worker frontend
+conda run -n firstrag python scripts/production_preflight.py --env-file .env --migration-method compose --check-runtime-health
+git diff --check
+```
+
+## T-099 拆分聊天输入与图片附件组件
+
+- 来源计划：`PLAN-20260728-09`
+- 优先级：`P1`
+- 状态：`Done`
+- 背景：T-098 完成后 `frontend/src/app/page.tsx` 仍有 2728 行，聊天输入、图片附件预览、图片选择、快捷键说明和发送状态继续以内联 JSX 形式占据约 160 行。
+- 目标：在不改变图片校验、Object URL 生命周期、上传、限流和消息发送行为的前提下，将聊天输入区迁移到独立、可测试的组件边界。
+- 技术边界：
+  - 输入 state、图片校验与 URL 清理、粘贴解析、附件上传、会话创建、限流倒计时和发送流程继续由 `page.tsx` 管理。
+  - 子组件只接收当前视图数据、共享 file input ref 和 callbacks，不增加 state、effect、数据请求或异步业务流程。
+  - 保持 Enter/Shift+Enter、图片类型与数量限制、状态文案优先级和发送禁用条件不变。
+- 范围：
+  - 新增 `ChatComposer.tsx`，承接 textarea、图片预览、图片选择入口、附件说明和发送按钮。
+  - 将图片约束常量与待发送图片类型放入组件模块，页面继续复用同一约束完成校验。
+  - `page.tsx` 改为复用独立组件，并保留完整发送与资源清理流程。
+  - 增加组件静态渲染测试，覆盖基础输入、图片预览、附件计数、发送状态和限流文案。
+  - 更新前端结构文档，明确页面与聊天输入组件的职责边界。
+- 验收标准：
+  - `page.tsx` 至少减少 120 行，图片和发送业务 state 与副作用仍保留在页面层。
+  - 新增组件测试、前端全量 Vitest、lint、production build 和 Playwright E2E 通过。
+  - Docker Compose、服务日志和 production preflight 通过。
+- 相关提交：`0f9ee9b`。
+- 完成记录：
+  - 新增 `ChatComposer.tsx`，将 textarea、待发送图片预览、图片选择入口、附件约束说明和发送按钮从主页面抽离；输入 state、图片校验与 URL 清理、粘贴解析、上传、会话创建、限流倒计时和发送流程继续由 `page.tsx` 管理。
+  - 将图片 MIME、数量、大小约束和 `PendingChatImage` 类型集中到组件模块，页面与展示层复用同一约束；子组件没有新增 state、effect、数据请求或异步业务流程。
+  - 保持 Enter/Shift+Enter、图片按钮和发送按钮禁用条件、创建/上传/思考/限流状态文案优先级不变；`page.tsx` 从 2728 行降至 2587 行，减少 141 行。
+  - 新增 3 项组件静态渲染测试，覆盖基础输入、图片预览与计数、发送禁用、进度状态和多路限流最大 Retry-After。
+  - 前端全量 Vitest 21 个文件、113 项通过；lint 0 error 并保留 2 个既有 `<img>` warning；宿主机与 Docker 中的 Next.js 16.2.12 production build、Playwright E2E 3/3 均通过。
   - Docker production audit 输出 `found 0 vulnerabilities`；Compose 服务状态与最近启动日志正常，migration 输出 `applied=0 skipped=9`，production preflight 全部通过。
 - 建议验证命令：
 
