@@ -1,6 +1,7 @@
 "use client";
 
 import dynamic from "next/dynamic";
+import { ChatWorkspaceHeader } from "@/components/chat-workspace/ChatWorkspaceHeader";
 import { ConversationSidebar } from "@/components/chat-workspace/ConversationSidebar";
 import { FileManagerDialog } from "@/components/chat-workspace/FileManagerDialog";
 import { KnowledgeBaseManagerDialog } from "@/components/chat-workspace/KnowledgeBaseManagerDialog";
@@ -1881,40 +1882,12 @@ export default function Home() {
         </aside>
 
         <section className="research-paper research-enter min-w-0 border border-[#bdcac5] lg:flex lg:h-full lg:min-h-0 lg:flex-col lg:overflow-hidden">
-          <header className="shrink-0 border-b border-[#cbd5d1] bg-[#fcfdfb] px-5 py-5 md:px-8 md:py-6">
-            <div className="flex flex-col justify-between gap-5 md:flex-row md:items-end">
-              <div className="min-w-0">
-                <div className="flex items-center gap-3">
-                  <span className="font-utility bg-[#d5a83b] px-2 py-1 text-[10px] font-bold uppercase text-[#17201f]">
-                    Live Research
-                  </span>
-                  <span className="font-utility text-[10px] font-semibold uppercase text-[#72807b]">
-                    {selectedKnowledgeBase?.name || "暂无知识库"}
-                  </span>
-                </div>
-                <h1 className="font-display mt-4 truncate text-3xl font-semibold text-[#17201f] md:text-4xl">
-                  {currentSession?.title || "聊天工作台"}
-                </h1>
-                <p className="mt-2 max-w-2xl text-sm leading-6 text-[#64716d]">
-                  基于当前知识库继续提问，回答与上下文会保存在此会话中。
-                </p>
-              </div>
-              <div className="font-utility flex shrink-0 gap-5 border-t border-[#d6dedb] pt-4 text-[10px] uppercase text-[#72807b] md:border-l md:border-t-0 md:pl-5 md:pt-0">
-                <span>
-                  消息
-                  <strong className="mt-1 block text-base text-[#17201f]">
-                    {String(currentSession?.messages.length || 0).padStart(2, "0")}
-                  </strong>
-                </span>
-                <span>
-                  文件
-                  <strong className="mt-1 block text-base text-[#17201f]">
-                    {String(selectedKnowledgeBaseFileCount).padStart(2, "0")}
-                  </strong>
-                </span>
-              </div>
-            </div>
-          </header>
+          <ChatWorkspaceHeader
+            knowledgeBaseName={selectedKnowledgeBase?.name}
+            sessionTitle={currentSession?.title}
+            messageCount={currentSession?.messages.length || 0}
+            fileCount={selectedKnowledgeBaseFileCount}
+          />
 
           <div
             ref={messagesContainerRef}

@@ -104,6 +104,7 @@
 | `PLAN-20260728-05` | 2026-07-28 | `Done` | 继续拆分前端聊天工作台，收口高级模式质量看板的展示职责。 | `T-095` |
 | `PLAN-20260728-06` | 2026-07-28 | `Done` | 继续拆分前端聊天工作台，收口知识库选择、上传和文件入口的展示职责。 | `T-096` |
 | `PLAN-20260728-07` | 2026-07-28 | `Done` | 继续拆分前端聊天工作台，收口侧栏用户身份、退出和模式切换的展示职责。 | `T-097` |
+| `PLAN-20260728-08` | 2026-07-28 | `Doing` | 继续拆分前端聊天工作台，收口主工作区标题与消息/文件统计的展示职责。 | `T-098` |
 
 ## 任务总览
 
@@ -206,6 +207,7 @@
 | `T-095` | `PLAN-20260728-05` | `P1` | `Done` | 拆分高级模式质量看板组件 | 2026-07-28 | `202c40e` |
 | `T-096` | `PLAN-20260728-06` | `P1` | `Done` | 拆分知识库侧栏控制组件 | 2026-07-28 | `32c0b99` |
 | `T-097` | `PLAN-20260728-07` | `P1` | `Done` | 拆分侧栏用户身份与模式控制组件 | 2026-07-28 | `2ed46af` |
+| `T-098` | `PLAN-20260728-08` | `P1` | `Doing` | 拆分主工作区 header 组件 | — | — |
 
 ## 新计划接入流程
 
@@ -3897,6 +3899,43 @@ git diff --check
   - `page.tsx` 从 2804 行降至 2755 行，减少 49 行；新增 3 项组件静态渲染测试，覆盖账户入口、用户名回退和普通/高级两种模式状态。
   - 前端全量 Vitest 19 个文件、107 项通过；lint 0 error 并保留 2 个既有 `<img>` warning；宿主机与 Docker 中的 Next.js 16.2.12 production build、Playwright E2E 3/3 均通过。
   - Docker production audit 输出 `found 0 vulnerabilities`；Compose 服务状态与最近启动日志正常，migration 输出 `applied=0 skipped=9`，production preflight 全部通过。
+- 建议验证命令：
+
+```bash
+cd frontend
+npm test
+npm run lint
+npm run build
+CI=1 npm run test:e2e
+cd ..
+docker compose up -d --build
+docker compose ps
+docker compose logs --since=5m redis postgres chroma migrate backend worker frontend
+conda run -n firstrag python scripts/production_preflight.py --env-file .env --migration-method compose --check-runtime-health
+git diff --check
+```
+
+## T-098 拆分主工作区 header 组件
+
+- 来源计划：`PLAN-20260728-08`
+- 优先级：`P1`
+- 状态：`Doing`
+- 背景：T-097 完成后 `frontend/src/app/page.tsx` 仍有 2755 行，主工作区标题、当前知识库名称、说明文案和消息/文件统计继续以内联 JSX 形式存在。
+- 目标：在不改变知识库、会话和文件状态编排的前提下，将主工作区 header 迁移到独立、可测试的组件边界。
+- 技术边界：
+  - 当前知识库、活动会话和文件计数继续由 `page.tsx` 及现有 hook 管理。
+  - 子组件只接收名称、标题和计数等 primitive props，不增加 state、effect、memo 或数据请求。
+  - 保持空知识库、空会话回退文案和两位数计数展示行为不变。
+- 范围：
+  - 新增 `ChatWorkspaceHeader.tsx`，承接主工作区标签、知识库名称、会话标题、说明文案和消息/文件统计。
+  - `page.tsx` 改为复用独立组件，并保留当前知识库与会话派生逻辑。
+  - 增加组件静态渲染测试，覆盖活动内容、空状态和计数格式。
+  - 更新前端结构文档，明确页面与工作区 header 的职责边界。
+- 验收标准：
+  - `page.tsx` 至少减少 25 行，知识库、会话和文件 state 仍保留在页面层。
+  - 新增组件测试、前端全量 Vitest、lint、production build 和 Playwright E2E 通过。
+  - Docker Compose、服务日志和 production preflight 通过。
+- 相关提交：待完成。
 - 建议验证命令：
 
 ```bash
