@@ -46,7 +46,7 @@ describe("KnowledgeBaseSidebarControls", () => {
 
     expect(markup).toContain("暂无知识库");
     expect(markup).toContain("上传文件");
-    expect(markup).toContain("disabled");
+    expect(markup).toContain('disabled=""');
     expect(markup).toContain("文件 0");
   });
 
