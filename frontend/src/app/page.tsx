@@ -5,6 +5,7 @@ import dynamic from "next/dynamic";
 import { ConversationSidebar } from "@/components/chat-workspace/ConversationSidebar";
 import { FileManagerDialog } from "@/components/chat-workspace/FileManagerDialog";
 import { KnowledgeBaseManagerDialog } from "@/components/chat-workspace/KnowledgeBaseManagerDialog";
+import { KnowledgeBaseSidebarControls } from "@/components/chat-workspace/KnowledgeBaseSidebarControls";
 import {
   MarkdownContent,
   MessageAttachmentGrid,
@@ -1895,79 +1896,20 @@ export default function Home() {
             />
           )}
 
-          <div className="border-b border-[#c7d1cd] py-4">
-            <div className="flex items-center justify-between gap-3">
-              <label
-                htmlFor="knowledge-base"
-                className="font-utility text-[10px] font-semibold uppercase text-[#72807b]"
-              >
-                Knowledge Base
-              </label>
-              <button
-                type="button"
-                onClick={() => setIsKnowledgeBaseManagerOpen(true)}
-                className="text-xs font-semibold text-[#176b62] underline decoration-[#d5a83b] decoration-2 underline-offset-4"
-              >
-                管理
-              </button>
-            </div>
-
-            <select
-              id="knowledge-base"
-              value={selectedKnowledgeBaseId}
-              onChange={(event) =>
-                setSelectedKnowledgeBaseId(event.target.value)
-              }
-              className="research-focus mt-2 w-full border border-[#b7c4bf] bg-[#fcfdfb] px-3 py-2.5 text-sm font-semibold text-[#17201f]"
-            >
-              {knowledgeBases.length === 0 && (
-                <option value="">暂无知识库</option>
-              )}
-              {knowledgeBases.map((knowledgeBase) => (
-                <option key={knowledgeBase.id} value={knowledgeBase.id}>
-                  {knowledgeBase.name}
-                </option>
-              ))}
-            </select>
-
-            <div className="mt-3 grid grid-cols-2 gap-2">
-              <button
-                type="button"
-                onClick={() => fileInputRef.current?.click()}
-                disabled={
-                  !selectedKnowledgeBaseId ||
-                  isUploadingKnowledgeFiles ||
-                  uploadRetryAfterSeconds > 0
-                }
-                className="bg-[#176b62] px-3 py-2.5 text-xs font-semibold text-white transition hover:bg-[#105149] disabled:bg-[#91aaa4]"
-              >
-                {uploadRetryAfterSeconds > 0
-                  ? `${uploadRetryAfterSeconds} 秒后重试`
-                  : isUploadingKnowledgeFiles
-                    ? "上传中..."
-                    : "上传文件"}
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  void handleOpenFileManager();
-                }}
-                className="border border-[#aebdb7] bg-[#fcfdfb] px-3 py-2.5 text-xs font-semibold text-[#46514e] transition hover:border-[#176b62] hover:text-[#176b62]"
-              >
-                文件 {selectedKnowledgeBaseFileCount}
-              </button>
-            </div>
-            <input
-              ref={fileInputRef}
-              type="file"
-              multiple
-              accept=".pdf,.docx,.md,.txt,.png,.jpg,.jpeg,.webp"
-              onChange={(event) => {
-                void handleSelectFiles(event.target.files);
-              }}
-              className="hidden"
-            />
-          </div>
+          <KnowledgeBaseSidebarControls
+            knowledgeBases={knowledgeBases}
+            selectedKnowledgeBaseId={selectedKnowledgeBaseId}
+            selectedFileCount={selectedKnowledgeBaseFileCount}
+            isUploadingFiles={isUploadingKnowledgeFiles}
+            uploadRetryAfterSeconds={uploadRetryAfterSeconds}
+            fileInputRef={fileInputRef}
+            onSelectedKnowledgeBaseChange={setSelectedKnowledgeBaseId}
+            onOpenKnowledgeBaseManager={() =>
+              setIsKnowledgeBaseManagerOpen(true)
+            }
+            onOpenFileManager={handleOpenFileManager}
+            onFilesSelected={handleSelectFiles}
+          />
 
           <ConversationSidebar
             sessions={visibleSessions}
