@@ -103,6 +103,7 @@
 | `PLAN-20260728-04` | 2026-07-28 | `Done` | 继续拆分前端聊天工作台，收口会话索引侧栏的展示职责。 | `T-094` |
 | `PLAN-20260728-05` | 2026-07-28 | `Done` | 继续拆分前端聊天工作台，收口高级模式质量看板的展示职责。 | `T-095` |
 | `PLAN-20260728-06` | 2026-07-28 | `Done` | 继续拆分前端聊天工作台，收口知识库选择、上传和文件入口的展示职责。 | `T-096` |
+| `PLAN-20260728-07` | 2026-07-28 | `Doing` | 继续拆分前端聊天工作台，收口侧栏用户身份、退出和模式切换的展示职责。 | `T-097` |
 
 ## 任务总览
 
@@ -204,6 +205,7 @@
 | `T-094` | `PLAN-20260728-04` | `P1` | `Done` | 拆分会话索引侧栏组件 | 2026-07-28 | `378f206` |
 | `T-095` | `PLAN-20260728-05` | `P1` | `Done` | 拆分高级模式质量看板组件 | 2026-07-28 | `202c40e` |
 | `T-096` | `PLAN-20260728-06` | `P1` | `Done` | 拆分知识库侧栏控制组件 | 2026-07-28 | `32c0b99` |
+| `T-097` | `PLAN-20260728-07` | `P1` | `Doing` | 拆分侧栏用户身份与模式控制组件 | — | — |
 
 ## 新计划接入流程
 
@@ -3852,6 +3854,43 @@ git diff --check
   - `page.tsx` 从 2862 行降至 2804 行，减少 58 行；新增 3 项组件静态渲染测试，覆盖空知识库、选择项、文件计数、上传中和限流状态。
   - 前端全量 Vitest 18 个文件、104 项通过，lint 0 error 并保留 2 个既有 `<img>` warning；宿主机与 Docker 中的 Next.js 16.2.12 production build、Playwright E2E 3/3 均通过。
   - Docker production audit 输出 `found 0 vulnerabilities`；Compose 服务状态与最近启动日志正常，migration 输出 `applied=0 skipped=9`，production preflight 全部通过。
+- 建议验证命令：
+
+```bash
+cd frontend
+npm test
+npm run lint
+npm run build
+CI=1 npm run test:e2e
+cd ..
+docker compose up -d --build
+docker compose ps
+docker compose logs --since=5m redis postgres chroma migrate backend worker frontend
+conda run -n firstrag python scripts/production_preflight.py --env-file .env --migration-method compose --check-runtime-health
+git diff --check
+```
+
+## T-097 拆分侧栏用户身份与模式控制组件
+
+- 来源计划：`PLAN-20260728-07`
+- 优先级：`P1`
+- 状态：`Doing`
+- 背景：T-096 完成后 `frontend/src/app/page.tsx` 仍有 2804 行，侧栏顶部的用户身份、设置入口、退出操作和普通/高级模式切换继续以内联 JSX 形式存在。
+- 目标：在不改变认证、退出和模式偏好行为的前提下，将侧栏账户与模式控制区迁移到独立、可测试的组件边界。
+- 技术边界：
+  - 当前用户名、认证清理、退出跳转、模式 state 和 `localStorage` 偏好持久化继续由 `page.tsx` 管理。
+  - 子组件只接收用户名、模式状态和 callbacks，不增加 state、effect、浏览器存储访问或数据请求。
+  - 保持设置页链接、用户名回退文案、退出入口和 `aria-pressed` 语义不变。
+- 范围：
+  - 新增 `SidebarAccountModeControls.tsx`，承接用户身份、设置/退出入口和普通/高级模式按钮。
+  - `page.tsx` 改为复用独立组件，并保留认证与模式偏好流程。
+  - 增加组件静态渲染测试，覆盖用户名、回退文案、设置入口和两种模式状态。
+  - 更新前端结构文档，明确页面与侧栏账户模式组件的职责边界。
+- 验收标准：
+  - `page.tsx` 至少减少 45 行，认证和模式偏好 state 与副作用仍保留在页面层。
+  - 新增组件测试、前端全量 Vitest、lint、production build 和 Playwright E2E 通过。
+  - Docker Compose、服务日志和 production preflight 通过。
+- 相关提交：待完成。
 - 建议验证命令：
 
 ```bash
