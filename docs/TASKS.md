@@ -111,7 +111,7 @@
 | `PLAN-20260728-12` | 2026-07-28 | `Done` | 继续拆分前端聊天工作台，收口单条消息容器与派生展示逻辑。 | `T-102` |
 | `PLAN-20260728-13` | 2026-07-28 | `Done` | 继续降低前端聊天工作台业务编排复杂度，收口消息质量反馈与 Eval 草稿工作流。 | `T-103` |
 | `PLAN-20260729-01` | 2026-07-29 | `Done` | 继续降低前端聊天工作台业务编排复杂度，收口会话 diagnostics 的缓存、加载和展开状态。 | `T-104` |
-| `PLAN-20260729-02` | 2026-07-29 | `Doing` | 继续降低前端聊天工作台业务编排复杂度，收口高级模式质量看板的数据加载与交互状态。 | `T-105` |
+| `PLAN-20260729-02` | 2026-07-29 | `Done` | 继续降低前端聊天工作台业务编排复杂度，收口高级模式质量看板的数据加载与交互状态。 | `T-105` |
 
 ## 任务总览
 
@@ -221,7 +221,7 @@
 | `T-102` | `PLAN-20260728-12` | `P1` | `Done` | 拆分单条会话消息组件 | 2026-07-28 | `081041f` |
 | `T-103` | `PLAN-20260728-13` | `P1` | `Done` | 抽取消息质量操作 hook | 2026-07-28 | `822b15e` |
 | `T-104` | `PLAN-20260729-01` | `P1` | `Done` | 抽取会话 diagnostics hook | 2026-07-29 | `4f5a013` |
-| `T-105` | `PLAN-20260729-02` | `P1` | `Doing` | 抽取高级模式质量看板 hook | — | — |
+| `T-105` | `PLAN-20260729-02` | `P1` | `Done` | 抽取高级模式质量看板 hook | 2026-07-29 | `0f59ec5` |
 
 ## 新计划接入流程
 
@@ -4245,7 +4245,7 @@ git diff --check
 
 - 来源计划：`PLAN-20260729-02`
 - 优先级：`P1`
-- 状态：`Doing`
+- 状态：`Done`
 - 背景：T-104 完成后 `frontend/src/app/page.tsx` 仍有 1791 行，其中高级模式质量看板使用 4 组 state，并在页面内重复实现首次打开与刷新时的数据加载、错误处理和 loading 收口。
 - 目标：在保持质量看板缓存与用户可见行为不变的前提下，将数据请求和交互 lifecycle 迁移到独立 custom hook。
 - 技术边界：
@@ -4262,7 +4262,14 @@ git diff --check
   - `page.tsx` 至少减少 50 行，不改变最近 7 天窗口、缓存、错误文案或高级模式门禁。
   - 新增测试、前端全量 Vitest、lint、production build 和 Playwright E2E 通过。
   - Docker Compose、服务日志和 production preflight 通过。
-- 相关提交：—
+- 相关提交：`0f59ec5`。
+- 完成记录：
+  - 新增 `use-quality-dashboard.ts`，集中管理面板展开、dashboard 缓存、loading 和 error，并让首次打开与刷新复用同一请求流程。
+  - 保持最近 7 天指标窗口、关闭再打开复用缓存、刷新强制重取、既有错误文案，以及退出高级模式仅关闭面板等行为；普通模式下 toggle/refresh 不触发请求。
+  - `page.tsx` 移除 4 组质量看板 state、关闭 effect 和两段重复 handler，改为直接装配 hook 返回值；文件从 1791 行降至 1740 行，减少 51 行。
+  - 新增 3 项 helper 测试，覆盖首次打开加载判断、Error 文案保留和未知异常 fallback；前端全量 Vitest 27 个文件、135 项通过。
+  - lint 0 error 并保留 2 个既有 `<img>` warning；宿主机与 Docker 中的 Next.js 16.2.12 production build、Playwright E2E 3/3 均通过。
+  - Docker production audit 输出 `found 0 vulnerabilities`；Compose 服务状态与最近启动日志正常，migration 输出 `applied=0 skipped=9`，production preflight 全部通过。
 - 建议验证命令：
 
 ```bash
