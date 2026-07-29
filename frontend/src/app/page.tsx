@@ -41,6 +41,7 @@ import {
 } from "@/lib/chat-workspace/advanced-mode";
 import * as chatApi from "@/lib/chat-workspace/api";
 import { useKnowledgeFiles } from "@/lib/chat-workspace/use-knowledge-files";
+import { useMessageQualityActions } from "@/lib/chat-workspace/use-message-quality-actions";
 import { buildSessionTitle } from "@/lib/chat-workspace/utils";
 import { streamChatResponse } from "@/lib/chat-workspace/chat-stream";
 import { useRetryAfterCountdown } from "@/lib/use-retry-after-countdown";
@@ -52,10 +53,7 @@ import type {
   KnowledgeBaseRetrievalSettings,
   Message,
   MessageAttachment,
-  MessageFeedbackReason,
-  MessageFeedbackRating,
   MessageDiagnostic,
-  MessageSourceFeedbackRating,
   QualityDashboard,
   RetrievalState,
 } from "@/lib/chat-workspace/types";
@@ -147,43 +145,36 @@ export default function Home() {
   const [renamingKnowledgeBaseId, setRenamingKnowledgeBaseId] = useState("");
   const [deletingKnowledgeBaseId, setDeletingKnowledgeBaseId] = useState("");
   const [restoringKnowledgeBaseId, setRestoringKnowledgeBaseId] = useState("");
-  const [activeFeedbackMessageKey, setActiveFeedbackMessageKey] = useState("");
-  const [feedbackReasonDrafts, setFeedbackReasonDrafts] = useState<
-    Record<string, MessageFeedbackReason>
-  >({});
-  const [feedbackNoteDrafts, setFeedbackNoteDrafts] = useState<
-    Record<string, string>
-  >({});
-  const [submittingFeedback, setSubmittingFeedback] = useState<
-    Record<string, boolean>
-  >({});
-  const [feedbackErrors, setFeedbackErrors] = useState<Record<string, string>>({});
-  const [feedbackMessages, setFeedbackMessages] = useState<Record<string, string>>(
-    {}
-  );
-  const [submittingSourceFeedback, setSubmittingSourceFeedback] = useState<
-    Record<string, boolean>
-  >({});
-  const [sourceFeedbackErrors, setSourceFeedbackErrors] = useState<
-    Record<string, string>
-  >({});
-  const [sourceFeedbackMessages, setSourceFeedbackMessages] = useState<
-    Record<string, string>
-  >({});
   const [activeSourcePreview, setActiveSourcePreview] =
     useState<ChatSource | null>(null);
-  const [exportingEvalDrafts, setExportingEvalDrafts] = useState<
-    Record<string, boolean>
-  >({});
-  const [evalDraftErrors, setEvalDraftErrors] = useState<Record<string, string>>(
-    {},
-  );
   const [isQualityDashboardOpen, setIsQualityDashboardOpen] = useState(false);
   const [qualityDashboard, setQualityDashboard] =
     useState<QualityDashboard | null>(null);
   const [isLoadingQualityDashboard, setIsLoadingQualityDashboard] =
     useState(false);
   const [qualityDashboardError, setQualityDashboardError] = useState("");
+  const {
+    activeFeedbackMessageKey,
+    evalDraftErrors,
+    exportingEvalDrafts,
+    exportEvalDraft,
+    feedbackErrors,
+    feedbackMessages,
+    feedbackNoteDrafts,
+    feedbackReasonDrafts,
+    sourceFeedbackErrors,
+    sourceFeedbackMessages,
+    submitMessageFeedback,
+    submitSourceFeedback,
+    submittingFeedback,
+    submittingSourceFeedback,
+    toggleFeedbackPanel,
+    updateFeedbackNoteDraft,
+    updateFeedbackReasonDraft,
+  } = useMessageQualityActions({
+    isAdvancedMode,
+    setSessions,
+  });
 
   const bottomRef = useRef<HTMLDivElement | null>(null);
   const messagesContainerRef = useRef<HTMLDivElement | null>(null);
@@ -637,7 +628,6 @@ export default function Home() {
 
     setIsQualityDashboardOpen(false);
     setExpandedDiagnosticPanels({});
-    setActiveFeedbackMessageKey("");
   }, [isAdvancedMode]);
 
   useEffect(() => {
@@ -1011,214 +1001,6 @@ export default function Home() {
     }
   }
 
-  async function handleSubmitMessageFeedback({
-    sessionId,
-    messageKey,
-    messageId,
-    rating,
-    reason,
-    note,
-  }: {
-    sessionId: string;
-    messageKey: string;
-    messageId?: string;
-    rating: MessageFeedbackRating;
-    reason?: MessageFeedbackReason | null;
-    note?: string | null;
-  }) {
-    if (!messageId) {
-      setFeedbackErrors((prev) => ({
-        ...prev,
-        [messageKey]: "这条回答还没有保存完成，稍后再反馈。",
-      }));
-      return;
-    }
-
-    setSubmittingFeedback((prev) => ({
-      ...prev,
-      [messageKey]: true,
-    }));
-    setFeedbackErrors((prev) => ({
-      ...prev,
-      [messageKey]: "",
-    }));
-    setFeedbackMessages((prev) => ({
-      ...prev,
-      [messageKey]: "正在保存反馈...",
-    }));
-
-    try {
-      const feedback = await chatApi.submitMessageFeedback(messageId, {
-        rating,
-        reason: rating === "negative" ? reason || "other" : null,
-        note: rating === "negative" ? note?.trim() || null : null,
-      });
-
-      setSessions((prev) =>
-        prev.map((session) =>
-          session.id === sessionId
-            ? {
-                ...session,
-                messages: session.messages.map((message) =>
-                  message.id === messageId
-                    ? {
-                        ...message,
-                        feedback,
-                      }
-                    : message
-                ),
-              }
-            : session
-        )
-      );
-      setActiveFeedbackMessageKey((current) =>
-        current === messageKey ? "" : current
-      );
-      setFeedbackMessages((prev) => ({
-        ...prev,
-        [messageKey]:
-          rating === "positive" ? "已标记为有用" : "已记录问题反馈",
-      }));
-      window.setTimeout(() => {
-        setFeedbackMessages((prev) => {
-          if (
-            prev[messageKey] !== "已标记为有用" &&
-            prev[messageKey] !== "已记录问题反馈"
-          ) {
-            return prev;
-          }
-
-          const next = { ...prev };
-          delete next[messageKey];
-          return next;
-        });
-      }, 2000);
-    } catch (error) {
-      setFeedbackMessages((prev) => {
-        const next = { ...prev };
-        delete next[messageKey];
-        return next;
-      });
-      setFeedbackErrors((prev) => ({
-        ...prev,
-        [messageKey]:
-          error instanceof Error ? error.message : "保存反馈失败，请稍后再试。",
-      }));
-    } finally {
-      setSubmittingFeedback((prev) => ({
-        ...prev,
-        [messageKey]: false,
-      }));
-    }
-  }
-
-  async function handleSubmitSourceFeedback({
-    sessionId,
-    messageId,
-    sourceKey,
-    sourceIndex,
-    rating,
-  }: {
-    sessionId: string;
-    messageId?: string;
-    sourceKey: string;
-    sourceIndex: number;
-    rating: MessageSourceFeedbackRating;
-  }) {
-    if (!messageId) {
-      setSourceFeedbackErrors((prev) => ({
-        ...prev,
-        [sourceKey]: "这条回答还没有保存完成，稍后再标记引用。",
-      }));
-      return;
-    }
-
-    setSubmittingSourceFeedback((prev) => ({
-      ...prev,
-      [sourceKey]: true,
-    }));
-    setSourceFeedbackErrors((prev) => ({
-      ...prev,
-      [sourceKey]: "",
-    }));
-    setSourceFeedbackMessages((prev) => ({
-      ...prev,
-      [sourceKey]: "正在保存引用反馈...",
-    }));
-
-    try {
-      const feedback = await chatApi.submitMessageSourceFeedback(
-        messageId,
-        sourceIndex,
-        { rating },
-      );
-
-      setSessions((prev) =>
-        prev.map((session) =>
-          session.id === sessionId
-            ? {
-                ...session,
-                messages: session.messages.map((message) =>
-                  message.id === messageId
-                    ? {
-                        ...message,
-                        sources: message.sources?.map((source, position) => {
-                          const currentSourceIndex = source.index ?? position;
-
-                          return currentSourceIndex === sourceIndex
-                            ? {
-                                ...source,
-                                feedback,
-                              }
-                            : source;
-                        }),
-                      }
-                    : message
-                ),
-              }
-            : session
-        )
-      );
-      setSourceFeedbackMessages((prev) => ({
-        ...prev,
-        [sourceKey]:
-          rating === "useful" ? "已标记引用有用" : "已标记引用无关",
-      }));
-      window.setTimeout(() => {
-        setSourceFeedbackMessages((prev) => {
-          if (
-            prev[sourceKey] !== "已标记引用有用" &&
-            prev[sourceKey] !== "已标记引用无关"
-          ) {
-            return prev;
-          }
-
-          const next = { ...prev };
-          delete next[sourceKey];
-          return next;
-        });
-      }, 2000);
-    } catch (error) {
-      setSourceFeedbackMessages((prev) => {
-        const next = { ...prev };
-        delete next[sourceKey];
-        return next;
-      });
-      setSourceFeedbackErrors((prev) => ({
-        ...prev,
-        [sourceKey]:
-          error instanceof Error
-            ? error.message
-            : "保存引用反馈失败，请稍后再试。",
-      }));
-    } finally {
-      setSubmittingSourceFeedback((prev) => ({
-        ...prev,
-        [sourceKey]: false,
-      }));
-    }
-  }
-
   function clearPendingChatImages() {
     pendingChatImagesRef.current.forEach((image) => {
       URL.revokeObjectURL(image.previewUrl);
@@ -1301,62 +1083,6 @@ export default function Home() {
 
     event.preventDefault();
     handleSelectChatImages(pastedImages);
-  }
-
-  async function handleExportEvalDraft(messageKey: string, messageId?: string) {
-    if (!isAdvancedMode) {
-      return;
-    }
-
-    if (!messageId) {
-      setEvalDraftErrors((prev) => ({
-        ...prev,
-        [messageKey]: "这条回答还没有保存完成，稍后再导出。",
-      }));
-      return;
-    }
-
-    setExportingEvalDrafts((prev) => ({
-      ...prev,
-      [messageKey]: true,
-    }));
-    setEvalDraftErrors((prev) => ({
-      ...prev,
-      [messageKey]: "",
-    }));
-
-    try {
-      const draft = await chatApi.exportEvalCaseDraft(messageId);
-      const draftId =
-        typeof draft.id === "string" && draft.id.trim()
-          ? draft.id.trim()
-          : `draft_message_${messageId}`;
-      const blob = new Blob([`${JSON.stringify(draft, null, 2)}\n`], {
-        type: "application/json;charset=utf-8",
-      });
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement("a");
-
-      link.href = url;
-      link.download = `${draftId}.json`;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      URL.revokeObjectURL(url);
-    } catch (error) {
-      setEvalDraftErrors((prev) => ({
-        ...prev,
-        [messageKey]:
-          error instanceof Error
-            ? error.message
-            : "导出 eval case 草稿失败，请稍后再试。",
-      }));
-    } finally {
-      setExportingEvalDrafts((prev) => ({
-        ...prev,
-        [messageKey]: false,
-      }));
-    }
   }
 
   async function handleToggleQualityDashboard() {
@@ -1949,7 +1675,7 @@ export default function Home() {
                       sourceIndex,
                       rating,
                     }) =>
-                      handleSubmitSourceFeedback({
+                      submitSourceFeedback({
                         sessionId: currentSession.id,
                         messageId: message.id,
                         sourceKey,
@@ -1958,7 +1684,7 @@ export default function Home() {
                       })
                     }
                     onSubmitMessageFeedback={(request) =>
-                      handleSubmitMessageFeedback({
+                      submitMessageFeedback({
                         sessionId: currentSession.id,
                         messageKey,
                         messageId: message.id,
@@ -1966,24 +1692,16 @@ export default function Home() {
                       })
                     }
                     onToggleNegativeFeedback={() =>
-                      setActiveFeedbackMessageKey((current) =>
-                        current === messageKey ? "" : messageKey
-                      )
+                      toggleFeedbackPanel(messageKey)
                     }
                     onFeedbackReasonChange={(reason) =>
-                      setFeedbackReasonDrafts((prev) => ({
-                        ...prev,
-                        [messageKey]: reason,
-                      }))
+                      updateFeedbackReasonDraft(messageKey, reason)
                     }
                     onFeedbackNoteChange={(note) =>
-                      setFeedbackNoteDrafts((prev) => ({
-                        ...prev,
-                        [messageKey]: note,
-                      }))
+                      updateFeedbackNoteDraft(messageKey, note)
                     }
                     onExportEvalDraft={() =>
-                      handleExportEvalDraft(messageKey, message.id)
+                      exportEvalDraft(messageKey, message.id)
                     }
                     onToggleDiagnostics={() =>
                       handleToggleDiagnostics(
