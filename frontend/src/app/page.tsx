@@ -35,6 +35,7 @@ import {
 import * as chatApi from "@/lib/chat-workspace/api";
 import { useConversationDiagnostics } from "@/lib/chat-workspace/use-conversation-diagnostics";
 import { useKnowledgeFiles } from "@/lib/chat-workspace/use-knowledge-files";
+import { useMessageClipboard } from "@/lib/chat-workspace/use-message-clipboard";
 import { useMessageQualityActions } from "@/lib/chat-workspace/use-message-quality-actions";
 import { usePendingChatImages } from "@/lib/chat-workspace/use-pending-chat-images";
 import { useQualityDashboard } from "@/lib/chat-workspace/use-quality-dashboard";
@@ -72,7 +73,6 @@ export default function Home() {
   const [editingTitle, setEditingTitle] = useState("");
   const [renamingSessionId, setRenamingSessionId] = useState("");
   const [deletingSessionId, setDeletingSessionId] = useState("");
-  const [copiedMessageKey, setCopiedMessageKey] = useState("");
   const [loadingSessions, setLoadingSessions] = useState<Record<string, boolean>>(
     {}
   );
@@ -93,6 +93,7 @@ export default function Home() {
   } = usePendingChatImages({
     onError: setPageError,
   });
+  const { copiedMessageKey, copyMessage } = useMessageClipboard();
   const [knowledgeBases, setKnowledgeBases] = useState<KnowledgeBase[]>([
     {
       id: DEFAULT_KNOWLEDGE_BASE_ID,
@@ -930,54 +931,6 @@ export default function Home() {
     setEditingTitle("");
   }
 
-  async function handleCopyMessage(messageKey: string, content: string) {
-    try {
-      if (navigator.clipboard?.writeText) {
-        await navigator.clipboard.writeText(content);
-      } else {
-        const textarea = document.createElement("textarea");
-        textarea.value = content;
-        textarea.style.position = "fixed";
-        textarea.style.opacity = "0";
-        document.body.appendChild(textarea);
-        textarea.select();
-        document.execCommand("copy");
-        document.body.removeChild(textarea);
-      }
-
-      setCopiedMessageKey(messageKey);
-
-      window.setTimeout(() => {
-        setCopiedMessageKey((current) =>
-          current === messageKey ? "" : current
-        );
-      }, 1500);
-    } catch (error) {
-      console.error("Failed to copy message:", error);
-
-      try {
-        const textarea = document.createElement("textarea");
-        textarea.value = content;
-        textarea.style.position = "fixed";
-        textarea.style.opacity = "0";
-        document.body.appendChild(textarea);
-        textarea.select();
-        document.execCommand("copy");
-        document.body.removeChild(textarea);
-
-        setCopiedMessageKey(messageKey);
-
-        window.setTimeout(() => {
-          setCopiedMessageKey((current) =>
-            current === messageKey ? "" : current
-          );
-        }, 1500);
-      } catch (fallbackError) {
-        console.error("Fallback copy also failed:", fallbackError);
-      }
-    }
-  }
-
   async function handleSubmit(overrideInput?: string) {
     const isImageUploadRateLimited =
       pendingChatImages.length > 0 && chatImageRateLimit.isRateLimited;
@@ -1474,7 +1427,7 @@ export default function Home() {
                       toggleDiagnostics(currentSession.id, messageKey)
                     }
                     onCopy={() =>
-                      handleCopyMessage(messageKey, message.content)
+                      copyMessage(messageKey, message.content)
                     }
                   />
                 );
