@@ -113,6 +113,7 @@
 | `PLAN-20260729-01` | 2026-07-29 | `Done` | 继续降低前端聊天工作台业务编排复杂度，收口会话 diagnostics 的缓存、加载和展开状态。 | `T-104` |
 | `PLAN-20260729-02` | 2026-07-29 | `Done` | 继续降低前端聊天工作台业务编排复杂度，收口高级模式质量看板的数据加载与交互状态。 | `T-105` |
 | `PLAN-20260729-03` | 2026-07-29 | `Done` | 继续降低前端聊天工作台业务编排复杂度，收口待发送聊天图片的校验与 Object URL 生命周期。 | `T-106` |
+| `PLAN-20260729-04` | 2026-07-29 | `Doing` | 继续降低前端聊天工作台业务编排复杂度，收口回答复制 fallback 与提示计时状态。 | `T-107` |
 
 ## 任务总览
 
@@ -224,6 +225,7 @@
 | `T-104` | `PLAN-20260729-01` | `P1` | `Done` | 抽取会话 diagnostics hook | 2026-07-29 | `4f5a013` |
 | `T-105` | `PLAN-20260729-02` | `P1` | `Done` | 抽取高级模式质量看板 hook | 2026-07-29 | `0f59ec5` |
 | `T-106` | `PLAN-20260729-03` | `P1` | `Done` | 抽取待发送聊天图片 hook | 2026-07-29 | `85eb883` |
+| `T-107` | `PLAN-20260729-04` | `P1` | `Doing` | 抽取回答复制 hook | — | — |
 
 ## 新计划接入流程
 
@@ -4318,6 +4320,44 @@ git diff --check
   - 新增 4 项 helper 测试，覆盖校验优先级、剪贴板图片筛选、preview record 创建和 URL 批量释放；前端全量 Vitest 28 个文件、139 项通过。
   - lint 0 error 并保留 2 个既有 `<img>` warning；宿主机与 Docker 中的 Next.js 16.2.12 production build、Playwright E2E 3/3 均通过。
   - Docker production audit 输出 `found 0 vulnerabilities`；Compose 服务状态与最近启动日志正常，migration 输出 `applied=0 skipped=9`，production preflight 全部通过。
+- 建议验证命令：
+
+```bash
+cd frontend
+npm test
+npm run lint
+npm run build
+CI=1 npm run test:e2e
+cd ..
+docker compose up -d --build
+docker compose ps
+docker compose logs --since=5m redis postgres chroma migrate backend worker frontend
+conda run -n firstrag python scripts/production_preflight.py --env-file .env --migration-method compose --check-runtime-health
+git diff --check
+```
+
+## T-107 抽取回答复制 hook
+
+- 来源计划：`PLAN-20260729-04`
+- 优先级：`P1`
+- 状态：`Doing`
+- 背景：T-106 完成后 `frontend/src/app/page.tsx` 仍有 1643 行，其中回答复制使用独立 state 和约 50 行 Clipboard API、textarea fallback、错误重试与 1.5 秒提示复位逻辑。
+- 目标：在保持复制兼容性和用户可见反馈不变的前提下，将剪贴板写入与局部提示状态迁移到独立 custom hook。
+- 技术边界：
+  - 优先使用 `navigator.clipboard.writeText`；API 不可用或调用失败时继续使用隐藏 textarea 和 `document.execCommand("copy")`。
+  - 主路径失败后保留 console error 和 fallback 重试；fallback 也失败时不显示误导性的“已复制”状态。
+  - 成功复制后目标消息显示 1.5 秒提示；旧计时器不能清除较新的目标消息状态，页面卸载时清理计时器。
+  - 消息组件继续保持纯展示职责，页面只装配 copied key 与 copy callback。
+- 范围：
+  - 新增 `use-message-clipboard.ts`，管理 copied message key、复制策略与提示计时。
+  - 抽取 textarea copy、主路径/fallback 编排和 stale timer 状态 helper。
+  - `page.tsx` 改为消费 hook，移除复制 state 与 handler。
+  - 增加 helper 单元测试，并更新前端职责文档。
+- 验收标准：
+  - `page.tsx` 至少减少 40 行，不改变复制按钮、fallback 顺序或 1.5 秒提示。
+  - 新增测试、前端全量 Vitest、lint、production build 和 Playwright E2E 通过。
+  - Docker Compose、服务日志和 production preflight 通过。
+- 相关提交：—
 - 建议验证命令：
 
 ```bash
