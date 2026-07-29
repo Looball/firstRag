@@ -111,6 +111,7 @@
 | `PLAN-20260728-12` | 2026-07-28 | `Done` | 继续拆分前端聊天工作台，收口单条消息容器与派生展示逻辑。 | `T-102` |
 | `PLAN-20260728-13` | 2026-07-28 | `Done` | 继续降低前端聊天工作台业务编排复杂度，收口消息质量反馈与 Eval 草稿工作流。 | `T-103` |
 | `PLAN-20260729-01` | 2026-07-29 | `Done` | 继续降低前端聊天工作台业务编排复杂度，收口会话 diagnostics 的缓存、加载和展开状态。 | `T-104` |
+| `PLAN-20260729-02` | 2026-07-29 | `Doing` | 继续降低前端聊天工作台业务编排复杂度，收口高级模式质量看板的数据加载与交互状态。 | `T-105` |
 
 ## 任务总览
 
@@ -220,6 +221,7 @@
 | `T-102` | `PLAN-20260728-12` | `P1` | `Done` | 拆分单条会话消息组件 | 2026-07-28 | `081041f` |
 | `T-103` | `PLAN-20260728-13` | `P1` | `Done` | 抽取消息质量操作 hook | 2026-07-28 | `822b15e` |
 | `T-104` | `PLAN-20260729-01` | `P1` | `Done` | 抽取会话 diagnostics hook | 2026-07-29 | `4f5a013` |
+| `T-105` | `PLAN-20260729-02` | `P1` | `Doing` | 抽取高级模式质量看板 hook | — | — |
 
 ## 新计划接入流程
 
@@ -4223,6 +4225,44 @@ git diff --check
   - 新增 3 项 helper 测试，覆盖 conversation-scoped panel key、持久化消息匹配和首次加载判断；前端全量 Vitest 26 个文件、132 项通过。
   - lint 0 error 并保留 2 个既有 `<img>` warning；宿主机与 Docker 中的 Next.js 16.2.12 production build、Playwright E2E 3/3 均通过。
   - Docker production audit 输出 `found 0 vulnerabilities`；Compose 服务状态与最近启动日志正常，migration 输出 `applied=0 skipped=9`，production preflight 全部通过。
+- 建议验证命令：
+
+```bash
+cd frontend
+npm test
+npm run lint
+npm run build
+CI=1 npm run test:e2e
+cd ..
+docker compose up -d --build
+docker compose ps
+docker compose logs --since=5m redis postgres chroma migrate backend worker frontend
+conda run -n firstrag python scripts/production_preflight.py --env-file .env --migration-method compose --check-runtime-health
+git diff --check
+```
+
+## T-105 抽取高级模式质量看板 hook
+
+- 来源计划：`PLAN-20260729-02`
+- 优先级：`P1`
+- 状态：`Doing`
+- 背景：T-104 完成后 `frontend/src/app/page.tsx` 仍有 1791 行，其中高级模式质量看板使用 4 组 state，并在页面内重复实现首次打开与刷新时的数据加载、错误处理和 loading 收口。
+- 目标：在保持质量看板缓存与用户可见行为不变的前提下，将数据请求和交互 lifecycle 迁移到独立 custom hook。
+- 技术边界：
+  - 首次打开面板时仅在无缓存且未加载时请求；关闭再打开复用已有 dashboard。
+  - 刷新操作强制重新请求最近 7 天指标，并复用首次加载的错误与 loading 流程。
+  - 退出高级模式时只关闭面板，保留 dashboard 缓存；普通模式下 toggle/refresh 均不触发请求。
+  - `QualityDashboardPanel` 继续保持纯展示职责，页面仅装配 hook 返回的 state 与 callbacks。
+- 范围：
+  - 新增 `use-quality-dashboard.ts`，管理面板展开、dashboard、loading 和 error。
+  - 抽取首次打开加载判断与错误文案 helper，消除 toggle/refresh 的重复请求代码。
+  - `page.tsx` 改为消费 hook，移除质量看板 state、effect 和 handlers。
+  - 增加 helper 单元测试，并更新组件注释与前端职责文档。
+- 验收标准：
+  - `page.tsx` 至少减少 50 行，不改变最近 7 天窗口、缓存、错误文案或高级模式门禁。
+  - 新增测试、前端全量 Vitest、lint、production build 和 Playwright E2E 通过。
+  - Docker Compose、服务日志和 production preflight 通过。
+- 相关提交：—
 - 建议验证命令：
 
 ```bash

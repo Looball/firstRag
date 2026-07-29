@@ -47,7 +47,7 @@ function formatMetricMs(value: number | null) {
 /**
  * 展示高级模式的质量指标、空数据说明和反馈分布。
  *
- * 质量数据请求和 lifecycle state 由页面层管理，组件只负责渲染并转发操作。
+ * 质量数据请求和 lifecycle state 由上层 hook 管理，组件只负责渲染并转发操作。
  */
 export function QualityDashboardPanel({
   isOpen,
