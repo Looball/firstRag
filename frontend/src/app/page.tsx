@@ -40,6 +40,7 @@ import {
   writeAdvancedModePreference,
 } from "@/lib/chat-workspace/advanced-mode";
 import * as chatApi from "@/lib/chat-workspace/api";
+import { useConversationDiagnostics } from "@/lib/chat-workspace/use-conversation-diagnostics";
 import { useKnowledgeFiles } from "@/lib/chat-workspace/use-knowledge-files";
 import { useMessageQualityActions } from "@/lib/chat-workspace/use-message-quality-actions";
 import { buildSessionTitle } from "@/lib/chat-workspace/utils";
@@ -53,7 +54,6 @@ import type {
   KnowledgeBaseRetrievalSettings,
   Message,
   MessageAttachment,
-  MessageDiagnostic,
   QualityDashboard,
   RetrievalState,
 } from "@/lib/chat-workspace/types";
@@ -87,18 +87,6 @@ export default function Home() {
     {}
   );
   const [sessionErrors, setSessionErrors] = useState<Record<string, string>>({});
-  const [conversationDiagnostics, setConversationDiagnostics] = useState<
-    Record<string, MessageDiagnostic[]>
-  >({});
-  const [expandedDiagnosticPanels, setExpandedDiagnosticPanels] = useState<
-    Record<string, boolean>
-  >({});
-  const [loadingDiagnostics, setLoadingDiagnostics] = useState<
-    Record<string, boolean>
-  >({});
-  const [diagnosticErrors, setDiagnosticErrors] = useState<
-    Record<string, string>
-  >({});
   const [hasCheckedAuth, setHasCheckedAuth] = useState(false);
   const [isCreatingSession, setIsCreatingSession] = useState(false);
   const [isCreatingKnowledgeBase, setIsCreatingKnowledgeBase] =
@@ -153,6 +141,13 @@ export default function Home() {
   const [isLoadingQualityDashboard, setIsLoadingQualityDashboard] =
     useState(false);
   const [qualityDashboardError, setQualityDashboardError] = useState("");
+  const {
+    getDiagnosticState,
+    loadDiagnostics,
+    toggleDiagnostics,
+  } = useConversationDiagnostics({
+    isAdvancedMode,
+  });
   const {
     activeFeedbackMessageKey,
     evalDraftErrors,
@@ -627,7 +622,6 @@ export default function Home() {
     }
 
     setIsQualityDashboardOpen(false);
-    setExpandedDiagnosticPanels({});
   }, [isAdvancedMode]);
 
   useEffect(() => {
@@ -1132,70 +1126,6 @@ export default function Home() {
     }
   }
 
-  async function loadConversationDiagnostics(
-    conversationId: string,
-    options: { silent?: boolean } = {}
-  ) {
-    if (!options.silent) {
-      setLoadingDiagnostics((prev) => ({
-        ...prev,
-        [conversationId]: true,
-      }));
-      setDiagnosticErrors((prev) => ({
-        ...prev,
-        [conversationId]: "",
-      }));
-    }
-
-    try {
-      const diagnostics = await chatApi.loadConversationDiagnostics(conversationId);
-
-      setConversationDiagnostics((prev) => ({
-        ...prev,
-        [conversationId]: diagnostics,
-      }));
-    } catch (error) {
-      if (!options.silent) {
-        setDiagnosticErrors((prev) => ({
-          ...prev,
-          [conversationId]:
-            error instanceof Error
-              ? error.message
-              : "加载诊断信息失败，请稍后再试。",
-        }));
-      }
-    } finally {
-      if (!options.silent) {
-        setLoadingDiagnostics((prev) => ({
-          ...prev,
-          [conversationId]: false,
-        }));
-      }
-    }
-  }
-
-  function handleToggleDiagnostics(conversationId: string, messageKey: string) {
-    if (!isAdvancedMode) {
-      return;
-    }
-
-    const panelKey = `${conversationId}:${messageKey}`;
-    const shouldOpen = !expandedDiagnosticPanels[panelKey];
-
-    setExpandedDiagnosticPanels((prev) => ({
-      ...prev,
-      [panelKey]: shouldOpen,
-    }));
-
-    if (
-      shouldOpen &&
-      conversationDiagnostics[conversationId] === undefined &&
-      !loadingDiagnostics[conversationId]
-    ) {
-      void loadConversationDiagnostics(conversationId);
-    }
-  }
-
   async function handleSubmit(overrideInput?: string) {
     const isImageUploadRateLimited =
       pendingChatImages.length > 0 && chatImageRateLimit.isRateLimited;
@@ -1494,7 +1424,7 @@ export default function Home() {
         setAssistantSources,
         onDone: () => {
           if (isAdvancedMode) {
-            void loadConversationDiagnostics(activeSessionId, { silent: true });
+            void loadDiagnostics(activeSessionId, { silent: true });
           }
         },
       });
@@ -1617,14 +1547,6 @@ export default function Home() {
 
               {currentSession?.messages.map((message, index) => {
                 const messageKey = `${currentSession.id}-${index}`;
-                const diagnosticPanelKey = `${currentSession.id}:${messageKey}`;
-                const cachedDiagnostics =
-                  conversationDiagnostics[currentSession.id];
-                const diagnostic = message.id
-                  ? (cachedDiagnostics?.find(
-                      (item) => item.messageId === message.id
-                    ) ?? null)
-                  : null;
 
                 return (
                   <ConversationMessageItem
@@ -1646,18 +1568,11 @@ export default function Home() {
                       errorMessage: feedbackErrors[messageKey] || "",
                       successMessage: feedbackMessages[messageKey] || "",
                     }}
-                    diagnosticState={{
-                      isExpanded: Boolean(
-                        expandedDiagnosticPanels[diagnosticPanelKey]
-                      ),
-                      diagnostic,
-                      isLoading: Boolean(
-                        loadingDiagnostics[currentSession.id]
-                      ),
-                      hasLoaded: Boolean(cachedDiagnostics),
-                      errorMessage:
-                        diagnosticErrors[currentSession.id] || "",
-                    }}
+                    diagnosticState={getDiagnosticState(
+                      currentSession.id,
+                      messageKey,
+                      message.id,
+                    )}
                     evalDraftState={{
                       isExporting: Boolean(
                         exportingEvalDrafts[messageKey]
@@ -1704,10 +1619,7 @@ export default function Home() {
                       exportEvalDraft(messageKey, message.id)
                     }
                     onToggleDiagnostics={() =>
-                      handleToggleDiagnostics(
-                        currentSession.id,
-                        messageKey
-                      )
+                      toggleDiagnostics(currentSession.id, messageKey)
                     }
                     onCopy={() =>
                       handleCopyMessage(messageKey, message.content)
