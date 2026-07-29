@@ -43,6 +43,7 @@ import * as chatApi from "@/lib/chat-workspace/api";
 import { useConversationDiagnostics } from "@/lib/chat-workspace/use-conversation-diagnostics";
 import { useKnowledgeFiles } from "@/lib/chat-workspace/use-knowledge-files";
 import { useMessageQualityActions } from "@/lib/chat-workspace/use-message-quality-actions";
+import { useQualityDashboard } from "@/lib/chat-workspace/use-quality-dashboard";
 import { buildSessionTitle } from "@/lib/chat-workspace/utils";
 import { streamChatResponse } from "@/lib/chat-workspace/chat-stream";
 import { useRetryAfterCountdown } from "@/lib/use-retry-after-countdown";
@@ -54,7 +55,6 @@ import type {
   KnowledgeBaseRetrievalSettings,
   Message,
   MessageAttachment,
-  QualityDashboard,
   RetrievalState,
 } from "@/lib/chat-workspace/types";
 
@@ -135,17 +135,21 @@ export default function Home() {
   const [restoringKnowledgeBaseId, setRestoringKnowledgeBaseId] = useState("");
   const [activeSourcePreview, setActiveSourcePreview] =
     useState<ChatSource | null>(null);
-  const [isQualityDashboardOpen, setIsQualityDashboardOpen] = useState(false);
-  const [qualityDashboard, setQualityDashboard] =
-    useState<QualityDashboard | null>(null);
-  const [isLoadingQualityDashboard, setIsLoadingQualityDashboard] =
-    useState(false);
-  const [qualityDashboardError, setQualityDashboardError] = useState("");
   const {
     getDiagnosticState,
     loadDiagnostics,
     toggleDiagnostics,
   } = useConversationDiagnostics({
+    isAdvancedMode,
+  });
+  const {
+    isLoadingQualityDashboard,
+    isQualityDashboardOpen,
+    qualityDashboard,
+    qualityDashboardError,
+    refreshQualityDashboard,
+    toggleQualityDashboard,
+  } = useQualityDashboard({
     isAdvancedMode,
   });
   const {
@@ -617,14 +621,6 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
-    if (isAdvancedMode) {
-      return;
-    }
-
-    setIsQualityDashboardOpen(false);
-  }, [isAdvancedMode]);
-
-  useEffect(() => {
     if (
       !hasCheckedAuth ||
       !isAdvancedMode ||
@@ -1079,53 +1075,6 @@ export default function Home() {
     handleSelectChatImages(pastedImages);
   }
 
-  async function handleToggleQualityDashboard() {
-    if (!isAdvancedMode) {
-      return;
-    }
-
-    const shouldOpen = !isQualityDashboardOpen;
-
-    setIsQualityDashboardOpen(shouldOpen);
-    if (!shouldOpen || qualityDashboard || isLoadingQualityDashboard) {
-      return;
-    }
-
-    setIsLoadingQualityDashboard(true);
-    setQualityDashboardError("");
-
-    try {
-      const dashboard = await chatApi.loadQualityDashboard(7);
-      setQualityDashboard(dashboard);
-    } catch (error) {
-      setQualityDashboardError(
-        error instanceof Error ? error.message : "加载质量看板失败，请稍后再试。",
-      );
-    } finally {
-      setIsLoadingQualityDashboard(false);
-    }
-  }
-
-  async function handleRefreshQualityDashboard() {
-    if (!isAdvancedMode) {
-      return;
-    }
-
-    setIsLoadingQualityDashboard(true);
-    setQualityDashboardError("");
-
-    try {
-      const dashboard = await chatApi.loadQualityDashboard(7);
-      setQualityDashboard(dashboard);
-    } catch (error) {
-      setQualityDashboardError(
-        error instanceof Error ? error.message : "加载质量看板失败，请稍后再试。",
-      );
-    } finally {
-      setIsLoadingQualityDashboard(false);
-    }
-  }
-
   async function handleSubmit(overrideInput?: string) {
     const isImageUploadRateLimited =
       pendingChatImages.length > 0 && chatImageRateLimit.isRateLimited;
@@ -1472,8 +1421,8 @@ export default function Home() {
               dashboard={qualityDashboard}
               isLoading={isLoadingQualityDashboard}
               error={qualityDashboardError}
-              onToggle={handleToggleQualityDashboard}
-              onRefresh={handleRefreshQualityDashboard}
+              onToggle={toggleQualityDashboard}
+              onRefresh={refreshQualityDashboard}
             />
           )}
 
