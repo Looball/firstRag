@@ -2,16 +2,19 @@
 
 import type { ClipboardEventHandler, RefObject } from "react";
 import { formatFileSize } from "../../lib/chat-workspace/utils";
+import {
+  CHAT_IMAGE_ACCEPT,
+  CHAT_IMAGE_MAX_FILES,
+  CHAT_IMAGE_MAX_FILE_SIZE_BYTES,
+  type PendingChatImage,
+} from "../../lib/chat-workspace/use-pending-chat-images";
 
-export const CHAT_IMAGE_ACCEPT = "image/png,image/jpeg,image/webp";
-export const CHAT_IMAGE_MAX_FILES = 3;
-export const CHAT_IMAGE_MAX_FILE_SIZE_BYTES = 5 * 1024 * 1024;
-
-export type PendingChatImage = {
-  id: string;
-  file: File;
-  previewUrl: string;
-};
+export {
+  CHAT_IMAGE_ACCEPT,
+  CHAT_IMAGE_MAX_FILES,
+  CHAT_IMAGE_MAX_FILE_SIZE_BYTES,
+} from "../../lib/chat-workspace/use-pending-chat-images";
+export type { PendingChatImage } from "../../lib/chat-workspace/use-pending-chat-images";
 
 export type ChatComposerProps = {
   input: string;
@@ -35,7 +38,7 @@ export type ChatComposerProps = {
 /**
  * 展示聊天输入、待发送图片、图片选择入口和发送状态。
  *
- * 图片校验与 Object URL 生命周期、上传、限流倒计时、会话创建和消息发送继续由页面层管理。
+ * 图片校验与 Object URL 生命周期由上层 hook 管理；上传、限流倒计时、会话创建和消息发送继续由页面层编排。
  */
 export function ChatComposer({
   input,

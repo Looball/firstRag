@@ -1,13 +1,7 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import {
-  CHAT_IMAGE_ACCEPT,
-  CHAT_IMAGE_MAX_FILES,
-  CHAT_IMAGE_MAX_FILE_SIZE_BYTES,
-  ChatComposer,
-  type PendingChatImage,
-} from "@/components/chat-workspace/ChatComposer";
+import { ChatComposer } from "@/components/chat-workspace/ChatComposer";
 import { ChatWorkspaceHeader } from "@/components/chat-workspace/ChatWorkspaceHeader";
 import { ConversationMessageItem } from "@/components/chat-workspace/ConversationMessageItem";
 import { ConversationSidebar } from "@/components/chat-workspace/ConversationSidebar";
@@ -17,7 +11,6 @@ import { KnowledgeBaseSidebarControls } from "@/components/chat-workspace/Knowle
 import { QualityDashboardPanel } from "@/components/chat-workspace/QualityDashboardPanel";
 import { SidebarAccountModeControls } from "@/components/chat-workspace/SidebarAccountModeControls";
 import {
-  type ClipboardEvent,
   useCallback,
   useEffect,
   useMemo,
@@ -43,6 +36,7 @@ import * as chatApi from "@/lib/chat-workspace/api";
 import { useConversationDiagnostics } from "@/lib/chat-workspace/use-conversation-diagnostics";
 import { useKnowledgeFiles } from "@/lib/chat-workspace/use-knowledge-files";
 import { useMessageQualityActions } from "@/lib/chat-workspace/use-message-quality-actions";
+import { usePendingChatImages } from "@/lib/chat-workspace/use-pending-chat-images";
 import { useQualityDashboard } from "@/lib/chat-workspace/use-quality-dashboard";
 import { buildSessionTitle } from "@/lib/chat-workspace/utils";
 import { streamChatResponse } from "@/lib/chat-workspace/chat-stream";
@@ -70,13 +64,9 @@ export default function Home() {
   const [sessions, setSessions] = useState<ChatSession[]>([]);
   const [currentSessionId, setCurrentSessionId] = useState("");
   const [input, setInput] = useState("");
-  const [pendingChatImages, setPendingChatImages] = useState<PendingChatImage[]>(
-    []
-  );
   const [isUploadingChatImages, setIsUploadingChatImages] = useState(false);
   const chatRateLimit = useRetryAfterCountdown();
   const chatImageRateLimit = useRetryAfterCountdown();
-  const pendingChatImagesRef = useRef<PendingChatImage[]>([]);
   const [isAdvancedMode, setIsAdvancedMode] = useState(getAdvancedModeDefault);
   const [editingSessionId, setEditingSessionId] = useState("");
   const [editingTitle, setEditingTitle] = useState("");
@@ -93,7 +83,16 @@ export default function Home() {
     useState(false);
   const [pageError, setPageError] = useState("");
   const [currentUsername, setCurrentUsername] = useState("");
-  const chatImageInputRef = useRef<HTMLInputElement | null>(null);
+  const {
+    chatImageInputRef,
+    clearPendingChatImages,
+    handlePasteChatImages,
+    handleSelectChatImages,
+    pendingChatImages,
+    removePendingChatImage,
+  } = usePendingChatImages({
+    onError: setPageError,
+  });
   const [knowledgeBases, setKnowledgeBases] = useState<KnowledgeBase[]>([
     {
       id: DEFAULT_KNOWLEDGE_BASE_ID,
@@ -609,18 +608,6 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
-    pendingChatImagesRef.current = pendingChatImages;
-  }, [pendingChatImages]);
-
-  useEffect(() => {
-    return () => {
-      pendingChatImagesRef.current.forEach((image) => {
-        URL.revokeObjectURL(image.previewUrl);
-      });
-    };
-  }, []);
-
-  useEffect(() => {
     if (
       !hasCheckedAuth ||
       !isAdvancedMode ||
@@ -989,90 +976,6 @@ export default function Home() {
         console.error("Fallback copy also failed:", fallbackError);
       }
     }
-  }
-
-  function clearPendingChatImages() {
-    pendingChatImagesRef.current.forEach((image) => {
-      URL.revokeObjectURL(image.previewUrl);
-    });
-    pendingChatImagesRef.current = [];
-    setPendingChatImages([]);
-    if (chatImageInputRef.current) {
-      chatImageInputRef.current.value = "";
-    }
-  }
-
-  function removePendingChatImage(imageId: string) {
-    setPendingChatImages((current) => {
-      const removedImage = current.find((image) => image.id === imageId);
-      if (removedImage) {
-        URL.revokeObjectURL(removedImage.previewUrl);
-      }
-      return current.filter((image) => image.id !== imageId);
-    });
-  }
-
-  function handleSelectChatImages(files: FileList | File[] | null) {
-    if (!files?.length) {
-      return;
-    }
-
-    const selectedFiles = Array.from(files);
-    const nextImages: PendingChatImage[] = [];
-
-    if (pendingChatImages.length + selectedFiles.length > CHAT_IMAGE_MAX_FILES) {
-      setPageError(`单轮最多只能附加 ${CHAT_IMAGE_MAX_FILES} 张图片。`);
-      if (chatImageInputRef.current) {
-        chatImageInputRef.current.value = "";
-      }
-      return;
-    }
-
-    for (const file of selectedFiles) {
-      if (!CHAT_IMAGE_ACCEPT.split(",").includes(file.type)) {
-        nextImages.forEach((image) => URL.revokeObjectURL(image.previewUrl));
-        setPageError("仅支持 PNG、JPEG 或 WebP 图片。");
-        if (chatImageInputRef.current) {
-          chatImageInputRef.current.value = "";
-        }
-        return;
-      }
-      if (file.size > CHAT_IMAGE_MAX_FILE_SIZE_BYTES) {
-        nextImages.forEach((image) => URL.revokeObjectURL(image.previewUrl));
-        setPageError("单张图片不能超过 5MB。");
-        if (chatImageInputRef.current) {
-          chatImageInputRef.current.value = "";
-        }
-        return;
-      }
-      nextImages.push({
-        id: `${file.name}-${file.size}-${file.lastModified}-${crypto.randomUUID()}`,
-        file,
-        previewUrl: URL.createObjectURL(file),
-      });
-    }
-
-    setPageError("");
-    setPendingChatImages((current) => [...current, ...nextImages]);
-    if (chatImageInputRef.current) {
-      chatImageInputRef.current.value = "";
-    }
-  }
-
-  function handlePasteChatImages(
-    event: ClipboardEvent<HTMLTextAreaElement>
-  ) {
-    const pastedImages = Array.from(event.clipboardData.items)
-      .filter((item) => item.kind === "file" && item.type.startsWith("image/"))
-      .map((item) => item.getAsFile())
-      .filter((file): file is File => file !== null);
-
-    if (pastedImages.length === 0) {
-      return;
-    }
-
-    event.preventDefault();
-    handleSelectChatImages(pastedImages);
   }
 
   async function handleSubmit(overrideInput?: string) {

@@ -112,6 +112,7 @@
 | `PLAN-20260728-13` | 2026-07-28 | `Done` | 继续降低前端聊天工作台业务编排复杂度，收口消息质量反馈与 Eval 草稿工作流。 | `T-103` |
 | `PLAN-20260729-01` | 2026-07-29 | `Done` | 继续降低前端聊天工作台业务编排复杂度，收口会话 diagnostics 的缓存、加载和展开状态。 | `T-104` |
 | `PLAN-20260729-02` | 2026-07-29 | `Done` | 继续降低前端聊天工作台业务编排复杂度，收口高级模式质量看板的数据加载与交互状态。 | `T-105` |
+| `PLAN-20260729-03` | 2026-07-29 | `Done` | 继续降低前端聊天工作台业务编排复杂度，收口待发送聊天图片的校验与 Object URL 生命周期。 | `T-106` |
 
 ## 任务总览
 
@@ -222,6 +223,7 @@
 | `T-103` | `PLAN-20260728-13` | `P1` | `Done` | 抽取消息质量操作 hook | 2026-07-28 | `822b15e` |
 | `T-104` | `PLAN-20260729-01` | `P1` | `Done` | 抽取会话 diagnostics hook | 2026-07-29 | `4f5a013` |
 | `T-105` | `PLAN-20260729-02` | `P1` | `Done` | 抽取高级模式质量看板 hook | 2026-07-29 | `0f59ec5` |
+| `T-106` | `PLAN-20260729-03` | `P1` | `Done` | 抽取待发送聊天图片 hook | 2026-07-29 | `85eb883` |
 
 ## 新计划接入流程
 
@@ -4268,6 +4270,52 @@ git diff --check
   - 保持最近 7 天指标窗口、关闭再打开复用缓存、刷新强制重取、既有错误文案，以及退出高级模式仅关闭面板等行为；普通模式下 toggle/refresh 不触发请求。
   - `page.tsx` 移除 4 组质量看板 state、关闭 effect 和两段重复 handler，改为直接装配 hook 返回值；文件从 1791 行降至 1740 行，减少 51 行。
   - 新增 3 项 helper 测试，覆盖首次打开加载判断、Error 文案保留和未知异常 fallback；前端全量 Vitest 27 个文件、135 项通过。
+  - lint 0 error 并保留 2 个既有 `<img>` warning；宿主机与 Docker 中的 Next.js 16.2.12 production build、Playwright E2E 3/3 均通过。
+  - Docker production audit 输出 `found 0 vulnerabilities`；Compose 服务状态与最近启动日志正常，migration 输出 `applied=0 skipped=9`，production preflight 全部通过。
+- 建议验证命令：
+
+```bash
+cd frontend
+npm test
+npm run lint
+npm run build
+CI=1 npm run test:e2e
+cd ..
+docker compose up -d --build
+docker compose ps
+docker compose logs --since=5m redis postgres chroma migrate backend worker frontend
+conda run -n firstrag python scripts/production_preflight.py --env-file .env --migration-method compose --check-runtime-health
+git diff --check
+```
+
+## T-106 抽取待发送聊天图片 hook
+
+- 来源计划：`PLAN-20260729-03`
+- 优先级：`P1`
+- 状态：`Done`
+- 背景：T-105 完成后 `frontend/src/app/page.tsx` 仍有 1740 行，其中待发送聊天图片使用独立 state、两个 ref、两个 effect 和约 80 行选择、粘贴、移除、清空与预览 URL 清理逻辑。
+- 目标：在保持图片附件交互与错误提示不变的前提下，将本地待发送图片及 Object URL 生命周期迁移到独立 custom hook。
+- 技术边界：
+  - 保持最多 3 张、仅 PNG/JPEG/WebP、单张不超过 5MB 的校验顺序和现有错误文案。
+  - 文件选择与剪贴板粘贴共用同一校验/创建流程；有图片粘贴时继续阻止 textarea 默认粘贴。
+  - 移除、发送成功后清空和页面卸载时必须释放对应 Object URL，并重置 file input。
+  - 图片上传 API、上传 loading、限流倒计时、会话创建和消息发送继续由 `page.tsx` 编排。
+- 范围：
+  - 新增 `use-pending-chat-images.ts`，管理 pending images、input ref 和本地生命周期 actions。
+  - 抽取校验、剪贴板图片筛选、pending image 创建与 URL 释放 helper。
+  - `page.tsx` 改为消费 hook；`ChatComposer` 从 hook 模块复用并兼容导出图片常量与类型。
+  - 增加 helper 单元测试，并更新组件注释与前端职责文档。
+- 验收标准：
+  - `page.tsx` 至少减少 80 行，不改变图片校验文案、发送流程或限流行为。
+  - 新增测试、前端全量 Vitest、lint、production build 和 Playwright E2E 通过。
+  - Docker Compose、服务日志和 production preflight 通过。
+- 相关提交：`85eb883`。
+- 完成记录：
+  - 新增 `use-pending-chat-images.ts`，集中管理 pending images、file input ref、选择、粘贴、移除、清空和卸载清理。
+  - 保持最多 3 张、仅 PNG/JPEG/WebP、单张不超过 5MB 的校验优先级和错误文案；文件选择与图片粘贴复用统一校验与预览创建流程。
+  - 移除单图、发送成功清空和页面卸载均释放对应 Object URL；`ChatComposer` 继续兼容导出既有图片常量与类型。
+  - 图片上传 API、上传 loading、限流、会话创建和消息发送继续由页面编排；`page.tsx` 从 1740 行降至 1643 行，减少 97 行。
+  - 新增 4 项 helper 测试，覆盖校验优先级、剪贴板图片筛选、preview record 创建和 URL 批量释放；前端全量 Vitest 28 个文件、139 项通过。
   - lint 0 error 并保留 2 个既有 `<img>` warning；宿主机与 Docker 中的 Next.js 16.2.12 production build、Playwright E2E 3/3 均通过。
   - Docker production audit 输出 `found 0 vulnerabilities`；Compose 服务状态与最近启动日志正常，migration 输出 `applied=0 skipped=9`，production preflight 全部通过。
 - 建议验证命令：
