@@ -82,7 +82,7 @@ const isDevelopmentEnvironment = process.env.NODE_ENV === "development";
 /**
  * 组合单条会话消息的内容、附件、引用和回答操作。
  *
- * 组件只派生展示状态并转发 callbacks；请求、缓存、draft state 和计时副作用由页面层管理。
+ * 组件只派生展示状态并转发 callbacks；请求、缓存、draft state 和计时副作用由上层编排与 hooks 管理。
  */
 export function ConversationMessageItem({
   messageKey,

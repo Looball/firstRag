@@ -110,6 +110,7 @@
 | `PLAN-20260728-11` | 2026-07-28 | `Done` | 继续拆分前端聊天工作台，收口回答反馈、Eval 草稿、diagnostics 和复制操作的展示职责。 | `T-101` |
 | `PLAN-20260728-12` | 2026-07-28 | `Done` | 继续拆分前端聊天工作台，收口单条消息容器与派生展示逻辑。 | `T-102` |
 | `PLAN-20260728-13` | 2026-07-28 | `Done` | 继续降低前端聊天工作台业务编排复杂度，收口消息质量反馈与 Eval 草稿工作流。 | `T-103` |
+| `PLAN-20260729-01` | 2026-07-29 | `Doing` | 继续降低前端聊天工作台业务编排复杂度，收口会话 diagnostics 的缓存、加载和展开状态。 | `T-104` |
 
 ## 任务总览
 
@@ -218,6 +219,7 @@
 | `T-101` | `PLAN-20260728-11` | `P1` | `Done` | 拆分回答反馈与操作组件 | 2026-07-28 | `90b61cc` |
 | `T-102` | `PLAN-20260728-12` | `P1` | `Done` | 拆分单条会话消息组件 | 2026-07-28 | `081041f` |
 | `T-103` | `PLAN-20260728-13` | `P1` | `Done` | 抽取消息质量操作 hook | 2026-07-28 | `822b15e` |
+| `T-104` | `PLAN-20260729-01` | `P1` | `Doing` | 抽取会话 diagnostics hook | — | — |
 
 ## 新计划接入流程
 
@@ -4176,6 +4178,44 @@ git diff --check
   - 新增 3 项 helper 测试，覆盖消息反馈定向回写、显式/位置 source index 匹配和 Eval 草稿文件名/JSON 序列化。
   - 前端全量 Vitest 25 个文件、129 项通过；lint 0 error 并保留 2 个既有 `<img>` warning；宿主机与 Docker 中的 Next.js 16.2.12 production build、Playwright E2E 3/3 均通过。
   - Docker production audit 输出 `found 0 vulnerabilities`；Compose 服务状态与最近启动日志正常，migration 输出 `applied=0 skipped=9`，production preflight 全部通过。
+- 建议验证命令：
+
+```bash
+cd frontend
+npm test
+npm run lint
+npm run build
+CI=1 npm run test:e2e
+cd ..
+docker compose up -d --build
+docker compose ps
+docker compose logs --since=5m redis postgres chroma migrate backend worker frontend
+conda run -n firstrag python scripts/production_preflight.py --env-file .env --migration-method compose --check-runtime-health
+git diff --check
+```
+
+## T-104 抽取会话 diagnostics hook
+
+- 来源计划：`PLAN-20260729-01`
+- 优先级：`P1`
+- 状态：`Doing`
+- 背景：T-103 完成后 `frontend/src/app/page.tsx` 仍有 1879 行，其中会话 diagnostics 使用 4 组 state，并在页面内分散处理缓存、silent preload、首次展开加载、错误提示和高级模式收起逻辑。
+- 目标：在保持 diagnostics 请求时机和消息展示行为不变的前提下，将会话级缓存与面板交互迁移到独立 custom hook。
+- 技术边界：
+  - diagnostics 继续按 conversation 缓存；空数组仍表示请求已经完成，避免展开无诊断消息时重复加载。
+  - 流式回答完成后的 silent preload 不显示 loading/error；用户首次展开时的显式加载继续显示状态和错误。
+  - 退出高级模式时收起所有 diagnostics 面板，但保留已加载缓存。
+  - 页面只消费稳定的 load/toggle/get state 接口，不复制 diagnostics state。
+- 范围：
+  - 新增 `use-conversation-diagnostics.ts`，集中管理 diagnostics 缓存、加载、错误和展开状态。
+  - 抽取 panel key、目标消息诊断匹配和首次加载判断 helper。
+  - `page.tsx` 改为消费 hook 返回值，并继续负责消息组件装配与流式完成回调。
+  - 增加 helper 单元测试并更新前端职责文档。
+- 验收标准：
+  - `page.tsx` 至少减少 80 行，不改变 diagnostics 的请求时机、错误文案或高级模式行为。
+  - 新增测试、前端全量 Vitest、lint、production build 和 Playwright E2E 通过。
+  - Docker Compose、服务日志和 production preflight 通过。
+- 相关提交：—
 - 建议验证命令：
 
 ```bash
