@@ -73,7 +73,8 @@ export type KnowledgeBaseManagerDialogProps = {
 /**
  * 展示知识库列表、回收站、检索设置和新建表单。
  *
- * 数据请求和生命周期状态由页面层管理，组件只负责渲染与转发用户操作。
+ * 生命周期请求和局部状态由 useKnowledgeBaseLifecycle 管理；
+ * retrieval settings 与文件数据保持各自独立边界。
  */
 export function KnowledgeBaseManagerDialog({
   selectedKnowledgeBaseName,

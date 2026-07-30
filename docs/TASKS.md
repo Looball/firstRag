@@ -115,6 +115,7 @@
 | `PLAN-20260729-03` | 2026-07-29 | `Done` | 继续降低前端聊天工作台业务编排复杂度，收口待发送聊天图片的校验与 Object URL 生命周期。 | `T-106` |
 | `PLAN-20260729-04` | 2026-07-29 | `Done` | 继续降低前端聊天工作台业务编排复杂度，收口回答复制 fallback 与提示计时状态。 | `T-107` |
 | `PLAN-20260729-05` | 2026-07-29 | `Done` | 继续降低前端聊天工作台业务编排复杂度，收口会话创建、选择加载、重命名和删除流程。 | `T-108` |
+| `PLAN-20260730-01` | 2026-07-30 | `Doing` | 继续降低前端聊天工作台业务编排复杂度，收口知识库管理弹窗与生命周期操作。 | `T-109` |
 
 ## 任务总览
 
@@ -228,6 +229,7 @@
 | `T-106` | `PLAN-20260729-03` | `P1` | `Done` | 抽取待发送聊天图片 hook | 2026-07-29 | `85eb883` |
 | `T-107` | `PLAN-20260729-04` | `P1` | `Done` | 抽取回答复制 hook | 2026-07-29 | `261d4ac` |
 | `T-108` | `PLAN-20260729-05` | `P1` | `Done` | 抽取会话生命周期操作 hook | 2026-07-29 | `b97f800` |
+| `T-109` | `PLAN-20260730-01` | `P1` | `Doing` | 抽取知识库生命周期操作 hook | — | — |
 
 ## 新计划接入流程
 
@@ -4416,6 +4418,46 @@ git diff --check
   - lint 0 error 并保留 2 个既有 `<img>` warning；宿主机与 Docker production build、Playwright E2E 3/3 均通过。
   - Docker production audit 输出 `found 0 vulnerabilities`；Compose 核心服务状态正常，migration 输出 `applied=0 skipped=9`，production preflight 全部通过。
 - 相关提交：`b97f800`
+- 建议验证命令：
+
+```bash
+cd frontend
+npm test
+npm run lint
+npm run build
+CI=1 npm run test:e2e
+cd ..
+docker compose up -d --build
+docker compose ps
+docker compose logs --since=5m redis postgres chroma migrate backend worker frontend
+conda run -n firstrag python scripts/production_preflight.py --env-file .env --migration-method compose --check-runtime-health
+git diff --check
+```
+
+## T-109 抽取知识库生命周期操作 hook
+
+- 来源计划：`PLAN-20260730-01`
+- 优先级：`P1`
+- 状态：`Doing`
+- 背景：T-108 完成后 `frontend/src/app/page.tsx` 仍有 1392 行，其中知识库管理弹窗使用 12 组局部 state、一段回收站加载 effect，以及约 180 行创建、刷新、重命名、删除和恢复流程。
+- 目标：保持知识库列表与聊天会话数据由页面持有，在不改变管理弹窗交互和错误文案的前提下，将知识库生命周期请求与局部状态迁移到独立 custom hook。
+- 技术边界：
+  - `knowledgeBases`、当前知识库 ID、`sessions` 和当前会话 ID 继续由页面持有，hook 通过稳定 React setter 回写。
+  - retrieval settings、知识文件管理和初次认证后加载继续保持独立边界，不迁入 lifecycle hook。
+  - 打开管理弹窗时加载回收站，关闭或卸载后忽略过期响应。
+  - 删除仍禁止默认知识库，并保留包含会话数量的确认文案；删除/恢复后同时刷新活动知识库、会话和回收站。
+  - 删除当前知识库后保留当前仍存在的选择，否则回退默认知识库；恢复后优先选中恢复目标。
+  - 创建和重命名保留名称 trim、既有 loading、成功/失败文案和输入清理行为。
+- 范围：
+  - 新增 `use-knowledge-base-lifecycle.ts`，管理弹窗、回收站与知识库 CRUD 交互状态和请求。
+  - 抽取知识库 upsert/rename、刷新选择、当前会话选择、删除确认文案和错误转换 helper。
+  - `page.tsx` 改为装配 hook，移除生命周期 state、回收站 effect 和 CRUD handlers。
+  - 增加 helper 单元测试，并更新前端职责文档与管理弹窗组件注释。
+- 验收标准：
+  - `page.tsx` 至少减少 160 行，不改变知识库 CRUD、回收站、选择回退或 retrieval settings 行为。
+  - 新增测试、前端全量 Vitest、lint、production build 和 Playwright E2E 通过。
+  - Docker Compose、服务日志和 production preflight 通过。
+- 相关提交：—
 - 建议验证命令：
 
 ```bash
