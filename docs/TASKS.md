@@ -114,6 +114,7 @@
 | `PLAN-20260729-02` | 2026-07-29 | `Done` | 继续降低前端聊天工作台业务编排复杂度，收口高级模式质量看板的数据加载与交互状态。 | `T-105` |
 | `PLAN-20260729-03` | 2026-07-29 | `Done` | 继续降低前端聊天工作台业务编排复杂度，收口待发送聊天图片的校验与 Object URL 生命周期。 | `T-106` |
 | `PLAN-20260729-04` | 2026-07-29 | `Done` | 继续降低前端聊天工作台业务编排复杂度，收口回答复制 fallback 与提示计时状态。 | `T-107` |
+| `PLAN-20260729-05` | 2026-07-29 | `Done` | 继续降低前端聊天工作台业务编排复杂度，收口会话创建、选择加载、重命名和删除流程。 | `T-108` |
 
 ## 任务总览
 
@@ -226,6 +227,7 @@
 | `T-105` | `PLAN-20260729-02` | `P1` | `Done` | 抽取高级模式质量看板 hook | 2026-07-29 | `0f59ec5` |
 | `T-106` | `PLAN-20260729-03` | `P1` | `Done` | 抽取待发送聊天图片 hook | 2026-07-29 | `85eb883` |
 | `T-107` | `PLAN-20260729-04` | `P1` | `Done` | 抽取回答复制 hook | 2026-07-29 | `261d4ac` |
+| `T-108` | `PLAN-20260729-05` | `P1` | `Done` | 抽取会话生命周期操作 hook | 2026-07-29 | `b97f800` |
 
 ## 新计划接入流程
 
@@ -4366,6 +4368,54 @@ git diff --check
   - frontend lint 通过，保留 2 条既有 `<img>` warning；production build 和 Playwright E2E（3/3）通过。
   - Docker Compose 重建与启动通过，核心服务状态正常，migration 为 applied=0 / skipped=9；production preflight 全部通过。
 - 相关提交：`261d4ac`
+- 建议验证命令：
+
+```bash
+cd frontend
+npm test
+npm run lint
+npm run build
+CI=1 npm run test:e2e
+cd ..
+docker compose up -d --build
+docker compose ps
+docker compose logs --since=5m redis postgres chroma migrate backend worker frontend
+conda run -n firstrag python scripts/production_preflight.py --env-file .env --migration-method compose --check-runtime-health
+git diff --check
+```
+
+## T-108 抽取会话生命周期操作 hook
+
+- 来源计划：`PLAN-20260729-05`
+- 优先级：`P1`
+- 状态：`Done`
+- 背景：T-107 完成后 `frontend/src/app/page.tsx` 仍有 1596 行，其中会话创建、选择消息加载、重命名和删除使用 5 组局部交互 state、两个请求 helper、一段消息加载 effect 和约 170 行 handler。
+- 目标：保持聊天流仍由页面编排，在不改变会话 CRUD 行为和错误文案的前提下，将会话生命周期请求与侧栏交互状态迁移到独立 custom hook。
+- 技术边界：
+  - `sessions`、当前会话 ID、聊天生成使用的 loading/error 继续由页面持有，hook 通过稳定 React setter 回写。
+  - 手动新建会话与发送首条消息时的自动建会话复用同一创建方法；自动建会话仍由聊天提交流程决定标题和后续发送时机。
+  - 选择未加载会话时只发起一次历史消息请求；切换目标或卸载后不得用过期响应覆盖页面状态。
+  - 删除当前会话后选择同知识库首个剩余会话，没有剩余会话时清空选择；删除非当前会话不改变当前选择。
+  - 重命名保留空标题回退“新对话”、目标级错误和既有 loading 状态。
+- 范围：
+  - 新增 `use-conversation-actions.ts`，管理创建、选择加载、重命名、删除及对应局部 state。
+  - 抽取 session 消息回写、重命名、删除结果和 record 清理 helper。
+  - `page.tsx` 改为装配 hook，移除重复请求 helper、消息加载 effect 和 CRUD handlers。
+  - 增加 helper 单元测试，并更新前端职责文档与侧栏组件注释。
+- 验收标准：
+  - `page.tsx` 至少减少 130 行，不改变会话按钮状态、错误文案、默认标题或聊天自动建会话流程。
+  - 新增测试、前端全量 Vitest、lint、production build 和 Playwright E2E 通过。
+  - Docker Compose、服务日志和 production preflight 通过。
+- 完成记录：
+  - 新增 `use-conversation-actions.ts`，集中管理会话创建、选择消息加载、重命名、删除及 5 组侧栏交互 state。
+  - 手动新建与聊天发送首条消息复用同一创建方法；聊天页面继续决定自动标题和 SSE 发送时机。
+  - 会话选择统一由单个 effect 加载历史消息，移除点击 handler 与页面 effect 的重复请求路径，并在切换目标或卸载时忽略过期响应。
+  - 删除保持当前会话切换、composer 清空和 loading/error record 清理规则；重命名继续将空标题回退为“新对话”。
+  - `sessions`、当前会话 ID 和聊天流 loading/error 仍由页面持有；`page.tsx` 从 1596 行降至 1392 行，减少 204 行。
+  - 新增 8 项 helper 测试；前端全量 Vitest 共 30 个测试文件、153 项通过。
+  - lint 0 error 并保留 2 个既有 `<img>` warning；宿主机与 Docker production build、Playwright E2E 3/3 均通过。
+  - Docker production audit 输出 `found 0 vulnerabilities`；Compose 核心服务状态正常，migration 输出 `applied=0 skipped=9`，production preflight 全部通过。
+- 相关提交：`b97f800`
 - 建议验证命令：
 
 ```bash

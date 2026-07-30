@@ -33,6 +33,7 @@ import {
   writeAdvancedModePreference,
 } from "@/lib/chat-workspace/advanced-mode";
 import * as chatApi from "@/lib/chat-workspace/api";
+import { useConversationActions } from "@/lib/chat-workspace/use-conversation-actions";
 import { useConversationDiagnostics } from "@/lib/chat-workspace/use-conversation-diagnostics";
 import { useKnowledgeFiles } from "@/lib/chat-workspace/use-knowledge-files";
 import { useMessageClipboard } from "@/lib/chat-workspace/use-message-clipboard";
@@ -69,16 +70,11 @@ export default function Home() {
   const chatRateLimit = useRetryAfterCountdown();
   const chatImageRateLimit = useRetryAfterCountdown();
   const [isAdvancedMode, setIsAdvancedMode] = useState(getAdvancedModeDefault);
-  const [editingSessionId, setEditingSessionId] = useState("");
-  const [editingTitle, setEditingTitle] = useState("");
-  const [renamingSessionId, setRenamingSessionId] = useState("");
-  const [deletingSessionId, setDeletingSessionId] = useState("");
   const [loadingSessions, setLoadingSessions] = useState<Record<string, boolean>>(
     {}
   );
   const [sessionErrors, setSessionErrors] = useState<Record<string, string>>({});
   const [hasCheckedAuth, setHasCheckedAuth] = useState(false);
-  const [isCreatingSession, setIsCreatingSession] = useState(false);
   const [isCreatingKnowledgeBase, setIsCreatingKnowledgeBase] =
     useState(false);
   const [pageError, setPageError] = useState("");
@@ -105,6 +101,37 @@ export default function Home() {
   const [selectedKnowledgeBaseId, setSelectedKnowledgeBaseId] = useState(
     DEFAULT_KNOWLEDGE_BASE_ID
   );
+  const clearComposerInput = useCallback(() => {
+    setInput("");
+  }, []);
+  const {
+    cancelRename: handleCancelRename,
+    createSelectedSession: handleCreateSession,
+    createSession,
+    deleteSession: handleDeleteSession,
+    deletingSessionId,
+    editingSessionId,
+    editingTitle,
+    isCreatingSession,
+    renamingSessionId,
+    saveRename: handleSaveRename,
+    selectSession: handleSelectSession,
+    setEditingTitle,
+    startRename: handleStartRename,
+  } = useConversationActions({
+    activeSessionId: currentSessionId,
+    canCreateSession:
+      Boolean(selectedKnowledgeBaseId) &&
+      selectedKnowledgeBaseId !== DEFAULT_KNOWLEDGE_BASE_ID,
+    onClearComposer: clearComposerInput,
+    selectedKnowledgeBaseId,
+    sessions,
+    setActiveSessionId: setCurrentSessionId,
+    setLoadingSessions,
+    setPageError,
+    setSessionErrors,
+    setSessions,
+  });
   const [
     retrievalSettingsByKnowledgeBaseId,
     setRetrievalSettingsByKnowledgeBaseId,
@@ -193,9 +220,6 @@ export default function Home() {
     visibleSessions.find((session) => session.id === currentSessionId) ||
     visibleSessions[0] ||
     null;
-  const currentSessionMessageId = currentSession?.id || "";
-  const areCurrentSessionMessagesLoaded =
-    currentSession?.messagesLoaded ?? true;
   const isCurrentSessionLoading = currentSession
     ? Boolean(loadingSessions[currentSession.id])
     : false;
@@ -541,46 +565,6 @@ export default function Home() {
     }
   }
 
-  async function createBackendSession(
-    knowledgeBaseId: string,
-    title = "新对话"
-  ) {
-    return chatApi.createConversation(knowledgeBaseId, title);
-  }
-
-  async function loadBackendMessages(conversationId: string) {
-    return chatApi.listConversationMessages(conversationId);
-  }
-
-  async function handleSelectSession(session: ChatSession) {
-    setCurrentSessionId(session.id);
-
-    if (session.messagesLoaded) {
-      return;
-    }
-
-    setSessionErrors((prev) => ({ ...prev, [session.id]: "" }));
-
-    try {
-      const messages = await loadBackendMessages(session.id);
-      setSessions((prev) =>
-        prev.map((candidate) =>
-          candidate.id === session.id
-            ? { ...candidate, messages, messagesLoaded: true }
-            : candidate
-        )
-      );
-    } catch (error) {
-      setSessionErrors((prev) => ({
-        ...prev,
-        [session.id]:
-          error instanceof Error
-            ? error.message
-            : "读取会话消息失败，请稍后再试。",
-      }));
-    }
-  }
-
   async function loadBackendKnowledgeBases() {
     return chatApi.listKnowledgeBasesAndSessions();
   }
@@ -730,46 +714,6 @@ export default function Home() {
   }, [selectedKnowledgeBaseId, sessions]);
 
   useEffect(() => {
-    let isCancelled = false;
-
-    if (currentSessionMessageId && !areCurrentSessionMessagesLoaded) {
-      const sessionId = currentSessionMessageId;
-
-      void loadBackendMessages(sessionId)
-        .then((messages) => {
-          if (isCancelled) {
-            return;
-          }
-
-          setSessions((previousSessions) =>
-            previousSessions.map((session) =>
-              session.id === sessionId
-                ? { ...session, messages, messagesLoaded: true }
-                : session
-            )
-          );
-        })
-        .catch((error) => {
-          if (isCancelled) {
-            return;
-          }
-
-          setSessionErrors((previousErrors) => ({
-            ...previousErrors,
-            [sessionId]:
-              error instanceof Error
-                ? error.message
-                : "读取会话消息失败，请稍后再试。",
-          }));
-        });
-    }
-
-    return () => {
-      isCancelled = true;
-    };
-  }, [areCurrentSessionMessagesLoaded, currentSessionMessageId]);
-
-  useEffect(() => {
     const currentMessageCount = currentSession?.messages.length ?? 0;
     const sessionChanged = previousSessionIdRef.current !== currentSession?.id;
     const messageCountIncreased =
@@ -787,148 +731,6 @@ export default function Home() {
 
   function handleLogout() {
     redirectToLogin();
-  }
-
-  async function handleCreateSession() {
-    if (
-      !selectedKnowledgeBaseId ||
-      selectedKnowledgeBaseId === DEFAULT_KNOWLEDGE_BASE_ID
-    ) {
-      setPageError("请先选择一个知识库。");
-      return;
-    }
-
-    setIsCreatingSession(true);
-    setPageError("");
-
-    try {
-      const newSession = await createBackendSession(selectedKnowledgeBaseId);
-
-      setSessions((prev) => [newSession, ...prev]);
-      setCurrentSessionId(newSession.id);
-      setInput("");
-    } catch (error) {
-      setPageError(
-        error instanceof Error ? error.message : "创建对话失败，请稍后再试。"
-      );
-    } finally {
-      setIsCreatingSession(false);
-    }
-  }
-
-  async function handleDeleteSession(sessionId: string) {
-    if (deletingSessionId) {
-      return;
-    }
-
-    setDeletingSessionId(sessionId);
-    setPageError("");
-
-    try {
-      const session = sessions.find(
-        (candidate) => candidate.id === sessionId
-      );
-      const knowledgeBaseId =
-        session?.knowledgeBaseId || selectedKnowledgeBaseId;
-      await chatApi.deleteConversation(knowledgeBaseId, sessionId);
-
-      const allRemainingSessions = sessions.filter(
-        (session) => session.id !== sessionId
-      );
-      const remainingVisibleSessions = allRemainingSessions.filter(
-        (session) => session.knowledgeBaseId === knowledgeBaseId
-      );
-
-      setSessions(allRemainingSessions);
-      setLoadingSessions((prev) => {
-        const next = { ...prev };
-        delete next[sessionId];
-        return next;
-      });
-      setSessionErrors((prev) => {
-        const next = { ...prev };
-        delete next[sessionId];
-        return next;
-      });
-
-      if (editingSessionId === sessionId) {
-        setEditingSessionId("");
-        setEditingTitle("");
-      }
-
-      if (remainingVisibleSessions.length === 0) {
-        setCurrentSessionId("");
-        setInput("");
-      } else if (currentSessionId === sessionId) {
-        setCurrentSessionId(remainingVisibleSessions[0].id);
-        setInput("");
-      }
-    } catch (error) {
-      setPageError(
-        error instanceof Error ? error.message : "删除会话失败，请稍后再试。"
-      );
-    } finally {
-      setDeletingSessionId("");
-    }
-  }
-
-  function handleStartRename(session: ChatSession) {
-    setEditingSessionId(session.id);
-    setEditingTitle(session.title);
-  }
-
-  async function handleSaveRename() {
-    if (!editingSessionId || renamingSessionId) {
-      return;
-    }
-
-    const normalizedTitle = editingTitle.trim() || "新对话";
-    const session = sessions.find(
-      (candidate) => candidate.id === editingSessionId
-    );
-    const knowledgeBaseId =
-      session?.knowledgeBaseId || selectedKnowledgeBaseId;
-
-    setRenamingSessionId(editingSessionId);
-    setSessionErrors((prev) => ({
-      ...prev,
-      [editingSessionId]: "",
-    }));
-
-    try {
-      await chatApi.renameConversation(
-        knowledgeBaseId,
-        editingSessionId,
-        normalizedTitle,
-      );
-
-      setSessions((prev) =>
-        prev.map((session) =>
-          session.id === editingSessionId
-            ? {
-                ...session,
-                title: normalizedTitle,
-              }
-            : session
-        )
-      );
-
-      setEditingSessionId("");
-      setEditingTitle("");
-    } catch (error) {
-      setSessionErrors((prev) => ({
-        ...prev,
-        [editingSessionId]:
-          error instanceof Error ? error.message : "重命名失败，请稍后再试。",
-      }));
-    } finally {
-      setRenamingSessionId("");
-    }
-  }
-
-  function handleCancelRename() {
-    setEditingSessionId("");
-    setEditingTitle("");
   }
 
   async function handleSubmit(overrideInput?: string) {
@@ -970,17 +772,13 @@ export default function Home() {
     let activeSession = currentSession;
 
     if (!activeSession) {
-      setIsCreatingSession(true);
       setPageError("");
 
       try {
-        const newSession = await createBackendSession(
+        activeSession = await createSession(
           selectedKnowledgeBaseId,
           buildSessionTitle(messageContent)
         );
-        activeSession = newSession;
-        setSessions((prev) => [newSession, ...prev]);
-        setCurrentSessionId(newSession.id);
       } catch (error) {
         setPageError(
           error instanceof Error
@@ -988,8 +786,6 @@ export default function Home() {
             : "创建对话失败，请稍后再试。"
         );
         return;
-      } finally {
-        setIsCreatingSession(false);
       }
     }
 
