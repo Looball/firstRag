@@ -126,6 +126,7 @@
 | `PLAN-20260731-08` | 2026-07-31 | `Done` | 继续拆分聊天提交 hook，独立管理 SSE 请求、assistant 回写与 diagnostics preload。 | `T-117` |
 | `PLAN-20260731-09` | 2026-07-31 | `Done` | 继续拆分消息质量操作 hook，独立管理 source feedback 提交与回写生命周期。 | `T-118` |
 | `PLAN-20260731-10` | 2026-07-31 | `Done` | 继续拆分知识库生命周期 hook，独立管理回收站加载、删除、恢复和集合刷新。 | `T-119` |
+| `PLAN-20260731-11` | 2026-07-31 | `Done` | 继续拆分会话操作 hook，独立管理 active session 消息懒加载与错误回写。 | `T-120` |
 
 ## 任务总览
 
@@ -250,6 +251,7 @@
 | `T-117` | `PLAN-20260731-08` | `P1` | `Done` | 抽取 chat response stream hook | 2026-07-31 | `2f2d72c` |
 | `T-118` | `PLAN-20260731-09` | `P1` | `Done` | 抽取 source feedback actions hook | 2026-07-31 | `8495ef5` |
 | `T-119` | `PLAN-20260731-10` | `P1` | `Done` | 抽取知识库回收站操作 hook | 2026-07-31 | `b456ea1` |
+| `T-120` | `PLAN-20260731-11` | `P1` | `Done` | 抽取会话消息懒加载 hook | 2026-07-31 | `db6c1fe` |
 
 ## 新计划接入流程
 
@@ -4963,6 +4965,52 @@ git diff --check
   - Docker production build 与 TypeScript 通过，runtime audit 输出 `found 0 vulnerabilities`；Compose 核心服务状态正常，frontend/backend HTTP smoke 分别为 200/healthy，migration 输出 `applied=0 skipped=9`，production preflight 全部通过。
   - Playwright E2E 3/3 和隔离 full-stack E2E 1/1 通过；隔离环境完成专用容器、网络与 volumes 清理。
 - 相关提交：`b456ea1`
+- 建议验证命令：
+
+```bash
+cd frontend
+npm test
+npm run lint
+CI=1 npm run test:e2e
+cd ..
+docker compose up -d --build
+docker compose ps
+docker compose logs --since=5m redis postgres chroma migrate backend worker frontend
+conda run -n firstrag python scripts/production_preflight.py --env-file .env --migration-method compose --check-runtime-health
+scripts/run_full_stack_e2e.sh
+git diff --check
+```
+
+## T-120 抽取会话消息懒加载 hook
+
+- 来源计划：`PLAN-20260731-11`
+- 优先级：`P1`
+- 状态：`Done`
+- 背景：`frontend/src/lib/chat-workspace/use-conversation-actions.ts` 有 384 行，在会话创建、选择、重命名和删除之外，还持有 active session 消息懒加载 effect；该 effect 具有独立的 sessions、active ID 和 error setter 依赖。
+- 目标：抽取独立 `useConversationMessageLoader`，集中管理 active session 消息加载、已加载短路、请求取消保护、加载结果和 session error 回写，使 conversation actions 聚焦会话 CRUD 与侧栏交互。
+- 技术边界：
+  - loader hook 仅接收 active session ID、是否已加载以及稳定的 sessions/session errors setters，不持有创建、重命名或删除状态。
+  - 保持空 active ID 和已加载消息的同步短路行为。
+  - 保持请求切换时的取消保护，避免旧会话响应写回当前状态。
+  - `useConversationActions` 内部组合 loader hook，保持页面消费的返回字段和调用签名不变。
+- 范围：
+  - 新增 `use-conversation-message-loader.ts`，管理 active session 消息懒加载。
+  - 将 `updateConversationMessages` helper 与对应测试迁移到新模块。
+  - 精简 `use-conversation-actions.ts`，保留创建、选择、重命名和删除。
+  - 更新前端职责文档与任务台账。
+- 验收标准：
+  - `use-conversation-actions.ts` 不再直接持有消息加载 effect 或调用 `listConversationMessages`。
+  - 新增或迁移测试，前端全量 Vitest、lint、production build 和 Playwright E2E 通过。
+  - Docker Compose、服务日志、production preflight 和隔离 full-stack E2E 通过。
+- 完成记录：
+  - 新增 `use-conversation-message-loader.ts`，集中管理 active session 消息懒加载、已加载短路、请求取消保护、消息写回和 session error 状态。
+  - `useConversationActions` 继续管理会话创建、选择、重命名和删除，通过加载状态布尔值与稳定 setters 组合 message loader hook，页面消费 API 保持不变。
+  - `updateConversationMessages` 与加载错误 fallback helper 的 2 项测试迁移到独立模块；conversation actions 模块保留 CRUD helper 的 7 项测试。
+  - `use-conversation-actions.ts` 从 384 行降至 333 行，减少 51 行；新 message loader hook 为 86 行。
+  - 前端全量 Vitest 共 40 个测试文件、181 项通过；lint 0 error 并保留 2 个既有 `<img>` warning。
+  - Docker production build 与 TypeScript 通过，runtime audit 输出 `found 0 vulnerabilities`；Compose 核心服务状态正常，frontend/backend HTTP smoke 分别为 200/healthy，migration 输出 `applied=0 skipped=9`，production preflight 全部通过。
+  - Playwright E2E 3/3 和隔离 full-stack E2E 1/1 通过；隔离环境完成专用容器、网络与 volumes 清理。
+- 相关提交：`db6c1fe`
 - 建议验证命令：
 
 ```bash
