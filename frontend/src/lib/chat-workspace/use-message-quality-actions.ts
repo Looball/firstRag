@@ -8,13 +8,12 @@ import {
   useState,
 } from "react";
 import * as chatApi from "./api";
+import { useSourceFeedbackActions } from "./use-source-feedback-actions";
 import type {
   ChatSession,
   MessageFeedback,
   MessageFeedbackRating,
   MessageFeedbackReason,
-  MessageSourceFeedback,
-  MessageSourceFeedbackRating,
 } from "./types";
 
 type SubmitMessageFeedbackOptions = {
@@ -24,14 +23,6 @@ type SubmitMessageFeedbackOptions = {
   rating: MessageFeedbackRating;
   reason?: MessageFeedbackReason | null;
   note?: string | null;
-};
-
-type SubmitSourceFeedbackOptions = {
-  sessionId: string;
-  messageId?: string;
-  sourceKey: string;
-  sourceIndex: number;
-  rating: MessageSourceFeedbackRating;
 };
 
 type UseMessageQualityActionsOptions = {
@@ -71,42 +62,6 @@ export function updateMessageFeedbackInSessions(
 }
 
 /**
- * 按持久化 source index 或数组位置回写引用反馈。
- */
-export function updateSourceFeedbackInSessions(
-  sessions: ChatSession[],
-  sessionId: string,
-  messageId: string,
-  sourceIndex: number,
-  feedback: MessageSourceFeedback,
-) {
-  return sessions.map((session) =>
-    session.id === sessionId
-      ? {
-          ...session,
-          messages: session.messages.map((message) =>
-            message.id === messageId
-              ? {
-                  ...message,
-                  sources: message.sources?.map((source, position) => {
-                    const currentSourceIndex = source.index ?? position;
-
-                    return currentSourceIndex === sourceIndex
-                      ? {
-                          ...source,
-                          feedback,
-                        }
-                      : source;
-                  }),
-                }
-              : message,
-          ),
-        }
-      : session,
-  );
-}
-
-/**
  * 生成 Eval 草稿下载所需的安全文件名和格式化 JSON。
  */
 export function serializeEvalCaseDraft(
@@ -125,7 +80,7 @@ export function serializeEvalCaseDraft(
 }
 
 /**
- * 管理回答反馈、引用反馈和 Eval 草稿导出的交互状态与请求。
+ * 管理回答反馈与 Eval 草稿导出，并组合 source feedback actions。
  *
  * session 数据仍由页面持有；hook 只通过稳定的 React setter 回写目标消息。
  */
@@ -149,21 +104,18 @@ export function useMessageQualityActions({
   const [feedbackMessages, setFeedbackMessages] = useState<
     Record<string, string>
   >({});
-  const [submittingSourceFeedback, setSubmittingSourceFeedback] = useState<
-    Record<string, boolean>
-  >({});
-  const [sourceFeedbackErrors, setSourceFeedbackErrors] = useState<
-    Record<string, string>
-  >({});
-  const [sourceFeedbackMessages, setSourceFeedbackMessages] = useState<
-    Record<string, string>
-  >({});
   const [exportingEvalDrafts, setExportingEvalDrafts] = useState<
     Record<string, boolean>
   >({});
   const [evalDraftErrors, setEvalDraftErrors] = useState<Record<string, string>>(
     {},
   );
+  const {
+    sourceFeedbackErrors,
+    sourceFeedbackMessages,
+    submitSourceFeedback,
+    submittingSourceFeedback,
+  } = useSourceFeedbackActions({ setSessions });
 
   useEffect(() => {
     if (!isAdvancedMode) {
@@ -279,93 +231,6 @@ export function useMessageQualityActions({
         setSubmittingFeedback((previous) => ({
           ...previous,
           [messageKey]: false,
-        }));
-      }
-    },
-    [setSessions],
-  );
-
-  const submitSourceFeedback = useCallback(
-    async ({
-      sessionId,
-      messageId,
-      sourceKey,
-      sourceIndex,
-      rating,
-    }: SubmitSourceFeedbackOptions) => {
-      if (!messageId) {
-        setSourceFeedbackErrors((previous) => ({
-          ...previous,
-          [sourceKey]: "这条回答还没有保存完成，稍后再标记引用。",
-        }));
-        return;
-      }
-
-      setSubmittingSourceFeedback((previous) => ({
-        ...previous,
-        [sourceKey]: true,
-      }));
-      setSourceFeedbackErrors((previous) => ({
-        ...previous,
-        [sourceKey]: "",
-      }));
-      setSourceFeedbackMessages((previous) => ({
-        ...previous,
-        [sourceKey]: "正在保存引用反馈...",
-      }));
-
-      try {
-        const feedback = await chatApi.submitMessageSourceFeedback(
-          messageId,
-          sourceIndex,
-          { rating },
-        );
-
-        setSessions((previous) =>
-          updateSourceFeedbackInSessions(
-            previous,
-            sessionId,
-            messageId,
-            sourceIndex,
-            feedback,
-          ),
-        );
-        setSourceFeedbackMessages((previous) => ({
-          ...previous,
-          [sourceKey]:
-            rating === "useful" ? "已标记引用有用" : "已标记引用无关",
-        }));
-        window.setTimeout(() => {
-          setSourceFeedbackMessages((previous) => {
-            if (
-              previous[sourceKey] !== "已标记引用有用" &&
-              previous[sourceKey] !== "已标记引用无关"
-            ) {
-              return previous;
-            }
-
-            const next = { ...previous };
-            delete next[sourceKey];
-            return next;
-          });
-        }, 2000);
-      } catch (error) {
-        setSourceFeedbackMessages((previous) => {
-          const next = { ...previous };
-          delete next[sourceKey];
-          return next;
-        });
-        setSourceFeedbackErrors((previous) => ({
-          ...previous,
-          [sourceKey]:
-            error instanceof Error
-              ? error.message
-              : "保存引用反馈失败，请稍后再试。",
-        }));
-      } finally {
-        setSubmittingSourceFeedback((previous) => ({
-          ...previous,
-          [sourceKey]: false,
         }));
       }
     },

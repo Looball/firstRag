@@ -2,12 +2,10 @@ import { describe, expect, it, vi } from "vitest";
 import type {
   ChatSession,
   MessageFeedback,
-  MessageSourceFeedback,
 } from "./types";
 import {
   serializeEvalCaseDraft,
   updateMessageFeedbackInSessions,
-  updateSourceFeedbackInSessions,
 } from "./use-message-quality-actions";
 
 vi.mock("@/lib/frontend-api", () => ({
@@ -68,38 +66,6 @@ describe("useMessageQualityActions helpers", () => {
     expect(updated[0].messages[0].feedback).toEqual(feedback);
     expect(updated[1]).toBe(sessions[1]);
     expect(sessions[0].messages[0].feedback).toBeUndefined();
-  });
-
-  it("matches source feedback by explicit index or fallback position", () => {
-    const explicitFeedback: MessageSourceFeedback = {
-      sourceIndex: 4,
-      rating: "useful",
-    };
-    const fallbackFeedback: MessageSourceFeedback = {
-      sourceIndex: 1,
-      rating: "irrelevant",
-    };
-    const withExplicit = updateSourceFeedbackInSessions(
-      sessions,
-      "session-1",
-      "message-1",
-      4,
-      explicitFeedback,
-    );
-    const withFallback = updateSourceFeedbackInSessions(
-      withExplicit,
-      "session-1",
-      "message-1",
-      1,
-      fallbackFeedback,
-    );
-
-    expect(withFallback[0].messages[0].sources?.[0].feedback).toEqual(
-      explicitFeedback,
-    );
-    expect(withFallback[0].messages[0].sources?.[1].feedback).toEqual(
-      fallbackFeedback,
-    );
   });
 
   it("serializes eval drafts with normalized and fallback file names", () => {
