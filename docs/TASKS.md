@@ -121,7 +121,7 @@
 | `PLAN-20260731-03` | 2026-07-31 | `Done` | 继续降低前端聊天工作台业务编排复杂度，收口工作区认证与初始化流程。 | `T-112` |
 | `PLAN-20260731-04` | 2026-07-31 | `Done` | 拆分知识文件管理 hook，独立管理 vector indexing health、任务队列、轮询与操作。 | `T-113` |
 | `PLAN-20260731-05` | 2026-07-31 | `Done` | 继续拆分知识文件管理 hook，独立管理文件库列表、上传、关联和删除生命周期。 | `T-114` |
-| `PLAN-20260731-06` | 2026-07-31 | `Doing` | 继续拆分知识文件 indexing hook，独立管理本地任务队列、任务等待与轮询生命周期。 | `T-115` |
+| `PLAN-20260731-06` | 2026-07-31 | `Done` | 继续拆分知识文件 indexing hook，独立管理本地任务队列、任务等待与轮询生命周期。 | `T-115` |
 
 ## 任务总览
 
@@ -241,7 +241,7 @@
 | `T-112` | `PLAN-20260731-03` | `P1` | `Done` | 抽取工作区认证与初始化 hook | 2026-07-31 | `2c96a3a` |
 | `T-113` | `PLAN-20260731-04` | `P1` | `Done` | 抽取知识文件 vector indexing hook | 2026-07-31 | `c62162f` |
 | `T-114` | `PLAN-20260731-05` | `P1` | `Done` | 抽取知识文件 library hook | 2026-07-31 | `88f5a8f` |
-| `T-115` | `PLAN-20260731-06` | `P1` | `Doing` | 抽取 vector index queue hook | - | - |
+| `T-115` | `PLAN-20260731-06` | `P1` | `Done` | 抽取 vector index queue hook | 2026-07-31 | `9be7c9c` |
 
 ## 新计划接入流程
 
@@ -4744,7 +4744,7 @@ git diff --check
 
 - 来源计划：`PLAN-20260731-06`
 - 优先级：`P1`
-- 状态：`Doing`
+- 状态：`Done`
 - 背景：T-114 完成后 `frontend/src/lib/chat-workspace/use-knowledge-file-indexing.ts` 有 453 行，同时管理 vector index health、索引操作、Retry-After、本地任务队列、整库任务等待和两段后台轮询。
 - 目标：抽取独立 queue hook，集中管理本地 vector index queue、任务合并/刷新/清理、整库任务等待，以及文件状态和本地队列的 polling 生命周期。
 - 技术边界：
@@ -4761,6 +4761,31 @@ git diff --check
   - `use-knowledge-file-indexing.ts` 不再直接持有 queue state、任务刷新/等待 helper 或 polling effect。
   - 新增或迁移测试，前端全量 Vitest、lint、production build 和 Playwright E2E 通过。
   - Docker Compose、服务日志、production preflight 和隔离 full-stack E2E 通过。
+- 完成记录：
+  - 新增 `use-vector-index-queue.ts`，集中管理本地任务队列、任务合并/刷新/清理、整库任务等待和两段后台 polling。
+  - `useKnowledgeFileIndexing` 继续管理 React Query health、单文件/整库向量化、删除向量、操作 loading 和共享 Retry-After，通过稳定回调装配 queue hook。
+  - queue helper 测试迁移到独立模块；目标名称/类型保留、轮询更新和按文件清理行为保持不变。
+  - `use-knowledge-file-indexing.ts` 从 453 行降至 265 行，减少 188 行；新 queue hook 为 235 行。
+  - 前端全量 Vitest 共 35 个测试文件、180 项通过；lint 0 error 并保留 2 个既有 `<img>` warning。
+  - Docker production build、TypeScript、Playwright E2E 3/3 和隔离 full-stack E2E 1/1 通过；隔离环境完成专用容器、网络与 volumes 清理。
+  - Docker runtime audit 输出 `found 0 vulnerabilities`；Compose 核心服务状态正常，frontend/backend HTTP smoke 均为 200，migration 输出 `applied=0 skipped=9`，production preflight 全部通过。
+- 相关提交：`9be7c9c`
+- 建议验证命令：
+
+```bash
+cd frontend
+npm test
+npm run lint
+npm run build
+CI=1 npm run test:e2e
+cd ..
+docker compose up -d --build
+docker compose ps
+docker compose logs --since=5m redis postgres chroma migrate backend worker frontend
+conda run -n firstrag python scripts/production_preflight.py --env-file .env --migration-method compose --check-runtime-health
+scripts/run_full_stack_e2e.sh
+git diff --check
+```
 
 ## 更新规则
 
