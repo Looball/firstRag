@@ -32,6 +32,7 @@ import {
   writeAdvancedModePreference,
 } from "@/lib/chat-workspace/advanced-mode";
 import * as chatApi from "@/lib/chat-workspace/api";
+import { useChatSubmission } from "@/lib/chat-workspace/use-chat-submission";
 import { useConversationActions } from "@/lib/chat-workspace/use-conversation-actions";
 import { useConversationDiagnostics } from "@/lib/chat-workspace/use-conversation-diagnostics";
 import { useKnowledgeFiles } from "@/lib/chat-workspace/use-knowledge-files";
@@ -41,16 +42,11 @@ import { useMessageClipboard } from "@/lib/chat-workspace/use-message-clipboard"
 import { useMessageQualityActions } from "@/lib/chat-workspace/use-message-quality-actions";
 import { usePendingChatImages } from "@/lib/chat-workspace/use-pending-chat-images";
 import { useQualityDashboard } from "@/lib/chat-workspace/use-quality-dashboard";
-import { buildSessionTitle } from "@/lib/chat-workspace/utils";
-import { streamChatResponse } from "@/lib/chat-workspace/chat-stream";
 import { useRetryAfterCountdown } from "@/lib/use-retry-after-countdown";
 import type {
   ChatSession,
   ChatSource,
   KnowledgeBase,
-  Message,
-  MessageAttachment,
-  RetrievalState,
 } from "@/lib/chat-workspace/types";
 
 const SourcePreviewDialog = dynamic(
@@ -65,7 +61,6 @@ export default function Home() {
   const [sessions, setSessions] = useState<ChatSession[]>([]);
   const [currentSessionId, setCurrentSessionId] = useState("");
   const [input, setInput] = useState("");
-  const [isUploadingChatImages, setIsUploadingChatImages] = useState(false);
   const chatRateLimit = useRetryAfterCountdown();
   const chatImageRateLimit = useRetryAfterCountdown();
   const [isAdvancedMode, setIsAdvancedMode] = useState(getAdvancedModeDefault);
@@ -317,6 +312,32 @@ export default function Home() {
     fileInputRef,
     onKnowledgeBaseFileCountChange: updateKnowledgeBaseFileCount,
   });
+  const {
+    isUploadingChatImages,
+    submitChat: handleSubmit,
+  } = useChatSubmission({
+    clearPendingChatImages,
+    createSession,
+    currentSession,
+    input,
+    isAdvancedMode,
+    isChatImageRateLimited: chatImageRateLimit.isRateLimited,
+    isChatRateLimited: chatRateLimit.isRateLimited,
+    isCreatingSession,
+    isCurrentSessionLoading,
+    loadDiagnostics,
+    pendingChatImages,
+    selectedKnowledgeBaseId,
+    setInput,
+    setLoadingSessions,
+    setPageError,
+    setSessionErrors,
+    setSessions,
+    startChatImageRateLimitCountdown:
+      chatImageRateLimit.startCountdownFromError,
+    startChatRateLimitCountdown: chatRateLimit.startCountdownFromError,
+  });
+
   function handleAdvancedModeChange(enabled: boolean) {
     setIsAdvancedMode(enabled);
     writeAdvancedModePreference(enabled);
@@ -331,6 +352,7 @@ export default function Home() {
         return;
       }
 
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- 登录态只能在客户端挂载后读取。
       setCurrentUsername(getAuthUsername(authState));
     } catch (error) {
       console.error("Failed to read auth state:", error);
@@ -342,6 +364,7 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- 浏览器偏好在 hydration 后覆盖环境默认值。
     setIsAdvancedMode(readAdvancedModePreference());
   }, []);
 
@@ -402,6 +425,7 @@ export default function Home() {
     const selectedSessions = sessions.filter(
       (session) => session.knowledgeBaseId === selectedKnowledgeBaseId
     );
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- 知识库/会话集合变化后同步可见会话选择。
     setCurrentSessionId((previousSessionId) =>
       selectedSessions.some(
         (session) => session.id === previousSessionId
@@ -429,318 +453,6 @@ export default function Home() {
 
   function handleLogout() {
     redirectToLogin();
-  }
-
-  async function handleSubmit(overrideInput?: string) {
-    const isImageUploadRateLimited =
-      pendingChatImages.length > 0 && chatImageRateLimit.isRateLimited;
-
-    if (
-      isCurrentSessionLoading ||
-      isCreatingSession ||
-      isUploadingChatImages ||
-      chatRateLimit.isRateLimited ||
-      isImageUploadRateLimited
-    ) {
-      return;
-    }
-
-    const messageContent = (overrideInput ?? input).trim();
-
-    if (!messageContent) {
-      if (currentSession) {
-        setSessionErrors((prev) => ({
-          ...prev,
-          [currentSession.id]: "请先在下方输入问题。",
-        }));
-      } else {
-        setPageError("请先在下方输入问题。");
-      }
-      return;
-    }
-
-    if (
-      !selectedKnowledgeBaseId ||
-      selectedKnowledgeBaseId === DEFAULT_KNOWLEDGE_BASE_ID
-    ) {
-      setPageError("请先选择一个知识库。");
-      return;
-    }
-
-    let activeSession = currentSession;
-
-    if (!activeSession) {
-      setPageError("");
-
-      try {
-        activeSession = await createSession(
-          selectedKnowledgeBaseId,
-          buildSessionTitle(messageContent)
-        );
-      } catch (error) {
-        setPageError(
-          error instanceof Error
-            ? error.message
-            : "创建对话失败，请稍后再试。"
-        );
-        return;
-      }
-    }
-
-    setPageError("");
-
-    const imagesToSend = [...pendingChatImages];
-    let uploadedAttachments: MessageAttachment[] = [];
-    if (imagesToSend.length > 0) {
-      setIsUploadingChatImages(true);
-      try {
-        uploadedAttachments = await chatApi.uploadChatAttachments(
-          activeSession.id,
-          imagesToSend.map((image) => image.file)
-        );
-      } catch (error) {
-        chatImageRateLimit.startCountdownFromError(error);
-        const message =
-          error instanceof Error ? error.message : "上传图片失败，请稍后再试。";
-        setSessionErrors((prev) => ({
-          ...prev,
-          [activeSession.id]: message,
-        }));
-        return;
-      } finally {
-        setIsUploadingChatImages(false);
-      }
-    }
-
-    const userMessage: Message = {
-      role: "user",
-      content: messageContent,
-      ...(uploadedAttachments.length > 0
-        ? { attachments: uploadedAttachments }
-        : {}),
-    };
-
-    const updatedMessages = [...activeSession.messages, userMessage];
-    const activeSessionId = activeSession.id;
-    const activeKnowledgeBaseId = activeSession.knowledgeBaseId;
-
-    setSessions((prev) =>
-      prev.map((session) =>
-        session.id === activeSessionId
-          ? {
-              ...session,
-              title:
-                session.messages.length === 0
-                  ? buildSessionTitle(messageContent)
-                  : session.title,
-              messages: updatedMessages,
-            }
-          : session
-      )
-    );
-
-    setInput("");
-    if (imagesToSend.length > 0) {
-      clearPendingChatImages();
-    }
-    setSessionErrors((prev) => ({
-      ...prev,
-      [activeSessionId]: "",
-    }));
-    setLoadingSessions((prev) => ({
-      ...prev,
-      [activeSessionId]: true,
-    }));
-
-    const appendAssistantContent = (content: string) => {
-      setSessions((prev) =>
-        prev.map((session) => {
-          if (session.id !== activeSessionId) {
-            return session;
-          }
-
-          const messages = [...session.messages];
-          const lastMessage = messages[messages.length - 1];
-
-          if (lastMessage?.role === "assistant") {
-            messages[messages.length - 1] = {
-              ...lastMessage,
-              content: lastMessage.content + content,
-            };
-          } else {
-            messages.push({
-              role: "assistant",
-              content,
-            });
-          }
-
-          return {
-            ...session,
-            messages,
-          };
-        })
-      );
-    };
-
-    const setAssistantSources = (sources: ChatSource[]) => {
-      if (sources.length === 0) {
-        return;
-      }
-
-      setSessions((prev) =>
-        prev.map((session) => {
-          if (session.id !== activeSessionId) {
-            return session;
-          }
-
-          const messages = [...session.messages];
-          const lastMessage = messages[messages.length - 1];
-
-          if (lastMessage?.role === "assistant") {
-            messages[messages.length - 1] = {
-              ...lastMessage,
-              sources,
-            };
-          } else {
-            messages.push({
-              role: "assistant",
-              content: "",
-              sources,
-            });
-          }
-
-          return {
-            ...session,
-            messages,
-          };
-        })
-      );
-    };
-
-    const setAssistantRetrieval = (retrieval: RetrievalState) => {
-      setSessions((prev) =>
-        prev.map((session) => {
-          if (session.id !== activeSessionId) {
-            return session;
-          }
-
-          const messages = [...session.messages];
-          const lastMessage = messages[messages.length - 1];
-
-          if (lastMessage?.role === "assistant") {
-            messages[messages.length - 1] = {
-              ...lastMessage,
-              retrieval,
-            };
-          } else {
-            messages.push({
-              role: "assistant",
-              content: "",
-              retrieval,
-            });
-          }
-
-          return {
-            ...session,
-            messages,
-          };
-        })
-      );
-    };
-
-    const setAssistantMessageId = (messageId: string) => {
-      if (!messageId) {
-        return;
-      }
-
-      setSessions((prev) =>
-        prev.map((session) => {
-          if (session.id !== activeSessionId) {
-            return session;
-          }
-
-          const messages = [...session.messages];
-          const lastMessage = messages[messages.length - 1];
-
-          if (lastMessage?.role === "assistant") {
-            messages[messages.length - 1] = {
-              ...lastMessage,
-              id: messageId,
-            };
-          }
-
-          return {
-            ...session,
-            messages,
-          };
-        })
-      );
-    };
-
-    const setAssistantFallback = (content: string) => {
-      setSessions((prev) =>
-        prev.map((session) => {
-          if (session.id !== activeSessionId) {
-            return session;
-          }
-
-          const messages = [...session.messages];
-          const lastMessage = messages[messages.length - 1];
-
-          if (lastMessage?.role === "assistant") {
-            messages[messages.length - 1] = {
-              ...lastMessage,
-              content,
-            };
-          } else {
-            messages.push({
-              role: "assistant",
-              content,
-            });
-          }
-
-          return {
-            ...session,
-            messages,
-          };
-        })
-      );
-    };
-
-    try {
-      const response = await chatApi.postChatMessage(
-        activeSessionId,
-        activeKnowledgeBaseId,
-        messageContent,
-        uploadedAttachments.map((attachment) => attachment.id),
-      );
-
-      await streamChatResponse(response, {
-        appendAssistantContent,
-        setAssistantFallback,
-        setAssistantMessageId,
-        setAssistantRetrieval,
-        setAssistantSources,
-        onDone: () => {
-          if (isAdvancedMode) {
-            void loadDiagnostics(activeSessionId, { silent: true });
-          }
-        },
-      });
-    } catch (error) {
-      console.error(error);
-      chatRateLimit.startCountdownFromError(error);
-      setSessionErrors((prev) => ({
-        ...prev,
-        [activeSessionId]:
-          error instanceof Error ? error.message : "请求失败了，请稍后再试。",
-      }));
-    } finally {
-      setLoadingSessions((prev) => ({
-        ...prev,
-        [activeSessionId]: false,
-      }));
-    }
   }
 
   if (!hasCheckedAuth) {

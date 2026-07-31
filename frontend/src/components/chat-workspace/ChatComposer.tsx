@@ -38,7 +38,8 @@ export type ChatComposerProps = {
 /**
  * 展示聊天输入、待发送图片、图片选择入口和发送状态。
  *
- * 图片校验与 Object URL 生命周期由上层 hook 管理；上传、限流倒计时、会话创建和消息发送继续由页面层编排。
+ * 图片校验与 Object URL 生命周期由 usePendingChatImages 管理；
+ * 上传、自动建会话和消息发送由 useChatSubmission 管理。
  */
 export function ChatComposer({
   input,

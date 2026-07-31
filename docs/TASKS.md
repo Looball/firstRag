@@ -4531,6 +4531,45 @@ conda run -n firstrag python scripts/production_preflight.py --env-file .env --m
 git diff --check
 ```
 
+## T-111 抽取聊天提交与 SSE 回写 hook
+
+- 来源计划：`PLAN-20260731-02`
+- 优先级：`P1`
+- 状态：`Doing`
+- 背景：T-110 完成后 `frontend/src/app/page.tsx` 仍有 1085 行，其中 `handleSubmit` 与图片上传 state 占约 310 行，混合输入校验、自动建会话、图片上传、用户消息、SSE assistant 回写、diagnostics preload 和 loading/error 编排。
+- 目标：保持 `sessions`、输入框、当前知识库/会话和限流倒计时由现有页面及 hooks 持有，在不改变聊天交互、错误文案和 SSE 时序的前提下，将单轮发送事务迁移到独立 custom hook。
+- 技术边界：
+  - `sessions`、当前会话 ID、输入值、会话 loading/error record 继续由页面持有，submission hook 只通过稳定 React setter 回写。
+  - 手动新建会话继续由 `useConversationActions` 管理；发送首条消息时仍复用其 `createSession` 并使用问题生成标题。
+  - 图片选择、校验、预览和 Object URL 生命周期继续由 `usePendingChatImages` 管理；submission hook 只上传当前快照并在成功后清空。
+  - 聊天和图片上传保持独立 Retry-After 倒计时；失败时保留既有用户可见文案，不自动重试。
+  - SSE 继续按 content、sources、retrieval、message ID 和 fallback 更新同一 assistant message；高级模式完成后 silent preload diagnostics。
+  - 增加同步提交锁，防止 React 下一次 render 前的重复点击产生重复会话或请求。
+- 范围：
+  - 新增 `use-chat-submission.ts`，管理自动建会话、图片上传、聊天请求、SSE handlers 及发送状态。
+  - 抽取用户消息追加和 assistant content/sources/retrieval/message ID/fallback 回写 helper。
+  - `page.tsx` 改为装配 hook，移除图片上传 state 与完整 `handleSubmit`。
+  - 增加 helper 单元测试，并更新前端职责文档与 ChatComposer 注释。
+- 验收标准：
+  - `page.tsx` 至少减少 260 行，不改变输入校验、自动建会话、图片上传、Retry-After、SSE 或 diagnostics 行为。
+  - 新增测试、前端全量 Vitest、lint、production build 和 Playwright E2E 通过。
+  - Docker Compose、服务日志和 production preflight 通过。
+- 建议验证命令：
+
+```bash
+cd frontend
+npm test
+npm run lint
+npm run build
+CI=1 npm run test:e2e
+cd ..
+docker compose up -d --build
+docker compose ps
+docker compose logs --since=5m redis postgres chroma migrate backend worker frontend
+conda run -n firstrag python scripts/production_preflight.py --env-file .env --migration-method compose --check-runtime-health
+git diff --check
+```
+
 ## 更新规则
 
 - 每个任务开始时，将状态从 `Todo` 改为 `Doing`。
