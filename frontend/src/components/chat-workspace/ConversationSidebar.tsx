@@ -22,7 +22,7 @@ export type ConversationSidebarProps = {
 /**
  * 展示新建会话入口和当前知识库的会话索引。
  *
- * 会话请求和异步状态由 useConversationActions 管理，组件只负责渲染并转发用户操作。
+ * 会话 CRUD 与消息懒加载分别由 actions 和 message loader hooks 管理，组件只负责渲染并转发用户操作。
  */
 export function ConversationSidebar({
   sessions,
