@@ -5,9 +5,12 @@ import {
 } from "react";
 import { useKnowledgeFileIndexing } from "./use-knowledge-file-indexing";
 import {
-  buildKnowledgeFileUploadMessage,
   useKnowledgeFileLibrary,
 } from "./use-knowledge-file-library";
+import {
+  buildKnowledgeFileUploadMessage,
+  useKnowledgeFileMutations,
+} from "./use-knowledge-file-mutations";
 
 type UseKnowledgeFilesOptions = {
   hasCheckedAuth: boolean;
@@ -34,34 +37,20 @@ export function useKnowledgeFiles({
   const [vectorIndexMessage, setVectorIndexMessage] = useState("");
   const [vectorIndexError, setVectorIndexError] = useState("");
   const {
-    attachingKnowledgeFileId,
-    detachingKnowledgeFileId,
-    handleAttachKnowledgeFile,
-    handlePermanentlyDeleteKnowledgeFile: permanentlyDeleteKnowledgeFile,
-    handleRemoveKnowledgeFile,
-    handleSelectFiles: selectKnowledgeFiles,
     isLoadingKnowledgeFiles,
     isLoadingReusableFiles,
-    isUploadingKnowledgeFiles,
     knowledgeBaseFiles,
-    knowledgeFileAttachError,
-    knowledgeFileDeleteError,
-    knowledgeFileDetachError,
     knowledgeFileLoadError,
-    knowledgeFileUploadError,
     knowledgeFiles,
-    permanentlyDeletingFileId,
     refreshKnowledgeFiles,
     reusableFileLoadError,
     reusableKnowledgeFiles,
     selectedKnowledgeBaseFileCount,
     selectedKnowledgeFiles,
-    uploadRetryAfterSeconds,
   } = useKnowledgeFileLibrary({
     hasCheckedAuth,
     selectedKnowledgeBaseId,
     selectedKnowledgeBaseStoredFileCount,
-    fileInputRef,
     onKnowledgeBaseFileCountChange,
   });
   const {
@@ -87,6 +76,25 @@ export function useKnowledgeFiles({
     selectedKnowledgeBaseName,
     setVectorIndexError,
     setVectorIndexMessage,
+  });
+  const {
+    attachingKnowledgeFileId,
+    detachingKnowledgeFileId,
+    handleAttachKnowledgeFile,
+    handlePermanentlyDeleteKnowledgeFile: permanentlyDeleteKnowledgeFile,
+    handleRemoveKnowledgeFile,
+    handleSelectFiles: selectKnowledgeFiles,
+    isUploadingKnowledgeFiles,
+    knowledgeFileAttachError,
+    knowledgeFileDeleteError,
+    knowledgeFileDetachError,
+    knowledgeFileUploadError,
+    permanentlyDeletingFileId,
+    uploadRetryAfterSeconds,
+  } = useKnowledgeFileMutations({
+    selectedKnowledgeBaseId,
+    fileInputRef,
+    refreshKnowledgeFiles,
   });
 
   const handleOpenFileManager = useCallback(async () => {

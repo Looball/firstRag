@@ -122,6 +122,7 @@
 | `PLAN-20260731-04` | 2026-07-31 | `Done` | 拆分知识文件管理 hook，独立管理 vector indexing health、任务队列、轮询与操作。 | `T-113` |
 | `PLAN-20260731-05` | 2026-07-31 | `Done` | 继续拆分知识文件管理 hook，独立管理文件库列表、上传、关联和删除生命周期。 | `T-114` |
 | `PLAN-20260731-06` | 2026-07-31 | `Done` | 继续拆分知识文件 indexing hook，独立管理本地任务队列、任务等待与轮询生命周期。 | `T-115` |
+| `PLAN-20260731-07` | 2026-07-31 | `Doing` | 继续拆分知识文件 library hook，独立管理上传、关联、解除关联和永久删除 mutation。 | `T-116` |
 
 ## 任务总览
 
@@ -242,6 +243,7 @@
 | `T-113` | `PLAN-20260731-04` | `P1` | `Done` | 抽取知识文件 vector indexing hook | 2026-07-31 | `c62162f` |
 | `T-114` | `PLAN-20260731-05` | `P1` | `Done` | 抽取知识文件 library hook | 2026-07-31 | `88f5a8f` |
 | `T-115` | `PLAN-20260731-06` | `P1` | `Done` | 抽取 vector index queue hook | 2026-07-31 | `9be7c9c` |
+| `T-116` | `PLAN-20260731-07` | `P1` | `Doing` | 抽取知识文件 mutation hook | - | - |
 
 ## 新计划接入流程
 
@@ -4786,6 +4788,28 @@ conda run -n firstrag python scripts/production_preflight.py --env-file .env --m
 scripts/run_full_stack_e2e.sh
 git diff --check
 ```
+
+## T-116 抽取知识文件 mutation hook
+
+- 来源计划：`PLAN-20260731-07`
+- 优先级：`P1`
+- 状态：`Doing`
+- 背景：T-114 完成后 `frontend/src/lib/chat-workspace/use-knowledge-file-library.ts` 有 445 行，同时管理文件列表加载与派生状态，以及上传、关联、解除关联和永久删除 mutation lifecycle。
+- 目标：抽取独立 mutation hook，集中管理知识文件上传、关联、解除关联、永久删除及其 loading/error/Retry-After 状态，使 library hook 聚焦列表加载、关联缓存和派生文件集合。
+- 技术边界：
+  - mutation hook 接收当前知识库 ID、文件 input ref 和稳定刷新回调，不重复持有文件集合或关联缓存。
+  - library hook 继续管理 `knowledgeFiles`、`knowledgeBaseFiles`、列表加载错误、文件数回写和派生集合。
+  - `useKnowledgeFiles` 继续负责上传和永久删除后需要同时刷新 indexing health、清理本地 index queue 与写入共享提示的跨域编排。
+  - 保持上传大小/类型提示、Retry-After、操作去重、文件 input 清空和现有用户提示行为。
+- 范围：
+  - 新增 `use-knowledge-file-mutations.ts`，管理上传、关联、解除关联和永久删除 mutation。
+  - 将上传消息/error helper 与测试迁移到 mutation 模块。
+  - 精简 `use-knowledge-file-library.ts` 为列表状态、刷新、关联缓存和派生集合 hook。
+  - 更新前端职责文档与任务台账。
+- 验收标准：
+  - `use-knowledge-file-library.ts` 不再直接持有 mutation loading/error/Retry-After state 或 API 调用。
+  - 新增或迁移测试，前端全量 Vitest、lint、production build 和 Playwright E2E 通过。
+  - Docker Compose、服务日志、production preflight 和隔离 full-stack E2E 通过。
 
 ## 更新规则
 
