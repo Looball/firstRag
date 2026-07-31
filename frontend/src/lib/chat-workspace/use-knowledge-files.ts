@@ -1,4 +1,3 @@
-import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { FrontendApiError } from "@/lib/frontend-api";
 import { useRetryAfterCountdown } from "../use-retry-after-countdown";
 import {
@@ -10,22 +9,11 @@ import {
 } from "react";
 import { DEFAULT_KNOWLEDGE_BASE_ID } from "./constants";
 import * as chatApi from "./api";
-import {
-  getVectorStatus,
-  isVectorIndexJobDone,
-  wait,
-} from "./utils";
+import { useKnowledgeFileIndexing } from "./use-knowledge-file-indexing";
 import type {
   KnowledgeBaseFile,
   KnowledgeFile,
-  VectorIndexJob,
-  VectorIndexQueueItem,
 } from "./types";
-
-export const VECTOR_INDEX_HEALTH_QUERY_KEY = [
-  "chat-workspace",
-  "vector-index-health",
-] as const;
 
 const MAX_UPLOAD_FILE_SIZE = 200 * 1024 * 1024;
 export const KNOWLEDGE_FILE_SUPPORTED_TYPES_TEXT =
@@ -79,33 +67,6 @@ export function replaceKnowledgeBaseFileAssociations(
       knowledgeFileId: file.id,
     })),
   ];
-}
-
-export function mergeVectorIndexQueueItems(
-  previousJobs: VectorIndexQueueItem[],
-  jobs: VectorIndexJob[],
-  target: Pick<VectorIndexQueueItem, "targetName" | "targetType">,
-) {
-  if (jobs.length === 0) {
-    return previousJobs;
-  }
-
-  const nextJobs = new Map<string, VectorIndexQueueItem>(
-    previousJobs.map((job) => [job.id, job]),
-  );
-
-  jobs.forEach((job) => {
-    const previousJob = nextJobs.get(job.id);
-
-    nextJobs.set(job.id, {
-      ...(previousJob || {}),
-      ...job,
-      targetName: previousJob?.targetName || target.targetName,
-      targetType: previousJob?.targetType || target.targetType,
-    });
-  });
-
-  return Array.from(nextJobs.values());
 }
 
 export function buildKnowledgeFileUploadMessage(files: KnowledgeFile[]) {
@@ -165,7 +126,6 @@ export function useKnowledgeFiles({
     useState("");
   const [attachingKnowledgeFileId, setAttachingKnowledgeFileId] =
     useState("");
-  const [deletingVectorFileId, setDeletingVectorFileId] = useState("");
   const [permanentlyDeletingFileId, setPermanentlyDeletingFileId] =
     useState("");
   const [knowledgeFileDeleteError, setKnowledgeFileDeleteError] =
@@ -182,14 +142,6 @@ export function useKnowledgeFiles({
   const [knowledgeBaseFiles, setKnowledgeBaseFiles] = useState<
     KnowledgeBaseFile[]
   >([]);
-  const [vectorIndexingFileIds, setVectorIndexingFileIds] = useState<
-    Record<string, boolean>
-  >({});
-  const [vectorIndexQueue, setVectorIndexQueue] = useState<
-    VectorIndexQueueItem[]
-  >([]);
-  const [isIndexingKnowledgeBase, setIsIndexingKnowledgeBase] =
-    useState(false);
   const [vectorIndexMessage, setVectorIndexMessage] = useState("");
   const [vectorIndexError, setVectorIndexError] = useState("");
   const {
@@ -197,24 +149,6 @@ export function useKnowledgeFiles({
     retryAfterSeconds: uploadRetryAfterSeconds,
     startCountdownFromError: startUploadCountdownFromError,
   } = useRetryAfterCountdown();
-  const {
-    isRateLimited: isVectorIndexRateLimited,
-    retryAfterSeconds: vectorIndexRetryAfterSeconds,
-    startCountdownFromError: startVectorIndexCountdownFromError,
-  } = useRetryAfterCountdown();
-
-  const queryClient = useQueryClient();
-  const vectorIndexHealthQuery = useQuery({
-    queryKey: VECTOR_INDEX_HEALTH_QUERY_KEY,
-    queryFn: chatApi.loadVectorIndexHealth,
-    enabled: hasCheckedAuth,
-    staleTime: 5_000,
-  });
-  const vectorIndexHealth = vectorIndexHealthQuery.data ?? null;
-  const vectorIndexHealthError = vectorIndexHealthQuery.error
-    ? "任务状态暂不可用"
-    : "";
-  const isLoadingVectorIndexHealth = vectorIndexHealthQuery.isFetching;
 
   const selectedKnowledgeFileIds = useMemo(
     () =>
@@ -235,14 +169,6 @@ export function useKnowledgeFiles({
   const reusableKnowledgeFiles = useMemo(
     () => knowledgeFiles.filter((file) => !selectedKnowledgeFileIds.has(file.id)),
     [knowledgeFiles, selectedKnowledgeFileIds],
-  );
-  const hasPollingIndexJobs = useMemo(
-    () => knowledgeFiles.some((file) => getVectorStatus(file).canPoll),
-    [knowledgeFiles],
-  );
-  const hasActiveVectorIndexQueueJobs = useMemo(
-    () => vectorIndexQueue.some((job) => !isVectorIndexJobDone(job)),
-    [vectorIndexQueue],
   );
   const selectedKnowledgeBaseFileCount =
     selectedKnowledgeFiles.length || selectedKnowledgeBaseStoredFileCount || 0;
@@ -314,18 +240,6 @@ export function useKnowledgeFiles({
     }
   }, []);
 
-  const loadVectorIndexHealth = useCallback(async () => {
-    try {
-      await queryClient.fetchQuery({
-        queryKey: VECTOR_INDEX_HEALTH_QUERY_KEY,
-        queryFn: chatApi.loadVectorIndexHealth,
-        staleTime: 0,
-      });
-    } catch {
-      // Health is advisory; the panel renders the query error state.
-    }
-  }, [queryClient]);
-
   const refreshKnowledgeFiles = useCallback(
     async (options?: LoadingOptions) => {
       await Promise.all([
@@ -336,80 +250,30 @@ export function useKnowledgeFiles({
     [loadAllKnowledgeFiles, loadKnowledgeBaseFiles, selectedKnowledgeBaseId],
   );
 
-  const updateVectorIndexQueue = useCallback(
-    (
-      jobs: VectorIndexJob[],
-      target: Pick<VectorIndexQueueItem, "targetName" | "targetType">,
-    ) => {
-      setVectorIndexQueue((previousJobs) =>
-        mergeVectorIndexQueueItems(previousJobs, jobs, target),
-      );
-    },
-    [],
-  );
-
-  const waitForVectorIndexJobs = useCallback(
-    async (
-      jobs: VectorIndexJob[],
-      onJobsUpdated?: (jobs: VectorIndexJob[]) => void,
-    ) => {
-      if (jobs.length === 0) {
-        return [];
-      }
-
-      let latestJobs = jobs;
-      onJobsUpdated?.(latestJobs);
-
-      for (let attempt = 0; attempt < 45; attempt += 1) {
-        if (latestJobs.every(isVectorIndexJobDone)) {
-          return latestJobs;
-        }
-
-        await wait(2000);
-
-        const nextJobs = await Promise.all(
-          latestJobs.map(async (job) => {
-            if (isVectorIndexJobDone(job)) {
-              return job;
-            }
-
-            return (await chatApi.getVectorIndexJob(job.id)) || job;
-          }),
-        );
-
-        latestJobs = nextJobs;
-        onJobsUpdated?.(latestJobs);
-      }
-
-      return latestJobs;
-    },
-    [],
-  );
-
-  const refreshVectorIndexQueue = useCallback(async () => {
-    const activeJobs = vectorIndexQueue.filter(
-      (job) => !isVectorIndexJobDone(job),
-    );
-
-    if (activeJobs.length === 0) {
-      return;
-    }
-
-    const nextJobs = await Promise.all(
-      activeJobs.map(async (job) => {
-        return (await chatApi.getVectorIndexJob(job.id)) || job;
-      }),
-    );
-    const nextJobsById = new Map(nextJobs.map((job) => [job.id, job]));
-
-    setVectorIndexQueue((previousJobs) =>
-      previousJobs.map((job) => {
-        const nextJob = nextJobsById.get(job.id);
-
-        return nextJob ? { ...job, ...nextJob } : job;
-      }),
-    );
-  }, [vectorIndexQueue]);
+  const {
+    clearCompletedVectorIndexJobs,
+    deletingVectorFileId,
+    handleDeleteKnowledgeFileVectors,
+    handleIndexKnowledgeBase,
+    handleIndexKnowledgeFile,
+    isIndexingKnowledgeBase,
+    isLoadingVectorIndexHealth,
+    loadVectorIndexHealth,
+    removeVectorIndexJobsForFile,
+    vectorIndexHealth,
+    vectorIndexHealthError,
+    vectorIndexingFileIds,
+    vectorIndexQueue,
+    vectorIndexRetryAfterSeconds,
+  } = useKnowledgeFileIndexing({
+    hasCheckedAuth,
+    knowledgeFiles,
+    refreshKnowledgeFiles,
+    selectedKnowledgeBaseId,
+    selectedKnowledgeBaseName,
+    setVectorIndexError,
+    setVectorIndexMessage,
+  });
 
   const handleOpenFileManager = useCallback(async () => {
     setIsFileManagerOpen(true);
@@ -535,85 +399,6 @@ export function useKnowledgeFiles({
     [detachingKnowledgeFileId, refreshKnowledgeFiles, selectedKnowledgeBaseId],
   );
 
-  const handleIndexKnowledgeFile = useCallback(
-    async (fileId: string) => {
-      if (
-        !fileId ||
-        vectorIndexingFileIds[fileId] ||
-        isVectorIndexRateLimited
-      ) {
-        return;
-      }
-
-      const targetFile = knowledgeFiles.find((file) => file.id === fileId);
-      const target = {
-        targetName: targetFile?.name || "知识库文件",
-        targetType: "file" as const,
-      };
-      setVectorIndexingFileIds((previousFileIds) => ({
-        ...previousFileIds,
-        [fileId]: true,
-      }));
-      setVectorIndexError("");
-      setVectorIndexMessage("");
-
-      try {
-        const jobs = await chatApi.indexKnowledgeFile(fileId);
-        updateVectorIndexQueue(jobs, target);
-
-        setVectorIndexMessage("文件向量化任务已提交。");
-        await Promise.all([refreshKnowledgeFiles(), loadVectorIndexHealth()]);
-      } catch (error) {
-        startVectorIndexCountdownFromError(error);
-        setVectorIndexError(
-          error instanceof Error ? error.message : "文件向量化失败，请稍后再试。",
-        );
-      } finally {
-        setVectorIndexingFileIds((previousFileIds) => {
-          const nextFileIds = { ...previousFileIds };
-          delete nextFileIds[fileId];
-          return nextFileIds;
-        });
-      }
-    },
-    [
-      knowledgeFiles,
-      isVectorIndexRateLimited,
-      loadVectorIndexHealth,
-      refreshKnowledgeFiles,
-      startVectorIndexCountdownFromError,
-      updateVectorIndexQueue,
-      vectorIndexingFileIds,
-    ],
-  );
-
-  const handleDeleteKnowledgeFileVectors = useCallback(
-    async (fileId: string) => {
-      if (!fileId || deletingVectorFileId) {
-        return;
-      }
-
-      setDeletingVectorFileId(fileId);
-      setVectorIndexError("");
-      setVectorIndexMessage("");
-
-      try {
-        await chatApi.deleteKnowledgeFileVectors(fileId);
-        setVectorIndexMessage("文件向量已删除，可重新向量化。");
-        await Promise.all([refreshKnowledgeFiles(), loadVectorIndexHealth()]);
-      } catch (error) {
-        setVectorIndexError(
-          error instanceof Error
-            ? error.message
-            : "删除文件向量失败，请稍后再试。",
-        );
-      } finally {
-        setDeletingVectorFileId("");
-      }
-    },
-    [deletingVectorFileId, loadVectorIndexHealth, refreshKnowledgeFiles],
-  );
-
   const handlePermanentlyDeleteKnowledgeFile = useCallback(
     async (fileId: string) => {
       if (!fileId || permanentlyDeletingFileId) {
@@ -626,9 +411,7 @@ export function useKnowledgeFiles({
 
       try {
         await chatApi.permanentlyDeleteKnowledgeFile(fileId);
-        setVectorIndexQueue((previousJobs) =>
-          previousJobs.filter((job) => job.knowledgeFileId !== fileId),
-        );
+        removeVectorIndexJobsForFile(fileId);
         setVectorIndexMessage("知识文件及其索引数据已永久删除。");
         await Promise.all([refreshKnowledgeFiles(), loadVectorIndexHealth()]);
       } catch (error) {
@@ -645,74 +428,9 @@ export function useKnowledgeFiles({
       loadVectorIndexHealth,
       permanentlyDeletingFileId,
       refreshKnowledgeFiles,
+      removeVectorIndexJobsForFile,
     ],
   );
-
-  const handleIndexKnowledgeBase = useCallback(async () => {
-    if (
-      !selectedKnowledgeBaseId ||
-      selectedKnowledgeBaseId === DEFAULT_KNOWLEDGE_BASE_ID ||
-      isIndexingKnowledgeBase ||
-      isVectorIndexRateLimited
-    ) {
-      return;
-    }
-
-    setIsIndexingKnowledgeBase(true);
-    setVectorIndexError("");
-    setVectorIndexMessage("");
-
-    try {
-      const target = {
-        targetName: selectedKnowledgeBaseName || "当前知识库",
-        targetType: "knowledge-base" as const,
-      };
-      const jobs = await chatApi.indexKnowledgeBase(selectedKnowledgeBaseId);
-      updateVectorIndexQueue(jobs, target);
-
-      setVectorIndexMessage("知识库向量化任务已提交。");
-
-      const finishedJobs = await waitForVectorIndexJobs(jobs, (latestJobs) =>
-        updateVectorIndexQueue(latestJobs, target),
-      );
-      const failedJob = finishedJobs.find((job) => job.status === "failed");
-
-      if (failedJob) {
-        throw new Error(failedJob.errorMessage || "知识库向量化失败。");
-      }
-
-      if (finishedJobs.length > 0) {
-        setVectorIndexMessage("知识库向量化完成。");
-      }
-
-      await Promise.all([refreshKnowledgeFiles(), loadVectorIndexHealth()]);
-    } catch (error) {
-      startVectorIndexCountdownFromError(error);
-      setVectorIndexError(
-        error instanceof Error ? error.message : "知识库向量化失败，请稍后再试。",
-      );
-    } finally {
-      setIsIndexingKnowledgeBase(false);
-    }
-  }, [
-    isIndexingKnowledgeBase,
-    isVectorIndexRateLimited,
-    loadVectorIndexHealth,
-    refreshKnowledgeFiles,
-    selectedKnowledgeBaseId,
-    selectedKnowledgeBaseName,
-    startVectorIndexCountdownFromError,
-    updateVectorIndexQueue,
-    waitForVectorIndexJobs,
-  ]);
-
-  const clearCompletedVectorIndexJobs = useCallback(() => {
-    setVectorIndexQueue((previousJobs) =>
-      previousJobs.filter(
-        (job) => job.status !== "succeeded" && job.status !== "failed",
-      ),
-    );
-  }, []);
 
   useEffect(() => {
     if (!hasCheckedAuth || !selectedKnowledgeBaseId) {
@@ -721,55 +439,6 @@ export function useKnowledgeFiles({
 
     void loadKnowledgeBaseFiles(selectedKnowledgeBaseId);
   }, [hasCheckedAuth, loadKnowledgeBaseFiles, selectedKnowledgeBaseId]);
-
-  useEffect(() => {
-    if (!hasCheckedAuth || !hasPollingIndexJobs) {
-      return;
-    }
-
-    const intervalId = window.setInterval(() => {
-      void Promise.all([
-        loadKnowledgeBaseFiles(selectedKnowledgeBaseId, {
-          showLoading: false,
-        }),
-        loadAllKnowledgeFiles({ showLoading: false }),
-        loadVectorIndexHealth(),
-      ]);
-    }, 2500);
-
-    return () => {
-      window.clearInterval(intervalId);
-    };
-  }, [
-    hasCheckedAuth,
-    hasPollingIndexJobs,
-    loadAllKnowledgeFiles,
-    loadKnowledgeBaseFiles,
-    loadVectorIndexHealth,
-    selectedKnowledgeBaseId,
-  ]);
-
-  useEffect(() => {
-    if (!hasCheckedAuth || !hasActiveVectorIndexQueueJobs) {
-      return;
-    }
-
-    const intervalId = window.setInterval(() => {
-      void Promise.all([
-        refreshVectorIndexQueue(),
-        loadVectorIndexHealth(),
-      ]);
-    }, 2500);
-
-    return () => {
-      window.clearInterval(intervalId);
-    };
-  }, [
-    hasActiveVectorIndexQueueJobs,
-    hasCheckedAuth,
-    loadVectorIndexHealth,
-    refreshVectorIndexQueue,
-  ]);
 
   return {
     attachingKnowledgeFileId,
