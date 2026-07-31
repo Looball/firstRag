@@ -4484,6 +4484,44 @@ conda run -n firstrag python scripts/production_preflight.py --env-file .env --m
 git diff --check
 ```
 
+## T-110 抽取知识库 retrieval settings hook
+
+- 来源计划：`PLAN-20260731-01`
+- 优先级：`P1`
+- 状态：`Doing`
+- 背景：T-109 完成后 `frontend/src/app/page.tsx` 仍有 1185 行，其中知识库 retrieval settings 使用 5 组局部 state、一段加载 effect，以及约 85 行按知识库缓存、更新、读取和保存流程。
+- 目标：保持知识库与会话主数据由页面持有，在不改变高级模式入口、表单值和错误/成功文案的前提下，将 retrieval settings 状态和请求流程迁移到独立 custom hook。
+- 技术边界：
+  - `knowledgeBases`、当前知识库 ID、管理弹窗开关与高级模式仍由现有页面/lifecycle hook 持有，retrieval hook 只接收装配参数。
+  - 继续按知识库 ID 缓存设置；切换知识库或关闭弹窗时，过期读取响应不得覆盖当前设置和 loading/error 状态。
+  - 默认知识库、未完成认证、普通模式或弹窗关闭时不请求 retrieval settings。
+  - 局部编辑继续基于缓存或默认设置合并 patch，并清空旧的成功/错误提示。
+  - 保存继续防止重复提交，使用当前知识库和表单快照，并保留既有成功/失败文案。
+- 范围：
+  - 新增 `use-knowledge-base-retrieval-settings.ts`，管理缓存、加载、编辑、保存和提示状态。
+  - 抽取加载门禁、缓存读取/写入、局部合并和错误转换 helper。
+  - `page.tsx` 改为装配 hook，移除 retrieval settings state、effect 和 handlers。
+  - 增加 helper 单元测试，并更新前端职责文档与管理弹窗组件注释。
+- 验收标准：
+  - `page.tsx` 至少减少 70 行，不改变 retrieval settings 表单、默认值、请求时机或提示文案。
+  - 新增测试、前端全量 Vitest、lint、production build 和 Playwright E2E 通过。
+  - Docker Compose、服务日志和 production preflight 通过。
+- 建议验证命令：
+
+```bash
+cd frontend
+npm test
+npm run lint
+npm run build
+CI=1 npm run test:e2e
+cd ..
+docker compose up -d --build
+docker compose ps
+docker compose logs --since=5m redis postgres chroma migrate backend worker frontend
+conda run -n firstrag python scripts/production_preflight.py --env-file .env --migration-method compose --check-runtime-health
+git diff --check
+```
+
 ## 更新规则
 
 - 每个任务开始时，将状态从 `Todo` 改为 `Doing`。

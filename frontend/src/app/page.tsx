@@ -25,7 +25,6 @@ import {
 import { redirectToLogin } from "@/lib/frontend-api";
 import {
   DEFAULT_KNOWLEDGE_BASE_ID,
-  DEFAULT_RETRIEVAL_SETTINGS,
 } from "@/lib/chat-workspace/constants";
 import {
   getAdvancedModeDefault,
@@ -37,6 +36,7 @@ import { useConversationActions } from "@/lib/chat-workspace/use-conversation-ac
 import { useConversationDiagnostics } from "@/lib/chat-workspace/use-conversation-diagnostics";
 import { useKnowledgeFiles } from "@/lib/chat-workspace/use-knowledge-files";
 import { useKnowledgeBaseLifecycle } from "@/lib/chat-workspace/use-knowledge-base-lifecycle";
+import { useKnowledgeBaseRetrievalSettings } from "@/lib/chat-workspace/use-knowledge-base-retrieval-settings";
 import { useMessageClipboard } from "@/lib/chat-workspace/use-message-clipboard";
 import { useMessageQualityActions } from "@/lib/chat-workspace/use-message-quality-actions";
 import { usePendingChatImages } from "@/lib/chat-workspace/use-pending-chat-images";
@@ -48,7 +48,6 @@ import type {
   ChatSession,
   ChatSource,
   KnowledgeBase,
-  KnowledgeBaseRetrievalSettings,
   Message,
   MessageAttachment,
   RetrievalState,
@@ -163,17 +162,20 @@ export default function Home() {
     setSelectedKnowledgeBaseId,
     setSessions,
   });
-  const [
-    retrievalSettingsByKnowledgeBaseId,
-    setRetrievalSettingsByKnowledgeBaseId,
-  ] = useState<Record<string, KnowledgeBaseRetrievalSettings>>({});
-  const [isLoadingRetrievalSettings, setIsLoadingRetrievalSettings] =
-    useState(false);
-  const [isSavingRetrievalSettings, setIsSavingRetrievalSettings] =
-    useState(false);
-  const [retrievalSettingsMessage, setRetrievalSettingsMessage] =
-    useState("");
-  const [retrievalSettingsError, setRetrievalSettingsError] = useState("");
+  const {
+    isLoadingRetrievalSettings,
+    isSavingRetrievalSettings,
+    retrievalSettingsError,
+    retrievalSettingsMessage,
+    saveSelectedRetrievalSettings: handleSaveRetrievalSettings,
+    selectedRetrievalSettings,
+    updateSelectedRetrievalSettings,
+  } = useKnowledgeBaseRetrievalSettings({
+    hasCheckedAuth,
+    isAdvancedMode,
+    isKnowledgeBaseManagerOpen,
+    selectedKnowledgeBaseId,
+  });
   const [activeSourcePreview, setActiveSourcePreview] =
     useState<ChatSource | null>(null);
   const {
@@ -315,92 +317,9 @@ export default function Home() {
     fileInputRef,
     onKnowledgeBaseFileCountChange: updateKnowledgeBaseFileCount,
   });
-  const selectedRetrievalSettings =
-    retrievalSettingsByKnowledgeBaseId[selectedKnowledgeBaseId] ||
-    DEFAULT_RETRIEVAL_SETTINGS;
-
-  function updateSelectedRetrievalSettings(
-    patch: Partial<KnowledgeBaseRetrievalSettings>
-  ) {
-    if (!selectedKnowledgeBaseId) {
-      return;
-    }
-
-    setRetrievalSettingsByKnowledgeBaseId((prev) => ({
-      ...prev,
-      [selectedKnowledgeBaseId]: {
-        ...(prev[selectedKnowledgeBaseId] || DEFAULT_RETRIEVAL_SETTINGS),
-        ...patch,
-      },
-    }));
-    setRetrievalSettingsMessage("");
-    setRetrievalSettingsError("");
-  }
-
   function handleAdvancedModeChange(enabled: boolean) {
     setIsAdvancedMode(enabled);
     writeAdvancedModePreference(enabled);
-  }
-
-  async function loadRetrievalSettings(knowledgeBaseId: string) {
-    if (!knowledgeBaseId || knowledgeBaseId === DEFAULT_KNOWLEDGE_BASE_ID) {
-      return;
-    }
-
-    setIsLoadingRetrievalSettings(true);
-    setRetrievalSettingsError("");
-
-    try {
-      const settings = await chatApi.getRetrievalSettings(knowledgeBaseId);
-
-      setRetrievalSettingsByKnowledgeBaseId((prev) => ({
-        ...prev,
-        [knowledgeBaseId]: settings,
-      }));
-    } catch (error) {
-      setRetrievalSettingsError(
-        error instanceof Error
-          ? error.message
-          : "读取检索设置失败，请稍后再试。"
-      );
-    } finally {
-      setIsLoadingRetrievalSettings(false);
-    }
-  }
-
-  async function handleSaveRetrievalSettings() {
-    if (
-      !selectedKnowledgeBaseId ||
-      selectedKnowledgeBaseId === DEFAULT_KNOWLEDGE_BASE_ID ||
-      isSavingRetrievalSettings
-    ) {
-      return;
-    }
-
-    setIsSavingRetrievalSettings(true);
-    setRetrievalSettingsMessage("");
-    setRetrievalSettingsError("");
-
-    try {
-      const settings = await chatApi.saveRetrievalSettings(
-        selectedKnowledgeBaseId,
-        selectedRetrievalSettings,
-      );
-
-      setRetrievalSettingsByKnowledgeBaseId((prev) => ({
-        ...prev,
-        [selectedKnowledgeBaseId]: settings,
-      }));
-      setRetrievalSettingsMessage("检索设置已保存，下一次提问生效。");
-    } catch (error) {
-      setRetrievalSettingsError(
-        error instanceof Error
-          ? error.message
-          : "保存检索设置失败，请稍后再试。"
-      );
-    } finally {
-      setIsSavingRetrievalSettings(false);
-    }
   }
 
   useEffect(() => {
@@ -425,25 +344,6 @@ export default function Home() {
   useEffect(() => {
     setIsAdvancedMode(readAdvancedModePreference());
   }, []);
-
-  useEffect(() => {
-    if (
-      !hasCheckedAuth ||
-      !isAdvancedMode ||
-      !isKnowledgeBaseManagerOpen ||
-      !selectedKnowledgeBaseId ||
-      selectedKnowledgeBaseId === DEFAULT_KNOWLEDGE_BASE_ID
-    ) {
-      return;
-    }
-
-    void loadRetrievalSettings(selectedKnowledgeBaseId);
-  }, [
-    hasCheckedAuth,
-    isAdvancedMode,
-    isKnowledgeBaseManagerOpen,
-    selectedKnowledgeBaseId,
-  ]);
 
   useEffect(() => {
     let isCancelled = false;
