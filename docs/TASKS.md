@@ -116,6 +116,10 @@
 | `PLAN-20260729-04` | 2026-07-29 | `Done` | 继续降低前端聊天工作台业务编排复杂度，收口回答复制 fallback 与提示计时状态。 | `T-107` |
 | `PLAN-20260729-05` | 2026-07-29 | `Done` | 继续降低前端聊天工作台业务编排复杂度，收口会话创建、选择加载、重命名和删除流程。 | `T-108` |
 | `PLAN-20260730-01` | 2026-07-30 | `Done` | 继续降低前端聊天工作台业务编排复杂度，收口知识库管理弹窗与生命周期操作。 | `T-109` |
+| `PLAN-20260731-01` | 2026-07-31 | `Done` | 继续降低前端聊天工作台业务编排复杂度，收口知识库 retrieval settings 的缓存、加载与保存流程。 | `T-110` |
+| `PLAN-20260731-02` | 2026-07-31 | `Done` | 继续降低前端聊天工作台业务编排复杂度，收口聊天提交、图片上传与 SSE 回写事务。 | `T-111` |
+| `PLAN-20260731-03` | 2026-07-31 | `Done` | 继续降低前端聊天工作台业务编排复杂度，收口工作区认证与初始化流程。 | `T-112` |
+| `PLAN-20260731-04` | 2026-07-31 | `Done` | 拆分知识文件管理 hook，独立管理 vector indexing health、任务队列、轮询与操作。 | `T-113` |
 
 ## 任务总览
 
@@ -230,6 +234,10 @@
 | `T-107` | `PLAN-20260729-04` | `P1` | `Done` | 抽取回答复制 hook | 2026-07-29 | `261d4ac` |
 | `T-108` | `PLAN-20260729-05` | `P1` | `Done` | 抽取会话生命周期操作 hook | 2026-07-29 | `b97f800` |
 | `T-109` | `PLAN-20260730-01` | `P1` | `Done` | 抽取知识库生命周期操作 hook | 2026-07-30 | `c18e3c3` |
+| `T-110` | `PLAN-20260731-01` | `P1` | `Done` | 抽取知识库 retrieval settings hook | 2026-07-31 | `dfa123c` |
+| `T-111` | `PLAN-20260731-02` | `P1` | `Done` | 抽取聊天提交与 SSE 回写 hook | 2026-07-31 | `0907dc4` |
+| `T-112` | `PLAN-20260731-03` | `P1` | `Done` | 抽取工作区认证与初始化 hook | 2026-07-31 | `2c96a3a` |
+| `T-113` | `PLAN-20260731-04` | `P1` | `Done` | 抽取知识文件 vector indexing hook | 2026-07-31 | `c62162f` |
 
 ## 新计划接入流程
 
@@ -4628,6 +4636,56 @@ docker compose up -d --build
 docker compose ps
 docker compose logs --since=5m redis postgres chroma migrate backend worker frontend
 conda run -n firstrag python scripts/production_preflight.py --env-file .env --migration-method compose --check-runtime-health
+git diff --check
+```
+
+## T-113 抽取知识文件 vector indexing hook
+
+- 来源计划：`PLAN-20260731-04`
+- 优先级：`P1`
+- 状态：`Done`
+- 背景：T-112 完成后 `frontend/src/lib/chat-workspace/use-knowledge-files.ts` 有 815 行，同时管理文件上传/关联/永久删除与 vector index health、任务提交、队列合并、轮询和 Retry-After 状态。
+- 目标：保持 `useKnowledgeFiles` 作为文件管理装配入口，在不改变文件管理弹窗 props、索引状态刷新或用户提示的前提下，将 vector indexing 生命周期迁移到独立 custom hook。
+- 技术边界：
+  - `knowledgeFiles`、知识库文件关联、上传、关联/解除关联和永久删除继续由 `useKnowledgeFiles` 持有。
+  - 新 hook 接收稳定的知识文件刷新回调和共享提示 setter，不重复文件列表请求或文件生命周期逻辑。
+  - vector index health 继续使用 React Query；手动刷新和后台轮询错误仍作为 advisory 状态展示。
+  - 单文件与整库向量化继续共享 Retry-After 倒计时，整库向量化继续等待最终任务状态并保留失败文案。
+  - 文件状态轮询与本地任务队列轮询保持两段独立 effect，仅在认证完成且存在对应活跃任务时启动。
+  - 永久删除文件后仅通过 hook 提供的队列清理动作移除对应任务，不把永久删除请求迁入 indexing hook。
+- 范围：
+  - 新增 `use-knowledge-file-indexing.ts`，管理 health、向量化提交/删除、任务队列、轮询和限流状态。
+  - 抽取任务队列新增/刷新/按文件清理 helper，并补充独立单元测试。
+  - `use-knowledge-files.ts` 改为装配 indexing hook，继续负责文件上传、列表和关联生命周期。
+  - 更新前端职责文档与任务台账。
+- 验收标准：
+  - `use-knowledge-files.ts` 至少减少 280 行，不改变文件上传、索引提交、轮询、health、Retry-After 或永久删除行为。
+  - 新增测试、前端全量 Vitest、lint、production build 和 Playwright E2E 通过。
+  - Docker Compose、服务日志、production preflight 和隔离 full-stack E2E 通过。
+- 完成记录：
+  - 新增 `use-knowledge-file-indexing.ts`，集中管理 vector index health、单文件/整库向量化、删除向量、任务队列、轮询和 Retry-After 状态。
+  - `useKnowledgeFiles` 继续持有知识文件集合、知识库关联、上传、解除关联和永久删除；indexing hook 通过稳定刷新回调复用文件请求，并通过共享 setter 保持原有提示编排。
+  - 文件状态轮询和本地任务队列轮询保持独立 effect，仅在认证完成且存在对应活跃任务时启动；队列新增、刷新和按文件清理均使用不可变 helper。
+  - `use-knowledge-files.ts` 从 815 行降至 484 行，减少 331 行；新 indexing hook 为 453 行。
+  - 新增独立 helper 测试并迁移原队列合并测试；前端全量 Vitest 共 35 个测试文件、180 项通过。
+  - lint 0 error 并保留 2 个既有 `<img>` warning；授权环境与 Docker production build、Playwright E2E 3/3 均通过。
+  - Docker runtime audit 输出 `found 0 vulnerabilities`；Compose 核心服务状态正常，frontend/backend HTTP smoke 均为 200，migration 输出 `applied=0 skipped=9`，production preflight 全部通过。
+  - 隔离 full-stack E2E 1/1 通过，覆盖真实注册、登录、TXT 上传、worker 向量化、SSE 回答和 sources 展示，并完成专用容器、网络及 volumes 清理。
+- 相关提交：`c62162f`
+- 建议验证命令：
+
+```bash
+cd frontend
+npm test
+npm run lint
+npm run build
+CI=1 npm run test:e2e
+cd ..
+docker compose up -d --build
+docker compose ps
+docker compose logs --since=5m redis postgres chroma migrate backend worker frontend
+conda run -n firstrag python scripts/production_preflight.py --env-file .env --migration-method compose --check-runtime-health
+scripts/run_full_stack_e2e.sh
 git diff --check
 ```
 
