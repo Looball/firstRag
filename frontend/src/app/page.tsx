@@ -36,6 +36,7 @@ import * as chatApi from "@/lib/chat-workspace/api";
 import { useConversationActions } from "@/lib/chat-workspace/use-conversation-actions";
 import { useConversationDiagnostics } from "@/lib/chat-workspace/use-conversation-diagnostics";
 import { useKnowledgeFiles } from "@/lib/chat-workspace/use-knowledge-files";
+import { useKnowledgeBaseLifecycle } from "@/lib/chat-workspace/use-knowledge-base-lifecycle";
 import { useMessageClipboard } from "@/lib/chat-workspace/use-message-clipboard";
 import { useMessageQualityActions } from "@/lib/chat-workspace/use-message-quality-actions";
 import { usePendingChatImages } from "@/lib/chat-workspace/use-pending-chat-images";
@@ -46,7 +47,6 @@ import { useRetryAfterCountdown } from "@/lib/use-retry-after-countdown";
 import type {
   ChatSession,
   ChatSource,
-  DeletedKnowledgeBase,
   KnowledgeBase,
   KnowledgeBaseRetrievalSettings,
   Message,
@@ -75,8 +75,6 @@ export default function Home() {
   );
   const [sessionErrors, setSessionErrors] = useState<Record<string, string>>({});
   const [hasCheckedAuth, setHasCheckedAuth] = useState(false);
-  const [isCreatingKnowledgeBase, setIsCreatingKnowledgeBase] =
-    useState(false);
   const [pageError, setPageError] = useState("");
   const [currentUsername, setCurrentUsername] = useState("");
   const {
@@ -132,6 +130,39 @@ export default function Home() {
     setSessionErrors,
     setSessions,
   });
+  const {
+    cancelKnowledgeBaseRename: handleCancelKnowledgeBaseRename,
+    closeKnowledgeBaseManager,
+    createKnowledgeBase: handleCreateKnowledgeBase,
+    deleteKnowledgeBase: handleDeleteKnowledgeBase,
+    deletedKnowledgeBases,
+    deletingKnowledgeBaseId,
+    editingKnowledgeBaseId,
+    editingKnowledgeBaseName,
+    isCreatingKnowledgeBase,
+    isKnowledgeBaseManagerOpen,
+    isLoadingDeletedKnowledgeBases,
+    knowledgeBaseLifecycleError,
+    knowledgeBaseLifecycleMessage,
+    newKnowledgeBaseName,
+    openKnowledgeBaseManager,
+    renamingKnowledgeBaseId,
+    restoreKnowledgeBase: handleRestoreKnowledgeBase,
+    restoringKnowledgeBaseId,
+    saveKnowledgeBaseRename: handleSaveKnowledgeBaseRename,
+    setEditingKnowledgeBaseName,
+    setNewKnowledgeBaseName,
+    startKnowledgeBaseRename: handleStartKnowledgeBaseRename,
+  } = useKnowledgeBaseLifecycle({
+    hasCheckedAuth,
+    selectedKnowledgeBaseId,
+    sessions,
+    setActiveSessionId: setCurrentSessionId,
+    setKnowledgeBases,
+    setPageError,
+    setSelectedKnowledgeBaseId,
+    setSessions,
+  });
   const [
     retrievalSettingsByKnowledgeBaseId,
     setRetrievalSettingsByKnowledgeBaseId,
@@ -143,23 +174,6 @@ export default function Home() {
   const [retrievalSettingsMessage, setRetrievalSettingsMessage] =
     useState("");
   const [retrievalSettingsError, setRetrievalSettingsError] = useState("");
-  const [isKnowledgeBaseManagerOpen, setIsKnowledgeBaseManagerOpen] =
-    useState(false);
-  const [newKnowledgeBaseName, setNewKnowledgeBaseName] = useState("");
-  const [deletedKnowledgeBases, setDeletedKnowledgeBases] = useState<
-    DeletedKnowledgeBase[]
-  >([]);
-  const [isLoadingDeletedKnowledgeBases, setIsLoadingDeletedKnowledgeBases] =
-    useState(false);
-  const [knowledgeBaseLifecycleError, setKnowledgeBaseLifecycleError] =
-    useState("");
-  const [knowledgeBaseLifecycleMessage, setKnowledgeBaseLifecycleMessage] =
-    useState("");
-  const [editingKnowledgeBaseId, setEditingKnowledgeBaseId] = useState("");
-  const [editingKnowledgeBaseName, setEditingKnowledgeBaseName] = useState("");
-  const [renamingKnowledgeBaseId, setRenamingKnowledgeBaseId] = useState("");
-  const [deletingKnowledgeBaseId, setDeletingKnowledgeBaseId] = useState("");
-  const [restoringKnowledgeBaseId, setRestoringKnowledgeBaseId] = useState("");
   const [activeSourcePreview, setActiveSourcePreview] =
     useState<ChatSource | null>(null);
   const {
@@ -305,182 +319,6 @@ export default function Home() {
     retrievalSettingsByKnowledgeBaseId[selectedKnowledgeBaseId] ||
     DEFAULT_RETRIEVAL_SETTINGS;
 
-  async function handleCreateKnowledgeBase() {
-    const normalizedName = newKnowledgeBaseName.trim();
-
-    if (!normalizedName || isCreatingKnowledgeBase) {
-      return;
-    }
-
-    setIsCreatingKnowledgeBase(true);
-    setPageError("");
-
-    try {
-      const knowledgeBase = await chatApi.createKnowledgeBase(normalizedName);
-
-      setKnowledgeBases((prev) => [
-        ...prev.filter((candidate) => candidate.id !== knowledgeBase.id),
-        knowledgeBase,
-      ]);
-      setSelectedKnowledgeBaseId(knowledgeBase.id);
-      setNewKnowledgeBaseName("");
-    } catch (error) {
-      setPageError(
-        error instanceof Error
-          ? error.message
-          : "创建知识库失败，请稍后再试。"
-      );
-    } finally {
-      setIsCreatingKnowledgeBase(false);
-    }
-  }
-
-  /** 重新加载活动知识库、会话和回收站数据。 */
-  async function refreshKnowledgeBaseCollections(
-    preferredKnowledgeBaseId?: string,
-  ) {
-    const {
-      knowledgeBases: nextKnowledgeBases,
-      sessions: nextSessions,
-    } = await loadBackendKnowledgeBases();
-    const preferredKnowledgeBase = nextKnowledgeBases.find(
-      (knowledgeBase) => knowledgeBase.id === preferredKnowledgeBaseId,
-    );
-    const currentKnowledgeBase = nextKnowledgeBases.find(
-      (knowledgeBase) => knowledgeBase.id === selectedKnowledgeBaseId,
-    );
-    const nextSelectedKnowledgeBaseId =
-      preferredKnowledgeBase?.id ||
-      currentKnowledgeBase?.id ||
-      nextKnowledgeBases.find((knowledgeBase) => knowledgeBase.isDefault)?.id ||
-      nextKnowledgeBases[0]?.id ||
-      "";
-
-    setKnowledgeBases(nextKnowledgeBases);
-    setSessions(nextSessions);
-    setSelectedKnowledgeBaseId(nextSelectedKnowledgeBaseId);
-    setCurrentSessionId((previousSessionId) => {
-      const previousSessionStillVisible = nextSessions.some(
-        (session) =>
-          session.id === previousSessionId &&
-          session.knowledgeBaseId === nextSelectedKnowledgeBaseId,
-      );
-      if (previousSessionStillVisible) {
-        return previousSessionId;
-      }
-      return (
-        nextSessions.find(
-          (session) => session.knowledgeBaseId === nextSelectedKnowledgeBaseId,
-        )?.id || ""
-      );
-    });
-    setDeletedKnowledgeBases(await chatApi.listDeletedKnowledgeBases());
-  }
-
-  /** 进入知识库名称编辑状态。 */
-  function handleStartKnowledgeBaseRename(knowledgeBase: KnowledgeBase) {
-    setEditingKnowledgeBaseId(knowledgeBase.id);
-    setEditingKnowledgeBaseName(knowledgeBase.name);
-    setKnowledgeBaseLifecycleError("");
-    setKnowledgeBaseLifecycleMessage("");
-  }
-
-  /** 保存知识库新名称并更新当前工作台状态。 */
-  async function handleSaveKnowledgeBaseRename() {
-    const normalizedName = editingKnowledgeBaseName.trim();
-    if (!editingKnowledgeBaseId || !normalizedName || renamingKnowledgeBaseId) {
-      return;
-    }
-
-    setRenamingKnowledgeBaseId(editingKnowledgeBaseId);
-    setKnowledgeBaseLifecycleError("");
-    setKnowledgeBaseLifecycleMessage("");
-    try {
-      const renamedKnowledgeBase = await chatApi.renameKnowledgeBase(
-        editingKnowledgeBaseId,
-        normalizedName,
-      );
-      setKnowledgeBases((previousKnowledgeBases) =>
-        previousKnowledgeBases.map((knowledgeBase) =>
-          knowledgeBase.id === renamedKnowledgeBase.id
-            ? { ...knowledgeBase, name: renamedKnowledgeBase.name }
-            : knowledgeBase,
-        ),
-      );
-      setEditingKnowledgeBaseId("");
-      setEditingKnowledgeBaseName("");
-      setKnowledgeBaseLifecycleMessage("知识库名称已更新。");
-    } catch (error) {
-      setKnowledgeBaseLifecycleError(
-        error instanceof Error
-          ? error.message
-          : "重命名知识库失败，请稍后再试。",
-      );
-    } finally {
-      setRenamingKnowledgeBaseId("");
-    }
-  }
-
-  /** 确认后将非默认知识库移入回收站。 */
-  async function handleDeleteKnowledgeBase(knowledgeBase: KnowledgeBase) {
-    if (knowledgeBase.isDefault || deletingKnowledgeBaseId) {
-      return;
-    }
-    const conversationCount = sessions.filter(
-      (session) => session.knowledgeBaseId === knowledgeBase.id,
-    ).length;
-    if (
-      !window.confirm(
-        `确认删除知识库“${knowledgeBase.name}”吗？${conversationCount} 个会话会暂时隐藏，但文件仍保留在文件库中，可从回收站恢复。`,
-      )
-    ) {
-      return;
-    }
-
-    setDeletingKnowledgeBaseId(knowledgeBase.id);
-    setKnowledgeBaseLifecycleError("");
-    setKnowledgeBaseLifecycleMessage("");
-    try {
-      await chatApi.deleteKnowledgeBase(knowledgeBase.id);
-      await refreshKnowledgeBaseCollections();
-      setEditingKnowledgeBaseId("");
-      setEditingKnowledgeBaseName("");
-      setKnowledgeBaseLifecycleMessage("知识库已移入回收站，文件仍保留。");
-    } catch (error) {
-      setKnowledgeBaseLifecycleError(
-        error instanceof Error
-          ? error.message
-          : "删除知识库失败，请稍后再试。",
-      );
-    } finally {
-      setDeletingKnowledgeBaseId("");
-    }
-  }
-
-  /** 恢复回收站知识库并重新加载原会话。 */
-  async function handleRestoreKnowledgeBase(knowledgeBaseId: string) {
-    if (!knowledgeBaseId || restoringKnowledgeBaseId) {
-      return;
-    }
-
-    setRestoringKnowledgeBaseId(knowledgeBaseId);
-    setKnowledgeBaseLifecycleError("");
-    setKnowledgeBaseLifecycleMessage("");
-    try {
-      await chatApi.restoreKnowledgeBase(knowledgeBaseId);
-      await refreshKnowledgeBaseCollections(knowledgeBaseId);
-      setKnowledgeBaseLifecycleMessage("知识库及其原会话已恢复。");
-    } catch (error) {
-      setKnowledgeBaseLifecycleError(
-        error instanceof Error
-          ? error.message
-          : "恢复知识库失败，请稍后再试。",
-      );
-    } finally {
-      setRestoringKnowledgeBaseId("");
-    }
-  }
-
   function updateSelectedRetrievalSettings(
     patch: Partial<KnowledgeBaseRetrievalSettings>
   ) {
@@ -565,10 +403,6 @@ export default function Home() {
     }
   }
 
-  async function loadBackendKnowledgeBases() {
-    return chatApi.listKnowledgeBasesAndSessions();
-  }
-
   useEffect(() => {
     try {
       const authState = parseAuthState(localStorage.getItem(AUTH_STORAGE_KEY));
@@ -612,42 +446,6 @@ export default function Home() {
   ]);
 
   useEffect(() => {
-    if (!hasCheckedAuth || !isKnowledgeBaseManagerOpen) {
-      return;
-    }
-
-    let isCancelled = false;
-    setIsLoadingDeletedKnowledgeBases(true);
-    setKnowledgeBaseLifecycleError("");
-
-    void chatApi
-      .listDeletedKnowledgeBases()
-      .then((knowledgeBases) => {
-        if (!isCancelled) {
-          setDeletedKnowledgeBases(knowledgeBases);
-        }
-      })
-      .catch((error) => {
-        if (!isCancelled) {
-          setKnowledgeBaseLifecycleError(
-            error instanceof Error
-              ? error.message
-              : "读取知识库回收站失败，请稍后再试。",
-          );
-        }
-      })
-      .finally(() => {
-        if (!isCancelled) {
-          setIsLoadingDeletedKnowledgeBases(false);
-        }
-      });
-
-    return () => {
-      isCancelled = true;
-    };
-  }, [hasCheckedAuth, isKnowledgeBaseManagerOpen]);
-
-  useEffect(() => {
     let isCancelled = false;
 
     async function restoreKnowledgeBases() {
@@ -655,7 +453,7 @@ export default function Home() {
         const {
           knowledgeBases: nextKnowledgeBases,
           sessions: nextSessions,
-        } = await loadBackendKnowledgeBases();
+        } = await chatApi.listKnowledgeBasesAndSessions();
 
         if (isCancelled) {
           return;
@@ -1086,9 +884,7 @@ export default function Home() {
             uploadRetryAfterSeconds={uploadRetryAfterSeconds}
             fileInputRef={fileInputRef}
             onSelectedKnowledgeBaseChange={setSelectedKnowledgeBaseId}
-            onOpenKnowledgeBaseManager={() =>
-              setIsKnowledgeBaseManagerOpen(true)
-            }
+            onOpenKnowledgeBaseManager={openKnowledgeBaseManager}
             onOpenFileManager={handleOpenFileManager}
             onFilesSelected={handleSelectFiles}
           />
@@ -1304,14 +1100,11 @@ export default function Home() {
           retrievalSettingsError={retrievalSettingsError}
           newKnowledgeBaseName={newKnowledgeBaseName}
           isCreatingKnowledgeBase={isCreatingKnowledgeBase}
-          onClose={() => setIsKnowledgeBaseManagerOpen(false)}
+          onClose={closeKnowledgeBaseManager}
           onSelectKnowledgeBase={setSelectedKnowledgeBaseId}
           onStartRename={handleStartKnowledgeBaseRename}
           onEditingNameChange={setEditingKnowledgeBaseName}
-          onCancelRename={() => {
-            setEditingKnowledgeBaseId("");
-            setEditingKnowledgeBaseName("");
-          }}
+          onCancelRename={handleCancelKnowledgeBaseRename}
           onSaveRename={handleSaveKnowledgeBaseRename}
           onDeleteKnowledgeBase={handleDeleteKnowledgeBase}
           onRestoreKnowledgeBase={handleRestoreKnowledgeBase}
