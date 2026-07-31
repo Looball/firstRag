@@ -10,7 +10,7 @@ import {
   buildKnowledgeFileUploadMessage,
   mergeKnowledgeFilesForKnowledgeBase,
   replaceKnowledgeBaseFileAssociations,
-} from "./use-knowledge-files";
+} from "./use-knowledge-file-library";
 
 vi.mock("@/lib/frontend-api", () => ({
   FrontendApiError: class FrontendApiError extends Error {
@@ -42,7 +42,7 @@ function knowledgeFile(
   };
 }
 
-describe("useKnowledgeFiles helpers", () => {
+describe("useKnowledgeFileLibrary helpers", () => {
   it("merges loaded knowledge base files and preserves known usage counts", () => {
     const previousFiles = [
       knowledgeFile("file-a", { usageCount: 3 }),
