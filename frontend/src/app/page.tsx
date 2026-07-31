@@ -17,11 +17,6 @@ import {
   useRef,
   useState,
 } from "react";
-import {
-  AUTH_STORAGE_KEY,
-  getAuthUsername,
-  parseAuthState,
-} from "@/lib/auth";
 import { redirectToLogin } from "@/lib/frontend-api";
 import {
   DEFAULT_KNOWLEDGE_BASE_ID,
@@ -31,7 +26,6 @@ import {
   readAdvancedModePreference,
   writeAdvancedModePreference,
 } from "@/lib/chat-workspace/advanced-mode";
-import * as chatApi from "@/lib/chat-workspace/api";
 import { useChatSubmission } from "@/lib/chat-workspace/use-chat-submission";
 import { useConversationActions } from "@/lib/chat-workspace/use-conversation-actions";
 import { useConversationDiagnostics } from "@/lib/chat-workspace/use-conversation-diagnostics";
@@ -42,6 +36,7 @@ import { useMessageClipboard } from "@/lib/chat-workspace/use-message-clipboard"
 import { useMessageQualityActions } from "@/lib/chat-workspace/use-message-quality-actions";
 import { usePendingChatImages } from "@/lib/chat-workspace/use-pending-chat-images";
 import { useQualityDashboard } from "@/lib/chat-workspace/use-quality-dashboard";
+import { useWorkspaceBootstrap } from "@/lib/chat-workspace/use-workspace-bootstrap";
 import { useRetryAfterCountdown } from "@/lib/use-retry-after-countdown";
 import type {
   ChatSession,
@@ -68,9 +63,7 @@ export default function Home() {
     {}
   );
   const [sessionErrors, setSessionErrors] = useState<Record<string, string>>({});
-  const [hasCheckedAuth, setHasCheckedAuth] = useState(false);
   const [pageError, setPageError] = useState("");
-  const [currentUsername, setCurrentUsername] = useState("");
   const {
     chatImageInputRef,
     clearPendingChatImages,
@@ -93,6 +86,18 @@ export default function Home() {
   const [selectedKnowledgeBaseId, setSelectedKnowledgeBaseId] = useState(
     DEFAULT_KNOWLEDGE_BASE_ID
   );
+  const {
+    currentUsername,
+    hasCheckedAuth,
+  } = useWorkspaceBootstrap({
+    selectedKnowledgeBaseId,
+    sessions,
+    setActiveSessionId: setCurrentSessionId,
+    setKnowledgeBases,
+    setPageError,
+    setSelectedKnowledgeBaseId,
+    setSessions,
+  });
   const clearComposerInput = useCallback(() => {
     setInput("");
   }, []);
@@ -344,96 +349,9 @@ export default function Home() {
   }
 
   useEffect(() => {
-    try {
-      const authState = parseAuthState(localStorage.getItem(AUTH_STORAGE_KEY));
-
-      if (!authState) {
-        redirectToLogin();
-        return;
-      }
-
-      // eslint-disable-next-line react-hooks/set-state-in-effect -- 登录态只能在客户端挂载后读取。
-      setCurrentUsername(getAuthUsername(authState));
-    } catch (error) {
-      console.error("Failed to read auth state:", error);
-      redirectToLogin();
-      return;
-    }
-
-    setHasCheckedAuth(true);
-  }, []);
-
-  useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- 浏览器偏好在 hydration 后覆盖环境默认值。
     setIsAdvancedMode(readAdvancedModePreference());
   }, []);
-
-  useEffect(() => {
-    let isCancelled = false;
-
-    async function restoreKnowledgeBases() {
-      try {
-        const {
-          knowledgeBases: nextKnowledgeBases,
-          sessions: nextSessions,
-        } = await chatApi.listKnowledgeBasesAndSessions();
-
-        if (isCancelled) {
-          return;
-        }
-
-        const defaultKnowledgeBaseId =
-          nextKnowledgeBases.find(
-            (knowledgeBase) => knowledgeBase.isDefault
-          )?.id ||
-          nextKnowledgeBases[0]?.id ||
-          "";
-
-        setKnowledgeBases(nextKnowledgeBases);
-        setSessions(nextSessions);
-        setSelectedKnowledgeBaseId(defaultKnowledgeBaseId);
-        setCurrentSessionId(
-          nextSessions.find(
-            (session) =>
-              session.knowledgeBaseId === defaultKnowledgeBaseId
-          )?.id || ""
-        );
-        setPageError("");
-      } catch (error) {
-        console.error("Failed to load knowledge bases:", error);
-
-        if (!isCancelled) {
-          setPageError(
-            error instanceof Error
-              ? error.message
-              : "读取知识库列表失败，请稍后再试。"
-          );
-        }
-      }
-    }
-
-    if (hasCheckedAuth) {
-      void restoreKnowledgeBases();
-    }
-
-    return () => {
-      isCancelled = true;
-    };
-  }, [hasCheckedAuth]);
-
-  useEffect(() => {
-    const selectedSessions = sessions.filter(
-      (session) => session.knowledgeBaseId === selectedKnowledgeBaseId
-    );
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- 知识库/会话集合变化后同步可见会话选择。
-    setCurrentSessionId((previousSessionId) =>
-      selectedSessions.some(
-        (session) => session.id === previousSessionId
-      )
-        ? previousSessionId
-        : selectedSessions[0]?.id || ""
-    );
-  }, [selectedKnowledgeBaseId, sessions]);
 
   useEffect(() => {
     const currentMessageCount = currentSession?.messages.length ?? 0;

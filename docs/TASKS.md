@@ -4581,6 +4581,56 @@ conda run -n firstrag python scripts/production_preflight.py --env-file .env --m
 git diff --check
 ```
 
+## T-112 抽取工作区认证与初始化 hook
+
+- 来源计划：`PLAN-20260731-03`
+- 优先级：`P1`
+- 状态：`Done`
+- 背景：T-111 完成后 `frontend/src/app/page.tsx` 有 797 行，其中认证检查、用户名、初始知识库/会话恢复和可见会话回退使用 2 组局部 state 与 3 段 effect，约 95 行。
+- 目标：保持知识库、会话和当前选择由页面持有，在不改变登录跳转、初始默认知识库或会话回退行为的前提下，将工作区 bootstrap 流程迁移到独立 custom hook。
+- 技术边界：
+  - `knowledgeBases`、`sessions`、当前知识库 ID 和当前会话 ID 继续由页面持有，bootstrap hook 通过稳定 React setter 初始化和同步。
+  - 认证信息只在客户端挂载后从现有 localStorage key 读取；无效登录态或读取异常继续清理并跳转登录页。
+  - 初次加载继续等待认证检查完成，并在卸载后忽略过期知识库/会话响应。
+  - 初始选择继续优先默认知识库、其次首个知识库；当前会话仅在目标知识库仍可见时保留，否则回退首个可见会话。
+  - 高级模式偏好、滚动行为、聊天发送和各业务 hook 保持独立，不迁入 bootstrap。
+- 范围：
+  - 新增 `use-workspace-bootstrap.ts`，管理认证结果、用户名、初次集合加载和会话选择同步。
+  - 抽取认证用户名解析、初始知识库选择、可见会话回退和错误转换 helper。
+  - `page.tsx` 改为装配 hook，移除认证/初始化 state 与 3 段 effect。
+  - 增加 helper 单元测试，并更新前端职责文档。
+- 验收标准：
+  - `page.tsx` 至少减少 70 行，不改变认证门禁、初始加载、默认知识库或当前会话回退行为。
+  - 新增测试、前端全量 Vitest、lint、production build 和 Playwright E2E 通过。
+  - Docker Compose、服务日志和 production preflight 通过。
+- 完成记录：
+  - 新增 `use-workspace-bootstrap.ts`，集中管理客户端认证检查、用户名、初次知识库/会话加载及可见会话选择同步。
+  - `knowledgeBases`、`sessions`、当前知识库 ID 和当前会话 ID 继续由页面持有，hook 只通过稳定 React setter 初始化和回退。
+  - 有效登录态继续允许缺少用户显示名并返回空字符串；缺失、损坏或字段不完整的登录态继续清理并跳转登录页。
+  - 初次加载继续优先默认知识库、其次首个知识库；切换知识库或集合刷新后保留仍可见的当前会话，否则选择首个可见会话。
+  - 初次集合请求在 effect 清理后忽略过期结果；高级模式偏好、滚动、聊天发送和业务 hooks 保持独立。
+  - `page.tsx` 从 797 行降至 715 行，减少 82 行。
+  - 新增 5 项 helper 测试；前端全量 Vitest 共 34 个测试文件、178 项通过。
+  - lint 0 error 并保留 2 个既有 `<img>` warning；宿主机与 Docker production build、Playwright E2E 3/3 均通过。
+  - 隔离 full-stack E2E 1/1 通过，覆盖真实注册、登录、工作区初始化、TXT 上传、worker 向量化、SSE 回答和 sources 展示，并完成专用环境清理。
+  - Docker runtime audit 输出 `found 0 vulnerabilities`；Compose 核心服务状态正常，frontend/backend HTTP smoke 均为 200，migration 输出 `applied=0 skipped=9`，production preflight 全部通过。
+- 相关提交：`2c96a3a`
+- 建议验证命令：
+
+```bash
+cd frontend
+npm test
+npm run lint
+npm run build
+CI=1 npm run test:e2e
+cd ..
+docker compose up -d --build
+docker compose ps
+docker compose logs --since=5m redis postgres chroma migrate backend worker frontend
+conda run -n firstrag python scripts/production_preflight.py --env-file .env --migration-method compose --check-runtime-health
+git diff --check
+```
+
 ## 更新规则
 
 - 每个任务开始时，将状态从 `Todo` 改为 `Doing`。
