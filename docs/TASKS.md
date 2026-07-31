@@ -4488,7 +4488,7 @@ git diff --check
 
 - 来源计划：`PLAN-20260731-01`
 - 优先级：`P1`
-- 状态：`Doing`
+- 状态：`Done`
 - 背景：T-109 完成后 `frontend/src/app/page.tsx` 仍有 1185 行，其中知识库 retrieval settings 使用 5 组局部 state、一段加载 effect，以及约 85 行按知识库缓存、更新、读取和保存流程。
 - 目标：保持知识库与会话主数据由页面持有，在不改变高级模式入口、表单值和错误/成功文案的前提下，将 retrieval settings 状态和请求流程迁移到独立 custom hook。
 - 技术边界：
@@ -4506,6 +4506,15 @@ git diff --check
   - `page.tsx` 至少减少 70 行，不改变 retrieval settings 表单、默认值、请求时机或提示文案。
   - 新增测试、前端全量 Vitest、lint、production build 和 Playwright E2E 通过。
   - Docker Compose、服务日志和 production preflight 通过。
+- 完成记录：
+  - 新增 `use-knowledge-base-retrieval-settings.ts`，集中管理按知识库缓存、加载、局部编辑、保存及 5 组提示/loading state。
+  - 默认知识库、未认证、普通模式或管理弹窗关闭时不发起读取；切换知识库或关闭弹窗后使用请求序号忽略过期响应。
+  - 局部编辑继续基于缓存或默认值合并 patch，并清空旧提示；保存继续使用当前知识库与设置快照，保留重复提交门禁和既有成功/失败文案。
+  - `knowledgeBases`、当前知识库 ID、管理弹窗开关和高级模式仍由页面及 lifecycle hook 持有；`page.tsx` 从 1185 行降至 1085 行，减少 100 行。
+  - 新增 5 项 helper 测试；前端全量 Vitest 共 32 个测试文件、165 项通过。
+  - lint 0 error 并保留 2 个既有 `<img>` warning；宿主机与 Docker production build、Playwright E2E 3/3 均通过。
+  - Docker runtime audit 输出 `found 0 vulnerabilities`；Compose 核心服务状态正常，frontend/backend HTTP smoke 均为 200，migration 输出 `applied=0 skipped=9`，production preflight 全部通过。
+- 相关提交：`dfa123c`
 - 建议验证命令：
 
 ```bash
