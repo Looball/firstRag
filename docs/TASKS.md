@@ -120,6 +120,7 @@
 | `PLAN-20260731-02` | 2026-07-31 | `Done` | 继续降低前端聊天工作台业务编排复杂度，收口聊天提交、图片上传与 SSE 回写事务。 | `T-111` |
 | `PLAN-20260731-03` | 2026-07-31 | `Done` | 继续降低前端聊天工作台业务编排复杂度，收口工作区认证与初始化流程。 | `T-112` |
 | `PLAN-20260731-04` | 2026-07-31 | `Done` | 拆分知识文件管理 hook，独立管理 vector indexing health、任务队列、轮询与操作。 | `T-113` |
+| `PLAN-20260731-05` | 2026-07-31 | `Done` | 继续拆分知识文件管理 hook，独立管理文件库列表、上传、关联和删除生命周期。 | `T-114` |
 
 ## 任务总览
 
@@ -238,6 +239,7 @@
 | `T-111` | `PLAN-20260731-02` | `P1` | `Done` | 抽取聊天提交与 SSE 回写 hook | 2026-07-31 | `0907dc4` |
 | `T-112` | `PLAN-20260731-03` | `P1` | `Done` | 抽取工作区认证与初始化 hook | 2026-07-31 | `2c96a3a` |
 | `T-113` | `PLAN-20260731-04` | `P1` | `Done` | 抽取知识文件 vector indexing hook | 2026-07-31 | `c62162f` |
+| `T-114` | `PLAN-20260731-05` | `P1` | `Done` | 抽取知识文件 library hook | 2026-07-31 | `88f5a8f` |
 
 ## 新计划接入流程
 
@@ -4672,6 +4674,53 @@ git diff --check
   - Docker runtime audit 输出 `found 0 vulnerabilities`；Compose 核心服务状态正常，frontend/backend HTTP smoke 均为 200，migration 输出 `applied=0 skipped=9`，production preflight 全部通过。
   - 隔离 full-stack E2E 1/1 通过，覆盖真实注册、登录、TXT 上传、worker 向量化、SSE 回答和 sources 展示，并完成专用容器、网络及 volumes 清理。
 - 相关提交：`c62162f`
+- 建议验证命令：
+
+```bash
+cd frontend
+npm test
+npm run lint
+npm run build
+CI=1 npm run test:e2e
+cd ..
+docker compose up -d --build
+docker compose ps
+docker compose logs --since=5m redis postgres chroma migrate backend worker frontend
+conda run -n firstrag python scripts/production_preflight.py --env-file .env --migration-method compose --check-runtime-health
+scripts/run_full_stack_e2e.sh
+git diff --check
+```
+
+## T-114 抽取知识文件 library hook
+
+- 来源计划：`PLAN-20260731-05`
+- 优先级：`P1`
+- 状态：`Done`
+- 背景：T-113 完成后 `frontend/src/lib/chat-workspace/use-knowledge-files.ts` 仍有 484 行，同时管理文件库列表加载、上传、知识库关联/解除关联、永久删除，以及 library 与 vector indexing 的跨域装配。
+- 目标：抽取 `useKnowledgeFileLibrary`，集中管理知识文件集合、知识库关联、列表刷新、上传、关联、解除关联和永久删除，使 `useKnowledgeFiles` 成为组合 library 与 indexing 的薄编排层。
+- 技术边界：
+  - library hook 持有 `knowledgeFiles`、`knowledgeBaseFiles`、派生文件集合、loading/error 和文件生命周期操作状态。
+  - indexing hook 继续独立管理 vector index health、任务队列、轮询、限流与索引操作，不重复文件库请求。
+  - `useKnowledgeFiles` 仅保留文件管理弹窗、共享 vector 提示，以及上传/永久删除后需要同时刷新 indexing 状态的跨域编排。
+  - 保持现有文件管理弹窗 props、上传大小/类型提示、Retry-After、文件数回写、索引 health 刷新和永久删除队列清理行为。
+- 范围：
+  - 新增 `use-knowledge-file-library.ts`，管理文件库读取、刷新、上传、关联、解除关联与永久删除。
+  - 将文件库 helper 和测试迁移到独立模块。
+  - 精简 `use-knowledge-files.ts` 为 library/indexing 装配入口。
+  - 更新前端职责文档与任务台账。
+- 验收标准：
+  - `use-knowledge-files.ts` 成为薄编排层，文件库请求和生命周期 state 不再由其直接持有。
+  - 新增或迁移测试，前端全量 Vitest、lint、production build 和 Playwright E2E 通过。
+  - Docker Compose、服务日志、production preflight 和隔离 full-stack E2E 通过。
+- 完成记录：
+  - 新增 `use-knowledge-file-library.ts`，集中管理知识文件集合、知识库关联、列表加载与刷新、上传、关联、解除关联、永久删除和上传 Retry-After 状态。
+  - `useKnowledgeFiles` 仅组合 library/indexing hooks，并协调文件管理弹窗、共享 vector 提示、上传后的 health 刷新和永久删除后的任务队列清理。
+  - 文件库 helper 测试迁移到独立模块，页面调用和文件管理弹窗 props 保持不变。
+  - `use-knowledge-files.ts` 从 484 行降至 180 行，减少 304 行；新 library hook 为 445 行。
+  - 前端全量 Vitest 共 35 个测试文件、180 项通过；lint 0 error 并保留 2 个既有 `<img>` warning。
+  - Docker production build、TypeScript、Playwright E2E 3/3 和隔离 full-stack E2E 1/1 通过；隔离环境完成专用容器、网络与 volumes 清理。
+  - Docker runtime audit 输出 `found 0 vulnerabilities`；Compose 核心服务状态正常，frontend/backend HTTP smoke 均为 200，migration 输出 `applied=0 skipped=9`，production preflight 全部通过。
+- 相关提交：`88f5a8f`
 - 建议验证命令：
 
 ```bash
