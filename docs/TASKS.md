@@ -120,6 +120,7 @@
 | `PLAN-20260731-02` | 2026-07-31 | `Done` | 继续降低前端聊天工作台业务编排复杂度，收口聊天提交、图片上传与 SSE 回写事务。 | `T-111` |
 | `PLAN-20260731-03` | 2026-07-31 | `Done` | 继续降低前端聊天工作台业务编排复杂度，收口工作区认证与初始化流程。 | `T-112` |
 | `PLAN-20260731-04` | 2026-07-31 | `Done` | 拆分知识文件管理 hook，独立管理 vector indexing health、任务队列、轮询与操作。 | `T-113` |
+| `PLAN-20260731-05` | 2026-07-31 | `Doing` | 继续拆分知识文件管理 hook，独立管理文件库列表、上传、关联和删除生命周期。 | `T-114` |
 
 ## 任务总览
 
@@ -238,6 +239,7 @@
 | `T-111` | `PLAN-20260731-02` | `P1` | `Done` | 抽取聊天提交与 SSE 回写 hook | 2026-07-31 | `0907dc4` |
 | `T-112` | `PLAN-20260731-03` | `P1` | `Done` | 抽取工作区认证与初始化 hook | 2026-07-31 | `2c96a3a` |
 | `T-113` | `PLAN-20260731-04` | `P1` | `Done` | 抽取知识文件 vector indexing hook | 2026-07-31 | `c62162f` |
+| `T-114` | `PLAN-20260731-05` | `P1` | `Doing` | 抽取知识文件 library hook | - | - |
 
 ## 新计划接入流程
 
@@ -4688,6 +4690,28 @@ conda run -n firstrag python scripts/production_preflight.py --env-file .env --m
 scripts/run_full_stack_e2e.sh
 git diff --check
 ```
+
+## T-114 抽取知识文件 library hook
+
+- 来源计划：`PLAN-20260731-05`
+- 优先级：`P1`
+- 状态：`Doing`
+- 背景：T-113 完成后 `frontend/src/lib/chat-workspace/use-knowledge-files.ts` 仍有 484 行，同时管理文件库列表加载、上传、知识库关联/解除关联、永久删除，以及 library 与 vector indexing 的跨域装配。
+- 目标：抽取 `useKnowledgeFileLibrary`，集中管理知识文件集合、知识库关联、列表刷新、上传、关联、解除关联和永久删除，使 `useKnowledgeFiles` 成为组合 library 与 indexing 的薄编排层。
+- 技术边界：
+  - library hook 持有 `knowledgeFiles`、`knowledgeBaseFiles`、派生文件集合、loading/error 和文件生命周期操作状态。
+  - indexing hook 继续独立管理 vector index health、任务队列、轮询、限流与索引操作，不重复文件库请求。
+  - `useKnowledgeFiles` 仅保留文件管理弹窗、共享 vector 提示，以及上传/永久删除后需要同时刷新 indexing 状态的跨域编排。
+  - 保持现有文件管理弹窗 props、上传大小/类型提示、Retry-After、文件数回写、索引 health 刷新和永久删除队列清理行为。
+- 范围：
+  - 新增 `use-knowledge-file-library.ts`，管理文件库读取、刷新、上传、关联、解除关联与永久删除。
+  - 将文件库 helper 和测试迁移到独立模块。
+  - 精简 `use-knowledge-files.ts` 为 library/indexing 装配入口。
+  - 更新前端职责文档与任务台账。
+- 验收标准：
+  - `use-knowledge-files.ts` 成为薄编排层，文件库请求和生命周期 state 不再由其直接持有。
+  - 新增或迁移测试，前端全量 Vitest、lint、production build 和 Playwright E2E 通过。
+  - Docker Compose、服务日志、production preflight 和隔离 full-stack E2E 通过。
 
 ## 更新规则
 
