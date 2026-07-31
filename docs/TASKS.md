@@ -124,7 +124,7 @@
 | `PLAN-20260731-06` | 2026-07-31 | `Done` | 继续拆分知识文件 indexing hook，独立管理本地任务队列、任务等待与轮询生命周期。 | `T-115` |
 | `PLAN-20260731-07` | 2026-07-31 | `Done` | 继续拆分知识文件 library hook，独立管理上传、关联、解除关联和永久删除 mutation。 | `T-116` |
 | `PLAN-20260731-08` | 2026-07-31 | `Done` | 继续拆分聊天提交 hook，独立管理 SSE 请求、assistant 回写与 diagnostics preload。 | `T-117` |
-| `PLAN-20260731-09` | 2026-07-31 | `Doing` | 继续拆分消息质量操作 hook，独立管理 source feedback 提交与回写生命周期。 | `T-118` |
+| `PLAN-20260731-09` | 2026-07-31 | `Done` | 继续拆分消息质量操作 hook，独立管理 source feedback 提交与回写生命周期。 | `T-118` |
 
 ## 任务总览
 
@@ -247,7 +247,7 @@
 | `T-115` | `PLAN-20260731-06` | `P1` | `Done` | 抽取 vector index queue hook | 2026-07-31 | `9be7c9c` |
 | `T-116` | `PLAN-20260731-07` | `P1` | `Done` | 抽取知识文件 mutation hook | 2026-07-31 | `b7eb96e` |
 | `T-117` | `PLAN-20260731-08` | `P1` | `Done` | 抽取 chat response stream hook | 2026-07-31 | `2f2d72c` |
-| `T-118` | `PLAN-20260731-09` | `P1` | `Doing` | 抽取 source feedback actions hook | - | - |
+| `T-118` | `PLAN-20260731-09` | `P1` | `Done` | 抽取 source feedback actions hook | 2026-07-31 | `8495ef5` |
 
 ## 新计划接入流程
 
@@ -4889,7 +4889,7 @@ git diff --check
 
 - 来源计划：`PLAN-20260731-09`
 - 优先级：`P1`
-- 状态：`Doing`
+- 状态：`Done`
 - 背景：`frontend/src/lib/chat-workspace/use-message-quality-actions.ts` 有 450 行，同时管理 message feedback 面板/草稿/提交、source feedback 提交，以及 Eval 草稿下载，三组状态拥有独立依赖。
 - 目标：抽取独立 source feedback hook，集中管理引用反馈提交、loading/error/message、2 秒提示清理和目标 source 回写，使 message quality hook 聚焦回答反馈与 Eval 草稿导出。
 - 技术边界：
@@ -4906,6 +4906,30 @@ git diff --check
   - `use-message-quality-actions.ts` 不再直接持有 source feedback state 或调用 `submitMessageSourceFeedback`。
   - 新增或迁移测试，前端全量 Vitest、lint、production build 和 Playwright E2E 通过。
   - Docker Compose、服务日志、production preflight 和隔离 full-stack E2E 通过。
+- 完成记录：
+  - 新增 `use-source-feedback-actions.ts`，集中管理引用反馈提交、loading/error/message、2 秒成功提示清理和目标 source 回写。
+  - `useMessageQualityActions` 继续管理 message feedback 面板/草稿/提交和 Eval 草稿导出，通过稳定 setter 组合 source feedback hook，页面消费 API 保持不变。
+  - `updateSourceFeedbackInSessions` 与 source index 匹配测试迁移到独立模块，继续兼容持久化 index 和数组位置 fallback。
+  - `use-message-quality-actions.ts` 从 450 行降至 315 行，减少 135 行；新 source feedback hook 为 169 行。
+  - 前端全量 Vitest 共 38 个测试文件、180 项通过；lint 0 error 并保留 2 个既有 `<img>` warning。
+  - Docker production build 与 TypeScript 通过，runtime audit 输出 `found 0 vulnerabilities`；Compose 核心服务状态正常，frontend/backend HTTP smoke 分别为 200/healthy，migration 输出 `applied=0 skipped=9`，production preflight 全部通过。
+  - Playwright E2E 3/3 和隔离 full-stack E2E 1/1 通过；隔离环境完成专用容器、网络与 volumes 清理。
+- 相关提交：`8495ef5`
+- 建议验证命令：
+
+```bash
+cd frontend
+npm test
+npm run lint
+CI=1 npm run test:e2e
+cd ..
+docker compose up -d --build
+docker compose ps
+docker compose logs --since=5m redis postgres chroma migrate backend worker frontend
+conda run -n firstrag python scripts/production_preflight.py --env-file .env --migration-method compose --check-runtime-health
+scripts/run_full_stack_e2e.sh
+git diff --check
+```
 
 ## 更新规则
 
