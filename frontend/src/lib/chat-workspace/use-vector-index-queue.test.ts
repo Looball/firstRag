@@ -5,7 +5,7 @@ import {
   mergeRefreshedVectorIndexQueueItems,
   mergeVectorIndexQueueItems,
   removeVectorIndexQueueItemsForFile,
-} from "./use-knowledge-file-indexing";
+} from "./use-vector-index-queue";
 
 vi.mock("@/lib/frontend-api", () => ({
   authenticatedFetch: vi.fn(),
@@ -29,7 +29,7 @@ function queueItem(
   };
 }
 
-describe("useKnowledgeFileIndexing helpers", () => {
+describe("useVectorIndexQueue helpers", () => {
   it("merges jobs while keeping existing target labels", () => {
     const previousJobs = [queueItem("job-1")];
 
