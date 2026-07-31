@@ -125,6 +125,7 @@
 | `PLAN-20260731-07` | 2026-07-31 | `Done` | 继续拆分知识文件 library hook，独立管理上传、关联、解除关联和永久删除 mutation。 | `T-116` |
 | `PLAN-20260731-08` | 2026-07-31 | `Done` | 继续拆分聊天提交 hook，独立管理 SSE 请求、assistant 回写与 diagnostics preload。 | `T-117` |
 | `PLAN-20260731-09` | 2026-07-31 | `Done` | 继续拆分消息质量操作 hook，独立管理 source feedback 提交与回写生命周期。 | `T-118` |
+| `PLAN-20260731-10` | 2026-07-31 | `Done` | 继续拆分知识库生命周期 hook，独立管理回收站加载、删除、恢复和集合刷新。 | `T-119` |
 
 ## 任务总览
 
@@ -248,6 +249,7 @@
 | `T-116` | `PLAN-20260731-07` | `P1` | `Done` | 抽取知识文件 mutation hook | 2026-07-31 | `b7eb96e` |
 | `T-117` | `PLAN-20260731-08` | `P1` | `Done` | 抽取 chat response stream hook | 2026-07-31 | `2f2d72c` |
 | `T-118` | `PLAN-20260731-09` | `P1` | `Done` | 抽取 source feedback actions hook | 2026-07-31 | `8495ef5` |
+| `T-119` | `PLAN-20260731-10` | `P1` | `Done` | 抽取知识库回收站操作 hook | 2026-07-31 | `b456ea1` |
 
 ## 新计划接入流程
 
@@ -4915,6 +4917,52 @@ git diff --check
   - Docker production build 与 TypeScript 通过，runtime audit 输出 `found 0 vulnerabilities`；Compose 核心服务状态正常，frontend/backend HTTP smoke 分别为 200/healthy，migration 输出 `applied=0 skipped=9`，production preflight 全部通过。
   - Playwright E2E 3/3 和隔离 full-stack E2E 1/1 通过；隔离环境完成专用容器、网络与 volumes 清理。
 - 相关提交：`8495ef5`
+- 建议验证命令：
+
+```bash
+cd frontend
+npm test
+npm run lint
+CI=1 npm run test:e2e
+cd ..
+docker compose up -d --build
+docker compose ps
+docker compose logs --since=5m redis postgres chroma migrate backend worker frontend
+conda run -n firstrag python scripts/production_preflight.py --env-file .env --migration-method compose --check-runtime-health
+scripts/run_full_stack_e2e.sh
+git diff --check
+```
+
+## T-119 抽取知识库回收站操作 hook
+
+- 来源计划：`PLAN-20260731-10`
+- 优先级：`P1`
+- 状态：`Done`
+- 背景：`frontend/src/lib/chat-workspace/use-knowledge-base-lifecycle.ts` 有 433 行，同时管理知识库创建/重命名、回收站加载、删除/恢复和跨集合刷新，这些流程拥有相对独立的状态与依赖。
+- 目标：抽取独立 `useKnowledgeBaseTrashActions`，集中管理回收站加载、软删除、恢复、错误/提示状态和刷新后的知识库/会话选择，使 lifecycle hook 聚焦管理器开关、创建和重命名。
+- 技术边界：
+  - trash hook 接收页面持有的知识库、会话和当前选择 setter，不接管创建名称或重命名草稿。
+  - 保持管理器打开且认证完成后才加载回收站，并保留 effect 取消保护。
+  - 保持默认知识库删除保护、受影响会话数量确认、删除/恢复提示和刷新选择 fallback 顺序。
+  - `useKnowledgeBaseLifecycle` 内部组合 trash hook，保持页面消费的返回字段和调用签名不变。
+- 范围：
+  - 新增 `use-knowledge-base-trash-actions.ts`，管理知识库回收站 lifecycle。
+  - 将回收站选择 helper、删除确认 helper 与对应测试迁移到独立模块。
+  - 精简 `use-knowledge-base-lifecycle.ts`，保留管理器开关、创建和重命名。
+  - 更新前端职责文档与任务台账。
+- 验收标准：
+  - `use-knowledge-base-lifecycle.ts` 不再直接加载回收站或调用知识库删除/恢复 API。
+  - 新增或迁移测试，前端全量 Vitest、lint、production build 和 Playwright E2E 通过。
+  - Docker Compose、服务日志、production preflight 和隔离 full-stack E2E 通过。
+- 完成记录：
+  - 新增 `use-knowledge-base-trash-actions.ts`，集中管理回收站加载、软删除、恢复、错误/提示状态，以及知识库/会话并行刷新与选择回退。
+  - `useKnowledgeBaseLifecycle` 继续管理弹窗开关、创建和重命名，通过稳定回调组合 trash actions hook，页面消费 API 保持不变。
+  - 回收站选择 fallback、会话选择 fallback、删除确认和错误转换 helper 与 4 项测试迁移到独立模块；lifecycle 模块保留名称清理、列表 upsert 和重命名 helper 的 3 项测试。
+  - `use-knowledge-base-lifecycle.ts` 从 433 行降至 245 行，减少 188 行；新 trash actions hook 为 286 行。
+  - 前端全量 Vitest 共 39 个测试文件、180 项通过；lint 0 error 并保留 2 个既有 `<img>` warning。
+  - Docker production build 与 TypeScript 通过，runtime audit 输出 `found 0 vulnerabilities`；Compose 核心服务状态正常，frontend/backend HTTP smoke 分别为 200/healthy，migration 输出 `applied=0 skipped=9`，production preflight 全部通过。
+  - Playwright E2E 3/3 和隔离 full-stack E2E 1/1 通过；隔离环境完成专用容器、网络与 volumes 清理。
+- 相关提交：`b456ea1`
 - 建议验证命令：
 
 ```bash
