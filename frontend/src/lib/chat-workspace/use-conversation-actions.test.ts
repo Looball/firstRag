@@ -1,12 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
-import type { ChatSession, Message } from "./types";
+import type { ChatSession } from "./types";
 import {
   getConversationActionError,
   getDeleteSessionResult,
   normalizeSessionTitle,
   removeSessionRecord,
   renameSession,
-  updateConversationMessages,
 } from "./use-conversation-actions";
 
 vi.mock("@/lib/frontend-api", () => ({
@@ -30,26 +29,6 @@ function createSession(
 }
 
 describe("useConversationActions helpers", () => {
-  it("writes loaded messages only to the target session", () => {
-    const sessions = [
-      createSession("session-1", "kb-1"),
-      createSession("session-2", "kb-1"),
-    ];
-    const messages: Message[] = [{ role: "user", content: "问题" }];
-
-    const updated = updateConversationMessages(
-      sessions,
-      "session-1",
-      messages,
-    );
-
-    expect(updated[0]).toMatchObject({
-      messages,
-      messagesLoaded: true,
-    });
-    expect(updated[1]).toBe(sessions[1]);
-  });
-
   it("renames only the target session", () => {
     const sessions = [
       createSession("session-1", "kb-1", "旧标题"),

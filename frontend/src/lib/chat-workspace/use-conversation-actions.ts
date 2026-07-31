@@ -4,11 +4,11 @@ import {
   type Dispatch,
   type SetStateAction,
   useCallback,
-  useEffect,
   useState,
 } from "react";
 import * as chatApi from "./api";
-import type { ChatSession, Message } from "./types";
+import type { ChatSession } from "./types";
+import { useConversationMessageLoader } from "./use-conversation-message-loader";
 
 type UseConversationActionsOptions = {
   activeSessionId: string;
@@ -45,21 +45,6 @@ export function getConversationActionError(
  */
 export function normalizeSessionTitle(title: string) {
   return title.trim() || "新对话";
-}
-
-/**
- * 将已加载消息写回目标会话，同时保持其他会话引用不变。
- */
-export function updateConversationMessages(
-  sessions: ChatSession[],
-  sessionId: string,
-  messages: Message[],
-) {
-  return sessions.map((session) =>
-    session.id === sessionId
-      ? { ...session, messages, messagesLoaded: true }
-      : session,
-  );
 }
 
 /**
@@ -122,7 +107,7 @@ export function getDeleteSessionResult(
 }
 
 /**
- * 管理会话创建、选择加载、重命名和删除的请求与侧栏交互状态。
+ * 管理会话创建、选择、重命名和删除的请求与侧栏交互状态。
  *
  * sessions 和聊天流状态仍由页面持有；hook 仅通过 React setter 回写。
  */
@@ -147,48 +132,12 @@ export function useConversationActions({
     sessions.find((session) => session.id === activeSessionId)
       ?.messagesLoaded ?? true;
 
-  useEffect(() => {
-    let isCancelled = false;
-
-    if (!activeSessionId || areActiveSessionMessagesLoaded) {
-      return;
-    }
-
-    setSessionErrors((previous) => ({
-      ...previous,
-      [activeSessionId]: "",
-    }));
-
-    void chatApi
-      .listConversationMessages(activeSessionId)
-      .then((messages) => {
-        if (!isCancelled) {
-          setSessions((previous) =>
-            updateConversationMessages(previous, activeSessionId, messages),
-          );
-        }
-      })
-      .catch((error) => {
-        if (!isCancelled) {
-          setSessionErrors((previous) => ({
-            ...previous,
-            [activeSessionId]: getConversationActionError(
-              error,
-              "读取会话消息失败，请稍后再试。",
-            ),
-          }));
-        }
-      });
-
-    return () => {
-      isCancelled = true;
-    };
-  }, [
+  useConversationMessageLoader({
     activeSessionId,
     areActiveSessionMessagesLoaded,
     setSessionErrors,
     setSessions,
-  ]);
+  });
 
   const createSession = useCallback(
     async (knowledgeBaseId: string, title = "新对话") => {
