@@ -4531,6 +4531,56 @@ conda run -n firstrag python scripts/production_preflight.py --env-file .env --m
 git diff --check
 ```
 
+## T-111 抽取聊天提交与 SSE 回写 hook
+
+- 来源计划：`PLAN-20260731-02`
+- 优先级：`P1`
+- 状态：`Done`
+- 背景：T-110 完成后 `frontend/src/app/page.tsx` 仍有 1085 行，其中 `handleSubmit` 与图片上传 state 占约 310 行，混合输入校验、自动建会话、图片上传、用户消息、SSE assistant 回写、diagnostics preload 和 loading/error 编排。
+- 目标：保持 `sessions`、输入框、当前知识库/会话和限流倒计时由现有页面及 hooks 持有，在不改变聊天交互、错误文案和 SSE 时序的前提下，将单轮发送事务迁移到独立 custom hook。
+- 技术边界：
+  - `sessions`、当前会话 ID、输入值、会话 loading/error record 继续由页面持有，submission hook 只通过稳定 React setter 回写。
+  - 手动新建会话继续由 `useConversationActions` 管理；发送首条消息时仍复用其 `createSession` 并使用问题生成标题。
+  - 图片选择、校验、预览和 Object URL 生命周期继续由 `usePendingChatImages` 管理；submission hook 只上传当前快照并在成功后清空。
+  - 聊天和图片上传保持独立 Retry-After 倒计时；失败时保留既有用户可见文案，不自动重试。
+  - SSE 继续按 content、sources、retrieval、message ID 和 fallback 更新同一 assistant message；高级模式完成后 silent preload diagnostics。
+  - 增加同步提交锁，防止 React 下一次 render 前的重复点击产生重复会话或请求。
+- 范围：
+  - 新增 `use-chat-submission.ts`，管理自动建会话、图片上传、聊天请求、SSE handlers 及发送状态。
+  - 抽取用户消息追加和 assistant content/sources/retrieval/message ID/fallback 回写 helper。
+  - `page.tsx` 改为装配 hook，移除图片上传 state 与完整 `handleSubmit`。
+  - 增加 helper 单元测试，并更新前端职责文档与 ChatComposer 注释。
+- 验收标准：
+  - `page.tsx` 至少减少 260 行，不改变输入校验、自动建会话、图片上传、Retry-After、SSE 或 diagnostics 行为。
+  - 新增测试、前端全量 Vitest、lint、production build 和 Playwright E2E 通过。
+  - Docker Compose、服务日志和 production preflight 通过。
+- 完成记录：
+  - 新增 `use-chat-submission.ts`，集中管理输入门禁、自动建会话、图片上传、用户消息、聊天请求、SSE handlers、diagnostics preload 及上传状态。
+  - `sessions`、输入框、当前知识库/会话、会话 loading/error record 和两组 Retry-After 倒计时仍由页面及现有 hooks 持有，通过稳定 setter/callback 装配。
+  - 用户消息与 assistant content、sources、retrieval、message ID、fallback 统一由不可变 helper 更新，并保留未受影响会话的对象引用。
+  - 发送流程使用同步 ref 锁阻止同一 render 周期内的重复提交；图片仍使用发送开始时的快照，成功进入聊天后才清空选择和 Object URL。
+  - `page.tsx` 从 1085 行降至 797 行，减少 288 行；认证、模式偏好与初次工作区加载继续留在页面。
+  - 新增 8 项 helper 测试；前端全量 Vitest 共 33 个测试文件、173 项通过。
+  - lint 0 error 并保留 2 个既有 `<img>` warning；宿主机与 Docker production build、Playwright E2E 3/3 均通过。
+  - 隔离 full-stack E2E 1/1 通过，覆盖真实注册、登录、TXT 上传、worker 向量化、SSE 回答和 sources 展示，并完成专用容器、网络及 volumes 清理。
+  - Docker runtime audit 输出 `found 0 vulnerabilities`；Compose 核心服务状态正常，frontend/backend HTTP smoke 均为 200，migration 输出 `applied=0 skipped=9`，production preflight 全部通过。
+- 相关提交：`0907dc4`
+- 建议验证命令：
+
+```bash
+cd frontend
+npm test
+npm run lint
+npm run build
+CI=1 npm run test:e2e
+cd ..
+docker compose up -d --build
+docker compose ps
+docker compose logs --since=5m redis postgres chroma migrate backend worker frontend
+conda run -n firstrag python scripts/production_preflight.py --env-file .env --migration-method compose --check-runtime-health
+git diff --check
+```
+
 ## 更新规则
 
 - 每个任务开始时，将状态从 `Todo` 改为 `Doing`。
