@@ -4,13 +4,11 @@ import { FrontendApiError } from "@/lib/frontend-api";
 import type {
   KnowledgeBaseFile,
   KnowledgeFile,
-  VectorIndexQueueItem,
 } from "./types";
 import {
   buildKnowledgeFileUploadErrorMessage,
   buildKnowledgeFileUploadMessage,
   mergeKnowledgeFilesForKnowledgeBase,
-  mergeVectorIndexQueueItems,
   replaceKnowledgeBaseFileAssociations,
 } from "./use-knowledge-files";
 
@@ -77,57 +75,6 @@ describe("useKnowledgeFiles helpers", () => {
     ).toEqual([
       { knowledgeBaseId: "kb-2", knowledgeFileId: "file-other" },
       { knowledgeBaseId: "kb-1", knowledgeFileId: "file-new" },
-    ]);
-  });
-
-  it("updates vector index queue jobs while keeping existing target labels", () => {
-    const previousJobs: VectorIndexQueueItem[] = [
-      {
-        id: "job-1",
-        status: "queued",
-        errorMessage: "",
-        failureHint: "",
-        targetName: "合同.md",
-        targetType: "file",
-      },
-    ];
-
-    expect(
-      mergeVectorIndexQueueItems(
-        previousJobs,
-        [
-          {
-            id: "job-1",
-            status: "succeeded",
-            errorMessage: "",
-            failureHint: "",
-          },
-          {
-            id: "job-2",
-            status: "queued",
-            errorMessage: "",
-            failureHint: "",
-          },
-        ],
-        { targetName: "当前知识库", targetType: "knowledge-base" },
-      ),
-    ).toEqual([
-      {
-        id: "job-1",
-        status: "succeeded",
-        errorMessage: "",
-        failureHint: "",
-        targetName: "合同.md",
-        targetType: "file",
-      },
-      {
-        id: "job-2",
-        status: "queued",
-        errorMessage: "",
-        failureHint: "",
-        targetName: "当前知识库",
-        targetType: "knowledge-base",
-      },
     ]);
   });
 
