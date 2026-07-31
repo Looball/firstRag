@@ -124,6 +124,7 @@
 | `PLAN-20260731-06` | 2026-07-31 | `Done` | 继续拆分知识文件 indexing hook，独立管理本地任务队列、任务等待与轮询生命周期。 | `T-115` |
 | `PLAN-20260731-07` | 2026-07-31 | `Done` | 继续拆分知识文件 library hook，独立管理上传、关联、解除关联和永久删除 mutation。 | `T-116` |
 | `PLAN-20260731-08` | 2026-07-31 | `Done` | 继续拆分聊天提交 hook，独立管理 SSE 请求、assistant 回写与 diagnostics preload。 | `T-117` |
+| `PLAN-20260731-09` | 2026-07-31 | `Doing` | 继续拆分消息质量操作 hook，独立管理 source feedback 提交与回写生命周期。 | `T-118` |
 
 ## 任务总览
 
@@ -246,6 +247,7 @@
 | `T-115` | `PLAN-20260731-06` | `P1` | `Done` | 抽取 vector index queue hook | 2026-07-31 | `9be7c9c` |
 | `T-116` | `PLAN-20260731-07` | `P1` | `Done` | 抽取知识文件 mutation hook | 2026-07-31 | `b7eb96e` |
 | `T-117` | `PLAN-20260731-08` | `P1` | `Done` | 抽取 chat response stream hook | 2026-07-31 | `2f2d72c` |
+| `T-118` | `PLAN-20260731-09` | `P1` | `Doing` | 抽取 source feedback actions hook | - | - |
 
 ## 新计划接入流程
 
@@ -4882,6 +4884,28 @@ conda run -n firstrag python scripts/production_preflight.py --env-file .env --m
 scripts/run_full_stack_e2e.sh
 git diff --check
 ```
+
+## T-118 抽取 source feedback actions hook
+
+- 来源计划：`PLAN-20260731-09`
+- 优先级：`P1`
+- 状态：`Doing`
+- 背景：`frontend/src/lib/chat-workspace/use-message-quality-actions.ts` 有 450 行，同时管理 message feedback 面板/草稿/提交、source feedback 提交，以及 Eval 草稿下载，三组状态拥有独立依赖。
+- 目标：抽取独立 source feedback hook，集中管理引用反馈提交、loading/error/message、2 秒提示清理和目标 source 回写，使 message quality hook 聚焦回答反馈与 Eval 草稿导出。
+- 技术边界：
+  - source feedback hook 仅接收稳定的 session setter，不持有 message feedback 面板、reason/note 草稿或 Eval 导出状态。
+  - `updateSourceFeedbackInSessions` helper 与对应测试迁移到新模块，继续按持久化 source index 或数组位置匹配引用。
+  - `useMessageQualityActions` 内部组合 source feedback hook，并保持页面消费的返回字段和调用签名不变。
+  - 保持未持久化 message 提示、API payload、成功/失败提示和 2 秒自动清理行为。
+- 范围：
+  - 新增 `use-source-feedback-actions.ts`，管理 source feedback lifecycle。
+  - 将 source feedback helper 与测试迁移到独立模块。
+  - 精简 `use-message-quality-actions.ts`，保留 message feedback 与 Eval 草稿导出。
+  - 更新前端职责文档与任务台账。
+- 验收标准：
+  - `use-message-quality-actions.ts` 不再直接持有 source feedback state 或调用 `submitMessageSourceFeedback`。
+  - 新增或迁移测试，前端全量 Vitest、lint、production build 和 Playwright E2E 通过。
+  - Docker Compose、服务日志、production preflight 和隔离 full-stack E2E 通过。
 
 ## 更新规则
 
