@@ -73,7 +73,7 @@ export type KnowledgeBaseManagerDialogProps = {
 /**
  * 展示知识库列表、回收站、检索设置和新建表单。
  *
- * 生命周期请求和局部状态由 useKnowledgeBaseLifecycle 管理，
+ * 创建/重命名与回收站请求分别由 lifecycle 和 trash actions hooks 管理，
  * retrieval settings 由 useKnowledgeBaseRetrievalSettings 管理。
  */
 export function KnowledgeBaseManagerDialog({
