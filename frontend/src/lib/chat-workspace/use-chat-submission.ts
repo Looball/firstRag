@@ -9,14 +9,11 @@ import {
 } from "react";
 import { DEFAULT_KNOWLEDGE_BASE_ID } from "./constants";
 import * as chatApi from "./api";
-import { streamChatResponse } from "./chat-stream";
+import { useChatResponseStream } from "./use-chat-response-stream";
 import type { PendingChatImage } from "./use-pending-chat-images";
 import type {
   ChatSession,
-  ChatSource,
-  Message,
   MessageAttachment,
-  RetrievalState,
 } from "./types";
 import { buildSessionTitle } from "./utils";
 
@@ -51,47 +48,6 @@ type UseChatSubmissionOptions = {
 };
 
 /**
- * 更新目标会话；目标不存在或 updater 无变更时保留原引用。
- */
-function updateTargetSession(
-  sessions: ChatSession[],
-  sessionId: string,
-  updater: (session: ChatSession) => ChatSession,
-) {
-  let hasChanged = false;
-  const nextSessions = sessions.map((session) => {
-    if (session.id !== sessionId) {
-      return session;
-    }
-
-    const nextSession = updater(session);
-    hasChanged ||= nextSession !== session;
-    return nextSession;
-  });
-
-  return hasChanged ? nextSessions : sessions;
-}
-
-/**
- * 更新最后一条 assistant message；不存在时按指定内容创建。
- */
-function upsertLastAssistantMessage(
-  messages: Message[],
-  createMessage: () => Message,
-  updater: (message: Message) => Message,
-) {
-  const lastMessage = messages[messages.length - 1];
-
-  if (lastMessage?.role !== "assistant") {
-    return [...messages, createMessage()];
-  }
-
-  const nextMessages = [...messages];
-  nextMessages[nextMessages.length - 1] = updater(lastMessage);
-  return nextMessages;
-}
-
-/**
  * 将用户消息追加到目标会话，并在首条消息时更新标题。
  */
 export function appendUserMessageToSessions(
@@ -100,128 +56,31 @@ export function appendUserMessageToSessions(
   content: string,
   attachments: MessageAttachment[],
 ) {
-  return updateTargetSession(sessions, sessionId, (session) => ({
-    ...session,
-    title:
-      session.messages.length === 0
-        ? buildSessionTitle(content)
-        : session.title,
-    messages: [
-      ...session.messages,
-      {
-        role: "user",
-        content,
-        ...(attachments.length > 0 ? { attachments } : {}),
-      },
-    ],
-  }));
-}
-
-/**
- * 将流式内容追加到最后一条 assistant message。
- */
-export function appendAssistantContentToSessions(
-  sessions: ChatSession[],
-  sessionId: string,
-  content: string,
-) {
-  return updateTargetSession(sessions, sessionId, (session) => ({
-    ...session,
-    messages: upsertLastAssistantMessage(
-      session.messages,
-      () => ({ role: "assistant", content }),
-      (message) => ({
-        ...message,
-        content: message.content + content,
-      }),
-    ),
-  }));
-}
-
-/**
- * 将引用来源写入最后一条 assistant message。
- */
-export function setAssistantSourcesInSessions(
-  sessions: ChatSession[],
-  sessionId: string,
-  sources: ChatSource[],
-) {
-  if (sources.length === 0) {
-    return sessions;
-  }
-
-  return updateTargetSession(sessions, sessionId, (session) => ({
-    ...session,
-    messages: upsertLastAssistantMessage(
-      session.messages,
-      () => ({ role: "assistant", content: "", sources }),
-      (message) => ({ ...message, sources }),
-    ),
-  }));
-}
-
-/**
- * 将 retrieval 状态写入最后一条 assistant message。
- */
-export function setAssistantRetrievalInSessions(
-  sessions: ChatSession[],
-  sessionId: string,
-  retrieval: RetrievalState,
-) {
-  return updateTargetSession(sessions, sessionId, (session) => ({
-    ...session,
-    messages: upsertLastAssistantMessage(
-      session.messages,
-      () => ({ role: "assistant", content: "", retrieval }),
-      (message) => ({ ...message, retrieval }),
-    ),
-  }));
-}
-
-/**
- * 将持久化 message ID 写入已存在的最后一条 assistant message。
- */
-export function setAssistantMessageIdInSessions(
-  sessions: ChatSession[],
-  sessionId: string,
-  messageId: string,
-) {
-  if (!messageId) {
-    return sessions;
-  }
-
-  return updateTargetSession(sessions, sessionId, (session) => {
-    const lastMessage = session.messages[session.messages.length - 1];
-
-    if (lastMessage?.role !== "assistant") {
+  let hasChanged = false;
+  const nextSessions = sessions.map((session) => {
+    if (session.id !== sessionId) {
       return session;
     }
 
-    const messages = [...session.messages];
-    messages[messages.length - 1] = {
-      ...lastMessage,
-      id: messageId,
+    hasChanged = true;
+    return {
+      ...session,
+      title:
+        session.messages.length === 0
+          ? buildSessionTitle(content)
+          : session.title,
+      messages: [
+        ...session.messages,
+        {
+          role: "user" as const,
+          content,
+          ...(attachments.length > 0 ? { attachments } : {}),
+        },
+      ],
     };
-    return { ...session, messages };
   });
-}
 
-/**
- * 用最终 fallback 内容覆盖或创建最后一条 assistant message。
- */
-export function setAssistantFallbackInSessions(
-  sessions: ChatSession[],
-  sessionId: string,
-  content: string,
-) {
-  return updateTargetSession(sessions, sessionId, (session) => ({
-    ...session,
-    messages: upsertLastAssistantMessage(
-      session.messages,
-      () => ({ role: "assistant", content }),
-      (message) => ({ ...message, content }),
-    ),
-  }));
+  return hasChanged ? nextSessions : sessions;
 }
 
 /**
@@ -235,7 +94,7 @@ export function getChatSubmissionError(
 }
 
 /**
- * 管理自动建会话、图片上传、用户消息、SSE 回写和发送状态。
+ * 管理自动建会话、图片上传、用户消息事务和提交互斥状态。
  *
  * sessions、输入框与会话 loading/error 仍由页面持有，hook 通过 React
  * setter 回写；页面只负责装配和展示。
@@ -263,6 +122,14 @@ export function useChatSubmission({
 }: UseChatSubmissionOptions) {
   const [isUploadingChatImages, setIsUploadingChatImages] = useState(false);
   const isSubmittingRef = useRef(false);
+  const { submitChatResponse } = useChatResponseStream({
+    isAdvancedMode,
+    loadDiagnostics,
+    setLoadingSessions,
+    setSessionErrors,
+    setSessions,
+    startChatRateLimitCountdown,
+  });
 
   const submitChat = useCallback(
     async (overrideInput?: string) => {
@@ -371,91 +238,12 @@ export function useChatSubmission({
           clearPendingChatImages();
         }
 
-        setSessionErrors((previous) => ({
-          ...previous,
-          [activeSessionId]: "",
-        }));
-        setLoadingSessions((previous) => ({
-          ...previous,
-          [activeSessionId]: true,
-        }));
-
-        try {
-          const response = await chatApi.postChatMessage(
-            activeSessionId,
-            activeKnowledgeBaseId,
-            messageContent,
-            uploadedAttachments.map((attachment) => attachment.id),
-          );
-
-          await streamChatResponse(response, {
-            appendAssistantContent: (content) => {
-              setSessions((previous) =>
-                appendAssistantContentToSessions(
-                  previous,
-                  activeSessionId,
-                  content,
-                ),
-              );
-            },
-            setAssistantFallback: (content) => {
-              setSessions((previous) =>
-                setAssistantFallbackInSessions(
-                  previous,
-                  activeSessionId,
-                  content,
-                ),
-              );
-            },
-            setAssistantMessageId: (messageId) => {
-              setSessions((previous) =>
-                setAssistantMessageIdInSessions(
-                  previous,
-                  activeSessionId,
-                  messageId,
-                ),
-              );
-            },
-            setAssistantRetrieval: (retrieval) => {
-              setSessions((previous) =>
-                setAssistantRetrievalInSessions(
-                  previous,
-                  activeSessionId,
-                  retrieval,
-                ),
-              );
-            },
-            setAssistantSources: (sources) => {
-              setSessions((previous) =>
-                setAssistantSourcesInSessions(
-                  previous,
-                  activeSessionId,
-                  sources,
-                ),
-              );
-            },
-            onDone: () => {
-              if (isAdvancedMode) {
-                void loadDiagnostics(activeSessionId, { silent: true });
-              }
-            },
-          });
-        } catch (error) {
-          console.error(error);
-          startChatRateLimitCountdown(error);
-          setSessionErrors((previous) => ({
-            ...previous,
-            [activeSessionId]: getChatSubmissionError(
-              error,
-              "请求失败了，请稍后再试。",
-            ),
-          }));
-        } finally {
-          setLoadingSessions((previous) => ({
-            ...previous,
-            [activeSessionId]: false,
-          }));
-        }
+        await submitChatResponse(
+          activeSessionId,
+          activeKnowledgeBaseId,
+          messageContent,
+          uploadedAttachments.map((attachment) => attachment.id),
+        );
       } finally {
         isSubmittingRef.current = false;
       }
@@ -465,22 +253,19 @@ export function useChatSubmission({
       createSession,
       currentSession,
       input,
-      isAdvancedMode,
       isChatImageRateLimited,
       isChatRateLimited,
       isCreatingSession,
       isCurrentSessionLoading,
       isUploadingChatImages,
-      loadDiagnostics,
       pendingChatImages,
       selectedKnowledgeBaseId,
       setInput,
-      setLoadingSessions,
       setPageError,
       setSessionErrors,
       setSessions,
       startChatImageRateLimitCountdown,
-      startChatRateLimitCountdown,
+      submitChatResponse,
     ],
   );
 
