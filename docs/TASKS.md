@@ -123,6 +123,7 @@
 | `PLAN-20260731-05` | 2026-07-31 | `Done` | 继续拆分知识文件管理 hook，独立管理文件库列表、上传、关联和删除生命周期。 | `T-114` |
 | `PLAN-20260731-06` | 2026-07-31 | `Done` | 继续拆分知识文件 indexing hook，独立管理本地任务队列、任务等待与轮询生命周期。 | `T-115` |
 | `PLAN-20260731-07` | 2026-07-31 | `Done` | 继续拆分知识文件 library hook，独立管理上传、关联、解除关联和永久删除 mutation。 | `T-116` |
+| `PLAN-20260731-08` | 2026-07-31 | `Done` | 继续拆分聊天提交 hook，独立管理 SSE 请求、assistant 回写与 diagnostics preload。 | `T-117` |
 
 ## 任务总览
 
@@ -244,6 +245,7 @@
 | `T-114` | `PLAN-20260731-05` | `P1` | `Done` | 抽取知识文件 library hook | 2026-07-31 | `88f5a8f` |
 | `T-115` | `PLAN-20260731-06` | `P1` | `Done` | 抽取 vector index queue hook | 2026-07-31 | `9be7c9c` |
 | `T-116` | `PLAN-20260731-07` | `P1` | `Done` | 抽取知识文件 mutation hook | 2026-07-31 | `b7eb96e` |
+| `T-117` | `PLAN-20260731-08` | `P1` | `Done` | 抽取 chat response stream hook | 2026-07-31 | `2f2d72c` |
 
 ## 新计划接入流程
 
@@ -4819,6 +4821,52 @@ git diff --check
   - Docker production build与 TypeScript 通过，runtime audit 输出 `found 0 vulnerabilities`；Compose 核心服务状态正常，frontend/backend HTTP smoke 分别为 200/healthy，migration 输出 `applied=0 skipped=9`，production preflight 全部通过。
   - Playwright E2E 3/3 和隔离 full-stack E2E 1/1 通过；隔离环境完成专用容器、网络与 volumes 清理。
 - 相关提交：`b7eb96e`
+- 建议验证命令：
+
+```bash
+cd frontend
+npm test
+npm run lint
+CI=1 npm run test:e2e
+cd ..
+docker compose up -d --build
+docker compose ps
+docker compose logs --since=5m redis postgres chroma migrate backend worker frontend
+conda run -n firstrag python scripts/production_preflight.py --env-file .env --migration-method compose --check-runtime-health
+scripts/run_full_stack_e2e.sh
+git diff --check
+```
+
+## T-117 抽取 chat response stream hook
+
+- 来源计划：`PLAN-20260731-08`
+- 优先级：`P1`
+- 状态：`Done`
+- 背景：T-111 完成后 `frontend/src/lib/chat-workspace/use-chat-submission.ts` 仍有 491 行，同时管理会话创建、图片上传、用户消息写入、chat 请求、SSE assistant 回写、错误/限流、loading 清理和 diagnostics preload。
+- 目标：抽取独立 response stream hook，集中管理 chat 请求、SSE assistant content/message ID/sources/retrieval/fallback 回写、请求错误与 Retry-After，以及高级模式 diagnostics preload，使 submission hook 聚焦会话创建、图片上传和用户消息事务。
+- 技术边界：
+  - response stream hook 接收稳定的 session setter、loading/error setter、diagnostics loader 和限流回调，不持有当前输入、待发送图片或会话创建状态。
+  - assistant message 更新 helper 迁移到 response stream 模块；用户消息追加和提交错误 helper 留在 submission 模块。
+  - submission hook 在用户消息写入并清理附件后调用 response stream，不改变 chat 请求参数、SSE 回调顺序、错误提示或 loading 清理行为。
+  - 保持页面持有 `sessions`、输入框、会话 loading/error 的现有边界。
+- 范围：
+  - 新增 `use-chat-response-stream.ts`，管理 chat 请求和 SSE 回写生命周期。
+  - 将 assistant message helper 与测试迁移到 response stream 模块。
+  - 精简 `use-chat-submission.ts`，保留会话创建、图片上传、用户消息写入和提交互斥。
+  - 更新前端职责文档与任务台账。
+- 验收标准：
+  - `use-chat-submission.ts` 不再直接调用 `postChatMessage`、`streamChatResponse` 或持有 assistant 回写 helper。
+  - 新增或迁移测试，前端全量 Vitest、lint、production build 和 Playwright E2E 通过。
+  - Docker Compose、服务日志、production preflight 和隔离 full-stack E2E 通过。
+- 完成记录：
+  - 新增 `use-chat-response-stream.ts`，集中管理 chat 请求、SSE assistant content/message ID/sources/retrieval/fallback 回写、请求错误/Retry-After、loading 清理和高级模式 diagnostics preload。
+  - `useChatSubmission` 继续管理自动建会话、图片上传、用户消息写入、附件清理和提交互斥，通过稳定回调装配 response stream hook，页面 API 保持不变。
+  - assistant message helper 与 5 项测试迁移到 response stream 模块；submission 模块保留用户消息追加与提交错误 helper 测试。
+  - `use-chat-submission.ts` 从 491 行降至 276 行，减少 215 行；新 response stream hook 为 280 行。
+  - 前端全量 Vitest 共 37 个测试文件、180 项通过；lint 0 error 并保留 2 个既有 `<img>` warning。
+  - Docker production build 与 TypeScript 通过，runtime audit 输出 `found 0 vulnerabilities`；Compose 核心服务状态正常，frontend/backend HTTP smoke 分别为 200/healthy，migration 输出 `applied=0 skipped=9`，production preflight 全部通过。
+  - Playwright E2E 3/3 和隔离 full-stack E2E 1/1 通过，覆盖真实注册、上传、向量化、SSE 回答与 sources 展示；隔离环境完成专用容器、网络与 volumes 清理。
+- 相关提交：`2f2d72c`
 - 建议验证命令：
 
 ```bash
