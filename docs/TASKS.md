@@ -4535,7 +4535,7 @@ git diff --check
 
 - 来源计划：`PLAN-20260731-02`
 - 优先级：`P1`
-- 状态：`Doing`
+- 状态：`Done`
 - 背景：T-110 完成后 `frontend/src/app/page.tsx` 仍有 1085 行，其中 `handleSubmit` 与图片上传 state 占约 310 行，混合输入校验、自动建会话、图片上传、用户消息、SSE assistant 回写、diagnostics preload 和 loading/error 编排。
 - 目标：保持 `sessions`、输入框、当前知识库/会话和限流倒计时由现有页面及 hooks 持有，在不改变聊天交互、错误文案和 SSE 时序的前提下，将单轮发送事务迁移到独立 custom hook。
 - 技术边界：
@@ -4554,6 +4554,17 @@ git diff --check
   - `page.tsx` 至少减少 260 行，不改变输入校验、自动建会话、图片上传、Retry-After、SSE 或 diagnostics 行为。
   - 新增测试、前端全量 Vitest、lint、production build 和 Playwright E2E 通过。
   - Docker Compose、服务日志和 production preflight 通过。
+- 完成记录：
+  - 新增 `use-chat-submission.ts`，集中管理输入门禁、自动建会话、图片上传、用户消息、聊天请求、SSE handlers、diagnostics preload 及上传状态。
+  - `sessions`、输入框、当前知识库/会话、会话 loading/error record 和两组 Retry-After 倒计时仍由页面及现有 hooks 持有，通过稳定 setter/callback 装配。
+  - 用户消息与 assistant content、sources、retrieval、message ID、fallback 统一由不可变 helper 更新，并保留未受影响会话的对象引用。
+  - 发送流程使用同步 ref 锁阻止同一 render 周期内的重复提交；图片仍使用发送开始时的快照，成功进入聊天后才清空选择和 Object URL。
+  - `page.tsx` 从 1085 行降至 797 行，减少 288 行；认证、模式偏好与初次工作区加载继续留在页面。
+  - 新增 8 项 helper 测试；前端全量 Vitest 共 33 个测试文件、173 项通过。
+  - lint 0 error 并保留 2 个既有 `<img>` warning；宿主机与 Docker production build、Playwright E2E 3/3 均通过。
+  - 隔离 full-stack E2E 1/1 通过，覆盖真实注册、登录、TXT 上传、worker 向量化、SSE 回答和 sources 展示，并完成专用容器、网络及 volumes 清理。
+  - Docker runtime audit 输出 `found 0 vulnerabilities`；Compose 核心服务状态正常，frontend/backend HTTP smoke 均为 200，migration 输出 `applied=0 skipped=9`，production preflight 全部通过。
+- 相关提交：`0907dc4`
 - 建议验证命令：
 
 ```bash
