@@ -38,14 +38,11 @@ import type {
 } from "./types";
 import {
   getConversationDiagnostics,
-  getVectorIndexJobs,
   parseJsonValue,
-  parseVectorIndexHealth,
   removeLegacyInitialMessage,
   serializeRetrievalSettings,
   toChatSession,
   toKnowledgeBase,
-  toKnowledgeFile,
   toMessageFeedback,
   toMessageAttachment,
   toMessageSourceFeedback,
@@ -53,6 +50,11 @@ import {
   toQualityDashboard,
   toRetrievalSettings,
 } from "./utils";
+import {
+  getVectorIndexJobs,
+  parseVectorIndexHealth,
+  toKnowledgeFile,
+} from "./vector-index-utils";
 
 const filesResponseSchema = z
   .object({

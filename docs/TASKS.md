@@ -127,6 +127,7 @@
 | `PLAN-20260731-09` | 2026-07-31 | `Done` | 继续拆分消息质量操作 hook，独立管理 source feedback 提交与回写生命周期。 | `T-118` |
 | `PLAN-20260731-10` | 2026-07-31 | `Done` | 继续拆分知识库生命周期 hook，独立管理回收站加载、删除、恢复和集合刷新。 | `T-119` |
 | `PLAN-20260731-11` | 2026-07-31 | `Done` | 继续拆分会话操作 hook，独立管理 active session 消息懒加载与错误回写。 | `T-120` |
+| `PLAN-20260801-01` | 2026-08-01 | `Doing` | 拆分聊天工作台通用工具，优先收口 vector indexing 解析、状态和展示 helper。 | `T-121` |
 
 ## 任务总览
 
@@ -252,6 +253,7 @@
 | `T-118` | `PLAN-20260731-09` | `P1` | `Done` | 抽取 source feedback actions hook | 2026-07-31 | `8495ef5` |
 | `T-119` | `PLAN-20260731-10` | `P1` | `Done` | 抽取知识库回收站操作 hook | 2026-07-31 | `b456ea1` |
 | `T-120` | `PLAN-20260731-11` | `P1` | `Done` | 抽取会话消息懒加载 hook | 2026-07-31 | `db6c1fe` |
+| `T-121` | `PLAN-20260801-01` | `P1` | `Doing` | 抽取 vector indexing utilities | — | — |
 
 ## 新计划接入流程
 
@@ -5017,6 +5019,42 @@ git diff --check
 cd frontend
 npm test
 npm run lint
+CI=1 npm run test:e2e
+cd ..
+docker compose up -d --build
+docker compose ps
+docker compose logs --since=5m redis postgres chroma migrate backend worker frontend
+conda run -n firstrag python scripts/production_preflight.py --env-file .env --migration-method compose --check-runtime-health
+scripts/run_full_stack_e2e.sh
+git diff --check
+```
+
+## T-121 抽取 vector indexing utilities
+
+- 来源计划：`PLAN-20260801-01`
+- 优先级：`P1`
+- 状态：`Doing`
+- 背景：`frontend/src/lib/chat-workspace/utils.ts` 已增长到 2281 行，同时包含消息、来源、retrieval settings、知识文件、vector job、worker health 和格式化 helper；其中 vector indexing 相关逻辑拥有独立类型和消费方。
+- 目标：抽取独立 `vector-index-utils.ts`，集中管理知识文件/vector job 解析、文件向量状态、失败恢复动作、worker health 解析与展示 helper，使通用 `utils.ts` 聚焦消息、来源、retrieval 和基础格式化能力。
+- 技术边界：
+  - 直接从新模块导入 vector indexing helper，不增加 barrel export，保持 bundle import 路径静态可分析。
+  - 不改变 API payload、状态映射、中文提示、轮询条件或组件展示行为。
+  - 将对应测试迁移到独立测试文件，保持原断言覆盖。
+- 范围：
+  - 新增 `frontend/src/lib/chat-workspace/vector-index-utils.ts` 与对应测试。
+  - 更新 API、任务队列和文件管理组件的直接导入。
+  - 更新前端职责文档与任务台账当前基线。
+- 验收标准：
+  - `utils.ts` 不再包含 vector indexing 解析、状态或 worker health helper。
+  - 前端全量 Vitest、lint、production build 和 Playwright E2E 通过。
+  - Docker Compose、服务日志、production preflight 和隔离 full-stack E2E 通过。
+- 建议验证命令：
+
+```bash
+cd frontend
+npm test
+npm run lint
+npm run build
 CI=1 npm run test:e2e
 cd ..
 docker compose up -d --build

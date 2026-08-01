@@ -4,7 +4,7 @@ import {
   getWorkerHealthDetails,
   getWorkerHealthToneClass,
   isVectorIndexJobDone,
-} from "@/lib/chat-workspace/utils";
+} from "@/lib/chat-workspace/vector-index-utils";
 import type {
   VectorIndexHealthResponse,
   VectorIndexQueueItem,
