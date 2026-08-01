@@ -8,7 +8,8 @@ import type {
   VectorIndexHealthResponse,
   VectorIndexQueueItem,
 } from "@/lib/chat-workspace/types";
-import { formatFileSize, getVectorStatus } from "@/lib/chat-workspace/utils";
+import { formatFileSize } from "@/lib/chat-workspace/utils";
+import { getVectorStatus } from "@/lib/chat-workspace/vector-index-utils";
 
 type FileManagerDialogProps = {
   knowledgeBaseName: string;

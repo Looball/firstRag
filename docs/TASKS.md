@@ -41,7 +41,7 @@
 ## 当前基线
 
 - 2026-07-27 已增加无外部密钥的全栈浏览器门禁：隔离 Compose project 使用临时 PostgreSQL、Chroma、uploads volumes 和本地 OpenAI-compatible stub，真实覆盖注册、前端登录、TXT 上传、worker 向量化、SSE 回答与 sources 展示；测试结束自动清理专用容器和数据。
-- 2026-07-28 已刷新静态回归验收：后端最近一次全量 373 项测试通过；前端 Vitest 116 项通过、lint 0 error（保留 2 个 `<img>` 性能 warning），宿主机与 Docker 中的 Next.js 16.2.12 production build 均通过。
+- 2026-08-01 已刷新静态回归验收：后端最近一次全量 373 项测试通过；前端 Vitest 181 项通过、lint 0 error（保留 2 个 `<img>` 性能 warning），Next.js 16.2.12 production build 与 Playwright E2E 3/3 通过。
 - 2026-07-26 已刷新前端依赖安全审计：Next.js 与 eslint-config-next 升级到 16.2.12，PostCSS 固定到 8.5.23；当前 production npm audit policy 为 `0 findings / 0 exceptions`。
 - 2026-07-20 已完成后端与镜像依赖安全审计：PyJWT、python-dotenv 和 python-multipart 已升级到安全补丁版本；`pip-audit` 只剩 ChromaDB 1.5.9 的 no-fix finding，由精确到版本且 2026-08-20 到期的内网不可达例外管理；Trivy 对当前 backend/frontend 镜像的可修复 high/critical OS finding 均为 0。
 - 2026-07-27 已刷新 GitHub Actions supply chain 基线：13 个外部 Action 引用均固定到官方 release 的 40 位 commit SHA，CI 自动拒绝 tag/branch/短 SHA 和缺失版本注释；Dependabot 每周聚合提出 Action 更新 PR。
@@ -127,6 +127,7 @@
 | `PLAN-20260731-09` | 2026-07-31 | `Done` | 继续拆分消息质量操作 hook，独立管理 source feedback 提交与回写生命周期。 | `T-118` |
 | `PLAN-20260731-10` | 2026-07-31 | `Done` | 继续拆分知识库生命周期 hook，独立管理回收站加载、删除、恢复和集合刷新。 | `T-119` |
 | `PLAN-20260731-11` | 2026-07-31 | `Done` | 继续拆分会话操作 hook，独立管理 active session 消息懒加载与错误回写。 | `T-120` |
+| `PLAN-20260801-01` | 2026-08-01 | `Done` | 拆分聊天工作台通用工具，优先收口 vector indexing 解析、状态和展示 helper。 | `T-121` |
 
 ## 任务总览
 
@@ -252,6 +253,7 @@
 | `T-118` | `PLAN-20260731-09` | `P1` | `Done` | 抽取 source feedback actions hook | 2026-07-31 | `8495ef5` |
 | `T-119` | `PLAN-20260731-10` | `P1` | `Done` | 抽取知识库回收站操作 hook | 2026-07-31 | `b456ea1` |
 | `T-120` | `PLAN-20260731-11` | `P1` | `Done` | 抽取会话消息懒加载 hook | 2026-07-31 | `db6c1fe` |
+| `T-121` | `PLAN-20260801-01` | `P1` | `Done` | 抽取 vector indexing utilities | 2026-08-01 | `1df28d6` |
 
 ## 新计划接入流程
 
@@ -5017,6 +5019,50 @@ git diff --check
 cd frontend
 npm test
 npm run lint
+CI=1 npm run test:e2e
+cd ..
+docker compose up -d --build
+docker compose ps
+docker compose logs --since=5m redis postgres chroma migrate backend worker frontend
+conda run -n firstrag python scripts/production_preflight.py --env-file .env --migration-method compose --check-runtime-health
+scripts/run_full_stack_e2e.sh
+git diff --check
+```
+
+## T-121 抽取 vector indexing utilities
+
+- 来源计划：`PLAN-20260801-01`
+- 优先级：`P1`
+- 状态：`Done`
+- 背景：`frontend/src/lib/chat-workspace/utils.ts` 已增长到 2281 行，同时包含消息、来源、retrieval settings、知识文件、vector job、worker health 和格式化 helper；其中 vector indexing 相关逻辑拥有独立类型和消费方。
+- 目标：抽取独立 `vector-index-utils.ts`，集中管理知识文件/vector job 解析、文件向量状态、失败恢复动作、worker health 解析与展示 helper，使通用 `utils.ts` 聚焦消息、来源、retrieval 和基础格式化能力。
+- 技术边界：
+  - 直接从新模块导入 vector indexing helper，不增加 barrel export，保持 bundle import 路径静态可分析。
+  - 不改变 API payload、状态映射、中文提示、轮询条件或组件展示行为。
+  - 将对应测试迁移到独立测试文件，保持原断言覆盖。
+- 范围：
+  - 新增 `frontend/src/lib/chat-workspace/vector-index-utils.ts` 与对应测试。
+  - 更新 API、任务队列和文件管理组件的直接导入。
+  - 更新前端职责文档与任务台账当前基线。
+- 验收标准：
+  - `utils.ts` 不再包含 vector indexing 解析、状态或 worker health helper。
+  - 前端全量 Vitest、lint、production build 和 Playwright E2E 通过。
+  - Docker Compose、服务日志、production preflight 和隔离 full-stack E2E 通过。
+- 完成记录：
+  - 新增 `vector-index-utils.ts`，集中管理知识文件/vector job 响应解析、文件向量状态、失败恢复动作、worker/queue health 解析和任务状态展示 helper；API、任务队列和文件管理组件改为直接导入新模块。
+  - vector indexing 测试迁移到独立测试文件，原有状态映射、恢复动作、health diagnostics 和中文提示断言保持不变。
+  - `utils.ts` 从 2281 行降至 1424 行，减少 857 行；新 vector indexing 模块为 868 行。
+  - 前端全量 Vitest 共 41 个测试文件、181 项通过；lint 0 error 并保留 2 个既有 `<img>` warning；Next.js 16.2.12 production build 和 Playwright E2E 3/3 通过。
+  - Compose 核心服务运行正常，migration 输出 `applied=0 skipped=9`，production preflight 通过；当前 bundle 通过隔离 full-stack E2E 1/1，并完成专用容器、网络和 volumes 清理。
+  - 官方 `docker compose up -d --build` 在读取基础镜像 metadata 时被本机配置的阿里云 registry mirror 阻断（Node 返回 `403 Forbidden`、Python TLS handshake timeout）；未修改系统 mirror，改用现有 Linux runtime 镜像注入当前 `.next` 产物完成容器回归。
+- 相关提交：`1df28d6`
+- 建议验证命令：
+
+```bash
+cd frontend
+npm test
+npm run lint
+npm run build
 CI=1 npm run test:e2e
 cd ..
 docker compose up -d --build

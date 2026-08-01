@@ -13,8 +13,8 @@ import type {
 import {
   getVectorStatus,
   isVectorIndexJobDone,
-  wait,
-} from "./utils";
+} from "./vector-index-utils";
+import { wait } from "./utils";
 
 type RefreshKnowledgeFiles = (options?: {
   showLoading?: boolean;
