@@ -60,7 +60,7 @@ POST /chat
 | Service 门面 | [`backend/app/services/rag_service.py`](../../backend/app/services/rag_service.py) | 保留兼容导入，委托 `services/rag/`。 |
 | 检索决策 | [`retrieval_decision.py`](../../backend/app/services/rag/retrieval_decision.py) | `auto/always/never`、Router 结果和确定性覆盖。 |
 | 检索流水线 | [`retrieval_pipeline.py`](../../backend/app/services/rag/retrieval_pipeline.py) | 设置、知识库画像、文件范围、hybrid retrieval 和 diagnostics。 |
-| Vector | [`vector_retriever.py`](../../backend/app/services/retrieval/vector_retriever.py) | query embedding 与 Chroma 召回。 |
+| Hybrid / Vector | [`hybrid_retriever.py`](../../backend/app/services/retrieval/hybrid_retriever.py) | 两路并行、query embedding cache、Chroma 召回与降级。 |
 | Full-text | [`fulltext_retriever.py`](../../backend/app/services/retrieval/fulltext_retriever.py) | PostgreSQL 全文召回。 |
 | Fusion / rerank | [`rrf.py`](../../backend/app/services/retrieval/rrf.py)、[`reranker.py`](../../backend/app/services/retrieval/reranker.py) | RRF 融合与可选本地/远程精排。 |
 | Chain | [`chain_builder.py`](../../backend/app/services/rag/chain_builder.py) | LCEL Router 与问答链构建。 |
@@ -68,7 +68,7 @@ POST /chat
 | 引用 | [`reference_serializer.py`](../../backend/app/services/rag/reference_serializer.py) | prompt context 和前端 sources。 |
 | 持久化 | [`message_repository.py`](../../backend/app/repositories/message_repository.py) | assistant 状态、回答、sources 与 retrieval JSON。 |
 
-继续阅读：[RAG 核心流程：聊天生成](../RAG_WORKFLOW.md#聊天生成)和[检索诊断](../RAG_WORKFLOW.md#检索诊断)。
+继续阅读：[混合检索与流式回答教程](HYBRID_RETRIEVAL_AND_STREAMING.md)、[RAG 核心流程：聊天生成](../RAG_WORKFLOW.md#聊天生成)和[检索诊断](../RAG_WORKFLOW.md#检索诊断)。
 
 ## 前端工作台与 API proxy
 
