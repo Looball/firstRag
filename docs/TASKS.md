@@ -259,7 +259,7 @@
 | `T-122` | `PLAN-20260802-01` | `P1` | `Done` | 固化教程化前产品基线与维护边界 | 2026-08-02 | `dd3f2c4` |
 | `T-123` | `PLAN-20260802-01` | `P1` | `Done` | 建立教程入口、学习路线与源码地图 | 2026-08-02 | `1aab220` |
 | `T-124` | `PLAN-20260802-01` | `P1` | `Done` | 建立无外部密钥的入门实验 | 2026-08-02 | `0c34c46` |
-| `T-125` | `PLAN-20260802-01` | `P1` | `Todo` | 编写文件入库与异步索引教程 | — | — |
+| `T-125` | `PLAN-20260802-01` | `P1` | `Done` | 编写文件入库与异步索引教程 | 2026-08-02 | `a8eaf94` |
 | `T-126` | `PLAN-20260802-01` | `P1` | `Todo` | 编写混合检索与流式回答教程 | — | — |
 | `T-127` | `PLAN-20260802-01` | `P2` | `Todo` | 编写前端、安全、测试与部署进阶教程 | — | — |
 | `T-128` | `PLAN-20260802-01` | `P2` | `Todo` | 增加练习、示例素材与文档回归门禁 | — | — |
@@ -5192,7 +5192,7 @@ git diff --check
 
 - 来源计划：`PLAN-20260802-01`
 - 优先级：`P1`
-- 状态：`Todo`
+- 状态：`Done`
 - 目标：围绕一份文件从 HTTP 上传到可检索数据的真实生命周期，解释权限隔离、SHA-256 去重、任务队列、worker、解析/OCR、chunk、embedding 和双存储写入。
 - 技术边界：
   - 保持 route、repository、service 和 worker 的现有分层边界，不为讲解方便把重型 indexing 移回 HTTP request。
@@ -5207,6 +5207,16 @@ git diff --check
   - 教程覆盖重复上传、旧任务覆盖保护、软删除、索引失败恢复和扫描 PDF fallback。
   - 示例 SQL、API 路径和状态名与当前实现一致，并且不绕过 `user_id` 和软删除条件。
   - 相关后端测试、OCR regression gate 和 full-stack E2E 继续通过。
+- 完成记录：
+  - 新增 `docs/tutorials/FILE_INGESTION_AND_INDEXING.md`，按上传与权限、SHA-256 去重与 metadata、任务入队与并发保护、解析与 OCR、chunk 与双存储五章组织真实实现。
+  - 每章均提供时序图、源码入口、关键字段、隔离环境可运行检查和故障注入/观察点；主实验可从 `file_id` 追踪 job、PostgreSQL chunk、Chroma metadata 与最终状态。
+  - 教程明确 PostgreSQL `vector_index_jobs` 是持久队列，Redis 只保存 worker 运行态与短租约；旧任务同时受 `index_version` 和 advisory lock 保护。
+  - 重复上传、活动记录 `user_id + deleted_at IS NULL`、知识库软删除、文件永久删除、索引补偿清理、失败重试和扫描 PDF fallback 均与当前代码及 reference 对齐。
+  - 7 个针对性后端测试、182 个 Markdown 相对链接检查和 `git diff --check` 通过。
+  - `conda run -n firstrag python scripts/eval_pdf_ocr.py` 通过 10 个合成案例；文档明确该结果不等同于真实 PDF OCR 准确率。
+  - `scripts/run_full_stack_e2e.sh` 的隔离 Playwright `1/1` 通过，临时 containers、network 和三个 volumes 自动清理。
+  - 默认 `docker compose up -d --build`、`docker compose ps` 和启动日志检查通过；migration 为 `applied=0 skipped=9`，当前七个核心服务无启动错误。
+- 相关提交：`a8eaf94`
 - 建议验证命令：
 
 ```bash

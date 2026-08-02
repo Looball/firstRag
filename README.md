@@ -45,7 +45,7 @@ FirstRAG 是一个全栈 RAG（Retrieval-Augmented Generation，检索增强生�
 | 前端 | 关注 Next.js proxy、React hooks、streaming 状态和引用 UI。 | [教程导航：前端](docs/tutorials/README.md#路线三前端) |
 | 工程化 | 关注 Docker、CI、安全审计、评测和生产检查。 | [教程导航：工程化](docs/tutorials/README.md#路线四工程化) |
 
-推荐先完成 [10 分钟导览](docs/tutorials/README.md#10-分钟导览)，再运行 [无外部密钥入门实验](docs/tutorials/CREDENTIAL_FREE_QUICKSTART.md)，并使用 [源码地图](docs/tutorials/CODE_MAP.md) 从业务问题定位真实代码。隔离实验使用确定性 provider stub；运行完整应用仍需要用户自己的聊天与 embedding provider。
+推荐先完成 [10 分钟导览](docs/tutorials/README.md#10-分钟导览)，再运行 [无外部密钥入门实验](docs/tutorials/CREDENTIAL_FREE_QUICKSTART.md)，沿 [文件入库与异步索引](docs/tutorials/FILE_INGESTION_AND_INDEXING.md) 从 `file_id` 追踪到双存储，并使用 [源码地图](docs/tutorials/CODE_MAP.md) 定位真实代码。隔离实验使用确定性 provider stub；运行完整应用仍需要用户自己的聊天与 embedding provider。
 
 ## 项目截图
 
@@ -213,6 +213,7 @@ FirstRAG/
 | --- | --- |
 | `docs/tutorials/README.md` | 教程总览、四条学习路线和统一章节模板。 |
 | `docs/tutorials/CREDENTIAL_FREE_QUICKSTART.md` | 无真实账号、API Key 或公网模型服务的隔离全栈实验。 |
+| `docs/tutorials/FILE_INGESTION_AND_INDEXING.md` | 文件上传、异步索引、OCR、chunk 和双存储教程。 |
 | `docs/tutorials/CODE_MAP.md` | 从业务链路定位真实源码、测试和部署入口。 |
 | `docs/README.md` | 文档目录说明。 |
 | `docs/ARCHITECTURE.md` | 系统架构和数据流。 |
@@ -232,7 +233,8 @@ FirstRAG/
 - [x] 固化教程化前产品基线，明确功能冻结与 `main` 单主线维护边界（T-122）。
 - [x] 建立教程入口、学习路线和源码地图（T-123）。
 - [x] 建立不依赖真实 API Key 的入门实验（T-124）。
-- [ ] 编写入库、索引、检索和流式回答核心教程（T-125、T-126）。
+- [x] 编写文件入库与异步索引教程（T-125）。
+- [ ] 编写混合检索与流式回答教程（T-126）。
 - [ ] 补齐前端、安全、测试、部署、练习和文档门禁（T-127、T-128）。
 - [ ] 明确教程仓库 License 与公开使用边界（T-129）。
 

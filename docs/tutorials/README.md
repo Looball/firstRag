@@ -8,6 +8,7 @@
 | --- | --- |
 | 本页 | 选择学习路线，了解章节顺序和统一写法。 |
 | [无外部密钥入门实验](CREDENTIAL_FREE_QUICKSTART.md) | 在隔离 Compose project 中运行注册、上传、向量化、检索、SSE 和 sources 完整链路。 |
+| [文件入库与异步索引](FILE_INGESTION_AND_INDEXING.md) | 从一个 `file_id` 追踪权限、去重、任务队列、worker、OCR、chunk 与双存储。 |
 | [源码地图](CODE_MAP.md) | 从业务问题定位 route、repository、service、worker、前端和测试入口。 |
 | [系统架构](../ARCHITECTURE.md) | 查看模块边界、核心数据流和存储职责。 |
 | [RAG 核心流程](../RAG_WORKFLOW.md) | 查看入库、检索、生成与 diagnostics 的当前行为。 |
@@ -42,11 +43,11 @@
 | 先修条件 | Python、HTTP、SQL 基础；了解 embedding 和向量相似度更佳。 |
 | 预计产出 | 能从 file ID 追踪到 job/chunk/vector，也能从一次提问追踪到 RRF、rerank、sources 和 diagnostics。 |
 | 第一步 | 阅读 [RAG 核心流程](../RAG_WORKFLOW.md) 和 [后端结构](../BACKEND.md)。 |
-| 第二步 | 沿 [入库与异步索引源码地图](CODE_MAP.md#文件入库与异步索引) 跟踪调用链。 |
+| 第二步 | 完成 [文件入库与异步索引](FILE_INGESTION_AND_INDEXING.md)，从 `file_id` 追踪到 job、chunk 和 Chroma metadata。 |
 | 第三步 | 沿 [混合检索与流式回答源码地图](CODE_MAP.md#混合检索与流式回答) 跟踪调用链。 |
 | 可以跳过 | 前端视觉组件、公开 demo 部署和 OCR 校对 UI；需要时再回查。 |
 
-完整教学章节分别由 [T-125](../TASKS.md#t-125-编写文件入库与异步索引教程) 和 [T-126](../TASKS.md#t-126-编写混合检索与流式回答教程) 交付。
+入库章节已由 [T-125](../TASKS.md#t-125-编写文件入库与异步索引教程) 交付；混合检索与流式回答章节由 [T-126](../TASKS.md#t-126-编写混合检索与流式回答教程) 交付。
 
 ## 路线三：前端
 
@@ -82,7 +83,7 @@
 | --- | --- | --- |
 | T-123 | 教程入口、四条学习路线、源码地图 | Done |
 | T-124 | 无真实 API Key 的隔离入门实验 | Done |
-| T-125 | 文件上传、任务队列、worker、解析/OCR、chunk 与向量写入 | Todo |
+| T-125 | [文件上传、任务队列、worker、解析/OCR、chunk 与向量写入](FILE_INGESTION_AND_INDEXING.md) | Done |
 | T-126 | vector/full-text、RRF、rerank、SSE、sources 与 diagnostics | Todo |
 | T-127 | 前端、安全、测试、CI 与部署 | Todo |
 | T-128 | 分级练习、示例素材与文档回归门禁 | Todo |
