@@ -89,7 +89,7 @@
 | T-125 | [文件上传、任务队列、worker、解析/OCR、chunk 与向量写入](FILE_INGESTION_AND_INDEXING.md) | Done |
 | T-126 | [vector/full-text、RRF、rerank、SSE、sources 与 diagnostics](HYBRID_RETRIEVAL_AND_STREAMING.md) | Done |
 | T-127 | [前端、安全、测试、CI 与部署](FRONTEND_SECURITY_TESTING_AND_DEPLOYMENT.md) | Done |
-| T-128 | [分级练习、示例素材与文档回归门禁](#教程文档回归门禁) | Doing |
+| T-128 | [分级练习、示例素材与文档回归门禁](#教程文档回归门禁) | Done |
 | T-129 | License 与公开使用边界 | Todo |
 
 任务状态以 [docs/TASKS.md](../TASKS.md) 为准。
