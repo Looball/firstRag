@@ -258,7 +258,7 @@
 | `T-121` | `PLAN-20260801-01` | `P1` | `Done` | 抽取 vector indexing utilities | 2026-08-01 | `1df28d6` |
 | `T-122` | `PLAN-20260802-01` | `P1` | `Done` | 固化教程化前产品基线与维护边界 | 2026-08-02 | `dd3f2c4` |
 | `T-123` | `PLAN-20260802-01` | `P1` | `Done` | 建立教程入口、学习路线与源码地图 | 2026-08-02 | `1aab220` |
-| `T-124` | `PLAN-20260802-01` | `P1` | `Doing` | 建立无外部密钥的入门实验 | — | — |
+| `T-124` | `PLAN-20260802-01` | `P1` | `Done` | 建立无外部密钥的入门实验 | 2026-08-02 | `0c34c46` |
 | `T-125` | `PLAN-20260802-01` | `P1` | `Todo` | 编写文件入库与异步索引教程 | — | — |
 | `T-126` | `PLAN-20260802-01` | `P1` | `Todo` | 编写混合检索与流式回答教程 | — | — |
 | `T-127` | `PLAN-20260802-01` | `P2` | `Todo` | 编写前端、安全、测试与部署进阶教程 | — | — |
@@ -5157,7 +5157,7 @@ rg -n "docs/tutorials|学习路线|源码地图" README.md docs/README.md docs/t
 
 - 来源计划：`PLAN-20260802-01`
 - 优先级：`P1`
-- 状态：`Doing`
+- 状态：`Done`
 - 目标：让学习者不提交真实 provider API Key，也能运行一条确定性的 FirstRAG 核心链路并观察注册、上传、worker、检索、SSE 和 sources 的实际行为。
 - 技术边界：
   - 优先复用现有 `scripts/run_full_stack_e2e.sh`、隔离 Compose project 和本地 OpenAI-compatible provider stub，不平行维护第二套教学后端。
@@ -5173,6 +5173,14 @@ rg -n "docs/tutorials|学习路线|源码地图" README.md docs/README.md docs/t
   - 实验结束后只清理自己的容器、网络和 volumes，不影响默认 FirstRAG 环境。
   - 文档明确预期耗时、端口冲突、Docker 依赖和常见失败恢复方式。
   - CI 中现有 Full-stack E2E 继续通过。
+- 完成记录：
+  - 新增 `docs/tutorials/CREDENTIAL_FREE_QUICKSTART.md`，覆盖环境准备、预计耗时、默认端口、运行步骤、合成样例、UI/日志观察点、自动清理、异常恢复和真实 provider 差异。
+  - `scripts/run_full_stack_e2e.sh` 新增显式 `FIRSTRAG_E2E_PAUSE_AFTER_TEST=1` 模式；只允许交互 TTY 暂停，默认 CI 行为仍在测试后立即清理。
+  - 实验继续复用原 FastAPI、Next.js、PostgreSQL、Redis、Chroma、worker、provider stub 和 Playwright 链路，没有引入平行教学后端，也不会读取根 `.env`。
+  - 本地交互验证 Playwright `1/1` 通过；暂停期间 backend、frontend、worker、PostgreSQL、Redis、Chroma 和 provider stub 均在隔离 project 中正常运行。
+  - 按 Enter 后脚本以退出码 `0` 完成；验证 project 的 containers、三个 volumes 和 network 均已删除，默认 FirstRAG project 未被操作。
+  - `bash -n`、ShellCheck、Markdown 本地路径/锚点检查和 `git diff --check` 全部通过。
+- 相关提交：`0c34c46`
 - 建议验证命令：
 
 ```bash

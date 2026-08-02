@@ -231,7 +231,7 @@ FirstRAG/
 - [x] 建立 Docker Compose、migration、production preflight、评测和 required CI checks。
 - [x] 固化教程化前产品基线，明确功能冻结与 `main` 单主线维护边界（T-122）。
 - [x] 建立教程入口、学习路线和源码地图（T-123）。
-- [ ] 建立不依赖真实 API Key 的入门实验（T-124）。
+- [x] 建立不依赖真实 API Key 的入门实验（T-124）。
 - [ ] 编写入库、索引、检索和流式回答核心教程（T-125、T-126）。
 - [ ] 补齐前端、安全、测试、部署、练习和文档门禁（T-127、T-128）。
 - [ ] 明确教程仓库 License 与公开使用边界（T-129）。
