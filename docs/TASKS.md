@@ -261,7 +261,7 @@
 | `T-124` | `PLAN-20260802-01` | `P1` | `Done` | 建立无外部密钥的入门实验 | 2026-08-02 | `0c34c46` |
 | `T-125` | `PLAN-20260802-01` | `P1` | `Done` | 编写文件入库与异步索引教程 | 2026-08-02 | `a8eaf94` |
 | `T-126` | `PLAN-20260802-01` | `P1` | `Done` | 编写混合检索与流式回答教程 | 2026-08-02 | `044a3eb` |
-| `T-127` | `PLAN-20260802-01` | `P2` | `Todo` | 编写前端、安全、测试与部署进阶教程 | — | — |
+| `T-127` | `PLAN-20260802-01` | `P2` | `Done` | 编写前端、安全、测试与部署进阶教程 | 2026-08-02 | `59ab53f` |
 | `T-128` | `PLAN-20260802-01` | `P2` | `Todo` | 增加练习、示例素材与文档回归门禁 | — | — |
 | `T-129` | `PLAN-20260802-01` | `P1` | `Todo` | 明确教程仓库 License 与公开使用边界 | — | — |
 
@@ -5264,7 +5264,7 @@ git diff --check
 
 - 来源计划：`PLAN-20260802-01`
 - 优先级：`P2`
-- 状态：`Todo`
+- 状态：`Done`
 - 目标：补齐工程实践学习路径，解释 Next.js proxy/状态管理、用户凭据安全、Docker Compose 拓扑、CI required checks、评测与生产 preflight，而不是只展示 RAG 算法主链路。
 - 技术边界：
   - 前端教程以当前 component、hook、API proxy 和 streaming 边界为准，不重新制造平行架构。
@@ -5279,6 +5279,15 @@ git diff --check
   - 测试章节说明每类门禁覆盖什么、没有覆盖什么，以及何时需要真实 RAG/indexing eval。
   - 部署命令、服务名和 required check 名称与当前仓库一致。
   - 前端 lint、Vitest、production build、Playwright E2E、Compose preflight 和 CI 配置检查通过。
+- 完成记录：
+  - 新增 `docs/tutorials/FRONTEND_SECURITY_TESTING_AND_DEPLOYMENT.md`，用五类信任边界串联页面状态、Next.js proxy、FastAPI、worker、数据存储与外部 provider。
+  - 教程说明 localStorage JWT 的当前风险、用户 API Key 的内存/加密/脱敏生命周期、自定义 provider URL 的 HTTPS 与公网解析限制，以及 Redis `fail_closed` 到前端手动重试的 `Retry-After` 链路。
+  - 测试矩阵区分 ESLint、Vitest、build、fixture Playwright、backend unittest、credential-free full-stack E2E、OCR/RAG/indexing eval、dependency audit、Trivy 和 production preflight 的覆盖与盲区。
+  - Compose 章节核对七个 service、migration 一次性行为、日志/健康检查、备份恢复和公网发布前置条件；required checks 使用 `Backend`、`Frontend`、`Full-stack E2E`、`Container OS Security` 四个稳定 job 名称。
+  - `docker compose up -d --build`、服务状态、当前启动日志、backend health 和 frontend 登录页 smoke 通过；migration 为 `applied=0 skipped=9`。
+  - ESLint 0 errors（2 个既有 `<img>` warning）、Vitest 41 files / 181 tests、production build、fixture Playwright 3/3、credential-free full-stack Playwright 1/1 全部通过。
+  - Compose config、production preflight、13 个 GitHub Actions pin、npm audit 0 findings 和 pip audit policy 通过；pip 的 `chromadb 1.5.9` no-fix finding 命中已审查且 2026-08-20 到期的限时例外。
+- 相关提交：`59ab53f`
 - 建议验证命令：
 
 ```bash

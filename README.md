@@ -215,6 +215,7 @@ FirstRAG/
 | `docs/tutorials/CREDENTIAL_FREE_QUICKSTART.md` | 无真实账号、API Key 或公网模型服务的隔离全栈实验。 |
 | `docs/tutorials/FILE_INGESTION_AND_INDEXING.md` | 文件上传、异步索引、OCR、chunk 和双存储教程。 |
 | `docs/tutorials/HYBRID_RETRIEVAL_AND_STREAMING.md` | 混合检索、RRF、rerank、SSE、消息落库与 diagnostics 教程。 |
+| `docs/tutorials/FRONTEND_SECURITY_TESTING_AND_DEPLOYMENT.md` | 前端状态与 proxy、凭据安全、测试门禁、Compose 和生产部署边界教程。 |
 | `docs/tutorials/CODE_MAP.md` | 从业务链路定位真实源码、测试和部署入口。 |
 | `docs/README.md` | 文档目录说明。 |
 | `docs/ARCHITECTURE.md` | 系统架构和数据流。 |
@@ -236,7 +237,8 @@ FirstRAG/
 - [x] 建立不依赖真实 API Key 的入门实验（T-124）。
 - [x] 编写文件入库与异步索引教程（T-125）。
 - [x] 编写混合检索与流式回答教程（T-126）。
-- [ ] 补齐前端、安全、测试、部署、练习和文档门禁（T-127、T-128）。
+- [x] 编写前端、安全、测试与部署进阶教程（T-127）。
+- [ ] 增加练习、示例素材与文档回归门禁（T-128）。
 - [ ] 明确教程仓库 License 与公开使用边界（T-129）。
 
 在线演示环境已有完整方案，但真实服务器、域名/TLS、生产配置和公网 smoke test 尚未落地；该事项暂不属于当前教程化主线。

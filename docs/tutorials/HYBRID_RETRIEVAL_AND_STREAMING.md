@@ -383,4 +383,4 @@ git diff --check
 
 相关回归入口包括 [`backend/tests/test_retrieval_resilience.py`](../../backend/tests/test_retrieval_resilience.py)、[`backend/tests/test_rag_service.py`](../../backend/tests/test_rag_service.py)、[`backend/tests/test_chat_service.py`](../../backend/tests/test_chat_service.py)、[`frontend/src/lib/api-proxy.test.ts`](../../frontend/src/lib/api-proxy.test.ts)和[`frontend/src/lib/chat-workspace/chat-stream.test.ts`](../../frontend/src/lib/chat-workspace/chat-stream.test.ts)。
 
-Reference：[API](../API.md)、[数据库结构](../SCHEMAS.md)、[RAG 核心流程](../RAG_WORKFLOW.md)、[评测说明](../evals/README.md)、[源码地图](CODE_MAP.md#混合检索与流式回答)。下一章是 T-127 的前端、安全、测试与部署进阶教程。
+Reference：[API](../API.md)、[数据库结构](../SCHEMAS.md)、[RAG 核心流程](../RAG_WORKFLOW.md)、[评测说明](../evals/README.md)、[源码地图](CODE_MAP.md#混合检索与流式回答)。下一章是[前端、安全、测试与部署进阶](FRONTEND_SECURITY_TESTING_AND_DEPLOYMENT.md)。
