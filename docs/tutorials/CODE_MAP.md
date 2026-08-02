@@ -126,7 +126,7 @@ POST /chat
 | CI | [`.github/workflows/ci.yml`](../../.github/workflows/ci.yml) | PR 与 `main` 的完整 required checks。 |
 | Docker runtime | [`deploy/docker/`](../../deploy/docker/) | backend/frontend 镜像和隔离 E2E override。 |
 
-继续阅读：[部署与本地工作流](../DEPLOYMENT.md)和[评测说明](../evals/README.md)。
+继续阅读：[无外部密钥入门实验](CREDENTIAL_FREE_QUICKSTART.md)、[部署与本地工作流](../DEPLOYMENT.md)和[评测说明](../evals/README.md)。
 
 ## 按问题反查
 

@@ -45,7 +45,7 @@ FirstRAG 是一个全栈 RAG（Retrieval-Augmented Generation，检索增强生�
 | 前端 | 关注 Next.js proxy、React hooks、streaming 状态和引用 UI。 | [教程导航：前端](docs/tutorials/README.md#路线三前端) |
 | 工程化 | 关注 Docker、CI、安全审计、评测和生产检查。 | [教程导航：工程化](docs/tutorials/README.md#路线四工程化) |
 
-推荐先完成 [10 分钟导览](docs/tutorials/README.md#10-分钟导览)，再使用 [源码地图](docs/tutorials/CODE_MAP.md) 从业务问题定位真实代码。当前运行完整应用仍需要用户自己的聊天与 embedding provider；无真实 API Key 的教学实验将在 T-124 交付，现阶段不把 CI gate 冒充为已完成的交互式教程。
+推荐先完成 [10 分钟导览](docs/tutorials/README.md#10-分钟导览)，再运行 [无外部密钥入门实验](docs/tutorials/CREDENTIAL_FREE_QUICKSTART.md)，并使用 [源码地图](docs/tutorials/CODE_MAP.md) 从业务问题定位真实代码。隔离实验使用确定性 provider stub；运行完整应用仍需要用户自己的聊天与 embedding provider。
 
 ## 项目截图
 
@@ -212,6 +212,7 @@ FirstRAG/
 | 文档 | 说明 |
 | --- | --- |
 | `docs/tutorials/README.md` | 教程总览、四条学习路线和统一章节模板。 |
+| `docs/tutorials/CREDENTIAL_FREE_QUICKSTART.md` | 无真实账号、API Key 或公网模型服务的隔离全栈实验。 |
 | `docs/tutorials/CODE_MAP.md` | 从业务链路定位真实源码、测试和部署入口。 |
 | `docs/README.md` | 文档目录说明。 |
 | `docs/ARCHITECTURE.md` | 系统架构和数据流。 |

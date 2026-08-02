@@ -258,7 +258,7 @@
 | `T-121` | `PLAN-20260801-01` | `P1` | `Done` | 抽取 vector indexing utilities | 2026-08-01 | `1df28d6` |
 | `T-122` | `PLAN-20260802-01` | `P1` | `Done` | 固化教程化前产品基线与维护边界 | 2026-08-02 | `dd3f2c4` |
 | `T-123` | `PLAN-20260802-01` | `P1` | `Done` | 建立教程入口、学习路线与源码地图 | 2026-08-02 | `1aab220` |
-| `T-124` | `PLAN-20260802-01` | `P1` | `Todo` | 建立无外部密钥的入门实验 | — | — |
+| `T-124` | `PLAN-20260802-01` | `P1` | `Doing` | 建立无外部密钥的入门实验 | — | — |
 | `T-125` | `PLAN-20260802-01` | `P1` | `Todo` | 编写文件入库与异步索引教程 | — | — |
 | `T-126` | `PLAN-20260802-01` | `P1` | `Todo` | 编写混合检索与流式回答教程 | — | — |
 | `T-127` | `PLAN-20260802-01` | `P2` | `Todo` | 编写前端、安全、测试与部署进阶教程 | — | — |
@@ -5157,7 +5157,7 @@ rg -n "docs/tutorials|学习路线|源码地图" README.md docs/README.md docs/t
 
 - 来源计划：`PLAN-20260802-01`
 - 优先级：`P1`
-- 状态：`Todo`
+- 状态：`Doing`
 - 目标：让学习者不提交真实 provider API Key，也能运行一条确定性的 FirstRAG 核心链路并观察注册、上传、worker、检索、SSE 和 sources 的实际行为。
 - 技术边界：
   - 优先复用现有 `scripts/run_full_stack_e2e.sh`、隔离 Compose project 和本地 OpenAI-compatible provider stub，不平行维护第二套教学后端。
