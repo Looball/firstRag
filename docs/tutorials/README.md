@@ -10,6 +10,7 @@
 | [无外部密钥入门实验](CREDENTIAL_FREE_QUICKSTART.md) | 在隔离 Compose project 中运行注册、上传、向量化、检索、SSE 和 sources 完整链路。 |
 | [文件入库与异步索引](FILE_INGESTION_AND_INDEXING.md) | 从一个 `file_id` 追踪权限、去重、任务队列、worker、OCR、chunk 与双存储。 |
 | [混合检索与流式回答](HYBRID_RETRIEVAL_AND_STREAMING.md) | 从一次提问追踪两路粗召回、RRF、rerank、SSE、持久化与 diagnostics。 |
+| [前端、安全、测试与部署进阶](FRONTEND_SECURITY_TESTING_AND_DEPLOYMENT.md) | 追踪页面状态、API proxy、凭据、限流、测试门禁、Compose 与生产 preflight。 |
 | [源码地图](CODE_MAP.md) | 从业务问题定位 route、repository、service、worker、前端和测试入口。 |
 | [系统架构](../ARCHITECTURE.md) | 查看模块边界、核心数据流和存储职责。 |
 | [RAG 核心流程](../RAG_WORKFLOW.md) | 查看入库、检索、生成与 diagnostics 的当前行为。 |
@@ -59,10 +60,10 @@
 | 预计产出 | 能从 `page.tsx` 定位 UI、状态 hook 和代理 route，解释 token、sources、diagnostics 如何进入消息界面。 |
 | 第一步 | 阅读 [前端结构](../FRONTEND.md) 和 [API 约定](../API.md)。 |
 | 第二步 | 沿 [前端工作台与 API proxy 源码地图](CODE_MAP.md#前端工作台与-api-proxy) 跟踪请求和状态。 |
-| 第三步 | 从现有 Vitest 与 Playwright 用例中选择一个交互做回归验证。 |
+| 第三步 | 完成[前端、安全、测试与部署进阶](FRONTEND_SECURITY_TESTING_AND_DEPLOYMENT.md)，再从现有 Vitest 与 Playwright 用例中选择一个交互做回归验证。 |
 | 可以跳过 | OCR engine 内部算法、PostgreSQL migration 和远程 provider 实现。 |
 
-前端、安全边界和测试策略的进阶章节由 [T-127](../TASKS.md#t-127-编写前端安全测试与部署进阶教程) 交付。
+前端、安全边界和测试策略的进阶章节已由 [T-127](../TASKS.md#t-127-编写前端安全测试与部署进阶教程) 交付。
 
 ## 路线四：工程化
 
@@ -73,10 +74,10 @@
 | 预计产出 | 能解释七个 Compose service 的启动关系，选择正确的测试门禁，并区分本地验证、真实 RAG eval 与生产 preflight。 |
 | 第一步 | 阅读 [部署与本地工作流](../DEPLOYMENT.md) 和 [评测说明](../evals/README.md)。 |
 | 第二步 | 沿 [测试、评测与部署源码地图](CODE_MAP.md#测试评测与部署) 查看脚本和 workflow。 |
-| 第三步 | 运行与改动范围匹配的最小验证，再由 PR required checks 完成全量门禁。 |
+| 第三步 | 完成[前端、安全、测试与部署进阶](FRONTEND_SECURITY_TESTING_AND_DEPLOYMENT.md)，运行与改动范围匹配的最小验证，再由 PR required checks 完成全量门禁。 |
 | 可以跳过 | React 组件细节和 OCR 校对交互；除非变更影响对应链路。 |
 
-工程化进阶章节由 [T-127](../TASKS.md#t-127-编写前端安全测试与部署进阶教程) 交付，练习和文档自动校验由 [T-128](../TASKS.md#t-128-增加练习示例素材与文档回归门禁) 交付。
+工程化进阶章节已由 [T-127](../TASKS.md#t-127-编写前端安全测试与部署进阶教程) 交付，练习素材和文档自动校验由 [T-128](../TASKS.md#t-128-增加练习示例素材与文档回归门禁) 交付。
 
 ## 专题交付顺序
 
@@ -86,7 +87,7 @@
 | T-124 | 无真实 API Key 的隔离入门实验 | Done |
 | T-125 | [文件上传、任务队列、worker、解析/OCR、chunk 与向量写入](FILE_INGESTION_AND_INDEXING.md) | Done |
 | T-126 | [vector/full-text、RRF、rerank、SSE、sources 与 diagnostics](HYBRID_RETRIEVAL_AND_STREAMING.md) | Done |
-| T-127 | 前端、安全、测试、CI 与部署 | Todo |
+| T-127 | [前端、安全、测试、CI 与部署](FRONTEND_SECURITY_TESTING_AND_DEPLOYMENT.md) | Doing |
 | T-128 | 分级练习、示例素材与文档回归门禁 | Todo |
 | T-129 | License 与公开使用边界 | Todo |
 

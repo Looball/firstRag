@@ -83,7 +83,7 @@ POST /chat
 | 文件与任务 | [`use-knowledge-files.ts`](../../frontend/src/lib/chat-workspace/use-knowledge-files.ts)、[`use-vector-index-queue.ts`](../../frontend/src/lib/chat-workspace/use-vector-index-queue.ts) | 文件操作、任务等待、轮询与 health。 |
 | 消息组件 | [`ConversationMessageItem.tsx`](../../frontend/src/components/chat-workspace/ConversationMessageItem.tsx)、[`MessageSourceList.tsx`](../../frontend/src/components/chat-workspace/MessageSourceList.tsx) | 回答、sources、diagnostics 和反馈入口。 |
 
-继续阅读：[前端结构说明](../FRONTEND.md)。
+继续阅读：[前端、安全、测试与部署进阶](FRONTEND_SECURITY_TESTING_AND_DEPLOYMENT.md#3-前端页面状态与-api-proxy)和[前端结构说明](../FRONTEND.md)。
 
 ## 认证、模型设置与安全边界
 
@@ -97,7 +97,7 @@ POST /chat
 | 自定义地址 | [`provider_base_url.py`](../../backend/app/services/provider_base_url.py) | OpenAI-compatible base URL 与 SSRF 边界。 |
 | 前端设置页 | [`frontend/src/app/settings/page.tsx`](../../frontend/src/app/settings/page.tsx)、[`ModelSettingsForm.tsx`](../../frontend/src/components/settings/ModelSettingsForm.tsx) | API Key 只在输入后提交，不回显完整值。 |
 
-继续阅读：[用户设置 API](../backend/user_settings_api.md)和[前后端设置协议](../backend/frontend_llm_settings_protocol.md)。
+继续阅读：[前端、安全、测试与部署进阶：认证、API Key 与自定义 provider 安全](FRONTEND_SECURITY_TESTING_AND_DEPLOYMENT.md#4-认证api-key-与自定义-provider-安全)、[用户设置 API](../backend/user_settings_api.md)和[前后端设置协议](../backend/frontend_llm_settings_protocol.md)。
 
 ## OCR 与引用核验
 
@@ -126,14 +126,14 @@ POST /chat
 | CI | [`.github/workflows/ci.yml`](../../.github/workflows/ci.yml) | PR 与 `main` 的完整 required checks。 |
 | Docker runtime | [`deploy/docker/`](../../deploy/docker/) | backend/frontend 镜像和隔离 E2E override。 |
 
-继续阅读：[无外部密钥入门实验](CREDENTIAL_FREE_QUICKSTART.md)、[部署与本地工作流](../DEPLOYMENT.md)和[评测说明](../evals/README.md)。
+继续阅读：[前端、安全、测试与部署进阶：测试金字塔](FRONTEND_SECURITY_TESTING_AND_DEPLOYMENT.md#6-测试金字塔每个门禁证明什么)、[无外部密钥入门实验](CREDENTIAL_FREE_QUICKSTART.md)、[部署与本地工作流](../DEPLOYMENT.md)和[评测说明](../evals/README.md)。
 
 ## 按问题反查
 
 | 问题 | 先看 |
 | --- | --- |
 | 文件为什么一直 `queued`？ | `vector_index_job_repository.py` → `vector_index_worker.py` → `vector_worker_runtime_service.py`。 |
-| 为什么 vector 失败但仍有回答？ | `vector_retriever.py` → `hybrid_retriever.py` → `retrieval_pipeline.py` 的 degraded diagnostics。 |
+| 为什么 vector 失败但仍有回答？ | `hybrid_retriever.py` → `retrieval_pipeline.py` 的 degraded diagnostics。 |
 | 为什么 sources 没显示？ | `reference_serializer.py` → `streaming.py` → `chat-stream.ts` → `MessageSourceList.tsx`。 |
 | API Key 保存在哪里？ | settings route/service → provider credential repository → `secret_cipher.py`。 |
 | OCR 修改后为何需要重建？ | correction service → reindex service → vector job → document service。 |
