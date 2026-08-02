@@ -48,6 +48,7 @@
 - 2026-07-20 已完成 Chroma 跨进程索引可见性真实回归：Compose 使用独立 `chroma` service，worker 重建文件向量后 backend 无需重启即可召回 16 条 vector 结果，`vector_degraded=false`、`vector_errors=[]`，目标资料同时包含 `fulltext` 和 `vector` 来源。
 - 当前默认验证路径为 `docker compose up -d --build` 后检查 `docker compose ps` 与 Redis、PostgreSQL、Chroma、migration、backend、worker、frontend 关键日志；`scripts/acceptance_check.sh` 作为补充验收脚本，静态补充检查可运行 `scripts/acceptance_check.sh --skip-real-eval`。
 - 当前阶段优先做“可维护性 + 可观测性 + 验收自动化”，避免在关键链路刚稳定后继续堆叠大功能；前端工作台已开始引入 React Query 和 Zod 做请求层集中化与轻量响应校验。
+- 2026-08-02 已确认后续不建立长期 `tutorial` 分支：`main` 继续作为唯一长期主线，项目停止非必要功能扩展，转向“可运行的全栈 RAG 工程教程与参考实现”；每项教程任务仍从 `main` 创建短期分支并通过 PR 合并。
 - 修改项目文件后，继续遵守只暂存当前任务相关文件、不混入 unrelated refactor 的规则。
 
 ## 计划批次
@@ -128,6 +129,7 @@
 | `PLAN-20260731-10` | 2026-07-31 | `Done` | 继续拆分知识库生命周期 hook，独立管理回收站加载、删除、恢复和集合刷新。 | `T-119` |
 | `PLAN-20260731-11` | 2026-07-31 | `Done` | 继续拆分会话操作 hook，独立管理 active session 消息懒加载与错误回写。 | `T-120` |
 | `PLAN-20260801-01` | 2026-08-01 | `Done` | 拆分聊天工作台通用工具，优先收口 vector indexing 解析、状态和展示 helper。 | `T-121` |
+| `PLAN-20260802-01` | 2026-08-02 | `Todo` | 在保留完整可运行实现的前提下，将 `main` 单主线转为分层教程与工程参考实现，并停止非必要功能扩展。 | `T-122` - `T-129` |
 
 ## 任务总览
 
@@ -254,6 +256,14 @@
 | `T-119` | `PLAN-20260731-10` | `P1` | `Done` | 抽取知识库回收站操作 hook | 2026-07-31 | `b456ea1` |
 | `T-120` | `PLAN-20260731-11` | `P1` | `Done` | 抽取会话消息懒加载 hook | 2026-07-31 | `db6c1fe` |
 | `T-121` | `PLAN-20260801-01` | `P1` | `Done` | 抽取 vector indexing utilities | 2026-08-01 | `1df28d6` |
+| `T-122` | `PLAN-20260802-01` | `P1` | `Todo` | 固化教程化前产品基线与维护边界 | — | — |
+| `T-123` | `PLAN-20260802-01` | `P1` | `Todo` | 建立教程入口、学习路线与源码地图 | — | — |
+| `T-124` | `PLAN-20260802-01` | `P1` | `Todo` | 建立无外部密钥的入门实验 | — | — |
+| `T-125` | `PLAN-20260802-01` | `P1` | `Todo` | 编写文件入库与异步索引教程 | — | — |
+| `T-126` | `PLAN-20260802-01` | `P1` | `Todo` | 编写混合检索与流式回答教程 | — | — |
+| `T-127` | `PLAN-20260802-01` | `P2` | `Todo` | 编写前端、安全、测试与部署进阶教程 | — | — |
+| `T-128` | `PLAN-20260802-01` | `P2` | `Todo` | 增加练习、示例素材与文档回归门禁 | — | — |
+| `T-129` | `PLAN-20260802-01` | `P1` | `Todo` | 明确教程仓库 License 与公开使用边界 | — | — |
 
 ## 新计划接入流程
 
@@ -5070,6 +5080,231 @@ docker compose ps
 docker compose logs --since=5m redis postgres chroma migrate backend worker frontend
 conda run -n firstrag python scripts/production_preflight.py --env-file .env --migration-method compose --check-runtime-health
 scripts/run_full_stack_e2e.sh
+git diff --check
+```
+
+## T-122 固化教程化前产品基线与维护边界
+
+- 来源计划：`PLAN-20260802-01`
+- 优先级：`P1`
+- 状态：`Todo`
+- 背景：FirstRAG 的认证、文件入库、异步向量化、OCR、混合检索、流式回答、诊断、评测和 Compose 验收链路已经完整，继续进行非必要功能扩展或仅按文件行数拆分模块的边际收益较低。后续将在 `main` 单一长期主线上转向教程与工程参考实现，不维护并行的长期 `tutorial` 分支。
+- 目标：保存教程化改造前的可追溯产品快照，明确功能冻结、维护例外、分支策略和教程内容的真实性边界。
+- 技术边界：
+  - `main` 继续作为唯一长期主线；教程任务使用短期 `codex/...` 分支，通过 PR、required checks 和 squash merge 回到 `main`。
+  - 停止非必要功能扩展；Bug、安全漏洞、依赖兼容、教程可复现性所需的最小修复可以继续进入 backlog。
+  - 教程化前的产品快照使用 annotated tag 固化，不通过长期分支复制同一套代码。
+  - 保留 `docs/TASKS.md` 中的历史任务和验收证据，不把旧基线改写成当前结论。
+- 范围：
+  - 核对 `main`、`origin/main`、工作区和最近 required checks 状态。
+  - 创建并推送 `product-v1.0.0` annotated tag，说明其为教程化前完整产品基线。
+  - 在 README、文档导航和协作规范中明确项目的新定位、功能冻结规则和短期分支工作流。
+- 验收标准：
+  - 本地与远端 `product-v1.0.0` 指向同一教程化前 commit。
+  - 仓库只保留 `main` 作为长期开发主线，文档不再建议建立长期 `tutorial` 分支。
+  - 功能冻结不影响必要的 Bug、安全和兼容性维护。
+  - 本任务不修改业务行为、API payload、数据库 schema 或部署拓扑。
+- 建议验证命令：
+
+```bash
+git status --short --branch
+git rev-parse main origin/main product-v1.0.0
+git ls-remote --tags origin refs/tags/product-v1.0.0
+git diff --check
+```
+
+## T-123 建立教程入口、学习路线与源码地图
+
+- 来源计划：`PLAN-20260802-01`
+- 优先级：`P1`
+- 状态：`Todo`
+- 目标：把当前偏产品介绍和参考手册的文档入口改造成面向学习者的导航层，让读者先理解学习目标、先修条件和章节顺序，再进入真实实现与专题参考文档。
+- 技术边界：
+  - 教程正文引用当前真实代码和配置，不复制大段易漂移的实现。
+  - `docs/ARCHITECTURE.md`、`docs/API.md`、`docs/SCHEMAS.md`、`docs/RAG_WORKFLOW.md` 等继续作为 reference，不用教程章节替代。
+  - 同时提供入门、后端/RAG、前端和工程化四条学习路线，不要求所有读者顺序阅读全部文档。
+- 范围：
+  - 重构根 README 的项目定位、学习收获、快速体验和教程导航。
+  - 新增 `docs/tutorials/README.md`，定义统一章节模板和推荐阅读顺序。
+  - 新增源码地图，把 route、repository、service、worker、前端 proxy/component/hook、测试和部署文件映射到对应教程章节。
+  - 更新 `docs/README.md`，区分 tutorial、reference、runbook、evaluation 和 historical material。
+- 验收标准：
+  - 新读者可以从根 README 在两次跳转内到达任一教程章节和对应源码入口。
+  - 每条学习路线都标注先修条件、预计产出和可跳过章节。
+  - 文档不把尚未实现的能力写成既有功能，也不展示真实 API Key、JWT、数据库密码或私人文档。
+  - 所有相对链接可从 GitHub Markdown 页面正确访问。
+- 建议验证命令：
+
+```bash
+git diff --check
+rg -n "docs/tutorials|学习路线|源码地图" README.md docs/README.md docs/tutorials
+```
+
+## T-124 建立无外部密钥的入门实验
+
+- 来源计划：`PLAN-20260802-01`
+- 优先级：`P1`
+- 状态：`Todo`
+- 目标：让学习者不提交真实 provider API Key，也能运行一条确定性的 FirstRAG 核心链路并观察注册、上传、worker、检索、SSE 和 sources 的实际行为。
+- 技术边界：
+  - 优先复用现有 `scripts/run_full_stack_e2e.sh`、隔离 Compose project 和本地 OpenAI-compatible provider stub，不平行维护第二套教学后端。
+  - 教程实验与用户本地 `.env`、现有 Compose project、uploads 和数据库 volumes 隔离。
+  - 示例只使用可公开、无版权风险的短文本和合成数据。
+- 范围：
+  - 编写环境准备、运行、预期输出、关键日志定位和自动清理步骤。
+  - 提供适合教程的示例知识文件、问题和结果观察清单。
+  - 说明无密钥实验与连接真实 LLM/embedding provider 两种路径的差异。
+  - 如果现有 E2E 脚本不适合交互式观察，只增加最小、可复用的 tutorial wrapper 或暂停选项。
+- 验收标准：
+  - 在无真实账号、API Key 和公网模型服务的环境中，可重复覆盖登录、TXT 上传、异步向量化、混合检索、SSE 回答和 sources 展示。
+  - 实验结束后只清理自己的容器、网络和 volumes，不影响默认 FirstRAG 环境。
+  - 文档明确预期耗时、端口冲突、Docker 依赖和常见失败恢复方式。
+  - CI 中现有 Full-stack E2E 继续通过。
+- 建议验证命令：
+
+```bash
+scripts/run_full_stack_e2e.sh
+git diff --check
+```
+
+## T-125 编写文件入库与异步索引教程
+
+- 来源计划：`PLAN-20260802-01`
+- 优先级：`P1`
+- 状态：`Todo`
+- 目标：围绕一份文件从 HTTP 上传到可检索数据的真实生命周期，解释权限隔离、SHA-256 去重、任务队列、worker、解析/OCR、chunk、embedding 和双存储写入。
+- 技术边界：
+  - 保持 route、repository、service 和 worker 的现有分层边界，不为讲解方便把重型 indexing 移回 HTTP request。
+  - 明确 PostgreSQL `vector_index_jobs` 是持久任务队列，Redis 只承担 worker 运行态、lease/heartbeat 和相关共享状态。
+  - 扫描 PDF 教程引用生产 OCR engine 和现有合成回归门禁，不伪造真实 OCR 精度结论。
+- 范围：
+  - 编写上传与权限、去重与 metadata、任务入队与 advisory lock、文档解析与 OCR、chunk 与存储五个章节。
+  - 为每章补充时序图、源码入口、关键表字段、可运行检查和故障注入/观察点。
+  - 关联 `docs/SCHEMAS.md`、`docs/API.md`、`docs/RAG_WORKFLOW.md` 和 OCR eval 文档。
+- 验收标准：
+  - 读者可以从一个 file ID 追踪到 job、chunk、Chroma metadata 和最终 indexing 状态。
+  - 教程覆盖重复上传、旧任务覆盖保护、软删除、索引失败恢复和扫描 PDF fallback。
+  - 示例 SQL、API 路径和状态名与当前实现一致，并且不绕过 `user_id` 和软删除条件。
+  - 相关后端测试、OCR regression gate 和 full-stack E2E 继续通过。
+- 建议验证命令：
+
+```bash
+conda run -n firstrag python scripts/eval_pdf_ocr.py
+scripts/run_full_stack_e2e.sh
+git diff --check
+```
+
+## T-126 编写混合检索与流式回答教程
+
+- 来源计划：`PLAN-20260802-01`
+- 优先级：`P1`
+- 状态：`Todo`
+- 目标：解释用户提问从 query embedding、vector/full-text 粗召回、RRF、可选 rerank 到 LCEL/LLM streaming、消息持久化、sources 和 retrieval diagnostics 的完整路径。
+- 技术边界：
+  - 保持 Chroma vector search 与 PostgreSQL full-text search 的职责差异，明确 degraded/fallback 状态。
+  - 保留 query embedding cache 的用户、provider、model 和 dimensions 隔离维度。
+  - 评测结果只使用报告实际计算的指标；不得把评测通过率或目标文档命中率写成标准 Recall@K。
+- 范围：
+  - 编写 hybrid retrieval、RRF、rerank、缓存、LCEL chain、SSE protocol、assistant 状态和 sources/diagnostics 持久化章节。
+  - 增加一次请求的阶段时序图和 diagnostics 字段阅读示例。
+  - 关联真实 RAG/indexing eval 的执行条件、报告 schema 和指标解释。
+- 验收标准：
+  - 读者可以从一次提问定位 vector、full-text、fusion、rerank、first-token 和完整回答阶段。
+  - 教程解释 rerank 不可用、Chroma 降级、provider 调用失败和客户端中断时的预期行为。
+  - SSE 示例保持 streaming body，不引导前端 proxy 预先读取完整响应。
+  - 相关后端测试和 full-stack E2E 继续通过。
+- 建议验证命令：
+
+```bash
+scripts/run_full_stack_e2e.sh
+git diff --check
+```
+
+## T-127 编写前端、安全、测试与部署进阶教程
+
+- 来源计划：`PLAN-20260802-01`
+- 优先级：`P2`
+- 状态：`Todo`
+- 目标：补齐工程实践学习路径，解释 Next.js proxy/状态管理、用户凭据安全、Docker Compose 拓扑、CI required checks、评测与生产 preflight，而不是只展示 RAG 算法主链路。
+- 技术边界：
+  - 前端教程以当前 component、hook、API proxy 和 streaming 边界为准，不重新制造平行架构。
+  - 安全教程不得展示或要求读者提交真实 secret；自定义 provider 地址需要保留现有 SSRF 防护说明。
+  - 部署章节区分本地教学环境、真实 provider 验收和生产部署，不把本地 Compose 等同于已完成公网发布。
+- 范围：
+  - 编写前端页面/代理/状态流、认证与 API Key 安全、错误和限流反馈章节。
+  - 编写测试金字塔、credential-free E2E、OCR gate、依赖审计和 GitHub Actions required checks 章节。
+  - 编写 Compose 服务关系、migration/preflight、日志、备份恢复和公网部署前置条件章节。
+- 验收标准：
+  - 教程清楚区分浏览器、Next.js proxy、FastAPI、worker 和外部 provider 的信任边界。
+  - 测试章节说明每类门禁覆盖什么、没有覆盖什么，以及何时需要真实 RAG/indexing eval。
+  - 部署命令、服务名和 required check 名称与当前仓库一致。
+  - 前端 lint、Vitest、production build、Playwright E2E、Compose preflight 和 CI 配置检查通过。
+- 建议验证命令：
+
+```bash
+cd frontend
+npm run lint
+npm run test
+npm run build
+CI=1 npm run test:e2e
+cd ..
+docker compose config --quiet
+conda run -n firstrag python scripts/production_preflight.py --env-file .env --migration-method compose --check-runtime-health
+git diff --check
+```
+
+## T-128 增加练习、示例素材与文档回归门禁
+
+- 来源计划：`PLAN-20260802-01`
+- 优先级：`P2`
+- 状态：`Todo`
+- 目标：把教程从单向阅读材料补强为可操作、可自检、可持续维护的学习资源，并降低源码路径、命令和内部链接随项目演进而失效的风险。
+- 技术边界：
+  - 练习优先使用小型、确定性、可清理的 fixture，不引入新的在线服务依赖。
+  - 自动检查只验证可稳定判断的链接、文件路径、命令格式和敏感信息规则，不对自然语言内容做脆弱的全文快照。
+  - 失败门禁应给出具体章节和失效目标，便于维护者修复。
+- 范围：
+  - 为核心章节增加基础、诊断和扩展三级练习，并提供预期观察点或参考答案方向。
+  - 增加公开可用的 Markdown/TXT、合成 OCR 和 retrieval 示例素材及来源说明。
+  - 增加教程内部链接、源码路径、章节索引和敏感占位符的自动检查脚本。
+  - 将稳定的教程文档检查接入 GitHub Actions。
+- 验收标准：
+  - 每个核心章节至少包含一个不需要真实 API Key 的练习。
+  - 示例素材不包含私人内容、未知授权材料或可用凭据。
+  - 删除或移动被教程引用的源码文件会让文档门禁给出明确失败。
+  - 本地文档检查和 CI required checks 通过。
+- 建议验证命令：
+
+```bash
+python3 scripts/check_tutorial_docs.py
+python3 scripts/check_github_actions_pins.py
+git diff --check
+```
+
+## T-129 明确教程仓库 License 与公开使用边界
+
+- 来源计划：`PLAN-20260802-01`
+- 优先级：`P1`
+- 状态：`Todo`
+- 背景：当前仓库允许项目展示、学习和审查，但没有授予复制、修改、分发、再授权、商业使用或托管服务的开放源码权利。公开教程如果鼓励读者 clone、修改和提交练习，需要让 README、教程说明和 `LICENSE` 对这些行为给出一致、无歧义的授权边界。
+- 目标：由仓库所有者明确选择开放源码教程或只读工程案例定位，并同步仓库许可证、教程用语和第三方素材说明。
+- 技术边界：
+  - License 类型和授权范围必须由仓库所有者明确决定，Agent 不自行替换许可证。
+  - 在决定前，不把仓库描述为允许自由复制、修改或再分发的开源教程。
+  - 第三方依赖许可证、示例素材来源和项目自身代码许可证分别说明，不混为一体。
+- 范围：
+  - 比较维持当前限制、MIT 和 Apache-2.0 对教程使用、再分发、商业使用和专利授权的影响。
+  - 按最终决定更新 `LICENSE`、README、教程入口和必要的 NOTICE/素材归属说明。
+  - 检查 package metadata、文档徽章和发布说明不存在冲突表述。
+- 验收标准：
+  - 仓库所有者已明确选择 License 或维持限制性授权。
+  - README、教程入口和 `LICENSE` 对 clone、修改、分发、商业使用的表述一致。
+  - 所有示例素材具有清晰来源或为仓库自有合成内容。
+  - 未获得授权前不删除原有版权和限制声明。
+- 建议验证命令：
+
+```bash
+rg -n "License|LICENSE|开源|复制|修改|分发|商业" README.md docs LICENSE
 git diff --check
 ```
 
