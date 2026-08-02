@@ -35,6 +35,7 @@ yarn-error.log*
 /backups/
 /tmp/pdfs/
 /tmp/full-stack-e2e/
+/tmp/tutorial-fixtures/
 
 # Local application settings
 .env

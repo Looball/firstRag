@@ -11,6 +11,7 @@
 | [文件入库与异步索引](FILE_INGESTION_AND_INDEXING.md) | 从一个 `file_id` 追踪权限、去重、任务队列、worker、OCR、chunk 与双存储。 |
 | [混合检索与流式回答](HYBRID_RETRIEVAL_AND_STREAMING.md) | 从一次提问追踪两路粗召回、RRF、rerank、SSE、持久化与 diagnostics。 |
 | [前端、安全、测试与部署进阶](FRONTEND_SECURITY_TESTING_AND_DEPLOYMENT.md) | 追踪页面状态、API proxy、凭据、限流、测试门禁、Compose 与生产 preflight。 |
+| [教程示例素材](fixtures/README.md) | 使用可追溯的 TXT、Markdown 和现场生成 OCR 素材完成练习。 |
 | [源码地图](CODE_MAP.md) | 从业务问题定位 route、repository、service、worker、前端和测试入口。 |
 | [系统架构](../ARCHITECTURE.md) | 查看模块边界、核心数据流和存储职责。 |
 | [RAG 核心流程](../RAG_WORKFLOW.md) | 查看入库、检索、生成与 diagnostics 的当前行为。 |
@@ -88,7 +89,7 @@
 | T-125 | [文件上传、任务队列、worker、解析/OCR、chunk 与向量写入](FILE_INGESTION_AND_INDEXING.md) | Done |
 | T-126 | [vector/full-text、RRF、rerank、SSE、sources 与 diagnostics](HYBRID_RETRIEVAL_AND_STREAMING.md) | Done |
 | T-127 | [前端、安全、测试、CI 与部署](FRONTEND_SECURITY_TESTING_AND_DEPLOYMENT.md) | Done |
-| T-128 | 分级练习、示例素材与文档回归门禁 | Todo |
+| T-128 | [分级练习、示例素材与文档回归门禁](#教程文档回归门禁) | Done |
 | T-129 | License 与公开使用边界 | Todo |
 
 任务状态以 [docs/TASKS.md](../TASKS.md) 为准。
@@ -110,6 +111,26 @@
 ```
 
 章节中的命令必须说明运行目录、外部依赖和是否需要真实账号/API Key；结果必须来自当前实现或可复现报告，不能把计划能力、历史数据或熟悉但未计算的指标当成当前结论。
+
+## 教程文档回归门禁
+
+[`tutorial_manifest.json`](tutorial_manifest.json) 以机器可读方式声明核心章节、三级练习和合成素材来源。维护教程后从仓库根目录运行：
+
+```bash
+python3 scripts/check_tutorial_docs.py
+```
+
+检查器只校验可稳定判断的事实：
+
+- 教程相对链接和 heading anchor 存在。
+- Markdown link 与 inline code 中明确写出的 repo-root 源码路径存在。
+- shell block 已闭合、使用 `docker compose`，且引用的仓库脚本/文件存在。
+- 四个核心章节均在教程索引中，并包含 manifest 声明的基础、诊断和扩展练习。
+- fixture 存在且来源字段为仓库自编合成内容。
+- 教程和 fixture 不包含 private key、可用 Key 或 JWT 的高置信度模式。
+- `.github/workflows/ci.yml` 继续执行同一检查命令。
+
+失败信息包含文件、行号和失效目标。例如删除源码地图引用的文件，会得到 `链接目标不存在`，而不是笼统的“文档失败”。检查器不对自然语言段落做全文快照，也不访问网络。
 
 ## 阅读约定
 

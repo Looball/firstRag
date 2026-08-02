@@ -196,7 +196,7 @@ conda run -n firstrag python scripts/eval_indexing.py \
 
 CI 覆盖：
 
-- 后端：安装 `backend/requirements.txt` 与 Tesseract 中英文 runtime、执行 Python production dependency audit policy、`python -m compileall app`、`python -m unittest discover tests -v`、PDF OCR regression gate、`python scripts/migrate_db.py --list` 和 `docker compose config --quiet`。OCR gate 用有界 cache 恢复同 benchmark suite、runner 和 Tesseract 历史，每次上传当前报告 artifact（保留 30 天），并把质量、耗时趋势写入 job summary；cache 不可用或 suite 改变时降级为新 baseline，不跳过当前门禁。
+- 后端：先执行 GitHub Actions pin policy 和 `python3 scripts/check_tutorial_docs.py` 文档门禁，再安装 `backend/requirements.txt` 与 Tesseract 中英文 runtime、执行 Python production dependency audit policy、`python -m compileall app`、`python -m unittest discover tests -v`、PDF OCR regression gate、`python scripts/migrate_db.py --list` 和 `docker compose config --quiet`。教程门禁检查内部链接/anchor、显式源码路径、三级练习、fixture 来源、shell 命令格式和高置信度敏感模式，不访问网络。OCR gate 用有界 cache 恢复同 benchmark suite、runner 和 Tesseract 历史，每次上传当前报告 artifact（保留 30 天），并把质量、耗时趋势写入 job summary；cache 不可用或 suite 改变时降级为新 baseline，不跳过当前门禁。
 - 前端：`npm ci`、production dependency audit policy、`npm run lint`、`npm run test`、`npm run build` 和 Playwright Chromium E2E。OCR source 回归使用本地受控 fixture，不依赖真实账号、后端或外部模型；E2E 失败时上传 HTML report、截图和 trace 诊断 artifact，保留 14 天。
 - 全栈 E2E：使用独立 Compose project、临时 named volumes 和本地确定性 OpenAI-compatible provider stub，覆盖真实注册、前端登录、上传、worker 向量化、Chroma/PostgreSQL 检索、SSE 回答与 sources 展示。该 job 不读取真实 provider Key，失败时额外上传 Compose 日志。
 - 容器：从当前 Dockerfile 构建 backend/frontend 第一方镜像，使用 Trivy 扫描 OS packages。

@@ -262,7 +262,7 @@
 | `T-125` | `PLAN-20260802-01` | `P1` | `Done` | 编写文件入库与异步索引教程 | 2026-08-02 | `a8eaf94` |
 | `T-126` | `PLAN-20260802-01` | `P1` | `Done` | 编写混合检索与流式回答教程 | 2026-08-02 | `044a3eb` |
 | `T-127` | `PLAN-20260802-01` | `P2` | `Done` | 编写前端、安全、测试与部署进阶教程 | 2026-08-02 | `59ab53f` |
-| `T-128` | `PLAN-20260802-01` | `P2` | `Todo` | 增加练习、示例素材与文档回归门禁 | — | — |
+| `T-128` | `PLAN-20260802-01` | `P2` | `Done` | 增加练习、示例素材与文档回归门禁 | 2026-08-02 | `78c272b` |
 | `T-129` | `PLAN-20260802-01` | `P1` | `Todo` | 明确教程仓库 License 与公开使用边界 | — | — |
 
 ## 新计划接入流程
@@ -5306,7 +5306,7 @@ git diff --check
 
 - 来源计划：`PLAN-20260802-01`
 - 优先级：`P2`
-- 状态：`Todo`
+- 状态：`Done`
 - 目标：把教程从单向阅读材料补强为可操作、可自检、可持续维护的学习资源，并降低源码路径、命令和内部链接随项目演进而失效的风险。
 - 技术边界：
   - 练习优先使用小型、确定性、可清理的 fixture，不引入新的在线服务依赖。
@@ -5322,6 +5322,15 @@ git diff --check
   - 示例素材不包含私人内容、未知授权材料或可用凭据。
   - 删除或移动被教程引用的源码文件会让文档门禁给出明确失败。
   - 本地文档检查和 CI required checks 通过。
+- 完成记录：
+  - 四个核心教程均补齐基础、诊断、扩展三级练习，以及预期观察点或参考答案方向；每章的基础练习均不需要真实 API Key。
+  - 新增仓库自有合成的 retrieval TXT、虚构 Markdown 和 OCR ground truth，并在 fixture README 中说明来源、授权边界、生成方式与清理路径。
+  - 新增 `tutorial_manifest.json` 与纯标准库文档检查器，校验章节索引、内部链接与 anchor、源码路径、shell 命令格式、fixture 来源和高置信度敏感凭据模式。
+  - 删除链接目标、练习标题、索引入口或 CI 命令时，门禁会报告具体 Markdown 文件、行号和失效目标；9 个脚本测试覆盖当前仓库、失败诊断与 OCR PNG 生成。
+  - 文档门禁已接入 Backend CI；GitHub Actions pin policy 继续通过 13 个引用检查，full-stack E2E 改为直接上传共享 retrieval fixture。
+  - 本地验证通过：教程文档检查 8 篇、后端 382 项、前端 Vitest 41 files / 181 tests、production build、Playwright 3/3、credential-free full-stack Playwright 1/1。
+  - Docker Compose build/status、backend/frontend smoke 与 production preflight 通过；full-stack 临时 containers、network 和 volumes 已自动清理。
+- 相关提交：`78c272b`
 - 建议验证命令：
 
 ```bash

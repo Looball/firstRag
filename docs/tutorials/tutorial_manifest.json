@@ -1,0 +1,48 @@
+{
+  "schema_version": 1,
+  "index_path": "docs/tutorials/README.md",
+  "ci_workflow_path": ".github/workflows/ci.yml",
+  "core_chapters": [
+    {
+      "path": "docs/tutorials/CREDENTIAL_FREE_QUICKSTART.md",
+      "title": "无外部密钥入门实验",
+      "required_headings": ["基础练习", "诊断练习", "扩展练习"],
+      "credential_free_heading": "基础练习"
+    },
+    {
+      "path": "docs/tutorials/FILE_INGESTION_AND_INDEXING.md",
+      "title": "文件入库与异步索引",
+      "required_headings": ["基础练习", "诊断练习", "扩展练习"],
+      "credential_free_heading": "基础练习"
+    },
+    {
+      "path": "docs/tutorials/HYBRID_RETRIEVAL_AND_STREAMING.md",
+      "title": "混合检索与流式回答",
+      "required_headings": ["基础练习", "诊断练习", "扩展练习"],
+      "credential_free_heading": "基础练习"
+    },
+    {
+      "path": "docs/tutorials/FRONTEND_SECURITY_TESTING_AND_DEPLOYMENT.md",
+      "title": "前端、安全、测试与部署进阶",
+      "required_headings": ["基础练习", "诊断练习", "扩展练习"],
+      "credential_free_heading": "基础练习"
+    }
+  ],
+  "fixtures": [
+    {
+      "path": "docs/tutorials/fixtures/credential_free_retrieval.txt",
+      "kind": "retrieval",
+      "origin": "repository-authored-synthetic"
+    },
+    {
+      "path": "docs/tutorials/fixtures/fictional_station.md",
+      "kind": "markdown",
+      "origin": "repository-authored-synthetic"
+    },
+    {
+      "path": "docs/tutorials/fixtures/ocr_ground_truth.txt",
+      "kind": "ocr-ground-truth",
+      "origin": "repository-authored-synthetic"
+    }
+  ]
+}

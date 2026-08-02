@@ -69,7 +69,7 @@ FIRSTRAG_E2E_PAUSE_AFTER_TEST=1 scripts/run_full_stack_e2e.sh
 
 ## 预期结果
 
-Playwright 使用的公开合成数据是：
+Playwright 使用的公开合成数据来自 [`fixtures/credential_free_retrieval.txt`](fixtures/credential_free_retrieval.txt)：
 
 | 项目 | 值 |
 | --- | --- |
@@ -175,4 +175,26 @@ scripts/run_full_stack_e2e.sh
 | seed 脚本直接写入隔离用户设置。 | 用户通过设置页保存并测试自己的 provider/API Key。 |
 | 证明工程链路能工作，不计算 RAG 质量指标。 | 需要按 `docs/evals/README.md` 的条件运行真实 RAG/indexing eval。 |
 
-继续阅读：[文件入库与异步索引](FILE_INGESTION_AND_INDEXING.md)、[源码地图](CODE_MAP.md)、[RAG 核心流程](../RAG_WORKFLOW.md)、[评测说明](../evals/README.md)。
+## 分级练习
+
+以下基础和诊断练习都在隔离 Compose project 中完成，不需要真实 API Key。扩展练习仍使用仓库自编虚构素材，不用于评价真实 provider 的回答质量。
+
+### 基础练习
+
+运行暂停模式，登录后确认文件列表、回答和引用分别出现 `t089-full-stack-source.txt` 与 `T089 FULL STACK SOURCE`。再从 [`full-stack-core.spec.ts`](../../frontend/e2e/full-stack-core.spec.ts) 找到同一断言，说明 UI 观察和自动门禁各证明了什么。
+
+自检方向：UI 证明当前浏览器会话可见；Playwright 断言还会阻断 console/page error，并通过 fixture 文件、worker 终态、SSE 回答和 source 文件名证明跨服务链路。两者都不证明真实模型质量。
+
+### 诊断练习
+
+脚本暂停时分别查看 `worker`、`backend` 和 `provider-stub` 日志，按时间写出 upload、job、embedding、chat 与 SSE 的顺序，并记录每一步由哪个 service 负责。不要复制临时 token 或完整设置 payload。
+
+自检方向：upload/backend 先持久化任务，worker 随后调用 embedding stub 并写入双存储；提问发生在索引成功之后，backend 调用 chat stub 并以 SSE 返回。provider 不直接访问浏览器。
+
+### 扩展练习
+
+把 [`fictional_station.md`](fixtures/fictional_station.md) 上传到隔离知识库并完成向量化，询问“备用电池最低安全电量是多少”。只检查 sources 是否指向该 Markdown 文件和 diagnostics 是否发生检索，不把 stub 的固定回答当成事实答案。
+
+自检方向：预期 source 文件名包含 `fictional_station.md`，full-text/vector 至少一路提供候选；ground truth 是 68%，但 credential-free stub 只用于协议链路，回答文本不构成质量验收。
+
+继续阅读：[教程示例素材](fixtures/README.md)、[文件入库与异步索引](FILE_INGESTION_AND_INDEXING.md)、[源码地图](CODE_MAP.md)、[RAG 核心流程](../RAG_WORKFLOW.md)、[评测说明](../evals/README.md)。

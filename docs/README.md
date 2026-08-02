@@ -18,6 +18,7 @@
 | [`tutorials/FILE_INGESTION_AND_INDEXING.md`](tutorials/FILE_INGESTION_AND_INDEXING.md) | 文件从 HTTP upload 到异步任务、OCR、chunk、Chroma 与 PostgreSQL 的可追踪教程。 |
 | [`tutorials/HYBRID_RETRIEVAL_AND_STREAMING.md`](tutorials/HYBRID_RETRIEVAL_AND_STREAMING.md) | 一次提问从 hybrid retrieval、RRF、rerank 到 SSE、落库与 diagnostics 的教程。 |
 | [`tutorials/FRONTEND_SECURITY_TESTING_AND_DEPLOYMENT.md`](tutorials/FRONTEND_SECURITY_TESTING_AND_DEPLOYMENT.md) | 前端状态与 proxy、凭据安全、测试门禁、Compose 和生产部署边界教程。 |
+| [`tutorials/fixtures/README.md`](tutorials/fixtures/README.md) | 仓库自编 TXT、Markdown、OCR ground truth 素材的用途、来源与清理说明。 |
 | [`tutorials/CODE_MAP.md`](tutorials/CODE_MAP.md) | route、repository、service、worker、前端、测试和部署的纵向源码地图。 |
 
 教程专题尚未全部完成。未交付章节只在导航中标记对应任务，不创建空白页面；状态以 `TASKS.md` 为准。

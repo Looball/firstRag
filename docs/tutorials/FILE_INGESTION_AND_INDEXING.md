@@ -620,19 +620,25 @@ Worker 对可重试失败最多执行 `max_attempts` 次并使用指数退避；
 | vector metadata 是否存在 | 用户隔离 Chroma collection | 同时 filter `user_id` 和 `file_id`。 |
 | 是否真正可检索 | retrieval/evaluation | 不能只看 job 成功；继续 T-126 或运行当前 eval。 |
 
-## 练习
+## 分级练习
 
-### 基础
+### 基础练习
 
-画出 `POST upload` 与 `POST vectors` 的边界，并解释为什么前者不应等待 embedding 完成。然后用本页 SQL 把 `file_id`、当前 `index_version`、job 和 chunk 串起来。
+凭据要求：不需要真实 API Key。画出 `POST upload` 与 `POST vectors` 的边界，并解释为什么前者不应等待 embedding 完成。然后用本页 SQL 把 `file_id`、当前 `index_version`、job 和 chunk 串起来。
 
-### 诊断
+自检方向：upload 的终点是文件、metadata、关联和可选入队；embedding 由 worker 消费持久 job 后执行。有效 chunk 必须与文件当前 `index_version` 一致，不能只按 `file_id` 统计历史残留。
+
+### 诊断练习
 
 执行“停止 worker 后持久排队”实验，对比 worker 停止和恢复前后的 job、queue health、Redis runtime 与文件状态。说明哪个信息来自 PostgreSQL，哪个来自 Redis。
 
-### 扩展
+自检方向：job、attempts 和文件状态是 PostgreSQL 持久事实；worker heartbeat/runtime 和共享限流/缓存状态在 Redis。worker 恢复后应领取原 `queued` job，而不是由浏览器重新构造任务。
 
-选择一个包含原生文本页和扫描页的自有 PDF，在独立测试账号中上传；先记录页级 `pdf_parse_method`，再运行 OCR gate。不要用合成 gate 的结果代替真实 PDF 的准确率结论。
+### 扩展练习
+
+先用 [`ocr_ground_truth.txt`](fixtures/ocr_ground_truth.txt) 和 `scripts/generate_tutorial_ocr_fixture.py` 生成合成 PNG，核对 ground truth、生成图和 OCR 输出之间的差异；再选择一个包含原生文本页和扫描页的自有 PDF，在独立测试账号中上传，记录页级 `pdf_parse_method` 并运行 OCR gate。不要用合成素材的结果代替真实 PDF 的准确率结论。
+
+自检方向：合成 PNG 的来源和期望文本完全可追溯，适合学习 pipeline；真实 PDF 才能暴露版式、字体、噪声和扫描设备差异。两类结果必须分开记录。
 
 ## 清理与验证
 
@@ -655,4 +661,4 @@ git diff --check
 - [`backend/tests/services/test_document_service.py`](../../backend/tests/services/test_document_service.py)
 - [`backend/tests/services/test_vector_index_service.py`](../../backend/tests/services/test_vector_index_service.py)
 
-Reference：[API](../API.md)、[数据库结构](../SCHEMAS.md)、[RAG 核心流程](../RAG_WORKFLOW.md)、[PDF OCR 回归门禁](../evals/README.md#pdf-ocr-回归门禁)、[源码地图](CODE_MAP.md#文件入库与异步索引)。下一章是[混合检索与流式回答](HYBRID_RETRIEVAL_AND_STREAMING.md)。
+Reference：[教程示例素材](fixtures/README.md)、[API](../API.md)、[数据库结构](../SCHEMAS.md)、[RAG 核心流程](../RAG_WORKFLOW.md)、[PDF OCR 回归门禁](../evals/README.md#pdf-ocr-回归门禁)、[源码地图](CODE_MAP.md#文件入库与异步索引)。下一章是[混合检索与流式回答](HYBRID_RETRIEVAL_AND_STREAMING.md)。

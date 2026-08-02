@@ -1,9 +1,15 @@
 import { expect, test } from "@playwright/test";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 
 const USERNAME = process.env.FIRSTRAG_E2E_USERNAME;
 const PASSWORD = process.env.FIRSTRAG_E2E_PASSWORD;
 const FILE_NAME = "t089-full-stack-source.txt";
 const SOURCE_MARKER = "T089 FULL STACK SOURCE";
+const RETRIEVAL_FIXTURE_PATH = resolve(
+  process.cwd(),
+  "../docs/tutorials/fixtures/credential_free_retrieval.txt",
+);
 
 test("真实服务完成登录、上传、向量化、SSE 回答和引用展示", async ({
   page,
@@ -35,10 +41,7 @@ test("真实服务完成登录、上传、向量化、SSE 回答和引用展示"
   await fileChooser.setFiles({
     name: FILE_NAME,
     mimeType: "text/plain",
-    buffer: Buffer.from(
-      `FirstRAG credential-free full-stack evidence: ${SOURCE_MARKER}.`,
-      "utf-8",
-    ),
+    buffer: readFileSync(RETRIEVAL_FIXTURE_PATH),
   });
 
   const fileDialog = page.getByRole("dialog", { name: "知识库文件" });
