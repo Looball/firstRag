@@ -7,6 +7,7 @@
 | 内容 | 用途 |
 | --- | --- |
 | 本页 | 选择学习路线，了解章节顺序和统一写法。 |
+| [无外部密钥入门实验](CREDENTIAL_FREE_QUICKSTART.md) | 在隔离 Compose project 中运行注册、上传、向量化、检索、SSE 和 sources 完整链路。 |
 | [源码地图](CODE_MAP.md) | 从业务问题定位 route、repository、service、worker、前端和测试入口。 |
 | [系统架构](../ARCHITECTURE.md) | 查看模块边界、核心数据流和存储职责。 |
 | [RAG 核心流程](../RAG_WORKFLOW.md) | 查看入库、检索、生成与 diagnostics 的当前行为。 |
@@ -27,10 +28,11 @@
 | 先修条件 | 能使用 Git、Docker 和命令行；不要求先掌握 LangChain。 |
 | 预计产出 | 能画出上传与提问两条流程，知道 PostgreSQL、Redis、Chroma、worker 各自负责什么。 |
 | 第一步 | 阅读 [系统架构](../ARCHITECTURE.md) 和 [源码地图的全局入口](CODE_MAP.md#全局入口)。 |
-| 第二步 | 按 [Docker Compose 启动 runbook](../docker-startup/README.md) 运行完整应用。 |
+| 第二步 | 完成 [无外部密钥入门实验](CREDENTIAL_FREE_QUICKSTART.md)，观察真实全栈链路。 |
+| 第三步 | 需要连接真实 provider 时，再按 [Docker Compose 启动 runbook](../docker-startup/README.md) 运行完整应用。 |
 | 可以跳过 | API 字段全集、数据库 migration 细节、前端 hook 拆分和 OCR 参数选优。 |
 
-当前完整应用需要用户配置自己的聊天与 embedding provider。无需真实 API Key 的隔离实验属于 [T-124](../TASKS.md#t-124-建立无外部密钥的入门实验)，尚未作为教程章节交付。
+无密钥实验使用隔离 provider stub 验证工程链路；运行完整应用仍需要用户配置自己的聊天与 embedding provider。两种路径的差异见[实验说明](CREDENTIAL_FREE_QUICKSTART.md#与真实-provider-路径的差异)。
 
 ## 路线二：后端与 RAG
 
@@ -79,7 +81,7 @@
 | 任务 | 内容 | 当前状态 |
 | --- | --- | --- |
 | T-123 | 教程入口、四条学习路线、源码地图 | Done |
-| T-124 | 无真实 API Key 的隔离入门实验 | Todo |
+| T-124 | 无真实 API Key 的隔离入门实验 | Done |
 | T-125 | 文件上传、任务队列、worker、解析/OCR、chunk 与向量写入 | Todo |
 | T-126 | vector/full-text、RRF、rerank、SSE、sources 与 diagnostics | Todo |
 | T-127 | 前端、安全、测试、CI 与部署 | Todo |
