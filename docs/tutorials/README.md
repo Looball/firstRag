@@ -83,7 +83,7 @@
 | --- | --- | --- |
 | T-123 | 教程入口、四条学习路线、源码地图 | Done |
 | T-124 | 无真实 API Key 的隔离入门实验 | Done |
-| T-125 | [文件上传、任务队列、worker、解析/OCR、chunk 与向量写入](FILE_INGESTION_AND_INDEXING.md) | Doing |
+| T-125 | [文件上传、任务队列、worker、解析/OCR、chunk 与向量写入](FILE_INGESTION_AND_INDEXING.md) | Done |
 | T-126 | vector/full-text、RRF、rerank、SSE、sources 与 diagnostics | Todo |
 | T-127 | 前端、安全、测试、CI 与部署 | Todo |
 | T-128 | 分级练习、示例素材与文档回归门禁 | Todo |
