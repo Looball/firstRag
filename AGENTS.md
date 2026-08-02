@@ -6,6 +6,8 @@
 
 FirstRAG 是一个全栈 RAG（Retrieval-Augmented Generation）应用，采用 monorepo 结构组织前端、后端、文档和部署配置。
 
+当前仓库进入“功能冻结、教程优先”的维护阶段：`main` 是唯一长期主线，后续重点是在真实可运行实现上补充教程、源码地图、可复现实验和练习。默认不再增加非必要产品功能，也不为了缩短文件行数继续拆分职责已经清晰的模块；Bug、安全漏洞、依赖兼容和教程可复现性所需的最小修复仍正常维护。教程化前的完整产品快照由 `product-v1.0.0` tag 固定。
+
 核心能力：
 
 - 用户注册、登录和 JWT 认证。
@@ -42,6 +44,8 @@ FirstRAG 是一个全栈 RAG（Retrieval-Augmented Generation）应用，采用 
 
 ## 2. Development Principles
 
+- 所有任务从最新 `main` 创建短期 `codex/...` 分支，通过 PR 和 required checks 合并回 `main`；不维护长期 `tutorial` 分支。
+- 教程和示例必须引用当前真实实现、API、schema 和运行行为，不创建与生产链路长期并行的教学实现。
 - 先阅读现有代码和文档，再修改实现。
 - 优先复用已有模块、helper、repository 和 service，不随意引入新抽象。
 - 保持分层边界清晰：route 不写业务逻辑，repository 不写业务判断，service 不接收 HTTP 对象。
@@ -217,7 +221,8 @@ FirstRAG/
 注意：
 
 - 可能存在用户未提交改动，禁止擅自 revert。
-- 大型改动优先在独立分支完成。
+- 所有改动使用从最新 `main` 创建的短期任务分支，不直接提交受保护的 `main`。
+- 不建立与 `main` 长期并行的教程开发分支；教程任务仍通过短期分支和 PR 交付。
 - PR review 修复应提交到对应 PR 分支。
 - 不使用 `git reset --hard`、`git checkout --`、`git clean` 等破坏性命令，除非用户明确要求。
 - 删除分支前确认内容已合并或最终文件内容一致。
