@@ -260,7 +260,7 @@
 | `T-123` | `PLAN-20260802-01` | `P1` | `Done` | 建立教程入口、学习路线与源码地图 | 2026-08-02 | `1aab220` |
 | `T-124` | `PLAN-20260802-01` | `P1` | `Done` | 建立无外部密钥的入门实验 | 2026-08-02 | `0c34c46` |
 | `T-125` | `PLAN-20260802-01` | `P1` | `Done` | 编写文件入库与异步索引教程 | 2026-08-02 | `a8eaf94` |
-| `T-126` | `PLAN-20260802-01` | `P1` | `Todo` | 编写混合检索与流式回答教程 | — | — |
+| `T-126` | `PLAN-20260802-01` | `P1` | `Done` | 编写混合检索与流式回答教程 | 2026-08-02 | `044a3eb` |
 | `T-127` | `PLAN-20260802-01` | `P2` | `Todo` | 编写前端、安全、测试与部署进阶教程 | — | — |
 | `T-128` | `PLAN-20260802-01` | `P2` | `Todo` | 增加练习、示例素材与文档回归门禁 | — | — |
 | `T-129` | `PLAN-20260802-01` | `P1` | `Todo` | 明确教程仓库 License 与公开使用边界 | — | — |
@@ -5229,7 +5229,7 @@ git diff --check
 
 - 来源计划：`PLAN-20260802-01`
 - 优先级：`P1`
-- 状态：`Todo`
+- 状态：`Done`
 - 目标：解释用户提问从 query embedding、vector/full-text 粗召回、RRF、可选 rerank 到 LCEL/LLM streaming、消息持久化、sources 和 retrieval diagnostics 的完整路径。
 - 技术边界：
   - 保持 Chroma vector search 与 PostgreSQL full-text search 的职责差异，明确 degraded/fallback 状态。
@@ -5244,6 +5244,15 @@ git diff --check
   - 教程解释 rerank 不可用、Chroma 降级、provider 调用失败和客户端中断时的预期行为。
   - SSE 示例保持 streaming body，不引导前端 proxy 预先读取完整响应。
   - 相关后端测试和 full-stack E2E 继续通过。
+- 完成记录：
+  - 新增 `docs/tutorials/HYBRID_RETRIEVAL_AND_STREAMING.md`，用一次请求时序和八个章节串联检索决策、query embedding、两路粗召回、RRF、rerank、LCEL、SSE、消息状态与持久化。
+  - 教程明确 query embedding cache 的 `user_id/provider/model/dimensions/query` 隔离、memory/Redis/provider 顺序，以及 vector、full-text 和 rerank 的独立降级边界。
+  - 提供 T-124 隔离 project 中可运行的 `curl --no-buffer -N` 实验、diagnostics 阅读示例和只限隔离环境的 Chroma 故障观察；Next.js proxy 示例保持直接透传 upstream streaming body。
+  - 真实评测章节核对当前 JSON 顶层、summary 与 case schema，并明确 14/14 是 case 通过数，目标文件命中和任务成功均不等于标准 Recall@K。
+  - `docker compose up -d --build`、服务状态与启动日志检查通过；migration 为 `applied=0 skipped=9`，当前核心服务无启动错误。
+  - retrieval resilience、RAG streaming 与 chat persistence 共 44 个后端测试通过；proxy 与 SSE parser 共 12 个前端测试通过。
+  - `scripts/run_full_stack_e2e.sh` 的隔离 Playwright `1/1` 通过，临时 containers、network 和三个 volumes 自动清理；`git diff --check` 通过。
+- 相关提交：`044a3eb`
 - 建议验证命令：
 
 ```bash

@@ -655,4 +655,4 @@ git diff --check
 - [`backend/tests/services/test_document_service.py`](../../backend/tests/services/test_document_service.py)
 - [`backend/tests/services/test_vector_index_service.py`](../../backend/tests/services/test_vector_index_service.py)
 
-Reference：[API](../API.md)、[数据库结构](../SCHEMAS.md)、[RAG 核心流程](../RAG_WORKFLOW.md)、[PDF OCR 回归门禁](../evals/README.md#pdf-ocr-回归门禁)、[源码地图](CODE_MAP.md#文件入库与异步索引)。下一章是 T-126 的混合检索与流式回答教程。
+Reference：[API](../API.md)、[数据库结构](../SCHEMAS.md)、[RAG 核心流程](../RAG_WORKFLOW.md)、[PDF OCR 回归门禁](../evals/README.md#pdf-ocr-回归门禁)、[源码地图](CODE_MAP.md#文件入库与异步索引)。下一章是[混合检索与流式回答](HYBRID_RETRIEVAL_AND_STREAMING.md)。
