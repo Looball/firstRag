@@ -396,15 +396,21 @@ scripts/run_full_stack_e2e.sh
 
 ### 基础练习
 
-沿一次聊天请求写出以下文件的调用顺序：`ChatComposer.tsx`、`use-chat-submission.ts`、`use-chat-response-stream.ts`、Next.js chat route、`api-proxy.ts`、FastAPI chat route、`streaming.py`、`chat-stream.ts`。标记 thinking indicator 由什么状态派生、首条 assistant message 何时创建，以及哪一步持久化 sources。
+凭据要求：不需要真实 API Key。沿一次聊天请求写出以下文件的调用顺序：`ChatComposer.tsx`、`use-chat-submission.ts`、`use-chat-response-stream.ts`、Next.js chat route、`api-proxy.ts`、FastAPI chat route、`streaming.py`、`chat-stream.ts`。标记 thinking indicator 由什么状态派生、首条 assistant message 何时创建，以及哪一步持久化 sources。
+
+自检方向：submission 先写 user message，response hook 设置 session loading；页面从 loading 派生 indicator，首个 assistant SSE 事件才创建/更新回答。后端先持久化 sources/retrieval，前端再从 SSE 回写展示状态。
 
 ### 诊断练习
 
 在 `api-proxy.test.ts` 和 `frontend-api.test.ts` 中找到 `Retry-After` 用例，再在一个倒计时 hook 或组件测试中确认按钮恢复条件。解释为什么测试不应使用真实 Redis 或等待真实窗口时长。
 
+自检方向：proxy 证明 header 没丢，API client 证明错误携带等待秒数，hook/component 证明 scope 隔离和倒计时恢复；fake timer 能确定性推进时间，真实 Redis 属于更高层集成验证。
+
 ### 扩展练习
 
 为一个假想的公网发布写验收清单，至少包含 required checks、preflight、反向代理 SSE、端口暴露、secret、备份恢复演练、真实 provider smoke 和回滚。不要修改生产环境，也不要填入真实域名或凭据。
+
+自检方向：清单必须把“配置静态通过”“runtime healthy”“真实 provider 质量”“公网 TLS/反向代理”和“备份可恢复”拆成独立证据，任何一项都不能替代其余项。
 
 ## 12. Reference 与下一步
 
@@ -414,4 +420,4 @@ scripts/run_full_stack_e2e.sh
 - RAG、indexing 和 OCR 门禁：[评测说明](../evals/README.md)。
 - 纵向代码入口：[源码地图](CODE_MAP.md)。
 
-下一步是 T-128：增加分级练习的可复用素材，并为教程链接、命令和事实漂移增加文档回归门禁。
+配套的[教程示例素材](fixtures/README.md)和[教程文档回归门禁](README.md#教程文档回归门禁)由 T-128 交付。下一步是 T-129：明确教程仓库 License 与公开使用边界。

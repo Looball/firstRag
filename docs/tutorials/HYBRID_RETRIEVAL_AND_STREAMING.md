@@ -351,19 +351,25 @@ performance_thresholds, quality_gate, summary, cases
 - Job `succeeded` 或文件 `indexed` 只说明入库任务完成，不能单独证明 ANN/vector retrieval 质量。
 - 讨论 Recall@K 前必须先定义每个 query 的相关 chunk ground truth、K 和计算方法；当前报告没有计算这个指标。
 
-## 练习与验证
+## 分级练习
 
-### 基础
+### 基础练习
 
-画出同一个 chunk 同时在 vector 第 2 名、full-text 第 1 名时的 RRF 贡献，并说明为什么不能把 `vector_score` 与 `fulltext_score` 相加。
+凭据要求：不需要真实 API Key。设 `rrf_k=60`，画出同一个 chunk 同时在 vector 第 2 名、full-text 第 1 名时的 RRF 贡献，并说明为什么不能把 `vector_score` 与 `fulltext_score` 相加。
 
-### 诊断
+自检方向：贡献为 `1/(60+2) + 1/(60+1)`；RRF 使用各通道名次而不是原始分数，因为 cosine similarity 与 PostgreSQL rank 的尺度和含义不同。
+
+### 诊断练习
 
 比较同一问题连续两次的 diagnostics，确认 cache source 与 `embedding_ms` 的变化；再运行 rerank 降级测试，说明为什么该请求仍能返回 top-k。
 
-### 扩展
+自检方向：第二次请求可能出现 memory/Redis cache source 且 embedding 阶段缩短；rerank 失败应保留融合排序候选并记录 degraded/fallback，而不是把整次回答直接变为空结果。
+
+### 扩展练习
 
 在真实测试账号中各运行一次 `enable_rerank=true/false` 的评测 case，对比 sources、`rerank_ms`、first token 和逐 case checks。不要只用单次主观答案决定默认配置。
+
+自检方向：先固定 query、知识库、provider 和 retrieval settings，再比较逐 case checks 与阶段耗时；一次答案更顺眼不等于稳定质量提升，也不能从 pass rate 推导标准 Recall@K。
 
 维护本教程时至少运行：
 

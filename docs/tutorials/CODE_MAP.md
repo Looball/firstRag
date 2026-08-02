@@ -122,6 +122,7 @@ POST /chat
 | 无密钥全栈 E2E | [`run_full_stack_e2e.sh`](../../scripts/run_full_stack_e2e.sh)、[`full-stack-core.spec.ts`](../../frontend/e2e/full-stack-core.spec.ts) | 注册、登录、上传、worker、检索、SSE 和 sources 完整链路。 |
 | RAG / indexing eval | [`eval_rag.py`](../../scripts/eval_rag.py)、[`eval_indexing.py`](../../scripts/eval_indexing.py) | 有真实账号和 provider 配置时验证质量与索引行为。 |
 | Production preflight | [`production_preflight.py`](../../scripts/production_preflight.py) | 部署配置、migration 方法和 runtime health。 |
+| 教程文档门禁 | [`check_tutorial_docs.py`](../../scripts/check_tutorial_docs.py)、[`tutorial_manifest.json`](tutorial_manifest.json) | 内部链接、源码路径、三级练习、fixture 来源、命令格式和敏感模式。 |
 | Migration | [`migrate_db.py`](../../scripts/migrate_db.py)、[`backend/app/db/sql/`](../../backend/app/db/sql/) | schema 变更和空库/增量迁移。 |
 | CI | [`.github/workflows/ci.yml`](../../.github/workflows/ci.yml) | PR 与 `main` 的完整 required checks。 |
 | Docker runtime | [`deploy/docker/`](../../deploy/docker/) | backend/frontend 镜像和隔离 E2E override。 |

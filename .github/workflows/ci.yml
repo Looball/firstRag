@@ -29,6 +29,9 @@ jobs:
       - name: Check GitHub Actions pins
         run: python3 scripts/check_github_actions_pins.py
 
+      - name: Check tutorial documentation
+        run: python3 scripts/check_tutorial_docs.py
+
       - name: Set up Python
         uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
         with:

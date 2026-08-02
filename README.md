@@ -216,6 +216,7 @@ FirstRAG/
 | `docs/tutorials/FILE_INGESTION_AND_INDEXING.md` | 文件上传、异步索引、OCR、chunk 和双存储教程。 |
 | `docs/tutorials/HYBRID_RETRIEVAL_AND_STREAMING.md` | 混合检索、RRF、rerank、SSE、消息落库与 diagnostics 教程。 |
 | `docs/tutorials/FRONTEND_SECURITY_TESTING_AND_DEPLOYMENT.md` | 前端状态与 proxy、凭据安全、测试门禁、Compose 和生产部署边界教程。 |
+| `docs/tutorials/fixtures/README.md` | 可追溯的 TXT、Markdown 和合成 OCR 教程素材。 |
 | `docs/tutorials/CODE_MAP.md` | 从业务链路定位真实源码、测试和部署入口。 |
 | `docs/README.md` | 文档目录说明。 |
 | `docs/ARCHITECTURE.md` | 系统架构和数据流。 |
