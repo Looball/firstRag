@@ -26,7 +26,26 @@ FirstRAG 是一个全栈 RAG（Retrieval-Augmented Generation，检索增强生�
 - 非必要功能扩展暂停；Bug、安全漏洞、依赖兼容和教程可复现性所需的最小修复仍正常维护。
 - 教程必须对应当前真实代码、API、数据表和部署行为，不把规划中的能力写成已实现功能。
 - 教程化改造前的完整产品快照固定在 `product-v1.0.0` tag。
-- 当前文档仍以 reference 和 runbook 为主；教程入口、学习路线和无外部密钥实验按 [`PLAN-20260802-01`](docs/TASKS.md#t-122-固化教程化前产品基线与维护边界) 逐步交付。
+- 当前已建立教程入口、四条学习路线和源码地图；无外部密钥实验与专题章节按 [`PLAN-20260802-01`](docs/TASKS.md#t-122-固化教程化前产品基线与维护边界) 逐步交付。
+
+## 你将学到什么
+
+- 如何把文件上传、SHA-256 去重、持久任务队列、worker、OCR、chunk 和 embedding 组织成异步入库链路。
+- 如何组合 Chroma vector search、PostgreSQL full-text、RRF 和可选 rerank，并保留可解释的 retrieval diagnostics。
+- 如何通过 FastAPI、LCEL 和 Next.js API proxy 传递 SSE token、sources、usage 与失败状态。
+- 如何隔离用户数据和 provider API Key，并在 route、service、repository 之间保持清晰边界。
+- 如何使用 Docker Compose、migration、单元测试、Playwright、真实 eval 和 GitHub Actions 验证完整系统。
+
+## 教程入口
+
+| 路线 | 适合读者 | 入口 |
+| --- | --- | --- |
+| 快速入门 | 第一次接触 RAG，希望先理解系统如何运行。 | [教程导航：快速入门](docs/tutorials/README.md#路线一快速入门) |
+| 后端与 RAG | 关注 FastAPI、异步 indexing、hybrid retrieval 和 SSE。 | [教程导航：后端与 RAG](docs/tutorials/README.md#路线二后端与-rag) |
+| 前端 | 关注 Next.js proxy、React hooks、streaming 状态和引用 UI。 | [教程导航：前端](docs/tutorials/README.md#路线三前端) |
+| 工程化 | 关注 Docker、CI、安全审计、评测和生产检查。 | [教程导航：工程化](docs/tutorials/README.md#路线四工程化) |
+
+推荐先完成 [10 分钟导览](docs/tutorials/README.md#10-分钟导览)，再使用 [源码地图](docs/tutorials/CODE_MAP.md) 从业务问题定位真实代码。当前运行完整应用仍需要用户自己的聊天与 embedding provider；无真实 API Key 的教学实验将在 T-124 交付，现阶段不把 CI gate 冒充为已完成的交互式教程。
 
 ## 项目截图
 
@@ -50,7 +69,7 @@ FirstRAG 是一个全栈 RAG（Retrieval-Augmented Generation，检索增强生�
 
 模型设置页支持用户按聊天、向量和 rerank 厂商保存自己的 API Key。用户 Key 只在保存或测试时提交给后端，页面只展示脱敏保存状态，不回显完整密钥。
 
-## 最短演示路径
+## 运行完整应用
 
 本地最小演示默认使用 Docker Compose，在仓库根目录构建并启动完整链路：
 
@@ -192,6 +211,8 @@ FirstRAG/
 
 | 文档 | 说明 |
 | --- | --- |
+| `docs/tutorials/README.md` | 教程总览、四条学习路线和统一章节模板。 |
+| `docs/tutorials/CODE_MAP.md` | 从业务链路定位真实源码、测试和部署入口。 |
 | `docs/README.md` | 文档目录说明。 |
 | `docs/ARCHITECTURE.md` | 系统架构和数据流。 |
 | `docs/SCHEMAS.md` | 数据库表、Pydantic Schema 和核心结构。 |
@@ -208,7 +229,7 @@ FirstRAG/
 - [x] 完成认证、文件入库、异步索引、OCR、混合检索、SSE、诊断与反馈主链路。
 - [x] 建立 Docker Compose、migration、production preflight、评测和 required CI checks。
 - [x] 固化教程化前产品基线，明确功能冻结与 `main` 单主线维护边界（T-122）。
-- [ ] 建立教程入口、学习路线和源码地图（T-123）。
+- [x] 建立教程入口、学习路线和源码地图（T-123）。
 - [ ] 建立不依赖真实 API Key 的入门实验（T-124）。
 - [ ] 编写入库、索引、检索和流式回答核心教程（T-125、T-126）。
 - [ ] 补齐前端、安全、测试、部署、练习和文档门禁（T-127、T-128）。
