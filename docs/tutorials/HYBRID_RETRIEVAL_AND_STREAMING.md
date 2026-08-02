@@ -335,7 +335,7 @@ firstrag_tutorial_compose ps
 - 该用户已在应用内保存可用的 LLM 与 embedding provider/model/API Key。
 - 评测知识文件已索引；indexing eval 还会临时上传并确认 source 包含 vector 通道。
 
-执行条件、账号环境变量和清理行为见[评测说明](../evals/README.md)。当前最新 RAG 报告是 [`latest_rag_eval_report.md`](../evals/latest_rag_eval_report.md)，对应 JSON 顶层包含：
+执行条件、账号环境变量和清理行为见[评测说明](../evals/README.md)。评测命令会在本地生成 `latest_rag_eval_report.md`；该运行产物不会提交到仓库。对应 JSON 顶层包含：
 
 ```text
 schema_version, generated_at, base_url, cases_path,
