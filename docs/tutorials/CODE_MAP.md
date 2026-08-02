@@ -39,7 +39,7 @@ Next.js proxy
 | 向量化 | [`embedding_model.py`](../../backend/app/services/vectors/embedding_model.py)、[`vector_index_service.py`](../../backend/app/services/vectors/vector_index_service.py) | 用户 embedding 配置、向量生成、Chroma 与 chunk 写入。 |
 | 锁与 SQL | [`backend/app/db/locks.py`](../../backend/app/db/locks.py)、[`000_initial_schema.sql`](../../backend/app/db/sql/000_initial_schema.sql) | PostgreSQL advisory lock 与空库 schema 基线。 |
 
-继续阅读：[RAG 核心流程：文件入库与向量化任务](../RAG_WORKFLOW.md#文件入库)。
+继续阅读：[文件入库与异步索引教程](FILE_INGESTION_AND_INDEXING.md)和[RAG 核心流程：文件入库与向量化任务](../RAG_WORKFLOW.md#文件入库)。
 
 ## 混合检索与流式回答
 

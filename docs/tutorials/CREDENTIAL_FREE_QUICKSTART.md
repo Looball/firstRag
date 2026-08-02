@@ -175,4 +175,4 @@ scripts/run_full_stack_e2e.sh
 | seed 脚本直接写入隔离用户设置。 | 用户通过设置页保存并测试自己的 provider/API Key。 |
 | 证明工程链路能工作，不计算 RAG 质量指标。 | 需要按 `docs/evals/README.md` 的条件运行真实 RAG/indexing eval。 |
 
-继续阅读：[源码地图](CODE_MAP.md)、[RAG 核心流程](../RAG_WORKFLOW.md)、[评测说明](../evals/README.md)。下一步专题是 T-125 的文件入库与异步索引教程。
+继续阅读：[文件入库与异步索引](FILE_INGESTION_AND_INDEXING.md)、[源码地图](CODE_MAP.md)、[RAG 核心流程](../RAG_WORKFLOW.md)、[评测说明](../evals/README.md)。
