@@ -78,7 +78,7 @@
 
 | 任务 | 内容 | 当前状态 |
 | --- | --- | --- |
-| T-123 | 教程入口、四条学习路线、源码地图 | 当前任务 |
+| T-123 | 教程入口、四条学习路线、源码地图 | Done |
 | T-124 | 无真实 API Key 的隔离入门实验 | Todo |
 | T-125 | 文件上传、任务队列、worker、解析/OCR、chunk 与向量写入 | Todo |
 | T-126 | vector/full-text、RRF、rerank、SSE、sources 与 diagnostics | Todo |
