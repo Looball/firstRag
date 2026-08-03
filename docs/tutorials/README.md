@@ -16,7 +16,7 @@
 | [系统架构](../ARCHITECTURE.md) | 查看模块边界、核心数据流和存储职责。 |
 | [RAG 核心流程](../RAG_WORKFLOW.md) | 查看入库、检索、生成与 diagnostics 的当前行为。 |
 
-专题实验与完整章节会按 [PLAN-20260802-01](../TASKS.md#t-123-建立教程入口学习路线与源码地图) 逐项交付。未完成的任务只在下方标记状态，不创建空白章节或失效链接。
+专题实验、完整章节、练习门禁和授权边界已按 [PLAN-20260802-01](../TASKS.md#t-123-建立教程入口学习路线与源码地图) 全部交付。
 
 ## 10 分钟导览
 
@@ -90,7 +90,7 @@
 | T-126 | [vector/full-text、RRF、rerank、SSE、sources 与 diagnostics](HYBRID_RETRIEVAL_AND_STREAMING.md) | Done |
 | T-127 | [前端、安全、测试、CI 与部署](FRONTEND_SECURITY_TESTING_AND_DEPLOYMENT.md) | Done |
 | T-128 | [分级练习、示例素材与文档回归门禁](#教程文档回归门禁) | Done |
-| T-129 | License 与公开使用边界 | Todo |
+| T-129 | [License 与公开使用边界](#license-与公开使用边界) | Done |
 
 任务状态以 [docs/TASKS.md](../TASKS.md) 为准。
 
@@ -131,6 +131,18 @@ python3 scripts/check_tutorial_docs.py
 - `.github/workflows/ci.yml` 继续执行同一检查命令。
 
 失败信息包含文件、行号和失效目标。例如删除源码地图引用的文件，会得到 `链接目标不存在`，而不是笼统的“文档失败”。检查器不对自然语言段落做全文快照，也不访问网络。
+
+## License 与公开使用边界
+
+FirstRAG 的项目代码、教程文档和 [`fixtures/`](fixtures/README.md) 中的仓库自编合成素材采用 [Apache License 2.0](../../LICENSE)，版权归属见 [NOTICE](../../NOTICE)。在遵守许可证条款的前提下，读者可以 clone、运行、修改、分发、再授权、商业使用或将项目作为服务托管。
+
+分发原始版本或衍生作品时，需要附带许可证、保留适用的版权与归属声明，并对修改过的文件作出显著说明。Apache-2.0 不授予 FirstRAG 名称或标识的商标使用权，项目按“原样”提供且不附带保证。
+
+以下内容不因仓库采用 Apache-2.0 而被重新授权：
+
+- `package-lock.json`、Python requirements 和容器镜像中声明的第三方依赖；它们继续适用各自许可证。
+- LLM、embedding、rerank provider 及其他外部服务；它们继续适用各自服务条款。
+- 用户上传的文件、API Key、数据库内容、日志和其他运行时数据；这些内容不属于仓库发行物。
 
 ## 阅读约定
 
