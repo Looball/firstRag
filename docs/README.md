@@ -21,7 +21,11 @@
 | [`tutorials/fixtures/README.md`](tutorials/fixtures/README.md) | 仓库自编 TXT、Markdown、OCR ground truth 素材的用途、来源与清理说明。 |
 | [`tutorials/CODE_MAP.md`](tutorials/CODE_MAP.md) | route、repository、service、worker、前端、测试和部署的纵向源码地图。 |
 
-教程专题尚未全部完成。未交付章节只在导航中标记对应任务，不创建空白页面；状态以 `TASKS.md` 为准。
+教程化计划 T-122 至 T-129 已全部交付。后续以修复 Bug、安全漏洞、依赖兼容和教程可复现性问题为主；状态以 `TASKS.md` 为准。
+
+## License 与内容边界
+
+FirstRAG 的项目代码、文档和仓库自编教程素材采用 [Apache License 2.0](../LICENSE)，版权归属见 [NOTICE](../NOTICE)。第三方依赖仍受各自许可证约束，用户上传内容和运行时数据不属于仓库授权范围。
 
 ## Reference
 
