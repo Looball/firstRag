@@ -130,7 +130,7 @@
 | `PLAN-20260731-11` | 2026-07-31 | `Done` | 继续拆分会话操作 hook，独立管理 active session 消息懒加载与错误回写。 | `T-120` |
 | `PLAN-20260801-01` | 2026-08-01 | `Done` | 拆分聊天工作台通用工具，优先收口 vector indexing 解析、状态和展示 helper。 | `T-121` |
 | `PLAN-20260802-01` | 2026-08-02 | `Done` | 在保留完整可运行实现的前提下，将 `main` 单主线转为分层教程与工程参考实现，并停止非必要功能扩展。 | `T-122` - `T-129` |
-| `PLAN-20260809-01` | 2026-08-09 | `Todo` | 在保持 PostgreSQL full-text、RRF、rerank、SSE 和用户隔离行为不变的前提下，将 vector store 从 Chroma 安全迁移到 Milvus，并提供可验证的数据迁移与回滚路径。 | `T-130` - `T-138` |
+| `PLAN-20260809-01` | 2026-08-09 | `Doing` | 在保持 PostgreSQL full-text、RRF、rerank、SSE 和用户隔离行为不变的前提下，将 vector store 从 Chroma 安全迁移到 Milvus，并提供可验证的数据迁移与回滚路径。 | `T-130` - `T-138` |
 
 ## 任务总览
 
@@ -265,7 +265,7 @@
 | `T-127` | `PLAN-20260802-01` | `P2` | `Done` | 编写前端、安全、测试与部署进阶教程 | 2026-08-02 | `59ab53f` |
 | `T-128` | `PLAN-20260802-01` | `P2` | `Done` | 增加练习、示例素材与文档回归门禁 | 2026-08-02 | `78c272b` |
 | `T-129` | `PLAN-20260802-01` | `P1` | `Done` | 明确教程仓库 License 与公开使用边界 | 2026-08-03 | `1d66209` |
-| `T-130` | `PLAN-20260809-01` | `P1` | `Doing` | 冻结 Chroma 基线并确定 Milvus 迁移设计 | — | — |
+| `T-130` | `PLAN-20260809-01` | `P1` | `Done` | 冻结 Chroma 基线并确定 Milvus 迁移设计 | `2026-08-09` | `144db0e` |
 | `T-131` | `PLAN-20260809-01` | `P1` | `Todo` | 建立 provider-neutral vector store boundary | — | — |
 | `T-132` | `PLAN-20260809-01` | `P1` | `Todo` | 接入 Milvus Standalone、配置与健康门禁 | — | — |
 | `T-133` | `PLAN-20260809-01` | `P1` | `Todo` | 迁移向量写入、重建与删除生命周期 | — | — |
@@ -5390,7 +5390,7 @@ git diff --check
 
 - 来源计划：`PLAN-20260809-01`
 - 优先级：`P1`
-- 状态：`Doing`
+- 状态：`Done`
 - 背景：当前 vector store 与 Chroma client、metadata filter、collection 私有接口、Compose 拓扑、preflight、清理脚本、E2E 和教程直接耦合；历史验收还出现过向量已经写入但 ANN 查询失败的情况，不能把迁移简化为依赖替换。
 - 目标：在修改生产链路前冻结可比较的 Chroma 基线，并明确 Milvus 版本、部署拓扑、schema、metric、consistency、collection 隔离和数据保留策略。
 - 技术边界：
@@ -5406,6 +5406,14 @@ git diff --check
   - ADR 能让后续任务无需重新决定核心 schema、metric、consistency 和 rollout 方式。
   - 基线同时验证 PostgreSQL chunks、vector store entries 和真实 similarity search，不以 job `succeeded` 代替向量命中。
   - 记录 Milvus 本地资源要求和当前 Docker Desktop 可用资源，不让迁移后 quickstart 静默失效。
+- 完成记录：
+  - 新增 `docs/adr/0001-milvus-migration.md`，固定 Milvus 3.0.0、PyMilvus 3.0.1、三容器 Standalone、collection-per-user+embedding identity、`FLOAT_VECTOR + COSINE + HNSW`、Strong consistency、entity schema、维护窗口切换和非 dual-write rollback。
+  - 新增 `docs/evals/chroma_migration_baseline_20260809.md`：PostgreSQL current chunks 为 119 条/19 文件；current Chroma collection 的 119 个 stable IDs、正文和核心 metadata 均 119/119 一致，filtered ANN self-hit 10/10、p95 2.28ms。
+  - legacy `langchain` collection 的 216 条 entry 与当前 PostgreSQL ID 零匹配，ADR 明确只读归档且不迁移；真实数据默认导入已有 embedding，开发/CI fixture 默认重新向量化。
+  - 当前 Docker Desktop 为 8 vCPU、约 15.35 GiB RAM，满足 Milvus 8 GiB 最低要求但处于 16 GiB 推荐线边缘；宿主盘余量约 44 GiB，T-132/T-136 必须增加资源 warning 和峰值门禁。
+  - 本地生命周期、删除/重建、worker、检索 resilience 与 eval 脚本专项测试 83 项通过；教程文档检查、13 个 Actions pin 和 `git diff --check` 通过。
+  - 本地 credential-free E2E rebuild 因清华 Debian mirror 的 `libgif7` 502 未进入测试；同一主线提交的 GitHub `Backend`、`Frontend`、`Full-stack E2E`、`Container OS Security` 四项 required checks 已全部通过，外部镜像故障未误记为产品回归。
+- 相关提交：`144db0e`
 
 ## T-131 建立 provider-neutral vector store boundary
 
