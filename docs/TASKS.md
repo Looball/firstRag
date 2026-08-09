@@ -269,7 +269,7 @@
 | `T-131` | `PLAN-20260809-01` | `P1` | `Done` | 建立 provider-neutral vector store boundary | `2026-08-09` | `73c54ae` |
 | `T-132` | `PLAN-20260809-01` | `P1` | `Done` | 接入 Milvus Standalone、配置与健康门禁 | `2026-08-09` | `b74043c` |
 | `T-133` | `PLAN-20260809-01` | `P1` | `Done` | 迁移向量写入、重建与删除生命周期 | `2026-08-09` | `0263bb2` |
-| `T-134` | `PLAN-20260809-01` | `P1` | `Todo` | 迁移 Milvus 向量检索与 diagnostics | — | — |
+| `T-134` | `PLAN-20260809-01` | `P1` | `Done` | 迁移 Milvus 向量检索与 diagnostics | `2026-08-09` | `95c1bde` |
 | `T-135` | `PLAN-20260809-01` | `P0` | `Todo` | 建立 Chroma 到 Milvus 数据迁移与回滚工具 | — | — |
 | `T-136` | `PLAN-20260809-01` | `P1` | `Todo` | 完成 Milvus 全链路回归、质量与性能验收 | — | — |
 | `T-137` | `PLAN-20260809-01` | `P1` | `Todo` | 更新 Milvus 架构、部署与教程文档 | — | — |
@@ -5501,7 +5501,7 @@ git diff --check
 
 - 来源计划：`PLAN-20260809-01`
 - 优先级：`P1`
-- 状态：`Todo`
+- 状态：`Done`
 - 目标：使用应用层预计算 query embedding 和 Milvus scalar filter 完成用户级、单文件与多文件向量粗召回，同时保留 full-text、RRF、rerank 和 SSE diagnostics 行为。
 - 技术边界：
   - 所有查询必须带 `user_id` 隔离，指定知识库时还必须限制允许的 `file_id`。
@@ -5515,6 +5515,14 @@ git diff --check
 - 验收标准：
   - 多用户、多文件和不同 embedding collection 的检索结果无越权、无串库、排序正确。
   - Milvus 正常时 `vector_degraded=false`，异常时 full-text fallback、diagnostics 和用户可理解提示同时有效。
+- 完成记录：
+  - Milvus adapter 使用应用层预计算 query embedding 和始终包含 `user_id` 的 scalar filter；单文件使用安全等值 literal，多文件使用去重排序后的 `in` 列表，返回 entity 再执行用户/文件范围复核。
+  - 固定 `COSINE + HNSW`、`ef=64` 和 Strong consistency，并把 Milvus similarity 转换为 `distance = 1 - similarity`，保持 `vector_score` 越小越近。首次 ANN 空结果会用相同 scope 的 `count(*)` 区分真实空集和索引可见性异常，只在 scoped rows 存在时重试一次相同 ANN，仍为空则显式降级。
+  - Chroma adapter 删除 `Error finding id` 延迟重试、用户级宽过滤、无过滤 ANN 和直接 embedding scan；Chroma/Milvus 都只允许严格用户/文件查询，不以降级扩大数据范围。
+  - Hybrid retrieval 的错误提示改为 provider-aware；Milvus 失败时 vector 通道为空、PostgreSQL full-text 继续进入 RRF，`vector_degraded=true`、`vector_errors` 和 `vector_ms` 保持进入 SSE 与持久化 diagnostics。
+  - 真实 Compose probe 由 worker 向两个用户 collection 写入 `3 + 1` 条 vectors，backend 新 client 首次检索返回 `closest/second/third`，归一化 distance 为 `0.0/0.2/1.0`；单文件 1 条、多文件 3 条、另一用户独立 1 条。验收后两个 exact-name probe collections 已清理并确认不存在。
+  - 定向回归 28/28、完整后端 409/409、credential-free Playwright 1/1、Python compileall、教程文档、13 个 Actions pin、Compose config、production preflight 和 `git diff --check` 均通过；验收明细见 `docs/evals/milvus_retrieval_20260809.md`。
+- 相关提交：`95c1bde`
 
 ## T-135 建立 Chroma 到 Milvus 数据迁移与回滚工具
 
