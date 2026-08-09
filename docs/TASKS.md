@@ -268,7 +268,7 @@
 | `T-130` | `PLAN-20260809-01` | `P1` | `Done` | 冻结 Chroma 基线并确定 Milvus 迁移设计 | `2026-08-09` | `144db0e` |
 | `T-131` | `PLAN-20260809-01` | `P1` | `Done` | 建立 provider-neutral vector store boundary | `2026-08-09` | `73c54ae` |
 | `T-132` | `PLAN-20260809-01` | `P1` | `Done` | 接入 Milvus Standalone、配置与健康门禁 | `2026-08-09` | `b74043c` |
-| `T-133` | `PLAN-20260809-01` | `P1` | `Done` | 迁移向量写入、重建与删除生命周期 | `2026-08-09` | — |
+| `T-133` | `PLAN-20260809-01` | `P1` | `Done` | 迁移向量写入、重建与删除生命周期 | `2026-08-09` | `0263bb2` |
 | `T-134` | `PLAN-20260809-01` | `P1` | `Todo` | 迁移 Milvus 向量检索与 diagnostics | — | — |
 | `T-135` | `PLAN-20260809-01` | `P0` | `Todo` | 建立 Chroma 到 Milvus 数据迁移与回滚工具 | — | — |
 | `T-136` | `PLAN-20260809-01` | `P1` | `Todo` | 完成 Milvus 全链路回归、质量与性能验收 | — | — |
@@ -5495,6 +5495,7 @@ git diff --check
   - 定向回归覆盖 schema/index、幂等重建、dimension 漂移、非法 payload、分批写入中断、跨 identity 删除、PostgreSQL ID/version 漂移与 stale 状态发布失败。
   - 专用 `firstrag_t133_probe_u900133_identity` 在真实 Milvus Standalone 上完成 worker 写 v1、backend 新 client 读回、worker 重建 v2、backend 读回和 backend 删除、worker 确认不可见；验收后已按 exact collection name 清理，默认 provider 仍为 Chroma。
   - 完整后端 `408/408`、credential-free Playwright `1/1`、Python 编译、教程文档、13 个 Actions pin、Compose runtime health 与 production preflight 均通过。
+- 相关提交：`0263bb2`
 
 ## T-134 迁移 Milvus 向量检索与 diagnostics
 
