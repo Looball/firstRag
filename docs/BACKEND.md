@@ -1,6 +1,6 @@
 # 后端结构说明
 
-后端位于 `backend/`，使用 FastAPI 提供 HTTP API，并通过 PostgreSQL 与 provider-neutral vector store boundary 完成 RAG 数据存储。默认 provider 仍为 Chroma；Milvus candidate 已接入写入、重建、删除和 filtered ANN 检索，数据迁移与默认切换由后续任务完成。
+后端位于 `backend/`，使用 FastAPI 提供 HTTP API，并通过 PostgreSQL 与 provider-neutral vector store boundary 完成 RAG 数据存储。默认 provider 仍为 Chroma；Milvus candidate 已接入写入、重建、删除和 filtered ANN 检索，current stored embeddings 已通过可恢复工具导入，默认切换与全链路验收由 T-136 完成。
 
 ## 目录结构
 
@@ -73,7 +73,7 @@ python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 | `documents/document_service.py` | 文档加载、图片知识文件 vision 解析、切分、向量库构建。 |
 | `knowledge_file_lifecycle_service.py` | 在单文件 advisory lock 下编排当前 vector store、PostgreSQL 与磁盘的永久删除。 |
 | `retrieval/*` | 向量检索、全文检索、RRF 融合、本地 CrossEncoder 或用户级远程 rerank 精排。 |
-| `vectors/*` | embedding 模型、provider-neutral vector store、Chroma/Milvus adapter、向量化队列、索引生命周期和 Redis worker 运行态。 |
+| `vectors/*` | embedding 模型、provider-neutral vector store、Chroma/Milvus adapter、可恢复 vector migration、向量化队列、索引生命周期和 Redis worker 运行态。 |
 
 ## Worker
 

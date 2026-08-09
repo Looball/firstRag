@@ -44,9 +44,11 @@ FirstRAG 的项目代码、文档和仓库自编教程素材采用 [Apache Licen
 | 文档 | 说明 |
 | --- | --- |
 | [`DEPLOYMENT.md`](DEPLOYMENT.md) | 本地工作流、CI、生产安全、备份恢复和在线 demo 前置条件。 |
+| [`MILVUS_MIGRATION_RUNBOOK.md`](MILVUS_MIGRATION_RUNBOOK.md) | Chroma 到 Milvus 的 dry-run、备份、checkpoint/resume、对账、cutover 与 rollback 操作手册。 |
 | [`docker-startup/README.md`](docker-startup/README.md) | Docker Compose 完整链路启动与故障排查 runbook。 |
 | [`evals/README.md`](evals/README.md) | RAG、indexing、OCR 评测条件、命令、报告和指标边界。 |
 | [`evals/chroma_migration_baseline_20260809.md`](evals/chroma_migration_baseline_20260809.md) | 迁移前 collection、PostgreSQL chunk 一致性、真实 ANN、资源和 Milvus 对照门槛。 |
+| [`evals/milvus_migration_20260809.md`](evals/milvus_migration_20260809.md) | T-135 current vectors 的 dry-run、备份、真实导入、resume 和 rollback-check 验收。 |
 
 ## 协作与任务
 

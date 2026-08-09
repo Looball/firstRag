@@ -270,7 +270,7 @@
 | `T-132` | `PLAN-20260809-01` | `P1` | `Done` | 接入 Milvus Standalone、配置与健康门禁 | `2026-08-09` | `b74043c` |
 | `T-133` | `PLAN-20260809-01` | `P1` | `Done` | 迁移向量写入、重建与删除生命周期 | `2026-08-09` | `0263bb2` |
 | `T-134` | `PLAN-20260809-01` | `P1` | `Done` | 迁移 Milvus 向量检索与 diagnostics | `2026-08-09` | `95c1bde` |
-| `T-135` | `PLAN-20260809-01` | `P0` | `Todo` | 建立 Chroma 到 Milvus 数据迁移与回滚工具 | — | — |
+| `T-135` | `PLAN-20260809-01` | `P0` | `Done` | 建立 Chroma 到 Milvus 数据迁移与回滚工具 | `2026-08-09` | `cf29b77` |
 | `T-136` | `PLAN-20260809-01` | `P1` | `Todo` | 完成 Milvus 全链路回归、质量与性能验收 | — | — |
 | `T-137` | `PLAN-20260809-01` | `P1` | `Todo` | 更新 Milvus 架构、部署与教程文档 | — | — |
 | `T-138` | `PLAN-20260809-01` | `P2` | `Todo` | 完成 Milvus 切换观察并移除 Chroma 遗留 | — | — |
@@ -5528,7 +5528,7 @@ git diff --check
 
 - 来源计划：`PLAN-20260809-01`
 - 优先级：`P0`
-- 状态：`Todo`
+- 状态：`Done`
 - 目标：提供 dry-run、可恢复、可审计的迁移工具，在不重新调用用户 embedding provider 的默认路径下复制既有 Chroma embeddings，并为损坏 collection 输出重新向量化清单。
 - 技术边界：
   - 执行迁移前必须备份 PostgreSQL、uploads 和 Chroma 数据，并暂停 worker 与新的 indexing 写入。
@@ -5543,6 +5543,14 @@ git diff --check
   - 重复运行不会产生重复数据；中断后可从 checkpoint 继续。
   - 任一无法导入或验证的文件不会被静默跳过，必须进入 machine-readable 失败清单。
   - rollback 演练能在不修改原 Chroma 数据的情况下恢复旧读写路径。
+- 完成记录：
+  - 新增 `chroma_to_milvus_migration.py`，以 PostgreSQL current chunks 为事实集合，显式创建只读 Chroma source 和无 embedding credential 的 Milvus target；支持 `--dry-run`、user/file scope、batch/rate 控制、原子 checkpoint、scope fingerprint、resume、结构化 failure/reindex 清单和 `--rollback-check`。
+  - 真实 import 必须同时通过维护窗口确认、全局 active vector jobs drain，以及 PostgreSQL/uploads/Chroma/Milvus 四类 verified backup manifest；工具不查询 credential 表、不解密 API Key，默认直接复制 stored embeddings。
+  - Milvus adapter 新增 precomputed embedding import 和 target-identity-only cleanup；逐文件验证 stable IDs、count、正文、完整 metadata、dimension、embedding 数值、filtered ANN self-hit 与 Chroma/Milvus Top-K overlap，验证失败清理当前 target file，不扫描其它 identity。
+  - 本地 current data dry-run 为 19 files / 119 entries / 0 failures；四类备份验证后导入 `langchain-u1-4aecfb85286f` 到 `firstrag_u1_4aecfb85286f`，dimension 1024，35/35 stored-vector self-hit、最低 Top-K overlap 1.0、reindex list 为空。
+  - 同 checkpoint 重跑 19/19 files 均为 `resumed_verified` 且没有重复 import；rollback-check 19/19 ready、35/35 Chroma self-hit、source fingerprint 全部 unchanged，Compose 默认 `VECTOR_STORE_PROVIDER=chroma` 未切换。
+  - 新增完整备份/cutover/rollback runbook 和验收报告；定向 unittest 20/20、完整 backend 418/418、credential-free full-stack E2E 1/1、Python compileall、教程文档、13 个 Actions pin、Compose build/config/runtime、production preflight 和 `git diff --check` 均通过。
+- 相关提交：`cf29b77`
 
 ## T-136 完成 Milvus 全链路回归、质量与性能验收
 

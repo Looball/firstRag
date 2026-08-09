@@ -87,6 +87,10 @@ FirstRAG/
 - Chroma：当前 vector store adapter。Docker Compose 使用独立 `chroma` service，backend 与
   worker 通过 HTTP client 共享访问，数据持久化到根目录 `vector_db/chroma`；
   单进程 conda 调试未配置 `CHROMA_HOST` 时仍可使用 embedded 模式。
+- Milvus：候选 vector store adapter。`milvus` profile 提供 authenticated Standalone、etcd
+  与 MinIO；T-135 工具以 PostgreSQL current chunks 为事实集合，直接复制 Chroma stored
+  embeddings，并通过 checkpoint/resume、完整读回和 filtered ANN 对账。T-136 完成前默认
+  provider 仍为 Chroma，原 Chroma 只读保留用于 rollback。
 - Tesseract：仅对无有效文本层或用户明确重识别的 PDF 页面执行本地 OCR；首次索引使用单次基线，主动重识别在候选/总超时上限内比较原图、灰度、二值化和页面旋转，同次调用产出正文和 TSV word confidence，原始页面和识别文本不发送到外部 OCR 服务。
 - 本地文件系统：知识文件默认保存到根目录 `uploads/users/...`，聊天图片附件默认保存到 `uploads/chat_attachments/users/...`。
 

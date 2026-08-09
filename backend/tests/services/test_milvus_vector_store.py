@@ -350,6 +350,50 @@ class MilvusVectorStoreTests(unittest.TestCase):
         })
         self.assertEqual(search_call["consistency_level"], "Strong")
 
+    def test_precomputed_import_cleanup_only_touches_target_identity(self) -> None:
+        """迁移清理不得扫描或删除当前用户的其它 Milvus identities。"""
+        client = FakeMilvusClient()
+        target = MilvusVectorStore(
+            client=client,
+            collection_name="firstrag_u1_target",
+            user_collection_prefix="firstrag_u1_",
+            embedding_model=None,
+            dimensions=2,
+            timeout_seconds=10,
+            consistency_level="Strong",
+        )
+        other = _store(
+            client,
+            collection_name="firstrag_u1_other_identity",
+        )
+        document = _document(file_id="file-a", content="stored")
+        chunk_id = _chunk_id(document)
+        target.import_file_vectors(
+            user_id=1,
+            file_id="file-a",
+            documents=[document],
+            ids=[chunk_id],
+            embeddings=[[1.0, 0.0]],
+            batch_size=1,
+        )
+        other.replace_file_vectors(
+            user_id=1,
+            file_id="file-a",
+            documents=[document],
+            ids=[chunk_id],
+        )
+
+        target.delete_imported_file_vectors(user_id=1, file_id="file-a")
+
+        self.assertEqual(
+            target.count_vectors(user_id=1, file_id="file-a"),
+            0,
+        )
+        self.assertEqual(
+            other.count_vectors(user_id=1, file_id="file-a"),
+            1,
+        )
+
     def test_search_escapes_single_file_scalar_literal(self) -> None:
         """特殊字符必须保持为 string literal，不能改变 filter 语义。"""
         client = FakeMilvusClient()
