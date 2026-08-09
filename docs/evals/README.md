@@ -2,6 +2,10 @@
 
 这里放项目内置的轻量 RAG 回归评测，用于检查真实后端链路中的检索判断、召回、引用和回答质量。
 
+## Vector store 迁移基线
+
+[`chroma_migration_baseline_20260809.md`](chroma_migration_baseline_20260809.md) 冻结 T-130 的 Chroma/PostgreSQL 一致性、真实 filtered ANN、资源和历史 eval 对照值；后续 Milvus 迁移必须按 [ADR-0001](../adr/0001-milvus-migration.md) 的门禁比较，不能只用 indexing job `succeeded` 代替向量命中。
+
 ## 最近整体回归验收
 
 2026-07-02 已刷新一轮真实链路 eval 基线，覆盖 RAG 真实评测门禁、上传与向量化真实链路验收，以及 eval 历史趋势摘要。Compose 启动后的补充验收入口见 `scripts/acceptance_check.sh`。
