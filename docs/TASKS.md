@@ -5445,7 +5445,7 @@ git diff --check
 
 - 来源计划：`PLAN-20260809-01`
 - 优先级：`P1`
-- 状态：`Todo`
+- 状态：`Done`
 - 目标：建立固定版本、可持久化、仅 Compose 内网访问的 Milvus Standalone runtime，并让 backend、worker、preflight 和隔离 E2E 使用同一健康契约。
 - 技术边界：
   - 不向公网暴露 Milvus gRPC/HTTP/WebUI 端口；生产凭据只来自环境配置，不写入日志或仓库。
@@ -5460,6 +5460,13 @@ git diff --check
   - `docker compose up -d --build` 后 Milvus healthy，backend 与 worker 可完成 authenticated health probe。
   - Compose config、production preflight、CI dependency audit 和容器安全门禁通过。
   - Milvus restart 后 collection 与向量数据仍可读取。
+- 完成记录：
+  - 增加可选 `milvus` Compose profile，固定 Milvus `v3.0.0`、etcd `v3.5.25`、MinIO `RELEASE.2024-05-28T17-19-04Z` 与 PyMilvus `3.0.1`；三项基础设施均使用 named volume、日志轮转、healthcheck 和仅 Compose 内网端口。
+  - Milvus entrypoint 从环境 token 渲染权限配置，显式启用 authentication、Woodpecker、独立 metadata/object namespace；startup probe 同时验证无 token 被拒绝和有效 token round-trip，backend/worker 复用同一安全健康契约。
+  - 增加 provider、URI、token/database、collection prefix、timeout、Strong consistency 与资源上限配置；production preflight 可按当前 provider 检查 Milvus 配置、固定拓扑、资源下限和 backend/worker runtime health。
+  - 本机 Docker 8 CPU / 15.35 GiB 环境完成镜像构建与启动；Milvus、etcd、MinIO healthy，WAL 日志确认 `woodpecker`，错误 token、无 token 和有效 token 三类鉴权探测符合预期，且未映射 Milvus host port。
+  - 专用 `firstrag_t132_persistence_probe` collection 写入后完整重启 Milvus，记录成功读回并按 exact collection name 清理；Chroma 数据和默认 provider 未切换。
+  - 完整后端 397 项测试、Python 编译、教程文档、13 个 Actions pin、三套 Compose config、production preflight、Python dependency audit 与 credential-free full-stack E2E 均通过。
 
 ## T-133 迁移向量写入、重建与删除生命周期
 

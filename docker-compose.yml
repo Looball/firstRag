@@ -52,6 +52,100 @@ services:
       timeout: 5s
       retries: 10
 
+  milvus-etcd:
+    profiles: ["milvus"]
+    image: quay.io/coreos/etcd:v3.5.25
+    restart: unless-stopped
+    command:
+      - etcd
+      - -advertise-client-urls=http://milvus-etcd:2379
+      - -listen-client-urls=http://0.0.0.0:2379
+      - --data-dir=/etcd
+    environment:
+      ETCD_AUTO_COMPACTION_MODE: revision
+      ETCD_AUTO_COMPACTION_RETENTION: "1000"
+      ETCD_QUOTA_BACKEND_BYTES: "4294967296"
+      ETCD_SNAPSHOT_COUNT: "50000"
+    volumes:
+      - milvus_etcd_data:/etcd
+    mem_limit: 512m
+    cpus: 0.5
+    logging: *default-logging
+    healthcheck:
+      test: ["CMD", "etcdctl", "endpoint", "health"]
+      interval: 30s
+      timeout: 20s
+      retries: 5
+
+  milvus-minio:
+    profiles: ["milvus"]
+    image: minio/minio:RELEASE.2024-05-28T17-19-04Z
+    restart: unless-stopped
+    environment:
+      MINIO_ROOT_USER: ${MILVUS_MINIO_ACCESS_KEY:-firstrag-minio-local}
+      MINIO_ROOT_PASSWORD: ${MILVUS_MINIO_SECRET_KEY:-firstrag-minio-local-password}
+    command: ["minio", "server", "/minio_data", "--console-address", ":9001"]
+    volumes:
+      - milvus_minio_data:/minio_data
+    mem_limit: 1g
+    cpus: 1.0
+    logging: *default-logging
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 30s
+      timeout: 20s
+      retries: 5
+
+  milvus-standalone:
+    profiles: ["milvus"]
+    image: milvusdb/milvus:v3.0.0
+    restart: unless-stopped
+    command: ["/bin/sh", "/opt/firstrag/milvus-entrypoint.sh"]
+    security_opt:
+      - seccomp:unconfined
+    environment:
+      ETCD_ENDPOINTS: milvus-etcd:2379
+      MINIO_ADDRESS: milvus-minio:9000
+      MINIO_REGION: us-east-1
+      MINIO_ACCESS_KEY_ID: ${MILVUS_MINIO_ACCESS_KEY:-firstrag-minio-local}
+      MINIO_SECRET_ACCESS_KEY: ${MILVUS_MINIO_SECRET_KEY:-firstrag-minio-local-password}
+      MQ_TYPE: woodpecker
+      MILVUS_TOKEN: ${MILVUS_TOKEN:-root:firstrag-milvus-local-password}
+    volumes:
+      - milvus_data:/var/lib/milvus
+      - ./deploy/docker/milvus-entrypoint.sh:/opt/firstrag/milvus-entrypoint.sh:ro
+    mem_limit: ${MILVUS_MEMORY_LIMIT:-8g}
+    cpus: ${MILVUS_CPU_LIMIT:-4.0}
+    stop_grace_period: 2m
+    logging: *default-logging
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9091/healthz"]
+      interval: 30s
+      start_period: 90s
+      timeout: 20s
+      retries: 5
+    depends_on:
+      milvus-etcd:
+        condition: service_healthy
+      milvus-minio:
+        condition: service_healthy
+
+  milvus-health-probe:
+    profiles: ["milvus"]
+    image: firstrag-backend:latest
+    restart: "no"
+    environment:
+      MILVUS_URI: ${MILVUS_URI:-http://milvus-standalone:19530}
+      MILVUS_TOKEN: ${MILVUS_TOKEN:-root:firstrag-milvus-local-password}
+      MILVUS_DATABASE: ${MILVUS_DATABASE:-default}
+      MILVUS_COLLECTION_PREFIX: ${MILVUS_COLLECTION_PREFIX:-firstrag}
+      MILVUS_TIMEOUT_SECONDS: ${MILVUS_TIMEOUT_SECONDS:-10}
+    command: ["python", "-m", "app.services.vectors.milvus_health"]
+    logging: *default-logging
+    depends_on:
+      milvus-standalone:
+        condition: service_healthy
+
   backend:
     build:
       context: .
@@ -75,6 +169,13 @@ services:
       CHROMA_HOST: ${CHROMA_HOST:-chroma}
       CHROMA_PORT: ${CHROMA_PORT:-8000}
       CHROMA_SSL: ${CHROMA_SSL:-false}
+      VECTOR_STORE_PROVIDER: ${VECTOR_STORE_PROVIDER:-chroma}
+      MILVUS_URI: ${MILVUS_URI:-http://milvus-standalone:19530}
+      MILVUS_TOKEN: ${MILVUS_TOKEN:-root:firstrag-milvus-local-password}
+      MILVUS_DATABASE: ${MILVUS_DATABASE:-default}
+      MILVUS_COLLECTION_PREFIX: ${MILVUS_COLLECTION_PREFIX:-firstrag}
+      MILVUS_TIMEOUT_SECONDS: ${MILVUS_TIMEOUT_SECONDS:-10}
+      MILVUS_CONSISTENCY_LEVEL: ${MILVUS_CONSISTENCY_LEVEL:-Strong}
       RERANKER_MODEL_PATH: ${RERANKER_MODEL_PATH:-/app/models/rerankers/bge-reranker-base}
     ports:
       - "${BACKEND_PORT:-8000}:8000"
@@ -91,6 +192,9 @@ services:
         condition: service_completed_successfully
       chroma:
         condition: service_healthy
+      milvus-health-probe:
+        condition: service_completed_successfully
+        required: false
 
   migrate:
     image: firstrag-backend:latest
@@ -121,6 +225,13 @@ services:
       CHROMA_HOST: ${CHROMA_HOST:-chroma}
       CHROMA_PORT: ${CHROMA_PORT:-8000}
       CHROMA_SSL: ${CHROMA_SSL:-false}
+      VECTOR_STORE_PROVIDER: ${VECTOR_STORE_PROVIDER:-chroma}
+      MILVUS_URI: ${MILVUS_URI:-http://milvus-standalone:19530}
+      MILVUS_TOKEN: ${MILVUS_TOKEN:-root:firstrag-milvus-local-password}
+      MILVUS_DATABASE: ${MILVUS_DATABASE:-default}
+      MILVUS_COLLECTION_PREFIX: ${MILVUS_COLLECTION_PREFIX:-firstrag}
+      MILVUS_TIMEOUT_SECONDS: ${MILVUS_TIMEOUT_SECONDS:-10}
+      MILVUS_CONSISTENCY_LEVEL: ${MILVUS_CONSISTENCY_LEVEL:-Strong}
       RERANKER_MODEL_PATH: ${RERANKER_MODEL_PATH:-/app/models/rerankers/bge-reranker-base}
     command: ["python", "-m", "app.workers.vector_index_worker"]
     volumes:
@@ -136,6 +247,9 @@ services:
         condition: service_completed_successfully
       chroma:
         condition: service_healthy
+      milvus-health-probe:
+        condition: service_completed_successfully
+        required: false
 
   frontend:
     build:
@@ -153,3 +267,6 @@ services:
 
 volumes:
   postgres_data:
+  milvus_etcd_data:
+  milvus_minio_data:
+  milvus_data:

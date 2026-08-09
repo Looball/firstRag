@@ -28,6 +28,11 @@ cp .env.example .env
 | `RERANK_PROVIDER` / `RERANK_MODEL` / `RERANK_BASE_URL` / `RERANK_API_KEY` | 历史环境变量兼容；新版本远程 rerank 推荐在登录后的“模型设置”页按用户配置。 |
 | `VECTOR_STORE_PATH` | 单进程 embedded Chroma 的持久化路径，本地默认 `./vector_db/chroma`。 |
 | `CHROMA_HOST` / `CHROMA_PORT` / `CHROMA_SSL` | Chroma server 连接；Compose 默认使用内置 `chroma:8000`，本地单进程调试留空 `CHROMA_HOST` 可继续 embedded。 |
+| `VECTOR_STORE_PROVIDER` | 当前 vector store provider；迁移完成前默认 `chroma`，Milvus candidate runtime 使用 `milvus` profile 单独验收。 |
+| `MILVUS_URI` / `MILVUS_TOKEN` / `MILVUS_DATABASE` | Milvus 内网连接、认证 token 和 database；Compose 默认 URI 为 `http://milvus-standalone:19530`，真实 token 只放 `.env`。 |
+| `MILVUS_COLLECTION_PREFIX` / `MILVUS_TIMEOUT_SECONDS` / `MILVUS_CONSISTENCY_LEVEL` | Milvus collection 前缀、client timeout 与一致性；当前 ADR 固定 `Strong`。 |
+| `MILVUS_MINIO_ACCESS_KEY` / `MILVUS_MINIO_SECRET_KEY` | Milvus 内置 MinIO 的本地凭据；非本机隔离环境必须覆盖模板值。 |
+| `MILVUS_MEMORY_LIMIT` / `MILVUS_CPU_LIMIT` | Milvus Standalone 容器资源上限，默认 `8g` / `4.0`。 |
 | `RERANKER_MODEL_PATH` | 本地 reranker 模型路径；compose 会把 `./models` 只读挂载到 `/app/models`。 |
 | `PDF_OCR_*` | 扫描 PDF 本地 OCR 开关、语言、DPI、单页/自适应总超时、原生文本阈值、低置信度阈值、单文件最大 OCR 页数、重识别批次页数、候选上限和二值化阈值；Compose 镜像内置 Tesseract `chi_sim/eng`。 |
 | `UPLOADS_DIR` / `VECTOR_DB_DIR` / `MODELS_DIR` | Docker Compose 宿主机持久化目录；生产环境建议指向独立数据盘。 |
@@ -51,6 +56,21 @@ docker compose logs --tail=100 redis migrate backend worker frontend postgres
 ```
 
 默认访问 `http://localhost:3000`。后端、前端和 worker 的常规验证都应基于 Compose 容器；本地 conda / npm 启动仅用于专项调试。
+
+### Milvus candidate runtime
+
+T-132 起提供可选 `milvus` profile，用于迁移期间构建和验收固定版本的 Milvus Standalone；默认业务链路仍使用 Chroma，直到迁移、对账和回滚任务完成。启动命令：
+
+```bash
+docker compose --profile milvus up -d --build
+docker compose --profile milvus ps -a
+docker compose --profile milvus logs --tail=100 \
+  milvus-etcd milvus-minio milvus-standalone milvus-health-probe
+```
+
+该 profile 固定 Milvus `v3.0.0`、etcd `v3.5.25` 和 MinIO `RELEASE.2024-05-28T17-19-04Z`，使用 named volumes 持久化 metadata、object/WAL 和本地数据，显式启用 Woodpecker 与 authentication。Milvus、etcd 和 MinIO 均不映射 host port；backend 和 worker 必须等待 authenticated probe 成功。首次启动前在 `.env` 中覆盖 `MILVUS_TOKEN` 与 MinIO 凭据，禁止把真实值提交到仓库。
+
+Milvus 至少需要为 Docker Desktop 分配 4 CPU / 8 GiB；低于 16 GiB 时 preflight 会提示容量余量不足。`docker compose restart milvus-standalone` 会按 `stop_grace_period=2m` 优雅退出，命令可能需要等待约两分钟；HTTP health 先恢复后，仍应以 PyMilvus authenticated round-trip 作为 gRPC ready 标准。
 
 ### 数据库初始化与迁移
 

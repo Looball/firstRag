@@ -65,6 +65,12 @@ BOOLEAN_ENV_VALUES = {
 }
 CHROMA_COMPOSE_HOST = "chroma"
 CHROMA_DEFAULT_PORT = 8000
+MILVUS_COMPOSE_HOST = "milvus-standalone"
+MILVUS_DEFAULT_PORT = 19530
+MILVUS_MIN_MEMORY_BYTES = 8 * 1024**3
+MILVUS_RECOMMENDED_MEMORY_BYTES = 16 * 1024**3
+MILVUS_MIN_CPUS = 4
+VECTOR_STORE_PROVIDERS = {"chroma", "milvus"}
 
 
 @dataclass(frozen=True)
@@ -116,7 +122,10 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--check-runtime-health",
         action="store_true",
-        help="Require the Compose Chroma service to be running and healthy.",
+        help=(
+            "Require the configured vector store Compose service and an "
+            "authenticated client round-trip to be healthy."
+        ),
     )
     parser.add_argument(
         "--require-provider-keys",
@@ -451,6 +460,112 @@ def validate_chroma_settings(env: Mapping[str, str]) -> list[str]:
     return errors
 
 
+def validate_milvus_settings(env: Mapping[str, str]) -> list[str]:
+    """校验 Milvus client、认证、database 和 collection 命名配置。"""
+    errors: list[str] = []
+    uri = (env.get("MILVUS_URI") or "").strip()
+    token = (env.get("MILVUS_TOKEN") or "").strip()
+    database = (env.get("MILVUS_DATABASE") or "default").strip()
+    prefix = (env.get("MILVUS_COLLECTION_PREFIX") or "firstrag").strip()
+    timeout_value = (env.get("MILVUS_TIMEOUT_SECONDS") or "10").strip()
+    consistency = (env.get("MILVUS_CONSISTENCY_LEVEL") or "Strong").strip()
+
+    try:
+        parsed_uri = urlsplit(uri)
+    except ValueError:
+        parsed_uri = None
+        errors.append("MILVUS_URI 格式无效。")
+    if parsed_uri is not None:
+        if parsed_uri.scheme not in {"http", "https"} or not parsed_uri.hostname:
+            errors.append("MILVUS_URI 必须是包含 host 的 http:// 或 https:// URI。")
+        if parsed_uri.username or parsed_uri.password:
+            errors.append("MILVUS_URI 不能内嵌认证信息，请使用 MILVUS_TOKEN。")
+        if parsed_uri.path not in {"", "/"} or parsed_uri.query or parsed_uri.fragment:
+            errors.append("MILVUS_URI 不能包含 path、query 或 fragment。")
+        try:
+            port = parsed_uri.port
+        except ValueError:
+            port = None
+            errors.append("MILVUS_URI port 必须是 1-65535 的整数。")
+        if port is not None and (port < 1 or port > 65535):
+            errors.append("MILVUS_URI port 必须是 1-65535 的整数。")
+        hostname = (parsed_uri.hostname or "").lower()
+        if hostname in {"localhost", "127.0.0.1", "::1"}:
+            errors.append(
+                "Compose 中 MILVUS_URI 不能使用 loopback，应使用 milvus-standalone。"
+            )
+        if hostname and not is_internal_chroma_host(hostname) and parsed_uri.scheme != "https":
+            errors.append("MILVUS_URI 指向外部地址时必须启用 HTTPS/TLS。")
+
+    if is_placeholder(token) or ":" not in token:
+        errors.append("MILVUS_TOKEN 必须通过 secret 注入 username:password。")
+    else:
+        username, password = token.split(":", 1)
+        if not re.fullmatch(r"[A-Za-z][A-Za-z0-9_]{0,31}", username):
+            errors.append("MILVUS_TOKEN username 格式无效。")
+        if is_placeholder(password):
+            errors.append("MILVUS_TOKEN password 不能使用模板占位值。")
+        elif len(password) < 12 or len(password) > 72 or any(
+            character.isspace() for character in password
+        ):
+            errors.append("MILVUS_TOKEN password 必须为 12-72 个非空白字符。")
+        elif (
+            parsed_uri is not None
+            and parsed_uri.hostname == MILVUS_COMPOSE_HOST
+            and not re.fullmatch(r"[A-Za-z0-9._@%+=,-]+", password)
+        ):
+            errors.append(
+                "Milvus Compose bootstrap password 只能使用字母、数字和 ._@%+=,-。"
+            )
+        if password in {"Milvus", "firstrag-milvus-local-password"}:
+            errors.append("MILVUS_TOKEN 不能使用默认或本地示例密码。")
+
+        if (
+            parsed_uri is not None
+            and parsed_uri.hostname == MILVUS_COMPOSE_HOST
+            and username != "root"
+        ):
+            errors.append("Compose 内置 Milvus bootstrap token 必须使用 root 用户。")
+
+    if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]{0,254}", database):
+        errors.append("MILVUS_DATABASE 必须是合法的 Milvus database 名称。")
+    if not re.fullmatch(r"[a-z][a-z0-9_]{0,31}", prefix):
+        errors.append("MILVUS_COLLECTION_PREFIX 只允许小写字母、数字和下划线。")
+    try:
+        timeout = float(timeout_value)
+    except ValueError:
+        errors.append("MILVUS_TIMEOUT_SECONDS 必须是正数。")
+    else:
+        if timeout <= 0 or timeout > 60:
+            errors.append("MILVUS_TIMEOUT_SECONDS 必须大于 0 且不超过 60。")
+    if consistency != "Strong":
+        errors.append("MILVUS_CONSISTENCY_LEVEL 在迁移期必须保持 Strong。")
+
+    if parsed_uri is not None and parsed_uri.hostname == MILVUS_COMPOSE_HOST:
+        access_key = (env.get("MILVUS_MINIO_ACCESS_KEY") or "").strip()
+        secret_key = (env.get("MILVUS_MINIO_SECRET_KEY") or "").strip()
+        if is_placeholder(access_key) or access_key == "firstrag-minio-local":
+            errors.append("MILVUS_MINIO_ACCESS_KEY 必须通过生产 secret 注入。")
+        if (
+            is_placeholder(secret_key)
+            or secret_key == "firstrag-minio-local-password"
+            or len(secret_key) < 16
+        ):
+            errors.append("MILVUS_MINIO_SECRET_KEY 必须使用生产级随机值。")
+
+    return errors
+
+
+def validate_vector_store_settings(env: Mapping[str, str]) -> list[str]:
+    """只对当前 provider 执行连接配置校验，并阻止未知 provider。"""
+    provider = (env.get("VECTOR_STORE_PROVIDER") or "chroma").strip().lower()
+    if provider not in VECTOR_STORE_PROVIDERS:
+        return ["VECTOR_STORE_PROVIDER 只能设置为 chroma 或 milvus。"]
+    if provider == "milvus":
+        return validate_milvus_settings(env)
+    return validate_chroma_settings(env)
+
+
 def extract_compose_service_block(compose_text: str, service_name: str) -> str | None:
     """从 docker-compose.yml 文本中提取指定 service 的缩进块。"""
     pattern = re.compile(rf"^  {re.escape(service_name)}:\s*$", re.MULTILINE)
@@ -540,6 +655,85 @@ def validate_compose_chroma_service(
             )
         if "\n      chroma:\n        condition: service_healthy" not in service_block:
             errors.append(f"{service_name} 必须等待 chroma service_healthy 后启动。")
+
+    return errors
+
+
+def validate_compose_milvus_services(
+    compose_file: Path = PROJECT_ROOT / "docker-compose.yml",
+) -> list[str]:
+    """静态校验固定版本、内网、持久化、认证和 startup probe。"""
+    errors: list[str] = []
+    if not compose_file.exists():
+        return ["docker-compose.yml 不存在，无法检查 Milvus services。"]
+
+    compose_text = compose_file.read_text(encoding="utf-8")
+    expected_images = {
+        "milvus-etcd": "quay.io/coreos/etcd:v3.5.25",
+        "milvus-minio": "minio/minio:RELEASE.2024-05-28T17-19-04Z",
+        "milvus-standalone": "milvusdb/milvus:v3.0.0",
+    }
+    for service_name, image in expected_images.items():
+        service_block = extract_compose_service_block(compose_text, service_name)
+        if service_block is None:
+            errors.append(f"docker-compose.yml 缺少 {service_name} service。")
+            continue
+        if f"image: {image}" not in service_block:
+            errors.append(f"{service_name} 必须固定为 {image}。")
+        if "\n    ports:" in service_block:
+            errors.append(f"{service_name} 不得声明 host ports。")
+        if "\n    profiles: [\"milvus\"]" not in service_block:
+            errors.append(f"{service_name} 必须属于可选 milvus profile。")
+        if "\n    volumes:" not in service_block:
+            errors.append(f"{service_name} 必须配置持久化 volume。")
+        if "\n    logging:" not in service_block:
+            errors.append(f"{service_name} 必须复用日志轮转配置。")
+        if "\n    healthcheck:" not in service_block:
+            errors.append(f"{service_name} 必须配置 healthcheck。")
+
+    standalone_block = extract_compose_service_block(
+        compose_text,
+        "milvus-standalone",
+    ) or ""
+    if "milvus-entrypoint.sh" not in standalone_block or "MILVUS_TOKEN:" not in standalone_block:
+        errors.append("milvus-standalone 必须从 MILVUS_TOKEN 渲染 authentication 配置。")
+    if "MQ_TYPE: woodpecker" not in standalone_block:
+        errors.append("milvus-standalone 必须显式固定 mq.type=woodpecker。")
+    if "mem_limit:" not in standalone_block or "cpus:" not in standalone_block:
+        errors.append("milvus-standalone 必须显式配置 CPU 和 memory 上限。")
+
+    minio_block = extract_compose_service_block(compose_text, "milvus-minio") or ""
+    if "minioadmin" in minio_block:
+        errors.append("milvus-minio 不得使用官方示例默认凭据。")
+
+    probe_block = extract_compose_service_block(
+        compose_text,
+        "milvus-health-probe",
+    )
+    if probe_block is None:
+        errors.append("docker-compose.yml 缺少 authenticated milvus-health-probe。")
+    elif "app.services.vectors.milvus_health" not in probe_block:
+        errors.append("milvus-health-probe 必须执行 PyMilvus authenticated round-trip。")
+
+    for service_name in ("backend", "worker"):
+        service_block = extract_compose_service_block(compose_text, service_name) or ""
+        for key in (
+            "VECTOR_STORE_PROVIDER:",
+            "MILVUS_URI:",
+            "MILVUS_TOKEN:",
+            "MILVUS_DATABASE:",
+            "MILVUS_COLLECTION_PREFIX:",
+            "MILVUS_TIMEOUT_SECONDS:",
+            "MILVUS_CONSISTENCY_LEVEL:",
+        ):
+            if key not in service_block:
+                errors.append(f"{service_name} 缺少 {key.rstrip(':')} 配置。")
+        if (
+            "\n      milvus-health-probe:\n"
+            "        condition: service_completed_successfully\n"
+            "        required: false"
+        ) not in service_block:
+            errors.append(f"{service_name} 必须声明可选 authenticated startup probe。")
 
     return errors
 
@@ -715,6 +909,161 @@ def run_chroma_runtime_health_check(env: Mapping[str, str]) -> ExternalCheck:
     )
 
 
+def run_milvus_runtime_health_check(env: Mapping[str, str]) -> ExternalCheck:
+    """确认 Milvus healthy，并在 backend 与 worker 内完成认证 round-trip。"""
+    child_env = os.environ.copy()
+    child_env.update(env)
+    name = "Milvus runtime health"
+    try:
+        result = subprocess.run(
+            [
+                "docker",
+                "compose",
+                "--profile",
+                "milvus",
+                "ps",
+                "--format",
+                "json",
+                "milvus-standalone",
+            ],
+            cwd=PROJECT_ROOT,
+            env=child_env,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            check=True,
+        )
+    except FileNotFoundError:
+        return ExternalCheck(
+            name=name,
+            success=False,
+            message="Milvus runtime health 命令不可用，请确认 Docker 已安装。",
+        )
+    except subprocess.CalledProcessError:
+        return ExternalCheck(
+            name=name,
+            success=False,
+            message="Milvus runtime health 未通过，请检查 Compose service 状态。",
+        )
+
+    try:
+        records = parse_compose_ps_records(result.stdout)
+    except json.JSONDecodeError:
+        records = []
+    if not records:
+        return ExternalCheck(
+            name=name,
+            success=False,
+            message=(
+                "Milvus service 未运行；请先执行 "
+                "docker compose --profile milvus up -d --build。"
+            ),
+        )
+    record = records[0]
+    state = str(record.get("State") or "").strip().lower()
+    health = str(record.get("Health") or "").strip().lower()
+    if state != "running" or health != "healthy":
+        return ExternalCheck(
+            name=name,
+            success=False,
+            message="Milvus service 未处于 running/healthy 状态，请检查容器日志。",
+        )
+
+    probe_command = (
+        "python",
+        "-m",
+        "app.services.vectors.milvus_health",
+    )
+    for service_name in ("backend", "worker"):
+        probe = run_external_check(
+            f"Milvus authenticated probe ({service_name})",
+            (
+                "docker",
+                "compose",
+                "--profile",
+                "milvus",
+                "exec",
+                "-T",
+                service_name,
+                *probe_command,
+            ),
+            env,
+        )
+        if not probe.success:
+            return probe
+    return ExternalCheck(
+        name=name,
+        success=True,
+        message="Milvus container 与 backend/worker authenticated probes 已通过。",
+    )
+
+
+def run_vector_store_runtime_health_check(
+    env: Mapping[str, str],
+) -> ExternalCheck:
+    """按当前 provider 选择 Compose runtime 健康门禁。"""
+    provider = (env.get("VECTOR_STORE_PROVIDER") or "chroma").strip().lower()
+    if provider == "milvus":
+        return run_milvus_runtime_health_check(env)
+    return run_chroma_runtime_health_check(env)
+
+
+def run_milvus_resource_check(env: Mapping[str, str]) -> ExternalCheck:
+    """检查 Docker VM 是否达到 Milvus 最低资源并标记推荐线 warning。"""
+    child_env = os.environ.copy()
+    child_env.update(env)
+    name = "Milvus Docker resources"
+    try:
+        result = subprocess.run(
+            ["docker", "info", "--format", "{{json .}}"],
+            cwd=PROJECT_ROOT,
+            env=child_env,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            check=True,
+        )
+        payload = json.loads(result.stdout)
+        cpu_count = int(payload.get("NCPU") or 0)
+        memory_bytes = int(payload.get("MemTotal") or 0)
+    except (FileNotFoundError, subprocess.CalledProcessError, ValueError, json.JSONDecodeError):
+        return ExternalCheck(
+            name=name,
+            success=False,
+            message="无法读取 Docker VM 资源，请确认 Docker Desktop 正常运行。",
+        )
+
+    memory_gib = memory_bytes / 1024**3
+    if cpu_count < MILVUS_MIN_CPUS or memory_bytes < MILVUS_MIN_MEMORY_BYTES:
+        return ExternalCheck(
+            name=name,
+            success=False,
+            message=(
+                "Docker VM 未达到 Milvus Standalone 最低资源："
+                f"当前 {cpu_count} CPU / {memory_gib:.2f} GiB RAM，"
+                "至少需要 4 CPU / 8 GiB RAM。"
+            ),
+        )
+    if memory_bytes < MILVUS_RECOMMENDED_MEMORY_BYTES:
+        return ExternalCheck(
+            name=name,
+            success=True,
+            message=(
+                "Milvus Docker resources 已达到最低要求；warning："
+                f"当前 {cpu_count} CPU / {memory_gib:.2f} GiB RAM，"
+                "低于 16 GiB 推荐线。"
+            ),
+        )
+    return ExternalCheck(
+        name=name,
+        success=True,
+        message=(
+            "Milvus Docker resources 已通过："
+            f"{cpu_count} CPU / {memory_gib:.2f} GiB RAM。"
+        ),
+    )
+
+
 def run_migration_dry_run(
     env: Mapping[str, str],
     env_file: Path,
@@ -786,8 +1135,9 @@ def run(args: argparse.Namespace) -> int:
         ("Database settings", validate_database_settings(env)),
         ("Redis settings", validate_redis_settings(env)),
         ("Redis Compose service", validate_compose_redis_service()),
-        ("Chroma settings", validate_chroma_settings(env)),
+        ("Vector store settings", validate_vector_store_settings(env)),
         ("Chroma Compose service", validate_compose_chroma_service()),
+        ("Milvus Compose services", validate_compose_milvus_services()),
         ("Port bindings", validate_port_bindings(env)),
     ]
     if not args.skip_path_check:
@@ -808,7 +1158,9 @@ def run(args: argparse.Namespace) -> int:
     if not args.skip_compose_check:
         external_checks.append(run_compose_check(env))
     if args.check_runtime_health:
-        external_checks.append(run_chroma_runtime_health_check(env))
+        if (env.get("VECTOR_STORE_PROVIDER") or "chroma").strip().lower() == "milvus":
+            external_checks.append(run_milvus_resource_check(env))
+        external_checks.append(run_vector_store_runtime_health_check(env))
     if not args.skip_migration_dry_run:
         external_checks.append(
             run_migration_dry_run(

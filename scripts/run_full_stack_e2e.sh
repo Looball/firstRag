@@ -14,6 +14,7 @@ PASSWORD="${FIRSTRAG_E2E_PASSWORD:-E2eOnly-123456}"
 PAUSE_AFTER_TEST="${FIRSTRAG_E2E_PAUSE_AFTER_TEST:-0}"
 COMPOSE_ARGS=(
   --env-file /dev/null
+  --profile milvus
   -f "${REPO_ROOT}/docker-compose.yml"
   -f "${REPO_ROOT}/deploy/docker/docker-compose.e2e.yml"
 )
