@@ -130,6 +130,7 @@
 | `PLAN-20260731-11` | 2026-07-31 | `Done` | 继续拆分会话操作 hook，独立管理 active session 消息懒加载与错误回写。 | `T-120` |
 | `PLAN-20260801-01` | 2026-08-01 | `Done` | 拆分聊天工作台通用工具，优先收口 vector indexing 解析、状态和展示 helper。 | `T-121` |
 | `PLAN-20260802-01` | 2026-08-02 | `Done` | 在保留完整可运行实现的前提下，将 `main` 单主线转为分层教程与工程参考实现，并停止非必要功能扩展。 | `T-122` - `T-129` |
+| `PLAN-20260809-01` | 2026-08-09 | `Todo` | 在保持 PostgreSQL full-text、RRF、rerank、SSE 和用户隔离行为不变的前提下，将 vector store 从 Chroma 安全迁移到 Milvus，并提供可验证的数据迁移与回滚路径。 | `T-130` - `T-138` |
 
 ## 任务总览
 
@@ -264,6 +265,15 @@
 | `T-127` | `PLAN-20260802-01` | `P2` | `Done` | 编写前端、安全、测试与部署进阶教程 | 2026-08-02 | `59ab53f` |
 | `T-128` | `PLAN-20260802-01` | `P2` | `Done` | 增加练习、示例素材与文档回归门禁 | 2026-08-02 | `78c272b` |
 | `T-129` | `PLAN-20260802-01` | `P1` | `Done` | 明确教程仓库 License 与公开使用边界 | 2026-08-03 | `1d66209` |
+| `T-130` | `PLAN-20260809-01` | `P1` | `Todo` | 冻结 Chroma 基线并确定 Milvus 迁移设计 | — | — |
+| `T-131` | `PLAN-20260809-01` | `P1` | `Todo` | 建立 provider-neutral vector store boundary | — | — |
+| `T-132` | `PLAN-20260809-01` | `P1` | `Todo` | 接入 Milvus Standalone、配置与健康门禁 | — | — |
+| `T-133` | `PLAN-20260809-01` | `P1` | `Todo` | 迁移向量写入、重建与删除生命周期 | — | — |
+| `T-134` | `PLAN-20260809-01` | `P1` | `Todo` | 迁移 Milvus 向量检索与 diagnostics | — | — |
+| `T-135` | `PLAN-20260809-01` | `P0` | `Todo` | 建立 Chroma 到 Milvus 数据迁移与回滚工具 | — | — |
+| `T-136` | `PLAN-20260809-01` | `P1` | `Todo` | 完成 Milvus 全链路回归、质量与性能验收 | — | — |
+| `T-137` | `PLAN-20260809-01` | `P1` | `Todo` | 更新 Milvus 架构、部署与教程文档 | — | — |
+| `T-138` | `PLAN-20260809-01` | `P2` | `Todo` | 完成 Milvus 切换观察并移除 Chroma 遗留 | — | — |
 
 ## 新计划接入流程
 
@@ -5374,6 +5384,181 @@ git diff --check
 rg -n "License|LICENSE|开源|复制|修改|分发|商业" README.md docs LICENSE
 git diff --check
 ```
+
+## T-130 冻结 Chroma 基线并确定 Milvus 迁移设计
+
+- 来源计划：`PLAN-20260809-01`
+- 优先级：`P1`
+- 状态：`Todo`
+- 背景：当前 vector store 与 Chroma client、metadata filter、collection 私有接口、Compose 拓扑、preflight、清理脚本、E2E 和教程直接耦合；历史验收还出现过向量已经写入但 ANN 查询失败的情况，不能把迁移简化为依赖替换。
+- 目标：在修改生产链路前冻结可比较的 Chroma 基线，并明确 Milvus 版本、部署拓扑、schema、metric、consistency、collection 隔离和数据保留策略。
+- 技术边界：
+  - 不在本任务中切换生产读写，不删除 Chroma 数据或依赖。
+  - 保持当前按用户与 embedding provider/model/dimensions 隔离不兼容向量的语义；是否优化 collection 数量作为迁移后的独立决策。
+  - Milvus image、Python client 和索引参数必须固定版本，不使用 `latest`。
+- 范围：
+  - 盘点 Chroma collections、已索引文件、chunk/embedding 数量、metadata 最大尺寸和 embedding dimensions。
+  - 固化上传、单文件重建、永久删除、用户/文件过滤、hybrid retrieval、diagnostics 和真实 eval 基线。
+  - 编写 Milvus ADR，定义 `chunk_id`、vector、content、`user_id`、`file_id`、`chunk_index`、`index_version` 和可变 metadata schema。
+  - 明确开发数据重新向量化、真实数据导入既有 embedding、维护窗口和 rollback 的选择条件。
+- 验收标准：
+  - ADR 能让后续任务无需重新决定核心 schema、metric、consistency 和 rollout 方式。
+  - 基线同时验证 PostgreSQL chunks、vector store entries 和真实 similarity search，不以 job `succeeded` 代替向量命中。
+  - 记录 Milvus 本地资源要求和当前 Docker Desktop 可用资源，不让迁移后 quickstart 静默失效。
+
+## T-131 建立 provider-neutral vector store boundary
+
+- 来源计划：`PLAN-20260809-01`
+- 优先级：`P1`
+- 状态：`Todo`
+- 目标：用一个薄的 vector store boundary 收口业务真正需要的 collection、写入、删除、检索、审计和健康检查能力，消除 service 对 Chroma 私有 `_collection` 和 filter 语法的直接依赖。
+- 技术边界：
+  - 只抽象真实消费者已有的能力，不建立通用 vector database framework。
+  - 第一阶段仍由 Chroma adapter 驱动现有链路，保证重构前后行为一致。
+  - `Document`、stable chunk ID、metadata 和 diagnostics 的应用层契约保持不变。
+- 范围：
+  - 定义 `ensure_collection`、`replace_file_vectors`、`delete_file_vectors`、`search_vectors`、`list_file_vectors`、`count_vectors` 和 `health_check`。
+  - 把 collection 命名、文件过滤、结果转换、score/distance 规范化和异常分类移入 adapter。
+  - 为 user/file 隔离、幂等写入、过滤删除、搜索排序和 provider error 增加 provider-neutral tests。
+- 验收标准：
+  - indexing、retrieval、文件生命周期和 cleanup 调用方不再引用 Chroma 私有对象。
+  - Chroma adapter 下现有后端测试、credential-free E2E 和 indexing/RAG 基线不回退。
+
+## T-132 接入 Milvus Standalone、配置与健康门禁
+
+- 来源计划：`PLAN-20260809-01`
+- 优先级：`P1`
+- 状态：`Todo`
+- 目标：建立固定版本、可持久化、仅 Compose 内网访问的 Milvus Standalone runtime，并让 backend、worker、preflight 和隔离 E2E 使用同一健康契约。
+- 技术边界：
+  - 不向公网暴露 Milvus gRPC/HTTP/WebUI 端口；生产凭据只来自环境配置，不写入日志或仓库。
+  - 持久化 volume、日志轮转、healthcheck、认证和资源要求必须显式配置。
+  - Milvus runtime 失败时 backend/worker 应给出安全且可定位的 vector store 状态。
+- 范围：
+  - 增加 `MILVUS_URI`、token/database、collection prefix、timeout 和 consistency 配置。
+  - 更新根 Compose、E2E override、backend image dependencies、`.env.example` 和 startup dependency。
+  - 将 production preflight 从 Chroma 专用检查改为当前 provider 对应的配置、拓扑和 runtime health 检查。
+  - 增加 Milvus image/version、持久化和未暴露公网端口的静态回归。
+- 验收标准：
+  - `docker compose up -d --build` 后 Milvus healthy，backend 与 worker 可完成 authenticated health probe。
+  - Compose config、production preflight、CI dependency audit 和容器安全门禁通过。
+  - Milvus restart 后 collection 与向量数据仍可读取。
+
+## T-133 迁移向量写入、重建与删除生命周期
+
+- 来源计划：`PLAN-20260809-01`
+- 优先级：`P1`
+- 状态：`Todo`
+- 目标：让 worker 通过 Milvus adapter 完成新文件索引、同文件重建、OCR 重识别/人工校对后的版本替换、补偿清理和永久删除。
+- 技术边界：
+  - 保留 PostgreSQL advisory lock、`index_version`、stable chunk ID 和 active job 约束。
+  - Milvus 与 PostgreSQL 仍不能共享事务；任一侧失败时不得把半成品标记为 `indexed`。
+  - 写入必须幂等，同一文件同一版本重复执行不得产生重复向量。
+- 范围：
+  - 按 ADR schema 创建/校验 collection 和 vector/scalar indexes。
+  - 实现按文件删除旧版本、批量 insert/upsert、新旧数据对账与失败补偿。
+  - 迁移文件删除、删除向量、OCR rebuild 和 worker retry 路径。
+  - 增加不同 embedding dimensions、重复任务、stale job 和中途失败回归。
+- 验收标准：
+  - 上传、重建、删除和失败恢复后，Milvus entries 与 PostgreSQL chunks 数量、ID、`index_version` 一致。
+  - backend 与 worker 使用不同 client 时，任务成功后 backend 无需重启即可查询新向量。
+
+## T-134 迁移 Milvus 向量检索与 diagnostics
+
+- 来源计划：`PLAN-20260809-01`
+- 优先级：`P1`
+- 状态：`Todo`
+- 目标：使用应用层预计算 query embedding 和 Milvus scalar filter 完成用户级、单文件与多文件向量粗召回，同时保留 full-text、RRF、rerank 和 SSE diagnostics 行为。
+- 技术边界：
+  - 所有查询必须带 `user_id` 隔离，指定知识库时还必须限制允许的 `file_id`。
+  - 明确 COSINE/L2 的 score 或 distance 排序方向，统一输出稳定的 `vector_score` 契约。
+  - Milvus 失败时允许降级到 PostgreSQL full-text，但不得吞掉 `vector_degraded` 和可观测错误。
+- 范围：
+  - 将 Chroma filter 字典转换为 Milvus scalar expression，并使用参数化/安全构造避免表达式注入。
+  - 实现 Top-K、批量文件范围、metadata/result 转换和 timing/error diagnostics。
+  - 删除仅为 Chroma `Error finding id` 建立的延迟重试、无过滤扫描和直接 `_collection.get()` fallback。
+  - 更新 retrieval resilience、RAG service、eval report 和 observability tests。
+- 验收标准：
+  - 多用户、多文件和不同 embedding collection 的检索结果无越权、无串库、排序正确。
+  - Milvus 正常时 `vector_degraded=false`，异常时 full-text fallback、diagnostics 和用户可理解提示同时有效。
+
+## T-135 建立 Chroma 到 Milvus 数据迁移与回滚工具
+
+- 来源计划：`PLAN-20260809-01`
+- 优先级：`P0`
+- 状态：`Todo`
+- 目标：提供 dry-run、可恢复、可审计的迁移工具，在不重新调用用户 embedding provider 的默认路径下复制既有 Chroma embeddings，并为损坏 collection 输出重新向量化清单。
+- 技术边界：
+  - 执行迁移前必须备份 PostgreSQL、uploads 和 Chroma 数据，并暂停 worker 与新的 indexing 写入。
+  - 工具不读取或打印用户 API Key；只有明确选择重新向量化时才依赖应用中已保存的 provider 设置。
+  - 原 Chroma 在观察期内只读保留，不做反向覆盖。
+- 范围：
+  - 支持 `--dry-run`、分 collection/file 批次、checkpoint/resume、幂等 upsert 和速率/批大小控制。
+  - 保留原 chunk ID、正文、metadata、embedding 和 collection identity。
+  - 对账 collection/file entry count、ID 集合、dimensions，并抽样比较 Chroma/Milvus Top-K。
+  - 暂时支持 `VECTOR_STORE_PROVIDER=chroma|milvus` 切换；记录切换、验证和 rollback runbook。
+- 验收标准：
+  - 重复运行不会产生重复数据；中断后可从 checkpoint 继续。
+  - 任一无法导入或验证的文件不会被静默跳过，必须进入 machine-readable 失败清单。
+  - rollback 演练能在不修改原 Chroma 数据的情况下恢复旧读写路径。
+
+## T-136 完成 Milvus 全链路回归、质量与性能验收
+
+- 来源计划：`PLAN-20260809-01`
+- 优先级：`P1`
+- 状态：`Todo`
+- 目标：证明 Milvus 不仅容器存活和数据可见，而且真实上传、索引、ANN、hybrid retrieval、SSE sources、删除与恢复链路均达到当前质量基线。
+- 技术边界：
+  - job `succeeded`、entry count 或 full-text 命中不能替代真实 vector similarity search。
+  - 真实 RAG/indexing eval 使用应用内已配置的专用测试账户；不得要求在日志或聊天中粘贴 API Key。
+  - 性能结论必须同时记录数据量、Milvus 参数、机器资源和 cold/warm 状态。
+- 范围：
+  - 运行后端全量测试、前端 lint/Vitest/build、fixture E2E、credential-free full-stack E2E 和 production preflight。
+  - 验证上传、worker、单/多文件 ANN、RRF/rerank、SSE sources、重新向量化、永久删除和 restart persistence。
+  - 运行真实 indexing/RAG eval，比较 target-document hit、`vector_degraded`、错误、P50/P95 latency、写入耗时和资源占用。
+  - 增加至少两个用户和两种 embedding dimensions 的隔离回归。
+- 验收标准：
+  - required CI 四项通过，真实新文件向量命中且 `vector_degraded=false`。
+  - RAG/indexing 质量不低于冻结基线，无跨用户或跨文件泄露。
+  - 性能或资源回退超出 ADR 阈值时保持 Chroma 为默认，不进入切换阶段。
+
+## T-137 更新 Milvus 架构、部署与教程文档
+
+- 来源计划：`PLAN-20260809-01`
+- 优先级：`P1`
+- 状态：`Todo`
+- 目标：让 README、架构/API/部署说明、源码地图和核心教程与真实 Milvus 实现一致，保留 Chroma 历史说明但不把它描述为当前 runtime。
+- 技术边界：
+  - 文档只描述已实现并验证的 Milvus 行为，不提前宣称迁移完成。
+  - 区分开发重建、真实数据迁移、备份恢复和正式切换，不把删除旧 volume 当成迁移步骤。
+  - 教程继续复用生产链路，不创建平行教学实现。
+- 范围：
+  - 更新 README、AGENTS、Architecture、Backend、Deployment、RAG Workflow、API/SCHEMAS 和 `.env.example`。
+  - 更新 credential-free quickstart、文件索引、混合检索、部署教程、源码地图和 fixtures 说明。
+  - 更新前端 `vector_store_error` 恢复提示、demo cleanup、日志排查和备份/恢复命令。
+  - 扩展教程文档回归门禁，拒绝当前基线中残留的 Chroma runtime 路径与命令。
+- 验收标准：
+  - 文档中的 service、环境变量、volume、日志、healthcheck 和检索语义与 Compose/代码一致。
+  - 教程文档检查、链接/源码路径检查和敏感信息门禁通过。
+
+## T-138 完成 Milvus 切换观察并移除 Chroma 遗留
+
+- 来源计划：`PLAN-20260809-01`
+- 优先级：`P2`
+- 状态：`Todo`
+- 目标：在 Milvus 默认运行并通过观察期后，删除只为 rollback 保留的 Chroma adapter、依赖、配置、容器和当前文档，结束长期双后端维护。
+- 技术边界：
+  - 删除前必须确认 Milvus 数据备份、恢复演练、真实 eval 和 main post-merge CI 均完成。
+  - 不自动删除用户现有 `vector_db/chroma` 数据；只停止代码引用并给出人工归档/删除说明。
+  - 历史 task/eval 证据中的 Chroma 名称保持原样。
+- 范围：
+  - 移除 `langchain-chroma`、`chromadb`、Chroma service/env/preflight、临时 provider 开关和 Chroma-specific workaround。
+  - 清理前端提示、security audit exception、demo cleanup 分支和不再需要的 tests。
+  - 再次运行全量静态搜索，区分当前基线残留与历史证据。
+- 验收标准：
+  - 生产代码、默认 Compose、CI 和当前文档只依赖 Milvus；历史证据不被改写。
+  - clean clone 能完成 credential-free quickstart 和 full-stack E2E。
+  - Chroma 数据归档/删除步骤为显式人工操作且默认不执行。
 
 ## 更新规则
 
