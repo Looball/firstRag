@@ -265,7 +265,7 @@
 | `T-127` | `PLAN-20260802-01` | `P2` | `Done` | 编写前端、安全、测试与部署进阶教程 | 2026-08-02 | `59ab53f` |
 | `T-128` | `PLAN-20260802-01` | `P2` | `Done` | 增加练习、示例素材与文档回归门禁 | 2026-08-02 | `78c272b` |
 | `T-129` | `PLAN-20260802-01` | `P1` | `Done` | 明确教程仓库 License 与公开使用边界 | 2026-08-03 | `1d66209` |
-| `T-130` | `PLAN-20260809-01` | `P1` | `Todo` | 冻结 Chroma 基线并确定 Milvus 迁移设计 | — | — |
+| `T-130` | `PLAN-20260809-01` | `P1` | `Doing` | 冻结 Chroma 基线并确定 Milvus 迁移设计 | — | — |
 | `T-131` | `PLAN-20260809-01` | `P1` | `Todo` | 建立 provider-neutral vector store boundary | — | — |
 | `T-132` | `PLAN-20260809-01` | `P1` | `Todo` | 接入 Milvus Standalone、配置与健康门禁 | — | — |
 | `T-133` | `PLAN-20260809-01` | `P1` | `Todo` | 迁移向量写入、重建与删除生命周期 | — | — |
@@ -5390,7 +5390,7 @@ git diff --check
 
 - 来源计划：`PLAN-20260809-01`
 - 优先级：`P1`
-- 状态：`Todo`
+- 状态：`Doing`
 - 背景：当前 vector store 与 Chroma client、metadata filter、collection 私有接口、Compose 拓扑、preflight、清理脚本、E2E 和教程直接耦合；历史验收还出现过向量已经写入但 ANN 查询失败的情况，不能把迁移简化为依赖替换。
 - 目标：在修改生产链路前冻结可比较的 Chroma 基线，并明确 Milvus 版本、部署拓扑、schema、metric、consistency、collection 隔离和数据保留策略。
 - 技术边界：

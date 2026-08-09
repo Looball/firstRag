@@ -37,6 +37,7 @@ FirstRAG 的项目代码、文档和仓库自编教程素材采用 [Apache Licen
 | `RAG_WORKFLOW.md` | 文件向量化、混合检索、流式回答流程。 |
 | `FRONTEND.md` | Next.js 前端目录、页面、代理层和状态约定。 |
 | `BACKEND.md` | FastAPI 后端分层、服务和 worker 说明。 |
+| [`adr/0001-milvus-migration.md`](adr/0001-milvus-migration.md) | 固定 Chroma 到 Milvus 的版本、拓扑、schema、隔离、metric、consistency、数据迁移和 rollback 决策。 |
 
 ## Runbook 与 Evaluation
 
@@ -45,6 +46,7 @@ FirstRAG 的项目代码、文档和仓库自编教程素材采用 [Apache Licen
 | [`DEPLOYMENT.md`](DEPLOYMENT.md) | 本地工作流、CI、生产安全、备份恢复和在线 demo 前置条件。 |
 | [`docker-startup/README.md`](docker-startup/README.md) | Docker Compose 完整链路启动与故障排查 runbook。 |
 | [`evals/README.md`](evals/README.md) | RAG、indexing、OCR 评测条件、命令、报告和指标边界。 |
+| [`evals/chroma_migration_baseline_20260809.md`](evals/chroma_migration_baseline_20260809.md) | 迁移前 collection、PostgreSQL chunk 一致性、真实 ANN、资源和 Milvus 对照门槛。 |
 
 ## 协作与任务
 
