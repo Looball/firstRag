@@ -7,6 +7,29 @@ services:
     volumes:
       - e2e_chroma_data:/data
 
+  milvus-etcd:
+    volumes:
+      - e2e_milvus_etcd_data:/etcd
+
+  milvus-minio:
+    environment:
+      MINIO_ROOT_USER: firstrag-e2e-minio
+      MINIO_ROOT_PASSWORD: firstrag-e2e-minio-password
+    volumes:
+      - e2e_milvus_minio_data:/minio_data
+
+  milvus-standalone:
+    environment:
+      MINIO_ACCESS_KEY_ID: firstrag-e2e-minio
+      MINIO_SECRET_ACCESS_KEY: firstrag-e2e-minio-password
+      MILVUS_TOKEN: root:firstrag-e2e-milvus-password
+    volumes:
+      - e2e_milvus_data:/var/lib/milvus
+
+  milvus-health-probe:
+    environment:
+      MILVUS_TOKEN: root:firstrag-e2e-milvus-password
+
   provider-stub:
     image: firstrag-backend:latest
     command: ["python", "/app/e2e-scripts/full_stack_e2e_provider.py"]
@@ -31,6 +54,7 @@ services:
       JWT_SECRET_KEY: firstrag-e2e-jwt-key-not-for-production
       USER_SETTINGS_ENCRYPTION_KEY: MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA=
       ALLOW_PUBLIC_REGISTRATION: "true"
+      MILVUS_TOKEN: root:firstrag-e2e-milvus-password
     volumes:
       - e2e_uploads:/app/uploads
       - ./scripts:/app/e2e-scripts:ro
@@ -43,6 +67,7 @@ services:
     environment:
       JWT_SECRET_KEY: firstrag-e2e-jwt-key-not-for-production
       USER_SETTINGS_ENCRYPTION_KEY: MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA=
+      MILVUS_TOKEN: root:firstrag-e2e-milvus-password
     volumes:
       - e2e_uploads:/app/uploads
       - ./scripts:/app/e2e-scripts:ro
@@ -57,4 +82,7 @@ services:
 volumes:
   e2e_postgres_data:
   e2e_chroma_data:
+  e2e_milvus_etcd_data:
+  e2e_milvus_minio_data:
+  e2e_milvus_data:
   e2e_uploads:

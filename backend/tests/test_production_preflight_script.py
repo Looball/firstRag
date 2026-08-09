@@ -258,6 +258,74 @@ class ProductionPreflightScriptTests(unittest.TestCase):
         )
         self.assertEqual(secure_errors, [])
 
+    def test_validate_milvus_settings_accepts_secure_compose_values(self) -> None:
+        """Milvus 内网 URI、强 token、MinIO secret 和 Strong 应通过。"""
+        errors = production_preflight.validate_milvus_settings(
+            {
+                "MILVUS_URI": "http://milvus-standalone:19530",
+                "MILVUS_TOKEN": "root:a-strong-runtime-password",
+                "MILVUS_DATABASE": "default",
+                "MILVUS_COLLECTION_PREFIX": "firstrag",
+                "MILVUS_TIMEOUT_SECONDS": "10",
+                "MILVUS_CONSISTENCY_LEVEL": "Strong",
+                "MILVUS_MINIO_ACCESS_KEY": "firstrag-production",
+                "MILVUS_MINIO_SECRET_KEY": "a-strong-minio-secret-key",
+            }
+        )
+
+        self.assertEqual(errors, [])
+
+    def test_validate_milvus_settings_rejects_unsafe_values_without_leak(self) -> None:
+        """Loopback、弱 token、非法命名和非 Strong 配置应失败且不泄露 token。"""
+        token = "root:short"
+        errors = production_preflight.validate_milvus_settings(
+            {
+                "MILVUS_URI": "http://localhost:19530/path",
+                "MILVUS_TOKEN": f"reader:{token.split(':', 1)[1]}$",
+                "MILVUS_DATABASE": "bad-name",
+                "MILVUS_COLLECTION_PREFIX": "Bad-Prefix",
+                "MILVUS_TIMEOUT_SECONDS": "0",
+                "MILVUS_CONSISTENCY_LEVEL": "Bounded",
+            }
+        )
+
+        joined_errors = "\n".join(errors)
+        self.assertIn("loopback", joined_errors)
+        self.assertIn("MILVUS_TOKEN", joined_errors)
+        self.assertIn("Strong", joined_errors)
+        self.assertNotIn(token.split(":", 1)[1], joined_errors)
+
+    def test_validate_milvus_settings_matches_compose_bootstrap_contract(self) -> None:
+        """内置 Milvus 只接受 root 和 entrypoint 安全字符集。"""
+        errors = production_preflight.validate_milvus_settings(
+            {
+                "MILVUS_URI": "http://milvus-standalone:19530",
+                "MILVUS_TOKEN": "reader:strong-password$",
+                "MILVUS_DATABASE": "default",
+                "MILVUS_COLLECTION_PREFIX": "firstrag",
+                "MILVUS_TIMEOUT_SECONDS": "10",
+                "MILVUS_CONSISTENCY_LEVEL": "Strong",
+                "MILVUS_MINIO_ACCESS_KEY": "firstrag-production",
+                "MILVUS_MINIO_SECRET_KEY": "a-strong-minio-secret-key",
+            }
+        )
+
+        joined_errors = "\n".join(errors)
+        self.assertIn("bootstrap password", joined_errors)
+        self.assertIn("root", joined_errors)
+        self.assertNotIn("strong-password$", joined_errors)
+
+    def test_validate_vector_store_settings_dispatches_current_provider(self) -> None:
+        """未知 provider 失败，默认 provider 继续走 Chroma。"""
+        self.assertEqual(
+            production_preflight.validate_vector_store_settings({}),
+            [],
+        )
+        errors = production_preflight.validate_vector_store_settings(
+            {"VECTOR_STORE_PROVIDER": "unknown"}
+        )
+        self.assertTrue(any("VECTOR_STORE_PROVIDER" in error for error in errors))
+
     def test_validate_compose_chroma_service_accepts_repository_topology(self) -> None:
         """仓库默认 Compose 应满足独立 Chroma server 拓扑。"""
         errors = production_preflight.validate_compose_chroma_service()
@@ -297,6 +365,47 @@ class ProductionPreflightScriptTests(unittest.TestCase):
         self.assertTrue(any("固定版本" in error for error in errors))
         self.assertTrue(any("/app/vector_db" in error for error in errors))
         self.assertTrue(any("service_healthy" in error for error in errors))
+
+    def test_validate_compose_milvus_services_accepts_repository_topology(self) -> None:
+        """仓库 Milvus profile 应满足固定版本、内网和认证门禁。"""
+        errors = production_preflight.validate_compose_milvus_services()
+
+        self.assertEqual(errors, [])
+
+    def test_validate_compose_milvus_services_rejects_public_unpinned_runtime(self) -> None:
+        """latest、host ports、缺失持久化与 probe 必须失败。"""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            compose_file = Path(tmpdir) / "docker-compose.yml"
+            compose_file.write_text(
+                "\n".join(
+                    [
+                        "services:",
+                        "  milvus-etcd:",
+                        "    image: quay.io/coreos/etcd:latest",
+                        "  milvus-minio:",
+                        "    image: minio/minio:latest",
+                        "  milvus-standalone:",
+                        "    image: milvusdb/milvus:latest",
+                        "    ports:",
+                        "      - \"19530:19530\"",
+                        "  backend:",
+                        "    image: backend",
+                        "  worker:",
+                        "    image: backend",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            errors = production_preflight.validate_compose_milvus_services(
+                compose_file
+            )
+
+        joined_errors = "\n".join(errors)
+        self.assertIn("milvusdb/milvus:v3.0.0", joined_errors)
+        self.assertIn("host ports", joined_errors)
+        self.assertIn("volume", joined_errors)
+        self.assertIn("milvus-health-probe", joined_errors)
 
     def test_parse_compose_ps_records_supports_object_and_json_lines(self) -> None:
         """runtime health 兼容 Compose 的单对象和逐行 JSON 输出。"""
@@ -345,6 +454,44 @@ class ProductionPreflightScriptTests(unittest.TestCase):
 
         self.assertTrue(healthy_check.success)
         self.assertFalse(unhealthy_check.success)
+
+    def test_run_milvus_runtime_health_check_requires_container_and_two_probes(self) -> None:
+        """Milvus runtime 必须 healthy，且 backend/worker probe 均成功。"""
+        completed = CompletedProcess(
+            args=[],
+            returncode=0,
+            stdout='{"Service":"milvus-standalone","State":"running","Health":"healthy"}\n',
+            stderr="",
+        )
+        probe = CompletedProcess(args=[], returncode=0, stdout="", stderr="")
+
+        with patch.object(
+            production_preflight.subprocess,
+            "run",
+            side_effect=[completed, probe, probe],
+        ) as run_mock:
+            result = production_preflight.run_milvus_runtime_health_check({})
+
+        self.assertTrue(result.success)
+        self.assertEqual(run_mock.call_count, 3)
+
+    def test_run_milvus_resource_check_warns_below_recommended_memory(self) -> None:
+        """满足最低但低于 16 GiB 时应成功并给出 warning。"""
+        docker_info = CompletedProcess(
+            args=[],
+            returncode=0,
+            stdout='{"NCPU":8,"MemTotal":16484397056}\n',
+            stderr="",
+        )
+        with patch.object(
+            production_preflight.subprocess,
+            "run",
+            return_value=docker_info,
+        ):
+            result = production_preflight.run_milvus_resource_check({})
+
+        self.assertTrue(result.success)
+        self.assertIn("warning", result.message)
 
     def test_validate_runtime_paths_checks_required_directories(self) -> None:
         """持久化目录和模型目录缺失时应失败。"""
