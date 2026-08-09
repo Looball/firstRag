@@ -25,4 +25,4 @@ Pillow==12.3.0
 pymupdf4llm==1.27.2.3
 
 # Security
-cryptography==49.0.0
+cryptography==50.0.0

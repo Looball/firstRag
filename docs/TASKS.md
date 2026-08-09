@@ -42,8 +42,8 @@
 
 - 2026-07-27 已增加无外部密钥的全栈浏览器门禁：隔离 Compose project 使用临时 PostgreSQL、Chroma、uploads volumes 和本地 OpenAI-compatible stub，真实覆盖注册、前端登录、TXT 上传、worker 向量化、SSE 回答与 sources 展示；测试结束自动清理专用容器和数据。
 - 2026-08-01 已刷新静态回归验收：后端最近一次全量 373 项测试通过；前端 Vitest 181 项通过、lint 0 error（保留 2 个 `<img>` 性能 warning），Next.js 16.2.12 production build 与 Playwright E2E 3/3 通过。
-- 2026-07-26 已刷新前端依赖安全审计：Next.js 与 eslint-config-next 升级到 16.2.12，PostCSS 固定到 8.5.23；当前 production npm audit policy 为 `0 findings / 0 exceptions`。
-- 2026-07-20 已完成后端与镜像依赖安全审计：PyJWT、python-dotenv 和 python-multipart 已升级到安全补丁版本；`pip-audit` 只剩 ChromaDB 1.5.9 的 no-fix finding，由精确到版本且 2026-08-20 到期的内网不可达例外管理；Trivy 对当前 backend/frontend 镜像的可修复 high/critical OS finding 均为 0。
+- 2026-08-09 已刷新前端依赖安全审计：Next.js 与 eslint-config-next 保持 16.2.12、PostCSS 固定到 8.5.23，transitive Nano ID 升级到 3.3.18；当前 production npm audit policy 为 `0 findings / 0 exceptions`。
+- 2026-08-09 已刷新后端依赖安全审计：`cryptography` 升级到 50.0.0；`pip-audit` 只剩 ChromaDB 1.5.9 的 no-fix finding，由精确到版本且 2026-08-20 到期的内网不可达例外管理；Trivy 对最近一次 backend/frontend 镜像的可修复 high/critical OS finding 均为 0。
 - 2026-07-27 已刷新 GitHub Actions supply chain 基线：13 个外部 Action 引用均固定到官方 release 的 40 位 commit SHA，CI 自动拒绝 tag/branch/短 SHA 和缺失版本注释；Dependabot 每周聚合提出 Action 更新 PR。
 - 2026-07-20 已完成 Chroma 跨进程索引可见性真实回归：Compose 使用独立 `chroma` service，worker 重建文件向量后 backend 无需重启即可召回 16 条 vector 结果，`vector_degraded=false`、`vector_errors=[]`，目标资料同时包含 `fulltext` 和 `vector` 来源。
 - 当前默认验证路径为 `docker compose up -d --build` 后检查 `docker compose ps` 与 Redis、PostgreSQL、Chroma、migration、backend、worker、frontend 关键日志；`scripts/acceptance_check.sh` 作为补充验收脚本，静态补充检查可运行 `scripts/acceptance_check.sh --skip-real-eval`。
@@ -274,6 +274,7 @@
 | `T-136` | `PLAN-20260809-01` | `P1` | `Todo` | 完成 Milvus 全链路回归、质量与性能验收 | — | — |
 | `T-137` | `PLAN-20260809-01` | `P1` | `Todo` | 更新 Milvus 架构、部署与教程文档 | — | — |
 | `T-138` | `PLAN-20260809-01` | `P2` | `Todo` | 完成 Milvus 切换观察并移除 Chroma 遗留 | — | — |
+| `T-139` | CI required checks | `P0` | `Doing` | 修复 Nano ID 与 cryptography 新增高危依赖漏洞 | — | — |
 
 ## 新计划接入流程
 
@@ -5559,6 +5560,30 @@ git diff --check
   - 生产代码、默认 Compose、CI 和当前文档只依赖 Milvus；历史证据不被改写。
   - clean clone 能完成 credential-free quickstart 和 full-stack E2E。
   - Chroma 数据归档/删除步骤为显式人工操作且默认不执行。
+
+## T-139 修复 Nano ID 与 cryptography 新增高危依赖漏洞
+
+- 来源计划：CI required checks
+- 优先级：`P0`
+- 状态：`Doing`
+- 背景：PR #51 的 2026-08-09 dependency audit 新发现两个已有修复版本的 high finding：Nano ID `GHSA-2V37-7H3G-55P8` 和 cryptography `GHSA-G6CJ-PR64-35W5`，导致 Frontend、Backend required checks 阻塞。
+- 目标：使用官方 advisory 给出的最小安全版本修复两个 finding，不新增漏洞例外、不引入 unrelated dependency update。
+- 范围：
+  - 将 transitive `nanoid` lockfile 从 3.3.16 更新到兼容当前 PostCSS 约束的 3.3.18。
+  - 将后端 `cryptography` 从 49.0.0 更新到 50.0.0。
+  - 刷新依赖审计、前后端回归、Docker Compose build 和 required checks。
+- 验收标准：
+  - production npm audit policy 为 `0 findings / 0 exceptions`。
+  - pip audit 不再报告 cryptography finding，且不为已有修复版本的漏洞新增例外。
+  - Backend、Frontend、Full-stack E2E、Container OS Security required checks 全部通过。
+- 建议验证命令：
+
+```bash
+python3 scripts/npm_audit_policy.py
+conda run -n firstrag python scripts/pip_audit_policy.py
+docker compose up -d --build
+git diff --check
+```
 
 ## 更新规则
 
