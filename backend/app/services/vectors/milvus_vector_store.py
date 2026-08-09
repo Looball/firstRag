@@ -589,6 +589,103 @@ class MilvusVectorStore:
                     pass
             raise self._provider_error("replace_file_vectors", exc) from exc
 
+    def import_file_vectors(
+        self,
+        *,
+        user_id: int,
+        file_id: UUID | str,
+        documents: list[Document],
+        ids: list[str],
+        embeddings: Sequence[Sequence[float]],
+        batch_size: int = WRITE_BATCH_SIZE,
+    ) -> None:
+        """使用既有 embeddings 幂等导入单文件，不调用外部 provider。"""
+        if len(documents) != len(ids):
+            raise ValueError("documents 与 ids 数量必须一致")
+        if batch_size < 1 or batch_size > 1_000:
+            raise ValueError("batch_size 必须在 1 到 1000 之间")
+        mutation_started = False
+        try:
+            normalized_embeddings, dimensions = self._normalize_embeddings(
+                embeddings,
+                len(documents),
+            )
+            if self._dimensions is not None and dimensions != self._dimensions:
+                raise ValueError("既有 embedding dimension 与设置不一致")
+            entities = self._build_entities(
+                user_id=user_id,
+                file_id=file_id,
+                documents=documents,
+                ids=ids,
+                embeddings=normalized_embeddings,
+            )
+            self._ensure_collection(dimensions)
+            mutation_started = True
+            self._client.delete(
+                collection_name=self.collection_name,
+                filter=_file_filter(user_id, file_id),
+                timeout=self._timeout_seconds,
+            )
+            for start in range(0, len(entities), batch_size):
+                self._client.upsert(
+                    collection_name=self.collection_name,
+                    data=entities[start:start + batch_size],
+                    timeout=self._timeout_seconds,
+                )
+            self._client.flush(
+                collection_name=self.collection_name,
+                timeout=self._timeout_seconds,
+            )
+            self._verify_write(
+                user_id=user_id,
+                file_id=file_id,
+                ids=ids,
+                embeddings=normalized_embeddings,
+            )
+        except Exception as exc:
+            if mutation_started:
+                try:
+                    self._client.delete(
+                        collection_name=self.collection_name,
+                        filter=_file_filter(user_id, file_id),
+                        timeout=self._timeout_seconds,
+                    )
+                    self._client.flush(
+                        collection_name=self.collection_name,
+                        timeout=self._timeout_seconds,
+                    )
+                except Exception:
+                    pass
+            raise self._provider_error("import_file_vectors", exc) from exc
+
+    def delete_imported_file_vectors(
+        self,
+        *,
+        user_id: int,
+        file_id: UUID | str,
+    ) -> None:
+        """只清理当前迁移目标 collection，不扫描其它 embedding identities。"""
+        try:
+            if not self._client.has_collection(
+                collection_name=self.collection_name,
+                timeout=self._timeout_seconds,
+            ):
+                return
+            self._client.delete(
+                collection_name=self.collection_name,
+                filter=_file_filter(user_id, file_id),
+                timeout=self._timeout_seconds,
+            )
+            self._client.flush(
+                collection_name=self.collection_name,
+                timeout=self._timeout_seconds,
+            )
+        except Exception as exc:
+            raise self._provider_error(
+                "delete_imported_file_vectors",
+                exc,
+            ) from exc
+
     def delete_file_vectors(
         self,
         *,

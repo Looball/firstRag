@@ -36,6 +36,7 @@ yarn-error.log*
 /tmp/pdfs/
 /tmp/full-stack-e2e/
 /tmp/tutorial-fixtures/
+/tmp/vector-migration/
 
 # Local application settings
 .env

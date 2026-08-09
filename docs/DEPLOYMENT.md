@@ -100,6 +100,8 @@ docker compose --profile milvus exec -T worker \
   python -m app.services.vectors.milvus_retrieval_probe cleanup
 ```
 
+T-135 的 current-data 导入必须在维护窗口内执行，不允许直接从日常 backend/worker 进程触发。完整的备份清单、dry-run、checkpoint/resume、失败清单、Top-K 对账和 rollback 命令见 [`MILVUS_MIGRATION_RUNBOOK.md`](MILVUS_MIGRATION_RUNBOOK.md)。T-136 完整验收前，`.env` 和 Compose 的默认 `VECTOR_STORE_PROVIDER` 继续保持 `chroma`。
+
 ### 数据库初始化与迁移
 
 迁移脚本默认读取仓库根目录 `.env` 中的 `DATABASE_URL`，不会打印 `.env` 内容或数据库密码。
