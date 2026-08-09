@@ -5,14 +5,10 @@ import re
 from typing import Any
 from uuid import UUID
 
-from langchain_chroma import Chroma
 from langchain_core.documents import Document
 
 from app.core.config import (
     CHROMA_COLLECTION_NAME,
-    CHROMA_HOST,
-    CHROMA_PORT,
-    CHROMA_SSL,
     PDF_OCR_HISTORY_MAX_RUNS_PER_PAGE,
     VECTOR_STORE_PATH,
 )
@@ -39,10 +35,16 @@ from app.services.documents.document_service import (
 from app.services.knowledge_profile_cache import (
     invalidate_file_knowledge_base_contexts,
 )
-from app.services.vectors.embedding_model import create_embedding_model_from_settings
-from app.services.vectors.embedding_settings_service import (
-    EmbeddingModelSettings,
-    get_effective_embedding_model_settings,
+from app.services.vectors.chroma_vector_store import (
+    ensure_vector_store_boundary,
+)
+from app.services.vectors.vector_store import (
+    VectorStoreBoundary,
+    build_chunk_ids,
+)
+from app.services.vectors.vector_store_factory import (
+    build_user_vector_collection_name,
+    get_vector_store,
 )
 
 
@@ -340,94 +342,12 @@ def _backfill_legacy_pdf_ocr_history(
     return merged_attempts
 
 
-def _normalize_collection_name_part(value: str) -> str:
-    """将 collection 名称片段规范化为 Chroma 可接受的安全字符。"""
-    normalized = re.sub(r"[^a-zA-Z0-9_-]+", "-", value.strip().lower())
-    normalized = normalized.strip("-_")
-    return normalized or "collection"
-
-
-def build_user_vector_collection_name(
-    base_collection_name: str,
-    user_id: int,
-    settings: EmbeddingModelSettings,
-) -> str:
-    """按用户和 embedding 配置生成隔离的 Chroma collection 名称。"""
-    identity = "|".join([
-        str(user_id),
-        settings.provider,
-        settings.model,
-        str(settings.dimensions or ""),
-    ])
-    digest = hashlib.sha1(identity.encode("utf-8")).hexdigest()[:12]
-    base = _normalize_collection_name_part(base_collection_name)[:24]
-    collection_name = f"{base}-u{user_id}-{digest}"
-    return collection_name[:63].strip("-_") or f"u{user_id}-{digest}"
-
-
-def get_vector_store(
-    user_id: int | None = None,
-    persist_directory: str | Path = VECTOR_STORE_PATH,
-    collection_name: str = CHROMA_COLLECTION_NAME,
-) -> Chroma:
-    """创建 Chroma 向量库连接；Compose 使用 HTTP，单进程本地可嵌入。"""
-    resolved_collection_name = collection_name
-    embedding_function = None
-    if user_id is not None:
-        settings = get_effective_embedding_model_settings(user_id)
-        resolved_collection_name = build_user_vector_collection_name(
-            collection_name,
-            user_id,
-            settings,
-        )
-        embedding_function = create_embedding_model_from_settings(settings)
-
-    common_options = {
-        "collection_name": resolved_collection_name,
-        "embedding_function": embedding_function,
-    }
-    if CHROMA_HOST:
-        return Chroma(
-            **common_options,
-            host=CHROMA_HOST,
-            port=CHROMA_PORT,
-            ssl=CHROMA_SSL,
-        )
-
-    return Chroma(
-        **common_options,
-        persist_directory=str(persist_directory),
-    )
-
-
-def build_chunk_ids(chunks: list[Document]) -> list[str]:
-    """为分块生成稳定向量 ID，避免同一文件重复入库。"""
-    chunk_ids = []
-    for chunk in chunks:
-        user_id = chunk.metadata["user_id"]
-        file_id = chunk.metadata["file_id"]
-        chunk_index = chunk.metadata["chunk_index"]
-        index_version = chunk.metadata["index_version"]
-        chunk_ids.append(f"{user_id}:{file_id}:v{index_version}:{chunk_index}")
-    return chunk_ids
-
-
-def build_file_vector_filter(user_id: int, file_id: UUID | str) -> dict:
-    """构造删除单个文件所有 Chroma 向量的 metadata 条件。"""
-    return {
-        "$and": [
-            {"user_id": str(user_id)},
-            {"file_id": str(file_id)},
-        ]
-    }
-
-
 def delete_file_vector_entries(
     user_id: int,
     file_id: UUID | str,
-    vectordb: Chroma | None = None,
+    vectordb: VectorStoreBoundary | Any | None = None,
 ) -> None:
-    """删除单个文件在 Chroma 中的全部索引版本。"""
+    """通过 provider-neutral boundary 删除单文件全部索引版本。"""
     if vectordb is not None:
         resolved_vectordb = vectordb
     else:
@@ -436,13 +356,14 @@ def delete_file_vector_entries(
         except ValueError:
             # 兼容迁移前的旧 collection 清理：删除操作不应要求用户先配置 Key。
             resolved_vectordb = get_vector_store()
-    resolved_vectordb.delete(where=build_file_vector_filter(user_id, file_id))
+    boundary = ensure_vector_store_boundary(resolved_vectordb)
+    boundary.delete_file_vectors(user_id=user_id, file_id=file_id)
 
 
 def compensate_failed_file_index(
     user_id: int,
     file_id: UUID | str,
-    vectordb: Chroma | None = None,
+    vectordb: VectorStoreBoundary | Any | None = None,
 ) -> None:
     """尽力清除一次失败索引留下的 Chroma 与全文检索分块。"""
     try:
@@ -470,7 +391,7 @@ def index_file_vectors(
     source_job_id: UUID | str | None = None,
     job_trigger: str = "file_index",
 ) -> dict[str, Any]:
-    """将单个知识文件解析、切分并写入 Chroma。"""
+    """将单个知识文件解析、切分并写入当前 vector store。"""
     file_path = Path(storage_path)
     if not file_path.exists():
         raise FileNotFoundError(f"文件不存在：{file_path}")
@@ -498,16 +419,17 @@ def index_file_vectors(
         chunk.metadata["index_version"] = index_version
 
     normalized_file_id = str(file_id)
-    vectordb: Chroma | None = None
+    vectordb: VectorStoreBoundary | None = None
     try:
         vectordb = get_vector_store(
             user_id=user_id,
             persist_directory=persist_directory,
             collection_name=collection_name,
         )
-        delete_file_vector_entries(user_id, file_id, vectordb)
         chunk_ids = build_chunk_ids(chunks)
-        vectordb.add_documents(
+        vectordb.replace_file_vectors(
+            user_id=user_id,
+            file_id=file_id,
             documents=chunks,
             ids=chunk_ids,
         )
@@ -533,11 +455,7 @@ def index_file_vectors(
         )
         raise
 
-    actual_collection_name = getattr(
-        getattr(vectordb, "_collection", None),
-        "name",
-        collection_name,
-    )
+    actual_collection_name = vectordb.ensure_collection()
     return {
         "file_id": normalized_file_id,
         "chunk_count": len(chunks),

@@ -1,4 +1,4 @@
-"""Chroma 向量粗召回。
+"""基于 provider-neutral boundary 的向量粗召回。
 
 向量检索使用 bi-encoder 思路：文档 chunk 在入库时提前编码成向量，
 用户查询时只编码 query，再通过向量相似度快速召回候选 chunk。
@@ -12,10 +12,11 @@
 from typing import Any
 
 from langchain_core.documents import Document
-from langchain_core.vectorstores.base import VectorStoreRetriever
+from langchain_core.runnables import Runnable, RunnableLambda
 
 from app.core.config import CHROMA_COLLECTION_NAME, VECTOR_STORE_PATH
-from app.services.vectors.vector_index_service import get_vector_store
+from app.services.vectors.embedding_model import create_embedding_model
+from app.services.vectors.vector_store_factory import get_vector_store
 
 
 def get_retriever(
@@ -25,18 +26,35 @@ def get_retriever(
     search_type: str = "similarity",
     search_kwargs: dict[str, Any] | None = None,
     **kwargs: Any,
-) -> VectorStoreRetriever:
-    """从本地 Chroma 向量数据库创建检索器。"""
-    vectordb = get_vector_store(
+) -> Runnable[str, list[Document]]:
+    """创建只依赖统一 vector store 契约的 Runnable 检索器。"""
+    if user_id is None:
+        raise ValueError("创建向量检索器需要 user_id")
+    if search_type != "similarity":
+        raise ValueError("provider-neutral 检索器仅支持 similarity")
+    if kwargs:
+        raise ValueError("provider-neutral 检索器不接受额外 provider 参数")
+
+    vector_store = get_vector_store(
         user_id=user_id,
         persist_directory=store_path,
         collection_name=collection_name,
     )
-    return vectordb.as_retriever(
-        search_type=search_type,
-        search_kwargs=search_kwargs or {"k": 5},
-        **kwargs,
-    )
+    embedding_model = create_embedding_model(user_id)
+    resolved_search_kwargs = search_kwargs or {"k": 5}
+    k = int(resolved_search_kwargs.get("k", 5))
+
+    def retrieve(query: str) -> list[Document]:
+        """生成 query embedding 并返回按 distance 排序的文档。"""
+        response = vector_store.search_vectors(
+            query_embedding=embedding_model.embed_query(query),
+            user_id=user_id,
+            file_ids=None,
+            k=k,
+        )
+        return [result.document for result in response.results]
+
+    return RunnableLambda(retrieve)
 
 
 def get_res_doc(inputs: dict[str, Any]) -> str:

@@ -22,7 +22,8 @@ FirstRAG/
   -> 创建 vector_index_jobs 队列任务
   -> vector_index_worker 消费任务
   -> document_service 解析/切分（图片知识文件先经用户 vision 模型转为可检索文本）
-  -> Chroma 写入向量 + PostgreSQL 写入全文检索 chunk
+  -> provider-neutral vector store boundary
+  -> Chroma adapter 写入向量 + PostgreSQL 写入全文检索 chunk
 
 用户提问
   -> Next.js API 代理
@@ -82,7 +83,8 @@ FirstRAG/
 - PostgreSQL OCR corrections：按用户、文件和页码保存人工修订、原始 OCR 文本与 revision；知识文件永久删除时级联清理。
 - PostgreSQL OCR history：按用户、文件、页码和 index version 保存有上限的 Tesseract 最佳原始识别记录、质量指标、文本 SHA、所选策略、候选摘要和来源 job；与 chunks 生命周期解耦，文件删除时级联清理。
 - Redis：提供基础设施健康检查、RAG 热点共享缓存、后端分布式限流和 vector worker 运行态，包括知识库画像、retrieval settings、query embedding、登录/业务 API sliding-window 计数、worker 心跳、单文件短租约和运行指标；不作为会话、消息或 vector index job 的持久存储。
-- Chroma：文档分块向量。Docker Compose 使用独立 `chroma` service，backend 与
+- Vector store boundary：业务层只使用 collection、单文件替换/删除、检索、审计、计数和健康检查契约；collection 命名、metadata filter、distance 规范化、provider 异常分类及 Chroma `_collection` 私有访问均收口在 adapter 内。
+- Chroma：当前 vector store adapter。Docker Compose 使用独立 `chroma` service，backend 与
   worker 通过 HTTP client 共享访问，数据持久化到根目录 `vector_db/chroma`；
   单进程 conda 调试未配置 `CHROMA_HOST` 时仍可使用 embedded 模式。
 - Tesseract：仅对无有效文本层或用户明确重识别的 PDF 页面执行本地 OCR；首次索引使用单次基线，主动重识别在候选/总超时上限内比较原图、灰度、二值化和页面旋转，同次调用产出正文和 TSV word confidence，原始页面和识别文本不发送到外部 OCR 服务。

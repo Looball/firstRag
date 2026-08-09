@@ -109,7 +109,8 @@ Query 会 trim、转小写并压缩连续空白。用户、provider、model 或 
 
 | 源码入口 | 作用 |
 | --- | --- |
-| [`backend/app/services/retrieval/hybrid_retriever.py`](../../backend/app/services/retrieval/hybrid_retriever.py) | 两路并行、query embedding cache、Chroma fallback 与总诊断。 |
+| [`backend/app/services/retrieval/hybrid_retriever.py`](../../backend/app/services/retrieval/hybrid_retriever.py) | 两路并行、query embedding cache、provider-neutral 结果与总诊断。 |
+| [`backend/app/services/vectors/chroma_vector_store.py`](../../backend/app/services/vectors/chroma_vector_store.py) | Chroma filter、重试、宽过滤、direct scan 与无过滤严格回退。 |
 | [`backend/app/services/vectors/embedding_model.py`](../../backend/app/services/vectors/embedding_model.py) | 用户 embedding 设置与 cache identity。 |
 | [`backend/app/services/retrieval/fulltext_retriever.py`](../../backend/app/services/retrieval/fulltext_retriever.py) | 把 PostgreSQL rows 转为 LangChain `Document`。 |
 | [`backend/app/repositories/knowledge_chunk_repository.py`](../../backend/app/repositories/knowledge_chunk_repository.py) | 用户/文件范围内的 full-text SQL 与 score。 |

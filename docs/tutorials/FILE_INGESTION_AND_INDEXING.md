@@ -499,6 +499,8 @@ Embedding 使用当前用户保存的 provider、model、dimensions 和加密凭
 | 边界 | 当前入口 | 观察重点 |
 | --- | --- | --- |
 | Index 编排 | [`backend/app/services/vectors/vector_index_service.py`](../../backend/app/services/vectors/vector_index_service.py) | stable IDs、用户 collection、双写与补偿清理。 |
+| Vector store 契约 | [`backend/app/services/vectors/vector_store.py`](../../backend/app/services/vectors/vector_store.py) | `Document`、stable ID、单文件替换/删除、检索、审计、计数和健康检查。 |
+| Chroma adapter | [`backend/app/services/vectors/chroma_vector_store.py`](../../backend/app/services/vectors/chroma_vector_store.py) | Chroma filter、私有 collection、distance 和异常分类。 |
 | Embedding 设置 | [`backend/app/services/vectors/embedding_settings_service.py`](../../backend/app/services/vectors/embedding_settings_service.py) | 当前用户 provider/model/dimensions。 |
 | Embedding client | [`backend/app/services/vectors/embedding_model.py`](../../backend/app/services/vectors/embedding_model.py) | OpenAI-compatible/Qwen/ZhipuAI 请求适配。 |
 | Chunk Repository | [`backend/app/repositories/knowledge_chunk_repository.py`](../../backend/app/repositories/knowledge_chunk_repository.py) | 同用户、同文件 replace 和 full-text 查询。 |
@@ -539,17 +541,18 @@ firstrag_tutorial_compose exec -T \
   -e FIRSTRAG_TUTORIAL_FILE_ID="${FIRSTRAG_TUTORIAL_FILE_ID}" \
   backend python -c '
 import os
-from app.services.vectors.vector_index_service import get_vector_store
+from app.services.vectors.vector_store_factory import get_vector_store
 
 user_id = int(os.environ["FIRSTRAG_TUTORIAL_USER_ID"])
 file_id = os.environ["FIRSTRAG_TUTORIAL_FILE_ID"]
-rows = get_vector_store(user_id=user_id).get(
-    where={"$and": [{"user_id": str(user_id)}, {"file_id": file_id}]},
-    include=["metadatas"],
+rows = get_vector_store(user_id=user_id).list_file_vectors(
+    user_id=user_id,
+    file_id=file_id,
 )
 safe_keys = ("user_id", "file_id", "file_name", "file_type", "chunk_index", "index_version")
-for chunk_id, metadata in zip(rows["ids"], rows["metadatas"], strict=True):
-    print(chunk_id, {key: metadata.get(key) for key in safe_keys})
+for row in rows:
+    metadata = row.document.metadata
+    print(row.id, {key: metadata.get(key) for key in safe_keys})
 '
 ```
 
