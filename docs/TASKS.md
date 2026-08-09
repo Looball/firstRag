@@ -266,7 +266,7 @@
 | `T-128` | `PLAN-20260802-01` | `P2` | `Done` | 增加练习、示例素材与文档回归门禁 | 2026-08-02 | `78c272b` |
 | `T-129` | `PLAN-20260802-01` | `P1` | `Done` | 明确教程仓库 License 与公开使用边界 | 2026-08-03 | `1d66209` |
 | `T-130` | `PLAN-20260809-01` | `P1` | `Done` | 冻结 Chroma 基线并确定 Milvus 迁移设计 | `2026-08-09` | `144db0e` |
-| `T-131` | `PLAN-20260809-01` | `P1` | `Todo` | 建立 provider-neutral vector store boundary | — | — |
+| `T-131` | `PLAN-20260809-01` | `P1` | `Done` | 建立 provider-neutral vector store boundary | `2026-08-09` | `73c54ae` |
 | `T-132` | `PLAN-20260809-01` | `P1` | `Todo` | 接入 Milvus Standalone、配置与健康门禁 | — | — |
 | `T-133` | `PLAN-20260809-01` | `P1` | `Todo` | 迁移向量写入、重建与删除生命周期 | — | — |
 | `T-134` | `PLAN-20260809-01` | `P1` | `Todo` | 迁移 Milvus 向量检索与 diagnostics | — | — |
@@ -5419,7 +5419,7 @@ git diff --check
 
 - 来源计划：`PLAN-20260809-01`
 - 优先级：`P1`
-- 状态：`Todo`
+- 状态：`Done`
 - 目标：用一个薄的 vector store boundary 收口业务真正需要的 collection、写入、删除、检索、审计和健康检查能力，消除 service 对 Chroma 私有 `_collection` 和 filter 语法的直接依赖。
 - 技术边界：
   - 只抽象真实消费者已有的能力，不建立通用 vector database framework。
@@ -5432,6 +5432,14 @@ git diff --check
 - 验收标准：
   - indexing、retrieval、文件生命周期和 cleanup 调用方不再引用 Chroma 私有对象。
   - Chroma adapter 下现有后端测试、credential-free E2E 和 indexing/RAG 基线不回退。
+- 完成记录：
+  - 新增 `vector_store.py` 最小契约，统一 `ensure_collection`、单文件 replace/delete、search、list/count audit 和 health check，并保留 `Document`、stable chunk ID 与 cosine distance 越小越近的应用层语义。
+  - 新增 `chroma_vector_store.py` 与 `vector_store_factory.py`；collection 命名、Chroma metadata filter、`_collection`、结果转换、单文件 ANN 回退和 provider 异常分类/脱敏均只存在于 adapter/factory。
+  - indexing、hybrid retrieval、文件生命周期、cleanup 和批量教学入口均改为调用 boundary；业务 service 静态扫描不再直接调用 Chroma 私有 collection、filter、ANN、add 或 delete API。
+  - 新增 provider-neutral 契约测试，覆盖 user/file 隔离、幂等替换、过滤删除、distance 排序、audit/health 和 provider error 分类；完整后端 385 项测试、编译、教程文档与 13 个 Actions pin 门禁通过。
+  - Docker Compose 完整构建和启动成功，migration 跳过 9 个已应用版本且无启动错误；credential-free full-stack E2E 通过登录、上传、异步向量化、SSE 回答和引用展示。
+  - 真实 Chroma 只读 boundary 探针返回 `provider=chroma`、current collection `langchain-u1-4aecfb85286f`、用户向量 119 条且 `healthy=true`，与 T-130 基线一致。
+- 相关提交：`73c54ae`
 
 ## T-132 接入 Milvus Standalone、配置与健康门禁
 
