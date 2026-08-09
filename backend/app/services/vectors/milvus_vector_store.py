@@ -15,6 +15,7 @@ from app.core.sensitive_data import sanitize_sensitive_text
 from app.services.vectors.vector_store import (
     VectorRecord,
     VectorSearchResponse,
+    VectorSearchResult,
     VectorStoreBoundary,
     VectorStoreHealth,
     VectorStoreProviderError,
@@ -48,6 +49,30 @@ def _file_filter(user_id: int, file_id: UUID | str) -> str:
 def _user_filter(user_id: int) -> str:
     """构造用户级过滤表达式。"""
     return f"user_id == {int(user_id)}"
+
+
+def _search_filter(
+    user_id: int,
+    file_ids: list[UUID | str] | None,
+) -> str:
+    """安全构造始终带 user_id 的单文件或多文件 scalar filter。"""
+    normalized_file_ids = sorted({str(value) for value in file_ids or []})
+    if not normalized_file_ids:
+        return _user_filter(user_id)
+    if any(
+        len(file_id) > FILE_ID_MAX_CHARACTERS
+        for file_id in normalized_file_ids
+    ):
+        raise ValueError("file_id 超过 Milvus VARCHAR(64) 限制")
+    if len(normalized_file_ids) == 1:
+        file_expression = f"file_id == {_string_literal(normalized_file_ids[0])}"
+    else:
+        literals = ", ".join(
+            _string_literal(file_id)
+            for file_id in normalized_file_ids
+        )
+        file_expression = f"file_id in [{literals}]"
+    return f"{_user_filter(user_id)} and {file_expression}"
 
 
 class MilvusVectorStore:
@@ -285,12 +310,14 @@ class MilvusVectorStore:
             resolved_dimensions = int(
                 (vector_field or {}).get("params", {}).get("dim") or 0
             )
-        self._validate_collection(resolved_dimensions)
-        self._dimensions = resolved_dimensions
+        # 新建 collection 的 indexes 可能先对创建 client 可见；先 load 会等待
+        # Milvus 完成 index readiness，避免其它 backend/worker client 过早校验。
         self._client.load_collection(
             collection_name=self.collection_name,
             timeout=self._timeout_seconds,
         )
+        self._validate_collection(resolved_dimensions)
+        self._dimensions = resolved_dimensions
         return self.collection_name
 
     def ensure_collection(self) -> str:
@@ -582,14 +609,105 @@ class MilvusVectorStore:
         file_ids: list[UUID | str] | None,
         k: int,
     ) -> VectorSearchResponse:
-        """Milvus 检索与 distance 归一化由 T-134 接入。"""
-        del query_embedding, user_id, file_ids, k
-        raise VectorStoreProviderError(
-            provider=self.provider,
-            operation="search_vectors",
-            category="invalid_request",
-            message="Milvus 检索将在 T-134 接入",
-        )
+        """执行 filtered ANN，并将 COSINE similarity 归一化为 distance。"""
+        if k < 1:
+            raise ValueError("k 必须大于 0")
+        try:
+            embeddings, dimensions = self._normalize_embeddings(
+                [query_embedding],
+                1,
+            )
+            if self._dimensions is not None and dimensions != self._dimensions:
+                raise ValueError("query embedding dimension 与设置不一致")
+            allowed_file_ids = {str(value) for value in file_ids or []}
+            expression = _search_filter(user_id, file_ids)
+            if not self._client.has_collection(
+                collection_name=self.collection_name,
+                timeout=self._timeout_seconds,
+            ):
+                return VectorSearchResponse(results=[])
+            self._ensure_collection(dimensions)
+            output_fields = [
+                "chunk_id",
+                "content",
+                "user_id",
+                "file_id",
+                "chunk_index",
+                "index_version",
+                "metadata",
+            ]
+            search_options = {
+                "collection_name": self.collection_name,
+                "data": embeddings,
+                "anns_field": "embedding",
+                "filter": expression,
+                "limit": k,
+                "output_fields": output_fields,
+                "search_params": {
+                    "metric_type": "COSINE",
+                    "params": {"ef": 64},
+                },
+                "consistency_level": self._consistency_level,
+                "timeout": self._timeout_seconds,
+            }
+            search_results = self._client.search(**search_options)
+            candidates = search_results[0] if search_results else []
+            if not candidates:
+                count_rows = self._client.query(
+                    collection_name=self.collection_name,
+                    filter=expression,
+                    output_fields=["count(*)"],
+                    consistency_level=self._consistency_level,
+                    timeout=self._timeout_seconds,
+                )
+                scoped_count = int(
+                    (count_rows[0] if count_rows else {}).get("count(*)") or 0,
+                )
+                if scoped_count:
+                    search_results = self._client.search(**search_options)
+                    candidates = search_results[0] if search_results else []
+                    if not candidates:
+                        raise RuntimeError(
+                            "Milvus 范围内存在向量但 ANN 未返回候选",
+                        )
+            results: list[VectorSearchResult] = []
+            for candidate in candidates:
+                entity = candidate.get("entity") or candidate
+                result_user_id = int(entity.get("user_id"))
+                result_file_id = str(entity.get("file_id") or "")
+                if result_user_id != int(user_id):
+                    raise RuntimeError("Milvus 返回了查询用户范围外的向量")
+                if allowed_file_ids and result_file_id not in allowed_file_ids:
+                    raise RuntimeError("Milvus 返回了查询文件范围外的向量")
+                similarity = float(candidate.get("distance"))
+                if not math.isfinite(similarity):
+                    raise RuntimeError("Milvus 返回了非有限 COSINE similarity")
+                if similarity < -1.000001 or similarity > 1.000001:
+                    raise RuntimeError("Milvus 返回了超出范围的 COSINE similarity")
+                normalized_similarity = min(1.0, max(-1.0, similarity))
+                metadata = dict(entity.get("metadata") or {})
+                metadata.update({
+                    "chunk_id": str(
+                        entity.get("chunk_id") or candidate.get("id") or ""
+                    ),
+                    "user_id": result_user_id,
+                    "file_id": result_file_id,
+                    "chunk_index": int(entity.get("chunk_index")),
+                    "index_version": int(entity.get("index_version")),
+                })
+                results.append(VectorSearchResult(
+                    document=Document(
+                        page_content=str(entity.get("content") or ""),
+                        metadata=metadata,
+                    ),
+                    distance=1.0 - normalized_similarity,
+                ))
+            results.sort(key=lambda result: result.distance)
+            return VectorSearchResponse(results=results[:k])
+        except VectorStoreProviderError:
+            raise
+        except Exception as exc:
+            raise self._provider_error("search_vectors", exc) from exc
 
     def list_file_vectors(
         self,

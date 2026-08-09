@@ -1,6 +1,6 @@
 # 后端结构说明
 
-后端位于 `backend/`，使用 FastAPI 提供 HTTP API，并通过 PostgreSQL 与 provider-neutral vector store boundary 完成 RAG 数据存储。默认 provider 仍为 Chroma；Milvus candidate 已接入写入、重建和删除生命周期，检索与默认切换由后续迁移任务完成。
+后端位于 `backend/`，使用 FastAPI 提供 HTTP API，并通过 PostgreSQL 与 provider-neutral vector store boundary 完成 RAG 数据存储。默认 provider 仍为 Chroma；Milvus candidate 已接入写入、重建、删除和 filtered ANN 检索，数据迁移与默认切换由后续任务完成。
 
 ## 目录结构
 

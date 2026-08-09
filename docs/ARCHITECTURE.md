@@ -23,7 +23,7 @@ FirstRAG/
   -> vector_index_worker 消费任务
   -> document_service 解析/切分（图片知识文件先经用户 vision 模型转为可检索文本）
   -> provider-neutral vector store boundary
-  -> Chroma adapter 写入向量 + PostgreSQL 写入全文检索 chunk
+  -> 当前 vector store adapter 写入向量 + PostgreSQL 写入全文检索 chunk
 
 用户提问
   -> Next.js API 代理

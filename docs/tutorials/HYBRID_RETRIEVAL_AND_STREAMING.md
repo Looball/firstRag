@@ -94,10 +94,10 @@ Hybrid retriever 使用两个线程并行执行粗召回；两路目标不同，
 
 | 通道 | 存储与排序依据 | 擅长 | 当前隔离边界 |
 | --- | --- | --- | --- |
-| Vector | Chroma；query embedding 与 chunk embedding 的距离 | 改写、近义表达和语义相似 | Chroma metadata 中的 `user_id` 与 `file_id`。 |
+| Vector | 当前 vector store；query embedding 与 chunk embedding 的距离 | 改写、近义表达和语义相似 | Chroma metadata filter 或 Milvus scalar filter 中的 `user_id` 与 `file_id`。 |
 | Full-text | PostgreSQL；`ts_rank_cd` 加词项/完整短语 `ILIKE` bonus | 精确词、编号、专名和短语 | SQL 中的 `user_id` 与可选 `knowledge_file_id`。 |
 
-Vector 通道先在应用中生成 query embedding，再把该向量交给 Chroma 查询；它不会让 Chroma 使用另一套隐式 embedding。结果记录 `vector_score`，当前值来自 Chroma distance，越小通常越接近。Full-text 结果记录 `fulltext_score`，越大越靠前。两者尺度完全不同，不能直接相加或横向比较。
+Vector 通道先在应用中生成 query embedding，再把该向量交给当前 vector store adapter；它不会让存储层使用另一套隐式 embedding。结果统一记录越小越近的 `vector_score`：Chroma 直接返回 distance，Milvus 的 COSINE similarity 由 adapter 转换为 `1 - similarity`。Full-text 结果记录 `fulltext_score`，越大越靠前。两者尺度完全不同，不能直接相加或横向比较。
 
 Query embedding 成功后会缓存 300 秒，读取顺序是进程内 memory、Redis、provider。缓存 key 由以下五部分组成：
 
@@ -110,7 +110,8 @@ Query 会 trim、转小写并压缩连续空白。用户、provider、model 或 
 | 源码入口 | 作用 |
 | --- | --- |
 | [`backend/app/services/retrieval/hybrid_retriever.py`](../../backend/app/services/retrieval/hybrid_retriever.py) | 两路并行、query embedding cache、provider-neutral 结果与总诊断。 |
-| [`backend/app/services/vectors/chroma_vector_store.py`](../../backend/app/services/vectors/chroma_vector_store.py) | Chroma filter、重试、宽过滤、direct scan 与无过滤严格回退。 |
+| [`backend/app/services/vectors/chroma_vector_store.py`](../../backend/app/services/vectors/chroma_vector_store.py) | Chroma 用户/文件 metadata filter、distance 转换与异常分类。 |
+| [`backend/app/services/vectors/milvus_vector_store.py`](../../backend/app/services/vectors/milvus_vector_store.py) | Milvus scalar filter、filtered ANN、COSINE distance 归一化与防御性范围校验。 |
 | [`backend/app/services/vectors/embedding_model.py`](../../backend/app/services/vectors/embedding_model.py) | 用户 embedding 设置与 cache identity。 |
 | [`backend/app/services/retrieval/fulltext_retriever.py`](../../backend/app/services/retrieval/fulltext_retriever.py) | 把 PostgreSQL rows 转为 LangChain `Document`。 |
 | [`backend/app/repositories/knowledge_chunk_repository.py`](../../backend/app/repositories/knowledge_chunk_repository.py) | 用户/文件范围内的 full-text SQL 与 score。 |
@@ -233,12 +234,12 @@ FastAPI response 使用 `text/event-stream; charset=utf-8`、`Cache-Control: no-
 | --- | --- | --- |
 | 正常完成 | `answer*` 后发送 `done` | `completed`；保存完整 answer、sources、retrieval。 |
 | Rerank 不可用 | 继续用 RRF top-k 生成回答 | 通常仍为 `completed`；diagnostics 标记 `rerank_degraded`。 |
-| Chroma/vector 失败 | vector 候选为空，full-text 可继续 | 若全文与 LLM 可用，仍可 `completed`；标记 `vector_degraded/vector_errors`。 |
+| Vector store 失败 | vector 候选为空，full-text 可继续 | 若全文与 LLM 可用，仍可 `completed`；标记 `vector_degraded/vector_errors`。 |
 | Full-text 失败 | full-text 候选为空，vector 可继续 | 若向量与 LLM 可用，仍可 `completed`；标记 `fulltext_degraded/fulltext_errors`。 |
 | LLM/provider 流式失败 | 发送 `error`，不发送伪 `done` | `failed`；保存已产生的 partial answer、sources、retrieval 和安全 `error_message`。 |
 | 客户端中断 | 连接关闭，不再发送后续事件 | generator 关闭时写 `cancelled`；保留 partial answer、sources、retrieval。 |
 
-Vector search 对 Chroma 的单文件复杂过滤还包含多级兼容 fallback：短暂重试、用户范围查询后 Python 严格文件过滤、限定候选的精确 cosine scan，以及无过滤查询后再次做用户/文件过滤。所有兜底都必须重新校验 metadata，不能用“降级”为理由越过用户隔离。整条 vector 通道仍失败时才退为空结果。
+Vector search 只执行一次严格范围查询：无论 provider，范围始终包含 `user_id`；指定知识库文件时再加入单文件等值或多文件集合过滤。adapter 会对返回 metadata 做防御性范围复核。过滤查询或 ANN 失败时不会改用更宽范围、无过滤扫描或读取全部 embedding；整条 vector 通道直接退为空候选并写入 provider-aware diagnostics，由 PostgreSQL full-text 通道继续兜底。
 
 `messages` 更新只允许命中 `role='assistant' AND status='generating'` 的占位记录，结束时一次写入 `content/status/error_message/sources/retrieval/completed_at`。会话历史默认只把 `completed` assistant message 重新送进模型，避免失败或取消的半截内容污染后续上下文；消息查询接口仍可向当前用户展示这些状态用于诊断。
 

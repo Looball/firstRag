@@ -89,6 +89,17 @@ docker compose --profile milvus exec -T backend \
   python -m app.services.vectors.milvus_write_lifecycle_probe cleanup
 ```
 
+T-134 另提供 filtered ANN probe，使用两个独立用户 collection 和三个文件验证用户隔离、单/多文件 scalar filter、COSINE distance 排序及 backend/worker 跨 client 可见性。它只创建两个 `firstrag_t134_probe_*` collection，结束后按 exact name 清理：
+
+```bash
+docker compose --profile milvus exec -T worker \
+  python -m app.services.vectors.milvus_retrieval_probe write
+docker compose --profile milvus exec -T backend \
+  python -m app.services.vectors.milvus_retrieval_probe search
+docker compose --profile milvus exec -T worker \
+  python -m app.services.vectors.milvus_retrieval_probe cleanup
+```
+
 ### 数据库初始化与迁移
 
 迁移脚本默认读取仓库根目录 `.env` 中的 `DATABASE_URL`，不会打印 `.env` 内容或数据库密码。

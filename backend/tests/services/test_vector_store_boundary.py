@@ -9,10 +9,19 @@ from app.services.vectors.vector_store import VectorStoreProviderError
 
 
 def matches_filter(metadata: dict[str, object], where: dict) -> bool:
-    """为测试 fake 执行 Chroma 等值与 $and filter。"""
+    """为测试 fake 执行 Chroma 等值、$in 与 $and filter。"""
     if "$and" in where:
         return all(matches_filter(metadata, item) for item in where["$and"])
-    return all(str(metadata.get(key)) == str(value) for key, value in where.items())
+    for key, value in where.items():
+        if isinstance(value, dict) and "$in" in value:
+            if str(metadata.get(key)) not in {
+                str(candidate)
+                for candidate in value["$in"]
+            }:
+                return False
+        elif str(metadata.get(key)) != str(value):
+            return False
+    return True
 
 
 class FakeCollection:

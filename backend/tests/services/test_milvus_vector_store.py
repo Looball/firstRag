@@ -1,6 +1,7 @@
 """Milvus 写入、重建、删除与补偿生命周期测试。"""
 
 import json
+import math
 import re
 import unittest
 from unittest.mock import patch
@@ -12,14 +13,30 @@ from app.services.vectors.vector_store import VectorStoreProviderError
 
 
 def _matches(expression: str, row: dict[str, object]) -> bool:
-    """执行测试所需的 user_id/file_id 等值表达式。"""
+    """执行测试所需的 user_id 与 file_id scalar expression。"""
     user_match = re.search(r"user_id == (\d+)", expression)
     file_match = re.search(r"file_id == (\"(?:[^\"\\]|\\.)*\")", expression)
+    file_in_match = re.search(r"file_id in (\[(?:.|\n)*\])", expression)
     if user_match and int(row["user_id"]) != int(user_match.group(1)):
         return False
     if file_match and str(row["file_id"]) != json.loads(file_match.group(1)):
         return False
+    if file_in_match and str(row["file_id"]) not in json.loads(
+        file_in_match.group(1),
+    ):
+        return False
     return True
+
+
+def _cosine_similarity(left: list[float], right: list[float]) -> float:
+    """计算 fake ANN 使用的 cosine similarity。"""
+    dot_product = sum(
+        left_value * right_value
+        for left_value, right_value in zip(left, right, strict=True)
+    )
+    left_norm = math.sqrt(sum(value * value for value in left))
+    right_norm = math.sqrt(sum(value * value for value in right))
+    return dot_product / (left_norm * right_norm)
 
 
 class FakeEmbeddings:
@@ -47,6 +64,9 @@ class FakeMilvusClient:
         self.collections: dict[str, dict[str, object]] = {}
         self.upsert_calls = 0
         self.fail_upsert_call: int | None = None
+        self.search_calls: list[dict[str, object]] = []
+        self.fail_search = False
+        self.empty_search_calls = 0
 
     def prepare_index_params(self):
         """复用真实 PyMilvus IndexParams 形状。"""
@@ -172,16 +192,49 @@ class FakeMilvusClient:
         collection_name: str,
         data: list[list[float]],
         filter: str,
-        **_: object,
+        limit: int = 10,
+        output_fields: list[str] | None = None,
+        search_params: dict | None = None,
+        **options: object,
     ) -> list[list[dict]]:
-        """让与 query embedding 相等的记录成为 top-1。"""
+        """按 COSINE similarity 返回过滤后的 entity projection。"""
+        self.search_calls.append({
+            "collection_name": collection_name,
+            "filter": filter,
+            "limit": limit,
+            "output_fields": output_fields,
+            "search_params": search_params,
+            **options,
+        })
+        if self.fail_search:
+            raise TimeoutError("connection timeout api_key=secret")
+        if self.empty_search_calls:
+            self.empty_search_calls -= 1
+            return [[]]
         rows = [
             row
             for row in self.collections[collection_name]["rows"].values()
             if _matches(filter, row)
         ]
-        rows.sort(key=lambda row: row["embedding"] != data[0])
-        return [[{"id": rows[0]["chunk_id"]}]] if rows else [[]]
+        ranked = sorted(
+            (
+                (_cosine_similarity(data[0], row["embedding"]), row)
+                for row in rows
+            ),
+            key=lambda item: item[0],
+            reverse=True,
+        )[:limit]
+        return [[
+            {
+                "id": row["chunk_id"],
+                "distance": similarity,
+                "entity": {
+                    field: row.get(field)
+                    for field in output_fields or []
+                },
+            }
+            for similarity, row in ranked
+        ]]
 
 
 def _document(
@@ -233,7 +286,168 @@ def _store(
 
 
 class MilvusVectorStoreTests(unittest.TestCase):
-    """验证 T-133 lifecycle 与 ADR schema 门禁。"""
+    """验证 Milvus lifecycle、filtered ANN 与 ADR schema 门禁。"""
+
+    def test_search_filters_scope_and_normalizes_cosine_distance(self) -> None:
+        """多文件搜索不得越权，并按归一化 distance 升序返回。"""
+        client = FakeMilvusClient()
+        store = _store(client)
+        documents = [
+            _document(file_id="file-a", chunk_index=0, content="closest"),
+            _document(file_id="file-a", chunk_index=1, content="second"),
+        ]
+        store.replace_file_vectors(
+            user_id=1,
+            file_id="file-a",
+            documents=documents,
+            ids=[_chunk_id(document) for document in documents],
+        )
+        file_b = _document(file_id="file-b", content="third")
+        store.replace_file_vectors(
+            user_id=1,
+            file_id="file-b",
+            documents=[file_b],
+            ids=[_chunk_id(file_b)],
+        )
+        rows = client.collections[store.collection_name]["rows"]
+        rows["1:file-a:v1:0"]["embedding"] = [1.0, 0.0]
+        rows["1:file-a:v1:1"]["embedding"] = [0.8, 0.6]
+        rows["1:file-b:v1:0"]["embedding"] = [0.0, 1.0]
+        rows["2:file-a:v1:0"] = {
+            **rows["1:file-a:v1:0"],
+            "chunk_id": "2:file-a:v1:0",
+            "user_id": 2,
+            "content": "other-user",
+        }
+
+        response = store.search_vectors(
+            query_embedding=[1.0, 0.0],
+            user_id=1,
+            file_ids=["file-b", "file-a", "file-a"],
+            k=5,
+        )
+
+        self.assertEqual(
+            [result.document.page_content for result in response.results],
+            ["closest", "second", "third"],
+        )
+        self.assertEqual(
+            [round(result.distance, 6) for result in response.results],
+            [0.0, 0.2, 1.0],
+        )
+        self.assertTrue(all(
+            result.document.metadata["user_id"] == 1
+            for result in response.results
+        ))
+        search_call = client.search_calls[-1]
+        self.assertEqual(
+            search_call["filter"],
+            'user_id == 1 and file_id in ["file-a", "file-b"]',
+        )
+        self.assertEqual(search_call["search_params"], {
+            "metric_type": "COSINE",
+            "params": {"ef": 64},
+        })
+        self.assertEqual(search_call["consistency_level"], "Strong")
+
+    def test_search_escapes_single_file_scalar_literal(self) -> None:
+        """特殊字符必须保持为 string literal，不能改变 filter 语义。"""
+        client = FakeMilvusClient()
+        store = _store(client)
+        document = _document(content="seed")
+        store.replace_file_vectors(
+            user_id=1,
+            file_id="file-a",
+            documents=[document],
+            ids=[_chunk_id(document)],
+        )
+
+        response = store.search_vectors(
+            query_embedding=[1.0, 0.0],
+            user_id=1,
+            file_ids=['file-\" or user_id == 2'],
+            k=5,
+        )
+
+        self.assertEqual(response.results, [])
+        self.assertEqual(
+            client.search_calls[-1]["filter"],
+            'user_id == 1 and file_id == "file-\\\" or user_id == 2"',
+        )
+
+    def test_search_missing_collection_is_empty_without_creating(self) -> None:
+        """未建立当前 identity collection 时搜索应安全返回空结果。"""
+        client = FakeMilvusClient()
+        store = _store(client)
+
+        response = store.search_vectors(
+            query_embedding=[1.0, 0.0],
+            user_id=1,
+            file_ids=None,
+            k=5,
+        )
+
+        self.assertEqual(response.results, [])
+        self.assertEqual(client.collections, {})
+
+    def test_search_failure_is_sanitized_and_classified(self) -> None:
+        """Milvus search 异常应转为脱敏的 provider-neutral 错误。"""
+        client = FakeMilvusClient()
+        store = _store(client)
+        document = _document()
+        store.replace_file_vectors(
+            user_id=1,
+            file_id="file-a",
+            documents=[document],
+            ids=[_chunk_id(document)],
+        )
+        client.fail_search = True
+
+        with self.assertRaises(VectorStoreProviderError) as raised:
+            store.search_vectors(
+                query_embedding=[1.0, 0.0],
+                user_id=1,
+                file_ids=["file-a"],
+                k=5,
+            )
+
+        self.assertEqual(raised.exception.provider, "milvus")
+        self.assertEqual(raised.exception.category, "unavailable")
+        self.assertNotIn("secret", str(raised.exception))
+
+    def test_search_retries_exact_scope_when_rows_exist_but_ann_is_empty(
+        self,
+    ) -> None:
+        """首次 ANN 暂不可见时只允许在相同 scalar scope 内重试。"""
+        client = FakeMilvusClient()
+        store = _store(client)
+        document = _document(content="visible-after-retry")
+        store.replace_file_vectors(
+            user_id=1,
+            file_id="file-a",
+            documents=[document],
+            ids=[_chunk_id(document)],
+        )
+        prior_search_calls = len(client.search_calls)
+        client.empty_search_calls = 1
+
+        response = store.search_vectors(
+            query_embedding=[1.0, 0.25],
+            user_id=1,
+            file_ids=["file-a"],
+            k=5,
+        )
+
+        retry_calls = client.search_calls[prior_search_calls:]
+        self.assertEqual(len(retry_calls), 2)
+        self.assertEqual(
+            {call["filter"] for call in retry_calls},
+            {'user_id == 1 and file_id == "file-a"'},
+        )
+        self.assertEqual(
+            response.results[0].document.page_content,
+            "visible-after-retry",
+        )
 
     def test_replace_creates_adr_schema_indexes_and_is_idempotent(self) -> None:
         """首次创建应固定 schema/index，重复重建只保留新版本。"""
