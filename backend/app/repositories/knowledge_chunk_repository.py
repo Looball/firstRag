@@ -149,6 +149,25 @@ def delete_file_chunks(
             return cursor.rowcount
 
 
+def list_file_chunk_identity_rows(
+    user_id: int,
+    file_id: UUID | str,
+) -> list[Row]:
+    """读取单个用户文件在 PostgreSQL 中的 chunk ID 与索引版本。"""
+    return fetch_all(
+        """
+        SELECT
+            chunk_id,
+            index_version
+        FROM knowledge_file_chunks
+        WHERE user_id = %s
+          AND knowledge_file_id = %s
+        ORDER BY chunk_id ASC;
+        """,
+        (user_id, str(file_id)),
+    )
+
+
 def get_user_knowledge_file_chunk_context(
     user_id: int,
     file_id: UUID | str,

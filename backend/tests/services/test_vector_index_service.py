@@ -10,11 +10,15 @@ from uuid import uuid4
 from langchain_core.documents import Document
 
 from app.services.vectors.vector_index_service import (
+    audit_postgres_chunk_identity,
     build_pdf_ocr_history_entries,
     get_vector_store,
     index_file_vectors,
     index_knowledge_file_record,
 )
+from app.services.vectors.embedding_settings_service import EmbeddingModelSettings
+from app.services.vectors import vector_store_factory
+from app.services.vectors.milvus_vector_store import MilvusVectorStore
 
 
 class VectorIndexServiceTests(unittest.TestCase):
@@ -102,6 +106,42 @@ class VectorIndexServiceTests(unittest.TestCase):
         self.assertTrue(entries[0]["ocr_candidate_results"][0]["selected"])
         self.assertNotIn("_ocr_history_text", document.metadata)
         self.assertNotIn("_ocr_history_candidates", document.metadata)
+
+    def test_postgres_chunk_audit_rejects_id_or_version_drift(self) -> None:
+        """双存储审计应拒绝 chunk ID 集合或 index_version 漂移。"""
+        file_id = uuid4()
+        with patch(
+            "app.services.vectors.vector_index_service.list_file_chunk_identity_rows",
+            return_value=[
+                {"chunk_id": "chunk-a", "index_version": 4},
+                {"chunk_id": "chunk-b", "index_version": 4},
+            ],
+        ):
+            audit_postgres_chunk_identity(
+                user_id=1,
+                file_id=file_id,
+                expected_chunk_ids=["chunk-b", "chunk-a"],
+                expected_index_version=4,
+            )
+
+        for rows in (
+            [{"chunk_id": "chunk-a", "index_version": 4}],
+            [
+                {"chunk_id": "chunk-a", "index_version": 3},
+                {"chunk_id": "chunk-b", "index_version": 3},
+            ],
+        ):
+            with self.subTest(rows=rows), patch(
+                "app.services.vectors.vector_index_service.list_file_chunk_identity_rows",
+                return_value=rows,
+            ):
+                with self.assertRaisesRegex(RuntimeError, "chunk 审计失败"):
+                    audit_postgres_chunk_identity(
+                        user_id=1,
+                        file_id=file_id,
+                        expected_chunk_ids=["chunk-a", "chunk-b"],
+                        expected_index_version=4,
+                    )
 
     def test_get_vector_store_uses_http_client_when_host_is_configured(
         self,
@@ -204,6 +244,108 @@ class VectorIndexServiceTests(unittest.TestCase):
             embedding_function=None,
             persist_directory="/tmp/firstrag-test-chroma",
         )
+
+    def test_factory_builds_milvus_adapter_and_safe_collection_name(self) -> None:
+        """Milvus provider 应使用 ADR collection identity 和用户 embedding。"""
+        settings = EmbeddingModelSettings(
+            provider="qwen",
+            model="text-embedding-v4",
+            api_key="test-only",
+            base_url=None,
+            dimensions=1024,
+            timeout_seconds=10,
+            max_retries=0,
+        )
+        client = object()
+        embedding_model = object()
+        with patch.object(
+            vector_store_factory,
+            "VECTOR_STORE_PROVIDER",
+            "milvus",
+        ), patch.object(
+            vector_store_factory,
+            "get_effective_embedding_model_settings",
+            return_value=settings,
+        ), patch.object(
+            vector_store_factory,
+            "create_embedding_model_from_settings",
+            return_value=embedding_model,
+        ), patch.object(
+            vector_store_factory,
+            "_create_milvus_client",
+            return_value=client,
+        ):
+            store = vector_store_factory.get_vector_store(user_id=42)
+
+        self.assertIsInstance(store, MilvusVectorStore)
+        self.assertRegex(
+            store.collection_name,
+            r"^firstrag_u42_[0-9a-f]{12}$",
+        )
+        self.assertNotIn("-", store.collection_name)
+        self.assertIs(store._client, client)
+        self.assertIs(store._embedding_model, embedding_model)
+
+    def test_cleanup_factory_does_not_require_embedding_settings(self) -> None:
+        """永久删除在用户凭据缺失时仍应能扫描 Milvus identities。"""
+        client = object()
+        with patch.object(
+            vector_store_factory,
+            "VECTOR_STORE_PROVIDER",
+            "milvus",
+        ), patch.object(
+            vector_store_factory,
+            "_create_milvus_client",
+            return_value=client,
+        ), patch.object(
+            vector_store_factory,
+            "get_effective_embedding_model_settings",
+        ) as settings:
+            store = vector_store_factory.get_vector_store_for_cleanup(7)
+
+        settings.assert_not_called()
+        self.assertIsInstance(store, MilvusVectorStore)
+        self.assertEqual(store._user_collection_prefix, "firstrag_u7_")
+
+    def test_failed_indexed_publish_runs_cross_store_compensation(self) -> None:
+        """最终状态发布失败时不得保留向量和 PostgreSQL chunks。"""
+        file_id = uuid4()
+        file_record = {
+            "id": file_id,
+            "original_name": "document.txt",
+            "storage_path": "/tmp/document.txt",
+        }
+        with patch(
+            "app.services.vectors.vector_index_service.file_index_lock",
+            return_value=nullcontext(),
+        ), patch(
+            "app.services.vectors.vector_index_service.update_knowledge_file_status",
+            side_effect=[1, 0],
+        ), patch(
+            "app.services.vectors.vector_index_service.invalidate_file_knowledge_base_contexts",
+        ), patch(
+            "app.services.vectors.vector_index_service.list_pdf_ocr_corrections",
+            return_value=[],
+        ), patch(
+            "app.services.vectors.vector_index_service.get_latest_pdf_ocr_attempts",
+            return_value={},
+        ), patch(
+            "app.services.vectors.vector_index_service._backfill_legacy_pdf_ocr_history",
+            return_value={},
+        ), patch(
+            "app.services.vectors.vector_index_service.index_file_vectors",
+            return_value={"chunk_count": 1},
+        ), patch(
+            "app.services.vectors.vector_index_service.compensate_failed_file_index",
+        ) as compensate:
+            with self.assertRaisesRegex(RuntimeError, "版本已过期"):
+                index_knowledge_file_record(
+                    file_record=file_record,
+                    user_id=1,
+                    index_version=3,
+                )
+
+        compensate.assert_called_once_with(1, file_id)
 
 
 if __name__ == "__main__":

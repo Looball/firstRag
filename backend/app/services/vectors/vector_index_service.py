@@ -16,6 +16,7 @@ from app.db.locks import file_index_lock
 from app.db.executor import Row
 from app.repositories.knowledge_chunk_repository import (
     delete_file_chunks,
+    list_file_chunk_identity_rows,
     list_user_pdf_ocr_page_history_rows,
     replace_file_chunks,
 )
@@ -43,8 +44,8 @@ from app.services.vectors.vector_store import (
     build_chunk_ids,
 )
 from app.services.vectors.vector_store_factory import (
-    build_user_vector_collection_name,
     get_vector_store,
+    get_vector_store_for_cleanup,
 )
 
 
@@ -355,7 +356,7 @@ def delete_file_vector_entries(
             resolved_vectordb = get_vector_store(user_id=user_id)
         except ValueError:
             # 兼容迁移前的旧 collection 清理：删除操作不应要求用户先配置 Key。
-            resolved_vectordb = get_vector_store()
+            resolved_vectordb = get_vector_store_for_cleanup(user_id)
     boundary = ensure_vector_store_boundary(resolved_vectordb)
     boundary.delete_file_vectors(user_id=user_id, file_id=file_id)
 
@@ -365,16 +366,38 @@ def compensate_failed_file_index(
     file_id: UUID | str,
     vectordb: VectorStoreBoundary | Any | None = None,
 ) -> None:
-    """尽力清除一次失败索引留下的 Chroma 与全文检索分块。"""
+    """尽力清除一次失败索引留下的向量与全文检索分块。"""
     try:
         delete_file_vector_entries(user_id, file_id, vectordb)
     except Exception:
-        logger.exception("补偿清理 Chroma 向量失败 file_id=%s", file_id)
+        logger.exception("补偿清理向量失败 file_id=%s", file_id)
 
     try:
         delete_file_chunks(user_id, file_id)
     except Exception:
         logger.exception("补偿清理全文分块失败 file_id=%s", file_id)
+
+
+def audit_postgres_chunk_identity(
+    *,
+    user_id: int,
+    file_id: UUID | str,
+    expected_chunk_ids: list[str],
+    expected_index_version: int,
+) -> None:
+    """确认 PostgreSQL chunk ID/version 与本次向量写入完全一致。"""
+    rows = list_file_chunk_identity_rows(user_id, file_id)
+    actual_ids = {str(row["chunk_id"]) for row in rows}
+    expected_ids = set(expected_chunk_ids)
+    actual_versions = {int(row["index_version"]) for row in rows}
+    if (
+        len(rows) != len(expected_chunk_ids)
+        or actual_ids != expected_ids
+        or actual_versions != {expected_index_version}
+    ):
+        raise RuntimeError(
+            "PostgreSQL chunk 审计失败：ID 或 index_version 与向量写入不一致",
+        )
 
 
 def index_file_vectors(
@@ -439,6 +462,12 @@ def index_file_vectors(
             index_version=index_version,
             chunks=chunks,
             chunk_ids=chunk_ids,
+        )
+        audit_postgres_chunk_identity(
+            user_id=user_id,
+            file_id=file_id,
+            expected_chunk_ids=chunk_ids,
+            expected_index_version=index_version,
         )
         record_pdf_ocr_history_entries(
             user_id=user_id,
@@ -545,6 +574,7 @@ def index_knowledge_file_record(
             "indexed",
             expected_index_version=index_version,
         ):
+            compensate_failed_file_index(user_id, file_id)
             raise RuntimeError("索引任务版本已过期")
         invalidate_file_knowledge_base_contexts(user_id, file_id)
     return {
