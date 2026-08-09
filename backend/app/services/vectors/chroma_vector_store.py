@@ -1,8 +1,5 @@
 """Chroma 对 provider-neutral vector store 契约的适配实现。"""
 
-from collections.abc import Sequence
-from math import sqrt
-from time import sleep
 from typing import Any
 from uuid import UUID
 
@@ -11,17 +8,12 @@ from langchain_core.documents import Document
 from app.core.sensitive_data import sanitize_sensitive_text
 from app.services.vectors.vector_store import (
     VectorRecord,
-    VectorSearchIssue,
     VectorSearchResponse,
     VectorSearchResult,
     VectorStoreBoundary,
     VectorStoreHealth,
     VectorStoreProviderError,
 )
-
-
-MAX_FILTER_FALLBACK_CANDIDATES = 1000
-FILE_FILTER_RETRY_DELAY_SECONDS = 0.2
 
 
 def _file_filter(user_id: int, file_id: UUID | str) -> dict[str, Any]:
@@ -34,18 +26,25 @@ def _file_filter(user_id: int, file_id: UUID | str) -> dict[str, Any]:
     }
 
 
-def _cosine_distance(left: Sequence[float], right: Sequence[float]) -> float:
-    """计算 cosine distance，保持现有 vector_score 越小越好的语义。"""
-    dot_product = 0.0
-    left_norm = 0.0
-    right_norm = 0.0
-    for left_value, right_value in zip(left, right, strict=False):
-        dot_product += float(left_value) * float(right_value)
-        left_norm += float(left_value) * float(left_value)
-        right_norm += float(right_value) * float(right_value)
-    if left_norm == 0.0 or right_norm == 0.0:
-        return 1.0
-    return 1.0 - (dot_product / (sqrt(left_norm) * sqrt(right_norm)))
+def _search_filter(
+    user_id: int,
+    file_ids: list[UUID | str] | None,
+) -> dict[str, Any]:
+    """构造始终包含 user_id 的 Chroma 检索范围。"""
+    normalized_file_ids = sorted({str(value) for value in file_ids or []})
+    if not normalized_file_ids:
+        return {"user_id": str(user_id)}
+    file_filter: dict[str, Any]
+    if len(normalized_file_ids) == 1:
+        file_filter = {"file_id": normalized_file_ids[0]}
+    else:
+        file_filter = {"file_id": {"$in": normalized_file_ids}}
+    return {
+        "$and": [
+            {"user_id": str(user_id)},
+            file_filter,
+        ],
+    }
 
 
 class ChromaVectorStore:
@@ -165,122 +164,24 @@ class ChromaVectorStore:
         ]
 
     @staticmethod
-    def _filter_results(
+    def _validate_results_scope(
         results: list[VectorSearchResult],
         *,
         user_id: int,
-        file_id: UUID | str,
-    ) -> list[VectorSearchResult]:
-        """对宽过滤或无过滤候选执行严格应用层隔离。"""
+        file_ids: list[UUID | str] | None,
+    ) -> None:
+        """对 provider 返回结果执行防御性用户与文件隔离校验。"""
         normalized_user_id = str(user_id)
-        normalized_file_id = str(file_id)
-        return [
-            result
-            for result in results
-            if str(result.document.metadata.get("user_id") or "")
-            == normalized_user_id
-            and str(result.document.metadata.get("file_id") or "")
-            == normalized_file_id
-        ]
-
-    def _direct_file_scan(
-        self,
-        *,
-        query_embedding: list[float],
-        user_id: int,
-        file_id: UUID | str,
-        k: int,
-    ) -> list[VectorSearchResult]:
-        """ANN 异常时读取持久化 embedding 做精确 cosine 排序。"""
-        records = self.list_file_vectors(
-            user_id=user_id,
-            file_id=file_id,
-            include_embeddings=True,
-        )
-        results = [
-            VectorSearchResult(
-                document=record.document,
-                distance=_cosine_distance(query_embedding, record.embedding),
-            )
-            for record in records
-            if record.embedding is not None
-        ]
-        results.sort(key=lambda item: item.distance)
-        return results[:k]
-
-    def _search_file_with_fallbacks(
-        self,
-        *,
-        query_embedding: list[float],
-        user_id: int,
-        file_id: UUID | str,
-        k: int,
-    ) -> tuple[list[VectorSearchResult], VectorSearchIssue | None]:
-        """封装 Chroma 单文件 ANN 的重试、宽过滤与 direct scan 回退。"""
-        original_error: Exception | None = None
-        try:
-            return self._raw_search(
-                query_embedding=query_embedding,
-                k=k,
-                metadata_filter=_file_filter(user_id, file_id),
-            ), None
-        except Exception as exc:
-            original_error = exc
-            sleep(FILE_FILTER_RETRY_DELAY_SECONDS)
-
-        fallback_k = min(max(k * 5, k), MAX_FILTER_FALLBACK_CANDIDATES)
-        attempts = (
-            lambda: self._raw_search(
-                query_embedding=query_embedding,
-                k=k,
-                metadata_filter=_file_filter(user_id, file_id),
-            ),
-            lambda: self._filter_results(
-                self._raw_search(
-                    query_embedding=query_embedding,
-                    k=fallback_k,
-                    metadata_filter={"user_id": str(user_id)},
-                ),
-                user_id=user_id,
-                file_id=file_id,
-            )[:k],
-            lambda: self._direct_file_scan(
-                query_embedding=query_embedding,
-                user_id=user_id,
-                file_id=file_id,
-                k=k,
-            ),
-            lambda: self._filter_results(
-                self._raw_search(
-                    query_embedding=query_embedding,
-                    k=min(
-                        max(k * 10, k),
-                        MAX_FILTER_FALLBACK_CANDIDATES,
-                    ),
-                    metadata_filter=None,
-                ),
-                user_id=user_id,
-                file_id=file_id,
-            )[:k],
-        )
-        for attempt in attempts:
-            try:
-                results = attempt()
-            except Exception:
-                continue
-            if results:
-                return results, None
-
-        provider_error = self._provider_error(
-            "search_vectors",
-            original_error or RuntimeError("unknown vector search error"),
-        )
-        return [], VectorSearchIssue(
-            provider=self.provider,
-            category=provider_error.category,
-            message=str(provider_error),
-            file_id=str(file_id),
-        )
+        allowed_file_ids = {str(value) for value in file_ids or []}
+        for result in results:
+            metadata = result.document.metadata
+            if str(metadata.get("user_id") or "") != normalized_user_id:
+                raise RuntimeError("Chroma 返回了查询用户范围外的向量")
+            if (
+                allowed_file_ids
+                and str(metadata.get("file_id") or "") not in allowed_file_ids
+            ):
+                raise RuntimeError("Chroma 返回了查询文件范围外的向量")
 
     def search_vectors(
         self,
@@ -293,32 +194,21 @@ class ChromaVectorStore:
         """执行用户隔离检索，并保持 distance 升序语义。"""
         if k < 1:
             raise ValueError("k 必须大于 0")
-        if not file_ids:
-            try:
-                results = self._raw_search(
-                    query_embedding=query_embedding,
-                    k=k,
-                    metadata_filter={"user_id": str(user_id)},
-                )
-            except Exception as exc:
-                raise self._provider_error("search_vectors", exc) from exc
-            results.sort(key=lambda item: item.distance)
-            return VectorSearchResponse(results=results[:k])
-
-        results: list[VectorSearchResult] = []
-        issues: list[VectorSearchIssue] = []
-        for file_id in sorted({str(value) for value in file_ids}):
-            file_results, issue = self._search_file_with_fallbacks(
+        try:
+            results = self._raw_search(
                 query_embedding=query_embedding,
-                user_id=user_id,
-                file_id=file_id,
                 k=k,
+                metadata_filter=_search_filter(user_id, file_ids),
             )
-            results.extend(file_results)
-            if issue is not None:
-                issues.append(issue)
+            self._validate_results_scope(
+                results,
+                user_id=user_id,
+                file_ids=file_ids,
+            )
+        except Exception as exc:
+            raise self._provider_error("search_vectors", exc) from exc
         results.sort(key=lambda item: item.distance)
-        return VectorSearchResponse(results=results[:k], issues=issues)
+        return VectorSearchResponse(results=results[:k])
 
     def list_file_vectors(
         self,

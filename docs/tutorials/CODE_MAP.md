@@ -37,7 +37,7 @@ Next.js proxy
 | Worker | [`vector_index_worker.py`](../../backend/app/workers/vector_index_worker.py) | 领取任务、租约/心跳、单文件锁和最终状态。 |
 | 文档解析 | [`document_service.py`](../../backend/app/services/documents/document_service.py) | PDF、DOCX、Markdown、TXT、图片解析与 chunk。 |
 | 向量化 | [`embedding_model.py`](../../backend/app/services/vectors/embedding_model.py)、[`vector_index_service.py`](../../backend/app/services/vectors/vector_index_service.py) | 用户 embedding 配置、向量生成、vector store 与 chunk 写入。 |
-| Vector store boundary | [`vector_store.py`](../../backend/app/services/vectors/vector_store.py)、[`vector_store_factory.py`](../../backend/app/services/vectors/vector_store_factory.py)、[`chroma_vector_store.py`](../../backend/app/services/vectors/chroma_vector_store.py) | 统一 collection、写入、删除、检索、审计、计数和健康契约；当前由 Chroma adapter 实现。 |
+| Vector store boundary | [`vector_store.py`](../../backend/app/services/vectors/vector_store.py)、[`vector_store_factory.py`](../../backend/app/services/vectors/vector_store_factory.py)、[`chroma_vector_store.py`](../../backend/app/services/vectors/chroma_vector_store.py)、[`milvus_vector_store.py`](../../backend/app/services/vectors/milvus_vector_store.py) | 统一 collection、写入、删除、检索、审计、计数和健康契约；默认 Chroma 与迁移候选 Milvus 使用同一应用层契约。 |
 | 锁与 SQL | [`backend/app/db/locks.py`](../../backend/app/db/locks.py)、[`000_initial_schema.sql`](../../backend/app/db/sql/000_initial_schema.sql) | PostgreSQL advisory lock 与空库 schema 基线。 |
 
 继续阅读：[文件入库与异步索引教程](FILE_INGESTION_AND_INDEXING.md)和[RAG 核心流程：文件入库与向量化任务](../RAG_WORKFLOW.md#文件入库)。
@@ -61,7 +61,7 @@ POST /chat
 | Service 门面 | [`backend/app/services/rag_service.py`](../../backend/app/services/rag_service.py) | 保留兼容导入，委托 `services/rag/`。 |
 | 检索决策 | [`retrieval_decision.py`](../../backend/app/services/rag/retrieval_decision.py) | `auto/always/never`、Router 结果和确定性覆盖。 |
 | 检索流水线 | [`retrieval_pipeline.py`](../../backend/app/services/rag/retrieval_pipeline.py) | 设置、知识库画像、文件范围、hybrid retrieval 和 diagnostics。 |
-| Hybrid / Vector | [`hybrid_retriever.py`](../../backend/app/services/retrieval/hybrid_retriever.py)、[`chroma_vector_store.py`](../../backend/app/services/vectors/chroma_vector_store.py) | 两路并行、query embedding cache、统一结果/诊断与 Chroma adapter 内部召回回退。 |
+| Hybrid / Vector | [`hybrid_retriever.py`](../../backend/app/services/retrieval/hybrid_retriever.py)、[`chroma_vector_store.py`](../../backend/app/services/vectors/chroma_vector_store.py)、[`milvus_vector_store.py`](../../backend/app/services/vectors/milvus_vector_store.py) | 两路并行、query embedding cache、严格用户/文件过滤、统一 distance 结果与 provider-aware diagnostics。 |
 | Full-text | [`fulltext_retriever.py`](../../backend/app/services/retrieval/fulltext_retriever.py) | PostgreSQL 全文召回。 |
 | Fusion / rerank | [`rrf.py`](../../backend/app/services/retrieval/rrf.py)、[`reranker.py`](../../backend/app/services/retrieval/reranker.py) | RRF 融合与可选本地/远程精排。 |
 | Chain | [`chain_builder.py`](../../backend/app/services/rag/chain_builder.py) | LCEL Router 与问答链构建。 |

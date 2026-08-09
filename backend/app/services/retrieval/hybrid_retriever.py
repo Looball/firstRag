@@ -291,7 +291,7 @@ def get_vector_documents(
     """通过 provider-neutral boundary 按用户和文件范围做向量检索。"""
     embedding_started_at = perf_counter()
     try:
-        # 外部预计算 embedding，绕过 ChromaDB query_texts 路径
+        # 外部预计算 embedding，避免 vector store 再次调用 provider。
         query_embedding = get_query_embedding(query, user_id)
     except Exception as exc:
         log_exception_event(
@@ -312,6 +312,7 @@ def get_vector_documents(
     vector_store = ensure_vector_store_boundary(
         get_vector_store(user_id=user_id),
     )
+    provider_name = vector_store.provider.capitalize()
     vector_started_at = perf_counter()
     try:
         response = vector_store.search_vectors(
@@ -329,9 +330,9 @@ def get_vector_documents(
             user_id=user_id,
             file_count=len(file_ids or []),
             stage="vector",
-            message="Chroma 向量检索失败，降级为空向量结果",
+            message=f"{provider_name} 向量检索失败，降级为空向量结果",
         )
-        add_vector_diagnostic_error("Chroma 向量检索失败")
+        add_vector_diagnostic_error(f"{provider_name} 向量检索失败")
         record_retrieval_timing("vector", vector_started_at)
         return []
     for issue in response.issues:

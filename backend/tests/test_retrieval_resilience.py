@@ -26,7 +26,7 @@ from app.services.retrieval.rrf import reciprocal_rank_fusion
 
 
 class FakeVectorStore:
-    """模拟 Chroma 向量库，按文件过滤制造一次失败一次成功。"""
+    """模拟按单文件范围返回候选的 Chroma 向量库。"""
 
     def similarity_search_by_vector_with_relevance_scores(
         self,
@@ -34,11 +34,8 @@ class FakeVectorStore:
         k: int,
         filter: dict,
     ) -> list[tuple[Document, float]]:
-        """根据 file_id 决定抛错或返回测试文档。"""
+        """返回符合单文件 filter 的测试文档。"""
         file_filter = filter["$and"][1]["file_id"]
-        if file_filter == "bad-file":
-            raise RuntimeError("Error finding id")
-
         return [
             (
                 Document(
@@ -54,178 +51,14 @@ class FakeVectorStore:
         ]
 
 
-class FakeFallbackVectorStore:
-    """模拟单文件过滤失败但用户级过滤可命中的 Chroma 向量库。"""
+class FakeFailingMilvusBoundary:
+    """模拟通过 boundary 暴露搜索故障的 Milvus adapter。"""
 
-    def similarity_search_by_vector_with_relevance_scores(
-        self,
-        embedding: list[float],
-        k: int,
-        filter: dict,
-    ) -> list[tuple[Document, float]]:
-        """单文件过滤抛错，用户级过滤返回待后过滤候选。"""
-        if "$and" in filter:
-            raise RuntimeError("Error finding id")
+    provider = "milvus"
 
-        return [
-            (
-                Document(
-                    page_content="目标文件向量候选",
-                    metadata={
-                        "user_id": "6",
-                        "file_id": "target-file",
-                        "chunk_index": 1,
-                    },
-                ),
-                0.1,
-            ),
-            (
-                Document(
-                    page_content="其它文件向量候选",
-                    metadata={
-                        "user_id": "6",
-                        "file_id": "other-file",
-                        "chunk_index": 1,
-                    },
-                ),
-                0.2,
-            ),
-        ]
-
-
-class FakeUnfilteredFallbackVectorStore:
-    """模拟所有 metadata filter 都失败但无过滤查询可命中的 Chroma 向量库。"""
-
-    def similarity_search_by_vector_with_relevance_scores(
-        self,
-        embedding: list[float],
-        k: int,
-        filter: dict | None = None,
-    ) -> list[tuple[Document, float]]:
-        """metadata filter 抛错，无过滤查询返回混合候选。"""
-        if filter is not None:
-            raise RuntimeError("Error finding id")
-
-        return [
-            (
-                Document(
-                    page_content="目标文件向量候选",
-                    metadata={
-                        "user_id": "6",
-                        "file_id": "target-file",
-                        "chunk_index": 1,
-                    },
-                ),
-                0.1,
-            ),
-            (
-                Document(
-                    page_content="其它用户候选",
-                    metadata={
-                        "user_id": "7",
-                        "file_id": "target-file",
-                        "chunk_index": 1,
-                    },
-                ),
-                0.2,
-            ),
-            (
-                Document(
-                    page_content="当前用户其它文件候选",
-                    metadata={
-                        "user_id": "6",
-                        "file_id": "other-file",
-                        "chunk_index": 1,
-                    },
-                ),
-                0.3,
-            ),
-        ]
-
-
-class FakeDirectScanCollection:
-    """模拟可从持久化 metadata 与 embedding 读取目标文件的 collection。"""
-
-    def get(
-        self,
-        *,
-        where: dict,
-        include: list[str],
-    ) -> dict[str, object]:
-        """返回无需 HNSW ANN 的单文件持久化数据。"""
-        self.where = where
-        self.include = include
-        return {
-            "documents": ["目标文件精确扫描候选", "同文件较低分候选"],
-            "metadatas": [
-                {"user_id": "6", "file_id": "target-file", "chunk_index": 1},
-                {"user_id": "6", "file_id": "target-file", "chunk_index": 2},
-            ],
-            "embeddings": AmbiguousEmbeddingRows(
-                [[0.1, 0.2], [-0.1, -0.2]],
-            ),
-        }
-
-
-class AmbiguousEmbeddingRows(list[list[float]]):
-    """模拟 NumPy array：禁止把多元素 embedding 容器隐式转为 bool。"""
-
-    def __bool__(self) -> bool:
-        """复现 NumPy 多元素数组的 truth-value 异常。"""
-        raise ValueError("The truth value of an array is ambiguous")
-
-
-class FakeDirectScanVectorStore:
-    """模拟 ANN 查询失败但 collection.get 仍可读取持久化 embedding。"""
-
-    def __init__(self) -> None:
-        """创建可供 direct scan 使用的底层 collection。"""
-        self._collection = FakeDirectScanCollection()
-
-    def similarity_search_by_vector_with_relevance_scores(
-        self,
-        embedding: list[float],
-        k: int,
-        filter: dict | None = None,
-    ) -> list[tuple[Document, float]]:
-        """模拟跨进程 HNSW 尚不可见导致的 ANN 查询失败。"""
-        raise RuntimeError("Error finding id")
-
-
-class FakeTransientVectorStore:
-    """模拟 Chroma 刚写入后首次单文件过滤短暂失败。"""
-
-    def __init__(self) -> None:
-        """记录单文件过滤调用次数。"""
-        self.file_filter_calls = 0
-
-    def similarity_search_by_vector_with_relevance_scores(
-        self,
-        embedding: list[float],
-        k: int,
-        filter: dict,
-    ) -> list[tuple[Document, float]]:
-        """首次单文件过滤抛错，第二次返回目标文件候选。"""
-        if "$and" in filter:
-            self.file_filter_calls += 1
-            if self.file_filter_calls == 1:
-                raise RuntimeError("Error finding id")
-            file_filter = filter["$and"][1]["file_id"]
-            return [
-                (
-                    Document(
-                        page_content="目标文件向量候选",
-                        metadata={
-                            "user_id": "6",
-                            "file_id": file_filter,
-                            "chunk_index": 1,
-                        },
-                    ),
-                    0.1,
-                ),
-            ]
-
-        return []
+    def search_vectors(self, **_: object) -> None:
+        """模拟 Milvus 服务不可用。"""
+        raise TimeoutError("Milvus unavailable")
 
 
 class FakeReranker:
@@ -265,166 +98,52 @@ class RetrievalResilienceTests(unittest.TestCase):
         self.assertIn("任务", terms)
         self.assertNotIn("是什么", terms)
 
-    def test_vector_search_skips_failed_file(self) -> None:
-        """单个 Chroma 文件过滤查询失败时，应继续返回其它文件结果。"""
-        with unittest.mock.patch(
-            "app.services.retrieval.hybrid_retriever.create_embedding_model",
-        ) as embedding_cls, unittest.mock.patch(
-            "app.services.retrieval.hybrid_retriever.get_embedding_cache_identity",
-            return_value=("6", "zhipuai", "embedding-3", ""),
-        ), unittest.mock.patch(
-            "app.services.retrieval.hybrid_retriever.get_vector_store",
-            return_value=FakeVectorStore(),
-        ):
-            embedding_cls.return_value.embed_query.return_value = [0.1, 0.2]
-
-            docs = get_vector_documents(
-                query="诉讼法的任务是什么",
-                user_id=6,
-                file_ids=["bad-file", "good-file"],
-                k=5,
-            )
-
-        self.assertEqual(len(docs), 1)
-        self.assertEqual(docs[0].metadata["file_id"], "good-file")
-        self.assertEqual(docs[0].metadata["retrieval_source"], "vector")
-
-    def test_vector_search_retries_user_scope_after_file_filter_failure(
-        self,
-    ) -> None:
-        """单文件过滤触发 Chroma HNSW 错误时，应退回用户级检索后过滤。"""
-        with unittest.mock.patch(
-            "app.services.retrieval.hybrid_retriever.create_embedding_model",
-        ) as embedding_cls, unittest.mock.patch(
-            "app.services.retrieval.hybrid_retriever.get_embedding_cache_identity",
-            return_value=("6", "zhipuai", "embedding-3", ""),
-        ), unittest.mock.patch(
-            "app.services.retrieval.hybrid_retriever.get_vector_store",
-            return_value=FakeFallbackVectorStore(),
-        ):
-            embedding_cls.return_value.embed_query.return_value = [0.1, 0.2]
-
-            docs = get_vector_documents(
-                query="索引验收标识是什么",
-                user_id=6,
-                file_ids=["target-file"],
-                k=5,
-            )
-
-        self.assertEqual(len(docs), 1)
-        self.assertEqual(docs[0].metadata["file_id"], "target-file")
-        self.assertEqual(docs[0].metadata["retrieval_source"], "vector")
-
-    def test_vector_search_retries_transient_file_filter_failure(self) -> None:
-        """单文件过滤瞬时失败后重试成功时不应标记向量降级。"""
-        vector_store = FakeTransientVectorStore()
-        reset_retrieval_diagnostics()
-
-        with unittest.mock.patch(
-            "app.services.retrieval.hybrid_retriever.create_embedding_model",
-        ) as embedding_cls, unittest.mock.patch(
-            "app.services.retrieval.hybrid_retriever.get_embedding_cache_identity",
-            return_value=("6", "zhipuai", "embedding-3", ""),
-        ), unittest.mock.patch(
-            "app.services.retrieval.hybrid_retriever.get_vector_store",
-            return_value=vector_store,
-        ), unittest.mock.patch(
-            "app.services.vectors.chroma_vector_store.sleep",
-        ):
-            embedding_cls.return_value.embed_query.return_value = [0.1, 0.2]
-
-            docs = get_vector_documents(
-                query="索引验收标识是什么",
-                user_id=6,
-                file_ids=["target-file"],
-                k=5,
-            )
-
-        diagnostics = get_retrieval_diagnostics()
-
-        self.assertEqual(vector_store.file_filter_calls, 2)
-        self.assertEqual(len(docs), 1)
-        self.assertEqual(docs[0].metadata["file_id"], "target-file")
-        self.assertIsNotNone(diagnostics)
-        assert diagnostics is not None
-        self.assertFalse(diagnostics["vector_degraded"])
-        self.assertEqual(diagnostics["vector_errors"], [])
-
-    def test_vector_search_falls_back_when_all_metadata_filters_fail(self) -> None:
-        """metadata filter 均失败时，应无过滤检索后按用户和文件严格过滤。"""
-        reset_retrieval_diagnostics()
-
-        with unittest.mock.patch(
-            "app.services.retrieval.hybrid_retriever.create_embedding_model",
-        ) as embedding_cls, unittest.mock.patch(
-            "app.services.retrieval.hybrid_retriever.get_embedding_cache_identity",
-            return_value=("6", "zhipuai", "embedding-3", ""),
-        ), unittest.mock.patch(
-            "app.services.retrieval.hybrid_retriever.get_vector_store",
-            return_value=FakeUnfilteredFallbackVectorStore(),
-        ), unittest.mock.patch(
-            "app.services.vectors.chroma_vector_store.sleep",
-        ):
-            embedding_cls.return_value.embed_query.return_value = [0.1, 0.2]
-
-            docs = get_vector_documents(
-                query="索引验收标识是什么",
-                user_id=6,
-                file_ids=["target-file"],
-                k=5,
-            )
-
-        diagnostics = get_retrieval_diagnostics()
-
-        self.assertEqual(len(docs), 1)
-        self.assertEqual(docs[0].metadata["user_id"], "6")
-        self.assertEqual(docs[0].metadata["file_id"], "target-file")
-        self.assertEqual(docs[0].metadata["retrieval_source"], "vector")
-        self.assertIsNotNone(diagnostics)
-        assert diagnostics is not None
-        self.assertFalse(diagnostics["vector_degraded"])
-        self.assertEqual(diagnostics["vector_errors"], [])
-
-    def test_vector_search_scans_persisted_embeddings_when_ann_is_stale(
-        self,
-    ) -> None:
-        """跨进程 HNSW 不可见时，应直接扫描持久化 embedding 完成召回。"""
-        reset_retrieval_diagnostics()
-        vector_store = FakeDirectScanVectorStore()
-
-        with unittest.mock.patch(
-            "app.services.retrieval.hybrid_retriever.create_embedding_model",
-        ) as embedding_cls, unittest.mock.patch(
-            "app.services.retrieval.hybrid_retriever.get_embedding_cache_identity",
-            return_value=("6", "zhipuai", "embedding-3", ""),
-        ), unittest.mock.patch(
-            "app.services.retrieval.hybrid_retriever.get_vector_store",
-            return_value=vector_store,
-        ), unittest.mock.patch(
-            "app.services.vectors.chroma_vector_store.sleep",
-        ):
-            embedding_cls.return_value.embed_query.return_value = [0.1, 0.2]
-
-            docs = get_vector_documents(
-                query="索引验收标识是什么",
-                user_id=6,
-                file_ids=["target-file"],
-                k=1,
-            )
-
-        diagnostics = get_retrieval_diagnostics()
-
-        self.assertEqual(len(docs), 1)
-        self.assertEqual(docs[0].page_content, "目标文件精确扫描候选")
-        self.assertAlmostEqual(docs[0].metadata["vector_score"], 0.0)
-        self.assertEqual(
-            vector_store._collection.include,
-            ["documents", "metadatas", "embeddings"],
+    def test_milvus_failure_keeps_fulltext_and_marks_diagnostics(self) -> None:
+        """Milvus 异常应保留全文结果并输出 provider-aware diagnostics。"""
+        fulltext_document = Document(
+            page_content="全文兜底候选",
+            metadata={
+                "user_id": "6",
+                "file_id": "target-file",
+                "chunk_index": 1,
+                "retrieval_source": "fulltext",
+            },
         )
+        failing_store = FakeFailingMilvusBoundary()
+        with unittest.mock.patch(
+            "app.services.retrieval.hybrid_retriever.create_embedding_model",
+        ) as embedding_cls, unittest.mock.patch(
+            "app.services.retrieval.hybrid_retriever.get_embedding_cache_identity",
+            return_value=("6", "zhipuai", "embedding-3", ""),
+        ), unittest.mock.patch(
+            "app.services.retrieval.hybrid_retriever.get_vector_store",
+            return_value=failing_store,
+        ), unittest.mock.patch(
+            "app.services.retrieval.hybrid_retriever.ensure_vector_store_boundary",
+            return_value=failing_store,
+        ), unittest.mock.patch(
+            "app.services.retrieval.hybrid_retriever.get_fulltext_documents",
+            return_value=[fulltext_document],
+        ):
+            embedding_cls.return_value.embed_query.return_value = [0.1, 0.2]
+            documents = get_hybrid_documents(
+                query="索引验收标识是什么",
+                user_id=6,
+                file_ids=["target-file"],
+                k=5,
+                rerank=False,
+            )
+
+        diagnostics = get_retrieval_diagnostics()
+        self.assertEqual(documents, [fulltext_document])
         self.assertIsNotNone(diagnostics)
         assert diagnostics is not None
-        self.assertFalse(diagnostics["vector_degraded"])
-        self.assertEqual(diagnostics["vector_errors"], [])
+        self.assertTrue(diagnostics["vector_degraded"])
+        self.assertEqual(
+            diagnostics["vector_errors"],
+            ["Milvus 向量检索失败"],
+        )
+        self.assertIn("vector_ms", diagnostics["timing"])
 
     def test_hybrid_retrieval_skips_rerank_when_candidates_fit_top_k(
         self,
