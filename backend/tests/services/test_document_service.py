@@ -187,14 +187,11 @@ class DocumentServiceTests(unittest.TestCase):
             persist_directory = root / "vector_db"
 
             mock_vector_store = Mock()
-            mock_vector_store._collection.count.return_value = 1
+            mock_vector_store.count_vectors.return_value = 1
             stdout = StringIO()
 
             with patch(
-                "app.services.documents.document_service.create_embedding_model",
-                return_value=Mock(),
-            ) as mock_create_embedding_model, patch(
-                "app.services.documents.document_service.Chroma.from_documents",
+                "app.services.documents.document_service.get_vector_store",
                 return_value=mock_vector_store,
             ), redirect_stdout(stdout):
                 result = build_vector_store(
@@ -205,7 +202,8 @@ class DocumentServiceTests(unittest.TestCase):
 
         self.assertIs(result, mock_vector_store)
         self.assertEqual(stdout.getvalue(), "")
-        mock_create_embedding_model.assert_called_once_with(42)
+        mock_vector_store.replace_file_vectors.assert_called_once()
+        mock_vector_store.count_vectors.assert_called_once_with(user_id=42)
 
     def test_pdf_chunks_keep_real_page_numbers_and_global_indexes(self) -> None:
         """PDF 分块应保留真实页码，并在跨页后继续递增 chunk index。"""

@@ -20,11 +20,9 @@ from collections.abc import Sequence
 from concurrent.futures import ThreadPoolExecutor
 from contextvars import ContextVar
 from hashlib import sha256
-from math import sqrt
 from threading import RLock
 from time import monotonic
 from time import perf_counter
-from time import sleep
 from typing import Any
 from uuid import UUID
 
@@ -43,14 +41,14 @@ from app.services.vectors.embedding_model import (
     create_embedding_model,
     get_embedding_cache_identity,
 )
-from app.services.vectors.vector_index_service import get_vector_store
+from app.services.vectors.chroma_vector_store import (
+    ensure_vector_store_boundary,
+)
+from app.services.vectors.vector_store_factory import get_vector_store
 
 logger = logging.getLogger(__name__)
 
 QUERY_EMBEDDING_CACHE_TTL_SECONDS = 300.0
-MAX_VECTOR_FILTER_FALLBACK_CANDIDATES = 1000
-VECTOR_FILE_FILTER_RETRY_DELAY_SECONDS = 0.2
-
 _QUERY_EMBEDDING_CACHE: dict[
     tuple[str, str, str, str, str],
     tuple[float, list[float]],
@@ -284,190 +282,13 @@ def get_query_embedding(query: str, user_id: int) -> list[float]:
     return embedding
 
 
-def build_chroma_filter(
-    user_id: int,
-    file_ids: Sequence[UUID | str] | None = None,
-) -> dict:
-    """构造 Chroma metadata 过滤条件。"""
-    user_filter = {"user_id": str(user_id)}
-    if not file_ids:
-        return user_filter
-
-    return {
-        "$and": [
-            user_filter,
-            {
-                "file_id": {
-                    "$in": [
-                        str(file_id)
-                        for file_id in file_ids
-                    ]
-                }
-            },
-        ]
-    }
-
-
-def build_file_chroma_filter(user_id: int, file_id: UUID | str) -> dict:
-    """构造单文件的 Chroma metadata 过滤条件。
-
-    不使用 `$in` 批量过滤，规避当前 Chroma Rust backend 的复杂过滤问题；
-    单文件等值过滤仍由 Chroma 在向量召回前执行。
-    """
-    return {
-        "$and": [
-            {"user_id": str(user_id)},
-            {"file_id": str(file_id)},
-        ]
-    }
-
-
-def retry_file_vector_search_without_file_filter(
-    *,
-    vectordb: Any,
-    query_embedding: list[float],
-    user_id: int,
-    file_id: UUID | str,
-    k: int,
-) -> list[tuple[Document, float]]:
-    """单文件过滤失败时，退回用户级检索并在 Python 侧过滤文件。
-
-    Chroma HNSW 删除/重建后偶发 `Error finding id`，常见于带 metadata
-    文件过滤的查询。用户级过滤更宽，命中后再按 file_id 过滤，避免一次
-    Chroma 内部索引残留错误让该文件完全失去 vector 召回机会。
-    """
-    fallback_k = min(max(k * 5, k), MAX_VECTOR_FILTER_FALLBACK_CANDIDATES)
-    candidates = vectordb.similarity_search_by_vector_with_relevance_scores(
-        embedding=query_embedding,
-        k=fallback_k,
-        filter={"user_id": str(user_id)},
-    )
-    normalized_file_id = str(file_id)
-    return [
-        (document, score)
-        for document, score in candidates
-        if str(document.metadata.get("file_id") or "") == normalized_file_id
-    ][:k]
-
-
-def cosine_distance(left: Sequence[float], right: Sequence[float]) -> float:
-    """计算两个向量的 cosine distance，数值越小越相近。"""
-    dot_product = 0.0
-    left_norm = 0.0
-    right_norm = 0.0
-    for left_value, right_value in zip(left, right, strict=False):
-        dot_product += float(left_value) * float(right_value)
-        left_norm += float(left_value) * float(left_value)
-        right_norm += float(right_value) * float(right_value)
-    if left_norm == 0.0 or right_norm == 0.0:
-        return 1.0
-    return 1.0 - (dot_product / (sqrt(left_norm) * sqrt(right_norm)))
-
-
-def retry_file_vector_search_with_direct_embedding_scan(
-    *,
-    vectordb: Any,
-    query_embedding: list[float],
-    user_id: int,
-    file_id: UUID | str,
-    k: int,
-) -> list[tuple[Document, float]]:
-    """ANN 查询失败时，直接读取单文件 embedding 并在 Python 侧精确打分。"""
-    collection = getattr(vectordb, "_collection", None)
-    if collection is None:
-        return []
-
-    result = collection.get(
-        where=build_file_chroma_filter(user_id, file_id),
-        include=["documents", "metadatas", "embeddings"],
-    )
-    documents = result.get("documents")
-    metadatas = result.get("metadatas")
-    embeddings = result.get("embeddings")
-    if documents is None or metadatas is None or embeddings is None:
-        return []
-    scored_documents: list[tuple[Document, float]] = []
-    for content, metadata, embedding in zip(
-        documents,
-        metadatas,
-        embeddings,
-        strict=False,
-    ):
-        scored_documents.append(
-            (
-                Document(
-                    page_content=str(content or ""),
-                    metadata=dict(metadata or {}),
-                ),
-                cosine_distance(query_embedding, embedding),
-            )
-        )
-
-    scored_documents.sort(key=lambda item: item[1])
-    return scored_documents[:k]
-
-
-def retry_file_vector_search_without_metadata_filter(
-    *,
-    vectordb: Any,
-    query_embedding: list[float],
-    user_id: int,
-    file_id: UUID | str,
-    k: int,
-) -> list[tuple[Document, float]]:
-    """metadata filter 均失败时，退回无过滤检索并在 Python 侧严格过滤。"""
-    fallback_k = min(max(k * 10, k), MAX_VECTOR_FILTER_FALLBACK_CANDIDATES)
-    candidates = vectordb.similarity_search_by_vector_with_relevance_scores(
-        embedding=query_embedding,
-        k=fallback_k,
-    )
-    normalized_user_id = str(user_id)
-    normalized_file_id = str(file_id)
-    return [
-        (document, score)
-        for document, score in candidates
-        if str(document.metadata.get("user_id") or "") == normalized_user_id
-        and str(document.metadata.get("file_id") or "") == normalized_file_id
-    ][:k]
-
-
-def retry_file_vector_search_with_delay(
-    *,
-    vectordb: Any,
-    query_embedding: list[float],
-    user_id: int,
-    file_id: UUID | str,
-    k: int,
-) -> list[tuple[Document, float]]:
-    """单文件 Chroma 查询瞬时失败时短暂等待后重试。
-
-    Chroma 刚完成写入后，HNSW/metadata 查询偶发短时间 `Error finding id`。
-    先重试同一单文件过滤，仍失败时再由调用方进入用户级 fallback。
-    """
-    sleep(VECTOR_FILE_FILTER_RETRY_DELAY_SECONDS)
-    return vectordb.similarity_search_by_vector_with_relevance_scores(
-        embedding=query_embedding,
-        k=k,
-        filter=build_file_chroma_filter(user_id, file_id),
-    )
-
-
 def get_vector_documents(
     query: str,
     user_id: int,
     file_ids: Sequence[UUID | str] | None = None,
     k: int = 5,
 ) -> list[Document]:
-    """从 Chroma 中按用户和文件范围做向量检索。
-
-    ChromaDB 1.5.x Rust backend 在内部调用 embedding 函数（query_texts
-    路径）时会触发 SSL 超时或 HNSW Error finding id。本函数改为在外部
-    预计算 query embedding，通过 query_embeddings 路径查询，完全绕过
-    ChromaDB 内部 embedding 调用链。
-
-    指定知识库文件范围时，逐个文件在 Chroma 侧进行等值过滤，再按向量
-    距离合并排序。这样不会因其它知识库的高分文档占满固定候选池而漏召回。
-    """
+    """通过 provider-neutral boundary 按用户和文件范围做向量检索。"""
     embedding_started_at = perf_counter()
     try:
         # 外部预计算 embedding，绕过 ChromaDB query_texts 路径
@@ -488,114 +309,17 @@ def get_vector_documents(
         return []
     record_retrieval_timing("embedding", embedding_started_at)
 
-    vectordb = get_vector_store(user_id=user_id)
+    vector_store = ensure_vector_store_boundary(
+        get_vector_store(user_id=user_id),
+    )
     vector_started_at = perf_counter()
     try:
-        if not file_ids:
-            candidates = vectordb.similarity_search_by_vector_with_relevance_scores(
-                embedding=query_embedding,
-                k=k,
-                filter={"user_id": str(user_id)},
-            )
-        else:
-            scored_candidates = []
-            for file_id in sorted({str(file_id) for file_id in file_ids}):
-                try:
-                    scored_candidates.extend(
-                        vectordb.similarity_search_by_vector_with_relevance_scores(
-                            embedding=query_embedding,
-                            k=k,
-                            filter=build_file_chroma_filter(user_id, file_id),
-                        )
-                    )
-                except Exception as exc:
-                    try:
-                        retry_candidates = retry_file_vector_search_with_delay(
-                            vectordb=vectordb,
-                            query_embedding=query_embedding,
-                            user_id=user_id,
-                            file_id=file_id,
-                            k=k,
-                        )
-                    except Exception:
-                        retry_candidates = []
-
-                    if retry_candidates:
-                        scored_candidates.extend(retry_candidates)
-                        continue
-
-                    try:
-                        fallback_candidates = (
-                            retry_file_vector_search_without_file_filter(
-                                vectordb=vectordb,
-                                query_embedding=query_embedding,
-                                user_id=user_id,
-                                file_id=file_id,
-                                k=k,
-                            )
-                        )
-                    except Exception:
-                        fallback_candidates = []
-
-                    if fallback_candidates:
-                        scored_candidates.extend(fallback_candidates)
-                        continue
-
-                    try:
-                        direct_scan_candidates = (
-                            retry_file_vector_search_with_direct_embedding_scan(
-                                vectordb=vectordb,
-                                query_embedding=query_embedding,
-                                user_id=user_id,
-                                file_id=file_id,
-                                k=k,
-                            )
-                        )
-                    except Exception:
-                        direct_scan_candidates = []
-
-                    if direct_scan_candidates:
-                        scored_candidates.extend(direct_scan_candidates)
-                        continue
-
-                    try:
-                        unfiltered_candidates = (
-                            retry_file_vector_search_without_metadata_filter(
-                                vectordb=vectordb,
-                                query_embedding=query_embedding,
-                                user_id=user_id,
-                                file_id=file_id,
-                                k=k,
-                            )
-                        )
-                    except Exception:
-                        unfiltered_candidates = []
-
-                    if unfiltered_candidates:
-                        scored_candidates.extend(unfiltered_candidates)
-                        continue
-
-                    # Chroma 删除/重建向量后偶发 HNSW 残留错误。
-                    # 单文件失败不应拖垮整个知识库检索，后续仍可依赖其它文件
-                    # 和 PostgreSQL 全文检索兜底。
-                    log_exception_event(
-                        logger,
-                        "retrieval_vector_file_failed",
-                        exc,
-                        default_source="vector_store",
-                        user_id=user_id,
-                        file_id=file_id,
-                        stage="vector",
-                        message="Chroma 单文件向量检索失败，跳过该文件",
-                    )
-                    add_vector_diagnostic_error(
-                        f"Chroma 单文件向量检索失败：{file_id}",
-                    )
-                    continue
-
-            # Chroma 返回的是距离，数值越小语义越相近。
-            scored_candidates.sort(key=lambda item: item[1])
-            candidates = scored_candidates[:k]
+        response = vector_store.search_vectors(
+            query_embedding=query_embedding,
+            user_id=user_id,
+            file_ids=list(file_ids) if file_ids else None,
+            k=k,
+        )
     except Exception as exc:
         log_exception_event(
             logger,
@@ -610,12 +334,28 @@ def get_vector_documents(
         add_vector_diagnostic_error("Chroma 向量检索失败")
         record_retrieval_timing("vector", vector_started_at)
         return []
+    for issue in response.issues:
+        provider_name = issue.provider.capitalize()
+        log_exception_event(
+            logger,
+            "retrieval_vector_file_failed",
+            RuntimeError(issue.message),
+            default_source="vector_store",
+            user_id=user_id,
+            file_id=issue.file_id,
+            stage="vector",
+            message=f"{provider_name} 单文件向量检索失败，跳过该文件",
+        )
+        add_vector_diagnostic_error(
+            f"{provider_name} 单文件向量检索失败：{issue.file_id}",
+        )
     record_retrieval_timing("vector", vector_started_at)
 
     documents = []
-    for document, score in candidates:
+    for result in response.results:
+        document = result.document
         document.metadata["retrieval_source"] = "vector"
-        document.metadata["vector_score"] = float(score)
+        document.metadata["vector_score"] = result.distance
         documents.append(document)
 
     update_retrieval_diagnostics(vector_count=len(documents))

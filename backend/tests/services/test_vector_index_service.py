@@ -108,16 +108,16 @@ class VectorIndexServiceTests(unittest.TestCase):
     ) -> None:
         """Compose 配置 Chroma host 后应连接独立 server。"""
         with patch(
-            "app.services.vectors.vector_index_service.CHROMA_HOST",
+            "app.services.vectors.vector_store_factory.CHROMA_HOST",
             "chroma",
         ), patch(
-            "app.services.vectors.vector_index_service.CHROMA_PORT",
+            "app.services.vectors.vector_store_factory.CHROMA_PORT",
             8000,
         ), patch(
-            "app.services.vectors.vector_index_service.CHROMA_SSL",
+            "app.services.vectors.vector_store_factory.CHROMA_SSL",
             False,
         ), patch(
-            "app.services.vectors.vector_index_service.Chroma",
+            "app.services.vectors.vector_store_factory.Chroma",
         ) as chroma:
             get_vector_store(collection_name="test-collection")
 
@@ -189,10 +189,10 @@ class VectorIndexServiceTests(unittest.TestCase):
     def test_get_vector_store_keeps_embedded_mode_without_host(self) -> None:
         """未配置 Chroma host 时应保留单进程本地持久化模式。"""
         with patch(
-            "app.services.vectors.vector_index_service.CHROMA_HOST",
+            "app.services.vectors.vector_store_factory.CHROMA_HOST",
             "",
         ), patch(
-            "app.services.vectors.vector_index_service.Chroma",
+            "app.services.vectors.vector_store_factory.Chroma",
         ) as chroma:
             get_vector_store(
                 persist_directory="/tmp/firstrag-test-chroma",

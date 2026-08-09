@@ -7,7 +7,6 @@ from uuid import UUID
 from xml.etree import ElementTree
 from zipfile import BadZipFile, ZipFile
 
-from langchain_chroma import Chroma
 from langchain_core.messages import HumanMessage
 
 # 将docx转为md文件
@@ -47,7 +46,11 @@ from app.services.llm_service import (
     create_openai_compatible_chat_model,
 )
 from app.services.user_settings_service import get_effective_chat_model_config
-from app.services.vectors.embedding_model import create_embedding_model
+from app.services.vectors.vector_store import (
+    VectorStoreBoundary,
+    build_chunk_ids,
+)
+from app.services.vectors.vector_store_factory import get_vector_store
 
 
 logger = logging.getLogger(__name__)
@@ -798,8 +801,8 @@ def build_vector_store(
     folder_path: str | Path = "./local_doc",
     persist_directory: str | Path = VECTOR_STORE_PATH,
     user_id: int | None = None,
-) -> Chroma:
-    """加载、切分本地文档并写入Chroma向量数据库。"""
+) -> VectorStoreBoundary:
+    """加载、切分本地文档并通过统一 boundary 写入向量库。"""
     if user_id is None:
         raise ValueError("构建向量库需要传入已配置向量模型的 user_id")
 
@@ -823,13 +826,27 @@ def build_vector_store(
     )
     logger.debug("文档切分样例：%s", split_docs[:3])
 
-    vectordb = Chroma.from_documents(
-        documents=split_docs,
-        embedding=create_embedding_model(user_id),
-        persist_directory=str(persist_directory),
+    vector_store = get_vector_store(
+        user_id=user_id,
+        persist_directory=persist_directory,
     )
-    logger.info("向量库中存储的数量：%s", vectordb._collection.count())
-    return vectordb
+    documents_by_file: dict[str, list[Document]] = {}
+    for document in split_docs:
+        document.metadata.setdefault("index_version", 0)
+        file_id = str(document.metadata["file_id"])
+        documents_by_file.setdefault(file_id, []).append(document)
+    for file_id, file_documents in documents_by_file.items():
+        vector_store.replace_file_vectors(
+            user_id=user_id,
+            file_id=file_id,
+            documents=file_documents,
+            ids=build_chunk_ids(file_documents),
+        )
+    logger.info(
+        "向量库中存储的数量：%s",
+        vector_store.count_vectors(user_id=user_id),
+    )
+    return vector_store
 
 
 if __name__ == '__main__':

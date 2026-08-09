@@ -329,7 +329,7 @@ class RetrievalResilienceTests(unittest.TestCase):
             "app.services.retrieval.hybrid_retriever.get_vector_store",
             return_value=vector_store,
         ), unittest.mock.patch(
-            "app.services.retrieval.hybrid_retriever.sleep",
+            "app.services.vectors.chroma_vector_store.sleep",
         ):
             embedding_cls.return_value.embed_query.return_value = [0.1, 0.2]
 
@@ -363,7 +363,7 @@ class RetrievalResilienceTests(unittest.TestCase):
             "app.services.retrieval.hybrid_retriever.get_vector_store",
             return_value=FakeUnfilteredFallbackVectorStore(),
         ), unittest.mock.patch(
-            "app.services.retrieval.hybrid_retriever.sleep",
+            "app.services.vectors.chroma_vector_store.sleep",
         ):
             embedding_cls.return_value.embed_query.return_value = [0.1, 0.2]
 
@@ -401,7 +401,7 @@ class RetrievalResilienceTests(unittest.TestCase):
             "app.services.retrieval.hybrid_retriever.get_vector_store",
             return_value=vector_store,
         ), unittest.mock.patch(
-            "app.services.retrieval.hybrid_retriever.sleep",
+            "app.services.vectors.chroma_vector_store.sleep",
         ):
             embedding_cls.return_value.embed_query.return_value = [0.1, 0.2]
 
