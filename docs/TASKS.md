@@ -274,7 +274,7 @@
 | `T-136` | `PLAN-20260809-01` | `P1` | `Todo` | 完成 Milvus 全链路回归、质量与性能验收 | — | — |
 | `T-137` | `PLAN-20260809-01` | `P1` | `Todo` | 更新 Milvus 架构、部署与教程文档 | — | — |
 | `T-138` | `PLAN-20260809-01` | `P2` | `Todo` | 完成 Milvus 切换观察并移除 Chroma 遗留 | — | — |
-| `T-139` | CI required checks | `P0` | `Doing` | 修复 Nano ID 与 cryptography 新增高危依赖漏洞 | — | — |
+| `T-139` | CI required checks | `P0` | `Done` | 修复 Nano ID 与 cryptography 新增高危依赖漏洞 | `2026-08-09` | `c5b5564` |
 
 ## 新计划接入流程
 
@@ -5565,7 +5565,7 @@ git diff --check
 
 - 来源计划：CI required checks
 - 优先级：`P0`
-- 状态：`Doing`
+- 状态：`Done`
 - 背景：PR #51 的 2026-08-09 dependency audit 新发现两个已有修复版本的 high finding：Nano ID `GHSA-2V37-7H3G-55P8` 和 cryptography `GHSA-G6CJ-PR64-35W5`，导致 Frontend、Backend required checks 阻塞。
 - 目标：使用官方 advisory 给出的最小安全版本修复两个 finding，不新增漏洞例外、不引入 unrelated dependency update。
 - 范围：
@@ -5576,6 +5576,12 @@ git diff --check
   - production npm audit policy 为 `0 findings / 0 exceptions`。
   - pip audit 不再报告 cryptography finding，且不为已有修复版本的漏洞新增例外。
   - Backend、Frontend、Full-stack E2E、Container OS Security required checks 全部通过。
+- 完成记录：
+  - transitive Nano ID 从 3.3.16 更新到 3.3.18，cryptography 从 49.0.0 更新到 50.0.0；未修改其它依赖，也未新增安全审计例外。
+  - production npm audit policy 为 `0 findings / 0 exceptions`；pip audit 不再报告 cryptography finding，只保留已有且 2026-08-20 到期的 ChromaDB 1.5.9 no-fix 例外。
+  - 本地前端 ESLint 为 0 errors（2 个既有 `<img>` warning）、Vitest 41 files / 181 tests、production build 通过；后端设置与凭据专项测试 42 项通过。
+  - 本地 Docker Compose rebuild 两次受 Debian 清华镜像 502/timeout 阻塞；GitHub clean runner 的 Backend、Frontend、Full-stack E2E、Container OS Security 四个 required checks 随后全部通过，完成独立网络和容器验证。
+- 相关提交：`c5b5564`
 - 建议验证命令：
 
 ```bash
