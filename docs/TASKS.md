@@ -5467,6 +5467,7 @@ git diff --check
   - 本机 Docker 8 CPU / 15.35 GiB 环境完成镜像构建与启动；Milvus、etcd、MinIO healthy，WAL 日志确认 `woodpecker`，错误 token、无 token 和有效 token 三类鉴权探测符合预期，且未映射 Milvus host port。
   - 专用 `firstrag_t132_persistence_probe` collection 写入后完整重启 Milvus，记录成功读回并按 exact collection name 清理；Chroma 数据和默认 provider 未切换。
   - 完整后端 397 项测试、Python 编译、教程文档、13 个 Actions pin、三套 Compose config、production preflight、Python dependency audit 与 credential-free full-stack E2E 均通过。
+- 相关提交：`b74043c`
 
 ## T-133 迁移向量写入、重建与删除生命周期
 
