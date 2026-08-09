@@ -12,10 +12,26 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from scripts import eval_indexing
+from scripts import full_stack_e2e_provider
 
 
 class EvalIndexingScriptTests(unittest.TestCase):
     """上传与向量化验收脚本测试。"""
+
+    def test_provider_stub_echoes_indexing_marker(self) -> None:
+        """隔离 provider 应回答每轮随机 marker，而非固定假阳性。"""
+        request = full_stack_e2e_provider.ChatCompletionRequest(
+            model="firstrag-e2e-model",
+            messages=[{
+                "role": "user",
+                "content": "请回答 FirstRAGIndexingEval-20260809-abcd1234",
+            }],
+        )
+        self.assertEqual(
+            full_stack_e2e_provider._answer_for_request(request),
+            "FirstRAG 索引验收标识是 "
+            "FirstRAGIndexingEval-20260809-abcd1234。",
+        )
 
     def build_chat_result(
         self,

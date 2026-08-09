@@ -141,6 +141,22 @@ def parse_args() -> argparse.Namespace:
         help="Keep the uploaded file associated with the knowledge base.",
     )
     parser.add_argument(
+        "--exercise-vector-lifecycle",
+        action="store_true",
+        help=(
+            "After the first successful retrieval, delete vectors, verify the "
+            "empty state, reindex the same file, and verify vector retrieval again."
+        ),
+    )
+    parser.add_argument(
+        "--permanent-delete",
+        action="store_true",
+        help=(
+            "Permanently delete the temporary file and verify its vector count is zero. "
+            "Intended for isolated acceptance environments only."
+        ),
+    )
+    parser.add_argument(
         "--file-kind",
         choices=("markdown", "image", MIXED_PDF_FILE_KIND),
         default=os.getenv("FIRSTRAG_INDEXING_EVAL_FILE_KIND", "markdown"),
@@ -523,6 +539,49 @@ def remove_file_relation(
         token=token,
         timeout=timeout,
     )
+
+
+def permanently_delete_file(
+    base_url: str,
+    token: str,
+    file_id: str,
+    timeout: int,
+) -> None:
+    """通过公开 API 永久删除验收临时文件。"""
+    request_json(
+        "DELETE",
+        base_url,
+        f"/chat/knowledge-files/{file_id}",
+        token=token,
+        timeout=timeout,
+    )
+
+
+def build_eval_vector_store(username: str) -> tuple[int, Any]:
+    """在后端运行环境中创建当前用户的生产 vector store adapter。"""
+    try:
+        from app.repositories.auth_repository import get_user_by_username
+        from app.services.vectors.vector_store_factory import get_vector_store
+    except ImportError as exc:
+        raise EvalError(
+            "vector lifecycle 验收必须在可导入 backend app 的环境中运行",
+        ) from exc
+
+    user = get_user_by_username(username)
+    if user is None:
+        raise EvalError("vector lifecycle 验收用户不存在")
+    user_id = int(user["id"])
+    return user_id, get_vector_store(user_id)
+
+
+def count_eval_file_vectors(
+    vector_store: Any,
+    *,
+    user_id: int,
+    file_id: str,
+) -> int:
+    """通过 provider-neutral adapter 统计目标文件向量，不读取正文或向量值。"""
+    return int(vector_store.count_vectors(user_id=user_id, file_id=file_id))
 
 
 def get_retrieval_settings(
@@ -1326,6 +1385,8 @@ def main() -> int:
         raise EvalError(
             "请通过 --username/--password 或 FIRSTRAG_EVAL_USERNAME/FIRSTRAG_EVAL_PASSWORD 提供登录信息",
         )
+    if args.keep_file and args.permanent_delete:
+        raise EvalError("--keep-file 与 --permanent-delete 不能同时使用")
 
     generated_at = datetime.now()
     run_id = generated_at.strftime("%Y%m%d%H%M%S") + "-" + uuid.uuid4().hex[:8]
@@ -1361,6 +1422,12 @@ def main() -> int:
     retrieval_settings_restored = False
     cleanup_verified = False
     cleanup_done = False
+    permanent_delete_vector_count: int | None = None
+    vector_user_id: int | None = None
+    vector_store: Any | None = None
+    lifecycle_checks: list[dict[str, Any]] = []
+    if args.exercise_vector_lifecycle or args.permanent_delete:
+        vector_user_id, vector_store = build_eval_vector_store(args.username)
     try:
         original_retrieval_settings = get_retrieval_settings(
             base_url=base_url,
@@ -1428,6 +1495,152 @@ def main() -> int:
             question=question,
             timeout=args.timeout,
         )
+        if args.exercise_vector_lifecycle:
+            if vector_store is None or vector_user_id is None:
+                raise EvalError("vector lifecycle adapter 未初始化")
+            initial_diagnostics = compact_diagnostics(chat_result.retrieval)
+            initial_sources = [
+                source
+                for source in chat_result.sources
+                if str(source.get("file_name") or "") == filename
+            ]
+            initial_count = count_eval_file_vectors(
+                vector_store,
+                user_id=vector_user_id,
+                file_id=uploaded_file_id,
+            )
+            request_json(
+                "DELETE",
+                base_url,
+                f"/chat/knowledge-files/{uploaded_file_id}/vectors",
+                token=token,
+                timeout=args.timeout,
+            )
+            deleted_count = count_eval_file_vectors(
+                vector_store,
+                user_id=vector_user_id,
+                file_id=uploaded_file_id,
+            )
+            deleted_file_record = find_file_in_knowledge_base(
+                base_url=base_url,
+                token=token,
+                knowledge_base_id=knowledge_base_id,
+                file_id=uploaded_file_id,
+                timeout=args.timeout,
+            )
+            reindex_started_at = time.monotonic()
+            reindex_response = request_json(
+                "POST",
+                base_url,
+                f"/chat/knowledge-files/{uploaded_file_id}/vectors",
+                token=token,
+                timeout=args.timeout,
+            )
+            reindex_job = reindex_response.get("job") or {}
+            reindex_job_id = str(reindex_job.get("id") or "")
+            if not reindex_job_id:
+                raise EvalError("重新向量化响应中没有 job id")
+            completed_job = wait_for_job(
+                base_url=base_url,
+                token=token,
+                job_id=reindex_job_id,
+                timeout=args.job_timeout,
+                poll_interval=args.poll_interval,
+                request_timeout=args.timeout,
+            )
+            reindex_elapsed_seconds = time.monotonic() - reindex_started_at
+            recovered_count = count_eval_file_vectors(
+                vector_store,
+                user_id=vector_user_id,
+                file_id=uploaded_file_id,
+            )
+            file_record = find_file_in_knowledge_base(
+                base_url=base_url,
+                token=token,
+                knowledge_base_id=knowledge_base_id,
+                file_id=uploaded_file_id,
+                timeout=args.timeout,
+            )
+            recovered_conversation_id = create_conversation(
+                base_url=base_url,
+                token=token,
+                knowledge_base_id=knowledge_base_id,
+                run_id=f"{run_id}-recovered",
+                timeout=args.timeout,
+            )
+            chat_result = stream_chat(
+                base_url=base_url,
+                token=token,
+                knowledge_base_id=knowledge_base_id,
+                conversation_id=recovered_conversation_id,
+                question=question,
+                timeout=args.timeout,
+            )
+            recovered_diagnostics = compact_diagnostics(chat_result.retrieval)
+            recovered_sources = [
+                source
+                for source in chat_result.sources
+                if str(source.get("file_name") or "") == filename
+            ]
+            lifecycle_checks.extend([
+                {
+                    "name": "initial_vector_count_positive",
+                    "passed": initial_count > 0,
+                    "expected": "> 0",
+                    "actual": initial_count,
+                },
+                {
+                    "name": "initial_vector_retrieval_healthy",
+                    "passed": bool(
+                        initial_diagnostics["vector_degraded"] is not True
+                        and any(
+                            "vector" in (source.get("retrieval_sources") or [])
+                            for source in initial_sources
+                        )
+                    ),
+                    "expected": "vector source and vector_degraded=false",
+                    "actual": {
+                        "vector_degraded": initial_diagnostics["vector_degraded"],
+                        "source_count": len(initial_sources),
+                    },
+                },
+                {
+                    "name": "vector_delete_clears_entries",
+                    "passed": deleted_count == 0,
+                    "expected": 0,
+                    "actual": deleted_count,
+                },
+                {
+                    "name": "vector_delete_resets_file_pending",
+                    "passed": (deleted_file_record or {}).get("status") == "pending",
+                    "expected": "pending",
+                    "actual": (deleted_file_record or {}).get("status"),
+                },
+                {
+                    "name": "reindex_restores_entries",
+                    "passed": recovered_count > 0,
+                    "expected": "> 0",
+                    "actual": {
+                        "count": recovered_count,
+                        "elapsed_seconds": round(reindex_elapsed_seconds, 3),
+                    },
+                },
+                {
+                    "name": "reindex_vector_retrieval_healthy",
+                    "passed": bool(
+                        recovered_diagnostics["vector_degraded"] is not True
+                        and any(
+                            "vector" in (source.get("retrieval_sources") or [])
+                            for source in recovered_sources
+                        )
+                    ),
+                    "expected": "vector source and vector_degraded=false",
+                    "actual": {
+                        "vector_degraded": recovered_diagnostics["vector_degraded"],
+                        "source_count": len(recovered_sources),
+                    },
+                },
+            ])
         if args.file_kind == MIXED_PDF_FILE_KIND:
             scanned_source = next(
                 (
@@ -1478,6 +1691,7 @@ def main() -> int:
             mixed_pdf_keywords=mixed_pdf_keywords,
             page_preview=page_preview,
         )
+        checks.extend(lifecycle_checks)
     finally:
         if original_retrieval_settings is not None:
             try:
@@ -1504,13 +1718,28 @@ def main() -> int:
                 )
         if uploaded_file_id and not args.keep_file:
             try:
-                remove_file_relation(
-                    base_url=base_url,
-                    token=token,
-                    knowledge_base_id=knowledge_base_id,
-                    file_id=uploaded_file_id,
-                    timeout=args.timeout,
-                )
+                if args.permanent_delete:
+                    permanently_delete_file(
+                        base_url=base_url,
+                        token=token,
+                        file_id=uploaded_file_id,
+                        timeout=args.timeout,
+                    )
+                    if vector_store is None or vector_user_id is None:
+                        raise EvalError("永久删除验收 adapter 未初始化")
+                    permanent_delete_vector_count = count_eval_file_vectors(
+                        vector_store,
+                        user_id=vector_user_id,
+                        file_id=uploaded_file_id,
+                    )
+                else:
+                    remove_file_relation(
+                        base_url=base_url,
+                        token=token,
+                        knowledge_base_id=knowledge_base_id,
+                        file_id=uploaded_file_id,
+                        timeout=args.timeout,
+                    )
                 cleanup_verified = find_file_in_knowledge_base(
                     base_url=base_url,
                     token=token,
@@ -1530,10 +1759,21 @@ def main() -> int:
     })
     if not args.keep_file:
         checks.append({
-            "name": "temporary_file_relation_removed",
+            "name": (
+                "temporary_file_permanently_deleted"
+                if args.permanent_delete
+                else "temporary_file_relation_removed"
+            ),
             "passed": cleanup_verified,
             "expected": True,
             "actual": cleanup_verified,
+        })
+    if args.permanent_delete:
+        checks.append({
+            "name": "permanent_delete_clears_vectors",
+            "passed": permanent_delete_vector_count == 0,
+            "expected": 0,
+            "actual": permanent_delete_vector_count,
         })
 
     run_record = serialize_run_record(

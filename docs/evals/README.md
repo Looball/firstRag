@@ -6,6 +6,8 @@
 
 [`chroma_migration_baseline_20260809.md`](chroma_migration_baseline_20260809.md) 冻结 T-130 的 Chroma/PostgreSQL 一致性、真实 filtered ANN、资源和历史 eval 对照值；后续 Milvus 迁移必须按 [ADR-0001](../adr/0001-milvus-migration.md) 的门禁比较，不能只用 indexing job `succeeded` 代替向量命中。
 
+[`milvus_acceptance_20260809.md`](milvus_acceptance_20260809.md) 记录 T-136 的 current data 一致性、真实 filtered ANN、双用户/双 dimensions 隔离、restart persistence、indexing lifecycle、14-case RAG 质量、资源和 Chroma/Milvus 双 provider E2E。结论为 Milvus 已满足受控默认切换条件；实际默认值与全量文档同步由 T-137 完成，Chroma rollback 能力保留到 T-138。
+
 ## 最近整体回归验收
 
 2026-07-02 已刷新一轮真实链路 eval 基线，覆盖 RAG 真实评测门禁、上传与向量化真实链路验收，以及 eval 历史趋势摘要。Compose 启动后的补充验收入口见 `scripts/acceptance_check.sh`。

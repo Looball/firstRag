@@ -11,6 +11,9 @@ E2E_FRONTEND_PORT="${FIRSTRAG_E2E_FRONTEND_PORT:-13000}"
 E2E_POSTGRES_PORT="${FIRSTRAG_E2E_POSTGRES_PORT:-25432}"
 USERNAME="${FIRSTRAG_E2E_USERNAME:-firstrag_e2e_$$}"
 PASSWORD="${FIRSTRAG_E2E_PASSWORD:-E2eOnly-123456}"
+VECTOR_STORE_PROVIDER="${FIRSTRAG_E2E_VECTOR_STORE_PROVIDER:-chroma}"
+EMBEDDING_DIMENSIONS="${FIRSTRAG_E2E_EMBEDDING_DIMENSIONS:-16}"
+SECOND_EMBEDDING_DIMENSIONS="${FIRSTRAG_E2E_SECOND_EMBEDDING_DIMENSIONS:-32}"
 PAUSE_AFTER_TEST="${FIRSTRAG_E2E_PAUSE_AFTER_TEST:-0}"
 COMPOSE_ARGS=(
   --env-file /dev/null
@@ -27,6 +30,18 @@ if [[ "${PAUSE_AFTER_TEST}" != "0" && "${PAUSE_AFTER_TEST}" != "1" ]]; then
   echo "FIRSTRAG_E2E_PAUSE_AFTER_TEST must be 0 or 1." >&2
   exit 2
 fi
+if [[ "${VECTOR_STORE_PROVIDER}" != "chroma" && "${VECTOR_STORE_PROVIDER}" != "milvus" ]]; then
+  echo "FIRSTRAG_E2E_VECTOR_STORE_PROVIDER must be chroma or milvus." >&2
+  exit 2
+fi
+if [[ ! "${EMBEDDING_DIMENSIONS}" =~ ^[1-9][0-9]*$ ]]; then
+  echo "FIRSTRAG_E2E_EMBEDDING_DIMENSIONS must be a positive integer." >&2
+  exit 2
+fi
+if [[ ! "${SECOND_EMBEDDING_DIMENSIONS}" =~ ^[1-9][0-9]*$ ]]; then
+  echo "FIRSTRAG_E2E_SECOND_EMBEDDING_DIMENSIONS must be a positive integer." >&2
+  exit 2
+fi
 if [[ "${PAUSE_AFTER_TEST}" == "1" && ! -t 0 ]]; then
   echo "FIRSTRAG_E2E_PAUSE_AFTER_TEST=1 requires an interactive terminal." >&2
   exit 2
@@ -39,6 +54,7 @@ export FIRSTRAG_E2E_POSTGRES_PORT="${E2E_POSTGRES_PORT}"
 export BACKEND_PORT="127.0.0.1:${E2E_BACKEND_PORT}"
 export FRONTEND_PORT="127.0.0.1:${E2E_FRONTEND_PORT}"
 export POSTGRES_PORT="127.0.0.1:${E2E_POSTGRES_PORT}"
+export VECTOR_STORE_PROVIDER
 
 cleanup() {
   status=$?
@@ -50,6 +66,21 @@ cleanup() {
   docker compose "${COMPOSE_ARGS[@]}" down --volumes --remove-orphans
 }
 trap cleanup EXIT
+
+run_probe_with_retry() {
+  local attempt
+  for attempt in $(seq 1 12); do
+    if "$@"; then
+      return 0
+    fi
+    if [[ "${attempt}" -eq 12 ]]; then
+      echo "Milvus persisted collection was not serviceable after 12 attempts." >&2
+      return 1
+    fi
+    echo "Milvus persisted collection not serviceable yet; retry ${attempt}/12." >&2
+    sleep 5
+  done
+}
 
 cd "${REPO_ROOT}"
 docker compose "${COMPOSE_ARGS[@]}" up -d --build
@@ -76,7 +107,8 @@ curl --fail --silent --show-error \
 
 docker compose "${COMPOSE_ARGS[@]}" exec -T backend \
   python /app/e2e-scripts/seed_full_stack_e2e.py \
-  --username "${USERNAME}"
+  --username "${USERNAME}" \
+  --embedding-dimensions "${EMBEDDING_DIMENSIONS}"
 
 cd "${REPO_ROOT}/frontend"
 FIRSTRAG_E2E_BASE_URL="http://127.0.0.1:${E2E_FRONTEND_PORT}" \
@@ -85,9 +117,65 @@ FIRSTRAG_E2E_PASSWORD="${PASSWORD}" \
 npx --no-install playwright test \
   --config playwright.full-stack.config.ts
 
+if [[ "${VECTOR_STORE_PROVIDER}" == "milvus" ]]; then
+  SECOND_USERNAME="${USERNAME}_dim${SECOND_EMBEDDING_DIMENSIONS}"
+  curl --fail --silent --show-error \
+    --request POST \
+    --header "Content-Type: application/json" \
+    --data "{\"username\":\"${SECOND_USERNAME}\",\"password\":\"${PASSWORD}\"}" \
+    "http://127.0.0.1:${E2E_BACKEND_PORT}/register" >/dev/null
+  docker compose "${COMPOSE_ARGS[@]}" exec -T backend \
+    python /app/e2e-scripts/seed_full_stack_e2e.py \
+    --username "${SECOND_USERNAME}" \
+    --embedding-dimensions "${SECOND_EMBEDDING_DIMENSIONS}"
+
+  docker compose "${COMPOSE_ARGS[@]}" exec -T worker \
+    python -m app.services.vectors.milvus_write_lifecycle_probe write --version 1
+  docker compose "${COMPOSE_ARGS[@]}" exec -T worker \
+    python -m app.services.vectors.milvus_retrieval_probe write
+  docker compose "${COMPOSE_ARGS[@]}" restart milvus-standalone
+  docker compose "${COMPOSE_ARGS[@]}" run --rm milvus-health-probe
+  run_probe_with_retry docker compose "${COMPOSE_ARGS[@]}" exec -T backend \
+    python -m app.services.vectors.milvus_write_lifecycle_probe verify --version 1
+  run_probe_with_retry docker compose "${COMPOSE_ARGS[@]}" exec -T backend \
+    python -m app.services.vectors.milvus_retrieval_probe search
+  docker compose "${COMPOSE_ARGS[@]}" exec -T worker \
+    python -m app.services.vectors.milvus_write_lifecycle_probe write --version 2
+  docker compose "${COMPOSE_ARGS[@]}" exec -T backend \
+    python -m app.services.vectors.milvus_write_lifecycle_probe verify --version 2
+  docker compose "${COMPOSE_ARGS[@]}" exec -T backend \
+    python -m app.services.vectors.milvus_write_lifecycle_probe delete
+  docker compose "${COMPOSE_ARGS[@]}" exec -T backend \
+    python -m app.services.vectors.milvus_write_lifecycle_probe cleanup
+  docker compose "${COMPOSE_ARGS[@]}" exec -T backend \
+    python -m app.services.vectors.milvus_retrieval_probe cleanup
+
+  docker compose "${COMPOSE_ARGS[@]}" exec -T backend \
+    python /app/e2e-scripts/eval_indexing.py \
+    --base-url http://127.0.0.1:8000 \
+    --username "${USERNAME}" \
+    --password "${PASSWORD}" \
+    --poll-interval 1 \
+    --exercise-vector-lifecycle \
+    --permanent-delete \
+    --no-history \
+    --report /tmp/milvus-indexing-primary.md
+  docker compose "${COMPOSE_ARGS[@]}" exec -T backend \
+    python /app/e2e-scripts/eval_indexing.py \
+    --base-url http://127.0.0.1:8000 \
+    --username "${SECOND_USERNAME}" \
+    --password "${PASSWORD}" \
+    --poll-interval 1 \
+    --exercise-vector-lifecycle \
+    --permanent-delete \
+    --no-history \
+    --report /tmp/milvus-indexing-secondary.md
+fi
+
 if [[ "${PAUSE_AFTER_TEST}" == "1" ]]; then
   printf '\n%s\n' "Credential-free tutorial verification passed."
   printf '%s\n' \
+    "Vector store provider: ${VECTOR_STORE_PROVIDER}" \
     "Compose project: ${PROJECT_NAME}" \
     "Open: http://127.0.0.1:${E2E_FRONTEND_PORT}/login" \
     "Temporary username: ${USERNAME}" \

@@ -26,10 +26,19 @@ OTHER_PREFIX = "firstrag_t134_probe_u900135_"
 PROBE_COLLECTION = f"{PROBE_PREFIX}identity"
 OTHER_COLLECTION = f"{OTHER_PREFIX}identity"
 PROBE_DIMENSIONS = 3
+OTHER_DIMENSIONS = 4
 
 
 class ProbeEmbeddings(Embeddings):
     """按 probe 正文生成可复现且排序已知的三维向量。"""
+
+    def __init__(self, dimensions: int = PROBE_DIMENSIONS) -> None:
+        """保存当前 probe collection 的固定向量维度。"""
+        self.dimensions = dimensions
+
+    def _pad(self, vector: list[float]) -> list[float]:
+        """把排序基线向量补齐到目标 identity 的维度。"""
+        return [*vector, *([0.0] * (self.dimensions - len(vector)))]
 
     def embed_documents(self, texts: list[str]) -> list[list[float]]:
         """把四种 probe 正文映射为固定 COSINE vectors。"""
@@ -39,12 +48,12 @@ class ProbeEmbeddings(Embeddings):
             "third": [0.0, 1.0, 0.0],
             "other-user": [1.0, 0.0, 0.0],
         }
-        return [vectors[text] for text in texts]
+        return [self._pad(vectors[text]) for text in texts]
 
     def embed_query(self, text: str) -> list[float]:
         """返回与 closest chunk 一致的 query vector。"""
         del text
-        return [1.0, 0.0, 0.0]
+        return self._pad([1.0, 0.0, 0.0])
 
 
 def _client() -> Any:
@@ -67,6 +76,7 @@ def _store(
 ) -> MilvusVectorStore:
     """构造只绑定一个 probe 用户 collection identity 的 adapter。"""
     is_primary_user = user_id == PROBE_USER_ID
+    dimensions = PROBE_DIMENSIONS if is_primary_user else OTHER_DIMENSIONS
     return MilvusVectorStore(
         client=client,
         collection_name=(
@@ -75,8 +85,8 @@ def _store(
         user_collection_prefix=(
             PROBE_PREFIX if is_primary_user else OTHER_PREFIX
         ),
-        embedding_model=ProbeEmbeddings() if writable else None,
-        dimensions=PROBE_DIMENSIONS,
+        embedding_model=ProbeEmbeddings(dimensions) if writable else None,
+        dimensions=dimensions,
         timeout_seconds=MILVUS_TIMEOUT_SECONDS,
         consistency_level=MILVUS_CONSISTENCY_LEVEL,
     )
@@ -190,6 +200,7 @@ def write() -> dict[str, object]:
                 user_id=PROBE_USER_ID,
             ),
             "other_count": other_store.count_vectors(user_id=OTHER_USER_ID),
+            "dimensions": [PROBE_DIMENSIONS, OTHER_DIMENSIONS],
             "ok": True,
         }
     finally:
@@ -200,7 +211,7 @@ def search() -> dict[str, object]:
     """用新 client 验证用户、单/多文件范围和 distance 排序。"""
     client = _client()
     try:
-        query_embedding = ProbeEmbeddings().embed_query("probe")
+        query_embedding = ProbeEmbeddings(PROBE_DIMENSIONS).embed_query("probe")
         primary_store = _store(
             client,
             user_id=PROBE_USER_ID,
@@ -224,12 +235,15 @@ def search() -> dict[str, object]:
             file_ids=["file-b", "file-a", "file-a"],
             k=10,
         ).results
+        other_query_embedding = ProbeEmbeddings(OTHER_DIMENSIONS).embed_query(
+            "probe",
+        )
         other_results = _store(
             client,
             user_id=OTHER_USER_ID,
             writable=False,
         ).search_vectors(
-            query_embedding=query_embedding,
+            query_embedding=other_query_embedding,
             user_id=OTHER_USER_ID,
             file_ids=["file-a"],
             k=10,
@@ -266,6 +280,7 @@ def search() -> dict[str, object]:
             "single_file_count": len(single_file_results),
             "multi_file_count": len(multi_file_results),
             "other_user_count": len(other_results),
+            "dimensions": [PROBE_DIMENSIONS, OTHER_DIMENSIONS],
             "ok": ok,
         }
     finally:
