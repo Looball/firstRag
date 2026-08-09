@@ -72,6 +72,23 @@ docker compose --profile milvus logs --tail=100 \
 
 Milvus 至少需要为 Docker Desktop 分配 4 CPU / 8 GiB；低于 16 GiB 时 preflight 会提示容量余量不足。`docker compose restart milvus-standalone` 会按 `stop_grace_period=2m` 优雅退出，命令可能需要等待约两分钟；HTTP health 先恢复后，仍应以 PyMilvus authenticated round-trip 作为 gRPC ready 标准。
 
+T-133 提供隔离的写入生命周期 probe，可在 backend/worker 两个进程间组合验证新写入可见、同文件版本替换和永久删除。它只使用 `firstrag_t133_probe_u900133_identity`，最后必须执行 `cleanup`；该 probe 不会切换默认 provider，也不会读取用户 embedding credential：
+
+```bash
+docker compose --profile milvus exec -T worker \
+  python -m app.services.vectors.milvus_write_lifecycle_probe write --version 1
+docker compose --profile milvus exec -T backend \
+  python -m app.services.vectors.milvus_write_lifecycle_probe verify --version 1
+docker compose --profile milvus exec -T worker \
+  python -m app.services.vectors.milvus_write_lifecycle_probe write --version 2
+docker compose --profile milvus exec -T backend \
+  python -m app.services.vectors.milvus_write_lifecycle_probe verify --version 2
+docker compose --profile milvus exec -T backend \
+  python -m app.services.vectors.milvus_write_lifecycle_probe delete
+docker compose --profile milvus exec -T backend \
+  python -m app.services.vectors.milvus_write_lifecycle_probe cleanup
+```
+
 ### 数据库初始化与迁移
 
 迁移脚本默认读取仓库根目录 `.env` 中的 `DATABASE_URL`，不会打印 `.env` 内容或数据库密码。

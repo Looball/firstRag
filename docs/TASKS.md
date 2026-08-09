@@ -267,8 +267,8 @@
 | `T-129` | `PLAN-20260802-01` | `P1` | `Done` | 明确教程仓库 License 与公开使用边界 | 2026-08-03 | `1d66209` |
 | `T-130` | `PLAN-20260809-01` | `P1` | `Done` | 冻结 Chroma 基线并确定 Milvus 迁移设计 | `2026-08-09` | `144db0e` |
 | `T-131` | `PLAN-20260809-01` | `P1` | `Done` | 建立 provider-neutral vector store boundary | `2026-08-09` | `73c54ae` |
-| `T-132` | `PLAN-20260809-01` | `P1` | `Todo` | 接入 Milvus Standalone、配置与健康门禁 | — | — |
-| `T-133` | `PLAN-20260809-01` | `P1` | `Todo` | 迁移向量写入、重建与删除生命周期 | — | — |
+| `T-132` | `PLAN-20260809-01` | `P1` | `Done` | 接入 Milvus Standalone、配置与健康门禁 | `2026-08-09` | `b74043c` |
+| `T-133` | `PLAN-20260809-01` | `P1` | `Done` | 迁移向量写入、重建与删除生命周期 | `2026-08-09` | `0263bb2` |
 | `T-134` | `PLAN-20260809-01` | `P1` | `Todo` | 迁移 Milvus 向量检索与 diagnostics | — | — |
 | `T-135` | `PLAN-20260809-01` | `P0` | `Todo` | 建立 Chroma 到 Milvus 数据迁移与回滚工具 | — | — |
 | `T-136` | `PLAN-20260809-01` | `P1` | `Todo` | 完成 Milvus 全链路回归、质量与性能验收 | — | — |
@@ -5473,7 +5473,7 @@ git diff --check
 
 - 来源计划：`PLAN-20260809-01`
 - 优先级：`P1`
-- 状态：`Todo`
+- 状态：`Done`
 - 目标：让 worker 通过 Milvus adapter 完成新文件索引、同文件重建、OCR 重识别/人工校对后的版本替换、补偿清理和永久删除。
 - 技术边界：
   - 保留 PostgreSQL advisory lock、`index_version`、stable chunk ID 和 active job 约束。
@@ -5487,6 +5487,15 @@ git diff --check
 - 验收标准：
   - 上传、重建、删除和失败恢复后，Milvus entries 与 PostgreSQL chunks 数量、ID、`index_version` 一致。
   - backend 与 worker 使用不同 client 时，任务成功后 backend 无需重启即可查询新向量。
+- 完成记录：
+  - 新增 `MilvusVectorStore`，按 ADR 创建并严格校验关闭 dynamic field 的 schema、`COSINE + HNSW` vector index、三个 scalar `INVERTED` index 和 `Strong` consistency。
+  - adapter 在删除前完成 embeddings、stable ID、隔离字段和 payload 校验；随后按用户全部 embedding identities 删除文件旧版本、分批 upsert、flush、ID/count 对账和 filtered ANN self-hit。任何 mutation 后失败都会清空该文件全部 Milvus 半成品。
+  - worker 保留 advisory lock、active job 和 `index_version` 门禁；Milvus 写入后再替换 PostgreSQL chunks，并读回核对 chunk ID 与版本。PostgreSQL、OCR history 或最终 `indexed` 状态发布失败时统一补偿两套存储。
+  - 永久删除和显式删除向量使用无需 embedding credential 的 Milvus cleanup adapter，并按当前用户 collection prefix 清理历史 embedding identities，不跨用户。
+  - 定向回归覆盖 schema/index、幂等重建、dimension 漂移、非法 payload、分批写入中断、跨 identity 删除、PostgreSQL ID/version 漂移与 stale 状态发布失败。
+  - 专用 `firstrag_t133_probe_u900133_identity` 在真实 Milvus Standalone 上完成 worker 写 v1、backend 新 client 读回、worker 重建 v2、backend 读回和 backend 删除、worker 确认不可见；验收后已按 exact collection name 清理，默认 provider 仍为 Chroma。
+  - 完整后端 `408/408`、credential-free Playwright `1/1`、Python 编译、教程文档、13 个 Actions pin、Compose runtime health 与 production preflight 均通过。
+- 相关提交：`0263bb2`
 
 ## T-134 迁移 Milvus 向量检索与 diagnostics
 
