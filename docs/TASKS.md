@@ -277,7 +277,7 @@
 | `T-138` | `PLAN-20260809-01` | `P2` | `Done` | 完成 Milvus 切换观察并移除 Chroma 遗留 | `2026-08-11` | `6feabef` |
 | `T-139` | CI required checks | `P0` | `Done` | 修复 Nano ID 与 cryptography 新增高危依赖漏洞 | `2026-08-09` | `c5b5564` |
 | `T-140` | `PLAN-20260811-01` | `P1` | `Done` | 冻结 PostgreSQL full-text 基线并确定 BGE-M3 sparse ADR | `2026-08-11` | `b0c11b9` |
-| `T-141` | `PLAN-20260811-01` | `P1` | `Done` | 接入单实例 BGE-M3 sparse encoder runtime | `2026-08-11` |  |
+| `T-141` | `PLAN-20260811-01` | `P1` | `Done` | 接入单实例 BGE-M3 sparse encoder runtime | `2026-08-11` | `8534823` |
 | `T-142` | `PLAN-20260811-01` | `P1` | `Todo` | 扩展 Milvus dense/sparse schema 与写入生命周期 |  |  |
 | `T-143` | `PLAN-20260811-01` | `P1` | `Todo` | 将混合召回与 RRF 统一迁移到 Milvus |  |  |
 | `T-144` | `PLAN-20260811-01` | `P1` | `Todo` | 移除 PostgreSQL 关键词检索并完成重建与验收 |  |  |
@@ -5711,6 +5711,7 @@ git diff --check
   - 真实 BGE-M3 在修复版 `FlagEmbedding==1.4.0`、`huggingface-hub==1.27.0`、`torch==2.13.0+cpu`、`transformers==5.15.0` 镜像中以 offline cache 完成 query/document probe；backend client smoke 返回 8 个非零 sparse 权重。最终镜像约 374 MB，实际 snapshot/Xet cache 约 4.3 GB，运行时约 792 MiB。
   - Linux Python 3.12 dependency audit 0 findings；正式 backend 镜像内 compileall 与全量 unittest 421/421 通过；默认/E2E Compose config、真实与 fixture probe、GitHub Actions pin、教程文档和 `git diff --check` 均通过。
   - 完整 Compose rebuild 后 `sparse-encoder` healthy，migration 与 Milvus authenticated probe 成功，backend/worker 只在 encoder ready 后启动；production preflight 的 sparse settings、拓扑与 runtime health 均通过，整体门禁仅因本机 `.env` 尚未显式配置生产级 `MILVUS_URI` / `MILVUS_TOKEN` 而失败。
+- 相关提交：`8534823`
 
 ## T-142 扩展 Milvus dense/sparse schema 与写入生命周期
 
