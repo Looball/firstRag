@@ -19,6 +19,7 @@ from app.services.vectors.vector_store import (
     VectorStoreBoundary,
     VectorStoreHealth,
     VectorStoreProviderError,
+    build_child_id,
 )
 
 
@@ -413,10 +414,14 @@ class MilvusVectorStore:
                 raise ValueError("document file_id 与写入范围不一致")
             chunk_index = int(metadata["chunk_index"])
             index_version = int(metadata["index_version"])
-            expected_id = (
-                f"{user_id}:{normalized_file_id}:"
-                f"v{index_version}:{chunk_index}"
-            )
+            if "parent_index" in metadata and "child_index" in metadata:
+                expected_id = build_child_id(metadata)
+            else:
+                # 兼容 T-145 前的 probe/旧调用；生产切分统一走 parent/child ID。
+                expected_id = (
+                    f"{user_id}:{normalized_file_id}:"
+                    f"v{index_version}:{chunk_index}"
+                )
             if chunk_id != expected_id:
                 raise ValueError("chunk_id 不符合 stable ID 契约")
             if len(chunk_id) > CHUNK_ID_MAX_CHARACTERS:

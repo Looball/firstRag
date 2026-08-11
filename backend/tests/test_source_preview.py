@@ -39,8 +39,10 @@ class KnowledgeChunkContextRepositoryTests(unittest.TestCase):
         self.assertIn("chunk.index_version = %s", sql)
         self.assertIn("%s::integer IS NULL", sql)
         self.assertIn("ORDER BY chunk.index_version DESC", sql)
+        self.assertIn("knowledge_file_chunk_parents", sql)
         self.assertIn("context.user_id = %s", sql)
-        self.assertEqual(params, (7, str(file_id), 4, 5, 5, 7, 2, 2))
+        self.assertIn("context.parent_id = target.target_parent_id", sql)
+        self.assertEqual(params, (7, str(file_id), 4, 5, 5, 7, 7, 2, 2))
 
     def test_ocr_page_list_query_is_scoped_to_user_file_and_version(self) -> None:
         """OCR 页级清单必须绑定 user、file、index version 和软删除条件。"""
@@ -83,6 +85,10 @@ class SourcePreviewApiTests(unittest.TestCase):
                 "mime_type": "text/markdown",
                 "index_version": 3,
                 "target_chunk_index": 2,
+                "target_parent_id": "7:file:v3:p0",
+                "parent_index": 0,
+                "parent_content": "previous\ntarget",
+                "parent_metadata": {"h1": "指南"},
                 "chunk_index": 1,
                 "content": "previous",
                 "metadata": {"h1": "指南", "source": "/app/uploads/secret"},
@@ -92,6 +98,10 @@ class SourcePreviewApiTests(unittest.TestCase):
                 "mime_type": "text/markdown",
                 "index_version": 3,
                 "target_chunk_index": 2,
+                "target_parent_id": "7:file:v3:p0",
+                "parent_index": 0,
+                "parent_content": "previous\ntarget",
+                "parent_metadata": {"h1": "指南"},
                 "chunk_index": 2,
                 "content": "target",
                 "metadata": {
@@ -137,6 +147,9 @@ class SourcePreviewApiTests(unittest.TestCase):
         )
         payload = response.json()
         self.assertEqual(payload["target_chunk_index"], 2)
+        self.assertEqual(payload["target_parent_id"], "7:file:v3:p0")
+        self.assertEqual(payload["parent"]["content"], "previous\ntarget")
+        self.assertEqual(payload["parent"]["location"]["h1"], "指南")
         self.assertFalse(payload["chunks"][0]["is_target"])
         self.assertTrue(payload["chunks"][1]["is_target"])
         self.assertEqual(payload["chunks"][1]["location"]["h2"], "安装")

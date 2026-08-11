@@ -11,7 +11,8 @@
 | `knowledge_base_retrieval_settings` | 知识库级 RAG 检索策略设置。 |
 | `knowledge_files` | 知识文件元数据，包含软删除兼容字段、SHA-256 去重和索引状态；用户永久删除时会同步清理关联存储。 |
 | `knowledge_base_files` | 知识库与文件多对多关联。 |
-| `knowledge_file_chunks` | 文本分块正文、metadata、全文检索索引和索引版本。 |
+| `knowledge_file_chunk_parents` | 结构化父块正文、位置 metadata 和索引版本，用于上下文扩展与引用核验。 |
+| `knowledge_file_chunks` | 可检索 child chunk 正文、parent identity、metadata、全文检索索引和索引版本。 |
 | `knowledge_file_ocr_corrections` | 扫描 PDF 页级人工 OCR 修订、原始 OCR 文本和修订版本。 |
 | `knowledge_file_ocr_history` | 扫描 PDF 页级原始识别历史、质量指标和相邻趋势基线。 |
 | `conversations` | 会话，属于某个知识库。 |
@@ -47,7 +48,8 @@
 | `conversations` | `id`, `user_id`, `title`, `created_at`, `updated_at`, `deleted_at`, `knowledge_base_id` |
 | `messages` | `id`, `conversation_id`, `role`, `content`, `created_at`, `status`, `error_message`, `completed_at`, `sources`, `retrieval` |
 | `message_attachments` | `id`, `user_id`, `conversation_id`, `message_id`, `original_name`, `storage_path`, `mime_type`, `size_bytes`, `file_hash`, `status`, `created_at`, `updated_at` |
-| `knowledge_file_chunks` | `chunk_id`, `user_id`, `knowledge_file_id`, `chunk_index`, `content`, `metadata`, `created_at`, `updated_at`, `index_version` |
+| `knowledge_file_chunk_parents` | `parent_id`, `user_id`, `knowledge_file_id`, `index_version`, `parent_index`, `content`, `metadata`, `created_at`, `updated_at` |
+| `knowledge_file_chunks` | `chunk_id`, `user_id`, `knowledge_file_id`, `chunk_index`, `parent_id`, `child_index`, `content`, `metadata`, `created_at`, `updated_at`, `index_version` |
 | `knowledge_file_ocr_corrections` | `user_id`, `knowledge_file_id`, `page_number`, `original_ocr_text`, `corrected_text`, `revision`, `created_at`, `updated_at` |
 | `knowledge_file_ocr_history` | `id`, `user_id`, `knowledge_file_id`, `page_number`, `index_version`, `ocr_attempt`, `source_job_id`, `trigger`, `ocr_engine`, `ocr_confidence`, `ocr_quality`, `ocr_word_count`, `ocr_text`, `ocr_text_sha256`, `ocr_text_source`, `correction_revision`, `created_at` |
 | `vector_index_jobs` | `id`, `user_id`, `knowledge_file_id`, `knowledge_base_id`, `status`, `priority`, `attempts`, `max_attempts`, `locked_by`, `locked_at`, `started_at`, `finished_at`, `error_message`, `result`, `options`, `created_at`, `updated_at`, `available_at`, `heartbeat_at`, `index_version` |
@@ -100,6 +102,10 @@
 - `index`
 - `file_id`
 - `file_name`
+- `parent_id`
+- `parent_index`
+- `child_id`
+- `child_index`
 - `chunk_index`
 - `index_version`
 - `page_index` / `page_number` / `page_count`（PDF）
@@ -131,9 +137,20 @@
 `override_applied` 与 `override_reason` 表示后端规则是否覆盖了 LLM 判断，
 例如问题关键词命中当前知识库文件画像时强制检索。
 
+`knowledge_file_chunk_parents` 保存结构优先的父块：Markdown 使用标题层级，PDF
+至少保持页边界，DOCX 使用标题与段落组，无可靠结构的纯文本才使用无 overlap 的
+递归 fallback。`knowledge_file_chunks` 只保存 parent 内继续切分出的可检索 child；
+`parent_id` 外键和 `(parent_id, child_index)` 唯一索引阻止新数据产生孤儿或重复 child。
+当前默认 parent 上限为 `2000` 字符，child 为 `600` 字符且 overlap 为 `100` 字符，
+overlap 不得跨 parent。
+
+parent stable ID 为 `{user_id}:{file_id}:v{index_version}:p{parent_index}`，child
+stable ID 为 `{parent_id}:c{child_index}`。为兼容既有 source API，同一文件的全局
+`chunk_index` 仍跨 PDF page 或 DOCX block 连续分配。
+
 `knowledge_file_chunks.metadata` 会随文件类型保存解析上下文。文本文件常见字段包括
-`source`、`file_id`、`file_name`、`user_id` 和 `chunk_index`。同一文件的
-`chunk_index` 会跨 PDF page 或 DOCX block 全局连续分配。PDF 额外保存
+`source`、`file_id`、`file_name`、`user_id`、`parent_id`、`parent_index`、
+`child_id`、`child_index` 和 `chunk_index`。PDF 额外保存
 `location_type=pdf_page`、0-based `page_index`、1-based `page_number` 和
 `page_count`。PDF 原生文本页保存 `pdf_parse_method=native_text`；扫描页保存
 `pdf_parse_method=ocr`、`ocr_engine=tesseract`、`ocr_languages` 和 `ocr_dpi`。

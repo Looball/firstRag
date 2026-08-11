@@ -468,10 +468,10 @@ sequenceDiagram
     participant PG as PostgreSQL chunks
     participant File as knowledge_files
 
-    Indexer->>Indexer: split documents and attach index_version
-    Indexer->>Embed: embed chunks with current user's settings
+    Indexer->>Indexer: split parents/children and attach index_version
+    Indexer->>Embed: embed child chunks with current user's settings
     Indexer->>Vector: delete old file entities, add stable IDs
-    Indexer->>PG: replace same-user file chunks
+    Indexer->>PG: replace same-user parents and child chunks
     alt both writes succeed
         Indexer->>File: status=indexed if version still matches
     else either write fails
@@ -481,16 +481,20 @@ sequenceDiagram
     end
 ```
 
-纯文本和 Markdown 默认使用 `chunk_size=1000`、`chunk_overlap=200`。多页或多 block 文档的 `chunk_index` 在同一用户、同一文件内全局连续。稳定 ID 格式是：
+切分先构造 parent，再只在 parent 内构造 child：Markdown 优先按标题，PDF 至少保持 page 边界，DOCX 沿用标题和段落组；无结构文本的默认 parent 是 `chunk_size=2000`、`chunk_overlap=0`。child 默认使用 `chunk_size=600`、`chunk_overlap=100`，overlap 不会跨 parent。多页或多 block 文档的 `chunk_index` 在同一用户、同一文件内仍全局连续。
+
+稳定 ID 格式是：
 
 ```text
-{user_id}:{file_id}:v{index_version}:{chunk_index}
+parent_id = {user_id}:{file_id}:v{index_version}:p{parent_index}
+child_id  = {parent_id}:c{child_index}
 ```
 
 Embedding 使用当前用户保存的 provider、model、dimensions 和加密凭据。Milvus collection 按用户与 embedding identity 派生，避免不同用户或不兼容维度混放。每个 chunk 同时写入：
 
 - Milvus：embedding、正文和 metadata JSON，服务 filtered ANN retrieval。
-- PostgreSQL `knowledge_file_chunks`：正文、metadata、`tsvector`/trigram 索引，服务 full-text retrieval 和引用原文。
+- PostgreSQL `knowledge_file_chunk_parents`：parent 正文和位置 metadata，服务 source context 与后续父块扩展。
+- PostgreSQL `knowledge_file_chunks`：child 正文、`parent_id` 外键、metadata、`tsvector`/trigram 索引，当前仍服务 full-text retrieval 和引用定位。
 
 两套存储不能共享事务，所以失败路径会尽力删除该用户、该文件的两边半成品，并把文件标记为 `failed`。`job.status=succeeded` 证明本次写入流程结束，但不单独证明任意 query 的 ANN 召回质量；检索质量要用当前 indexing/RAG eval 验证。
 
@@ -509,7 +513,8 @@ Embedding 使用当前用户保存的 provider、model、dimensions 和加密凭
 
 | 存储 | 字段 | 约束或用途 |
 | --- | --- | --- |
-| PostgreSQL chunk | `chunk_id`, `user_id`, `knowledge_file_id`, `chunk_index`, `index_version` | 精确定位与用户隔离。 |
+| PostgreSQL parent | `parent_id`, `user_id`, `knowledge_file_id`, `parent_index`, `index_version` | 完整上下文与用户隔离。 |
+| PostgreSQL child | `chunk_id`, `parent_id`, `child_index`, `chunk_index`, `index_version` | 精确命中、父块归属与旧 API 兼容。 |
 | PostgreSQL chunk | `content`, `metadata` | full-text retrieval 与引用原文。 |
 | Milvus fields/metadata | `user_id`, `file_id`, `chunk_index`, `index_version`, location fields | scalar filter、引用和版本诊断。 |
 | `knowledge_files` | `status`, `error_message`, `index_version` | 当前文件索引状态。 |

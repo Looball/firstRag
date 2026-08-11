@@ -150,13 +150,42 @@ class VectorStoreBoundary(Protocol):
         ...
 
 
+def build_parent_id(metadata: dict[str, object]) -> str:
+    """按文件版本与 parent 序号生成确定性的父块 ID。"""
+    user_id = metadata["user_id"]
+    file_id = metadata["file_id"]
+    index_version = metadata["index_version"]
+    parent_index = metadata["parent_index"]
+    return f"{user_id}:{file_id}:v{index_version}:p{parent_index}"
+
+
+def build_child_id(metadata: dict[str, object]) -> str:
+    """按父块 ID 与 parent 内 child 序号生成确定性的子块 ID。"""
+    parent_id = build_parent_id(metadata)
+    child_index = metadata["child_index"]
+    return f"{parent_id}:c{child_index}"
+
+
+def build_parent_ids(parents: list[Document]) -> list[str]:
+    """生成父块 ID，并把 identity 写回 metadata 供持久化与审计。"""
+    parent_ids: list[str] = []
+    for parent in parents:
+        parent_id = build_parent_id(parent.metadata)
+        parent.metadata["parent_id"] = parent_id
+        parent_ids.append(parent_id)
+    return parent_ids
+
+
 def build_chunk_ids(chunks: list[Document]) -> list[str]:
-    """按应用层 metadata 生成跨 provider 稳定的向量 ID。"""
-    chunk_ids = []
+    """生成 child stable ID，并把 parent/child identity 写回 metadata。"""
+    chunk_ids: list[str] = []
     for chunk in chunks:
-        user_id = chunk.metadata["user_id"]
-        file_id = chunk.metadata["file_id"]
-        chunk_index = chunk.metadata["chunk_index"]
-        index_version = chunk.metadata["index_version"]
-        chunk_ids.append(f"{user_id}:{file_id}:v{index_version}:{chunk_index}")
+        parent_id = build_parent_id(chunk.metadata)
+        child_id = build_child_id(chunk.metadata)
+        chunk.metadata.update({
+            "parent_id": parent_id,
+            "child_id": child_id,
+            "chunk_id": child_id,
+        })
+        chunk_ids.append(child_id)
     return chunk_ids

@@ -4,7 +4,7 @@ from contextlib import nullcontext
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 from uuid import uuid4
 
 from langchain_core.documents import Document
@@ -112,35 +112,134 @@ class VectorIndexServiceTests(unittest.TestCase):
         with patch(
             "app.services.vectors.vector_index_service.list_file_chunk_identity_rows",
             return_value=[
-                {"chunk_id": "chunk-a", "index_version": 4},
-                {"chunk_id": "chunk-b", "index_version": 4},
+                {
+                    "chunk_id": "chunk-a",
+                    "parent_id": "parent-a",
+                    "child_index": 0,
+                    "index_version": 4,
+                },
+                {
+                    "chunk_id": "chunk-b",
+                    "parent_id": "parent-a",
+                    "child_index": 1,
+                    "index_version": 4,
+                },
             ],
+        ), patch(
+            "app.services.vectors.vector_index_service.list_file_parent_identity_rows",
+            return_value=[{"parent_id": "parent-a", "index_version": 4}],
         ):
             audit_postgres_chunk_identity(
                 user_id=1,
                 file_id=file_id,
                 expected_chunk_ids=["chunk-b", "chunk-a"],
+                expected_parent_ids=["parent-a"],
                 expected_index_version=4,
             )
 
         for rows in (
-            [{"chunk_id": "chunk-a", "index_version": 4}],
+            [{
+                "chunk_id": "chunk-a",
+                "parent_id": "parent-a",
+                "child_index": 0,
+                "index_version": 4,
+            }],
             [
-                {"chunk_id": "chunk-a", "index_version": 3},
-                {"chunk_id": "chunk-b", "index_version": 3},
+                {
+                    "chunk_id": "chunk-a",
+                    "parent_id": "parent-a",
+                    "child_index": 0,
+                    "index_version": 3,
+                },
+                {
+                    "chunk_id": "chunk-b",
+                    "parent_id": "parent-a",
+                    "child_index": 1,
+                    "index_version": 3,
+                },
             ],
         ):
             with self.subTest(rows=rows), patch(
                 "app.services.vectors.vector_index_service.list_file_chunk_identity_rows",
                 return_value=rows,
+            ), patch(
+                "app.services.vectors.vector_index_service.list_file_parent_identity_rows",
+                return_value=[{"parent_id": "parent-a", "index_version": 4}],
             ):
-                with self.assertRaisesRegex(RuntimeError, "chunk 审计失败"):
+                with self.assertRaisesRegex(RuntimeError, "parent/child 审计失败"):
                     audit_postgres_chunk_identity(
                         user_id=1,
                         file_id=file_id,
                         expected_chunk_ids=["chunk-a", "chunk-b"],
+                        expected_parent_ids=["parent-a"],
                         expected_index_version=4,
                     )
+
+    def test_index_file_vectors_persists_parent_child_hierarchy(self) -> None:
+        """索引应同时写入 parent 正文与带稳定 identity 的 child。"""
+        file_id = uuid4()
+        vector_store = Mock()
+        vector_store.ensure_collection.return_value = "collection"
+        with TemporaryDirectory() as temp_dir:
+            storage_path = Path(temp_dir) / "document.md"
+            storage_path.write_text("placeholder", encoding="utf-8")
+            loaded = Document(
+                page_content="# 第一章\n\n" + "企业制度内容。" * 120,
+                metadata={
+                    "user_id": "1",
+                    "file_id": str(file_id),
+                    "file_name": "document.md",
+                    "file_type": "md",
+                    "content_format": "markdown",
+                },
+            )
+            with patch(
+                "app.services.vectors.vector_index_service.load_document",
+                return_value=[loaded],
+            ), patch(
+                "app.services.vectors.vector_index_service.get_vector_store",
+                return_value=vector_store,
+            ), patch(
+                "app.services.vectors.vector_index_service.replace_file_chunks",
+            ) as replace_chunks, patch(
+                "app.services.vectors.vector_index_service.audit_postgres_chunk_identity",
+            ) as audit_identity, patch(
+                "app.services.vectors.vector_index_service.record_pdf_ocr_history_entries",
+            ):
+                result = index_file_vectors(
+                    user_id=1,
+                    file_id=file_id,
+                    storage_path=storage_path,
+                    index_version=4,
+                    original_name="document.md",
+                )
+
+        self.assertEqual(result["parent_count"], 1)
+        self.assertGreater(result["chunk_count"], 1)
+        replace_kwargs = replace_chunks.call_args.kwargs
+        self.assertEqual(len(replace_kwargs["parents"]), 1)
+        self.assertEqual(
+            replace_kwargs["parent_ids"],
+            [f"1:{file_id}:v4:p0"],
+        )
+        self.assertTrue(all(
+            chunk.metadata["parent_id"] == f"1:{file_id}:v4:p0"
+            for chunk in replace_kwargs["chunks"]
+        ))
+        self.assertEqual(
+            replace_kwargs["chunk_ids"],
+            [
+                f"1:{file_id}:v4:p0:c{child_index}"
+                for child_index in range(result["chunk_count"])
+            ],
+        )
+        audit_identity.assert_called_once_with(
+            user_id=1,
+            file_id=file_id,
+            expected_chunk_ids=replace_kwargs["chunk_ids"],
+            expected_parent_ids=replace_kwargs["parent_ids"],
+            expected_index_version=4,
+        )
 
     def test_index_record_loads_persistent_pdf_ocr_corrections(self) -> None:
         """worker 索引文件时应加载并传递全部持久化页级修订。"""

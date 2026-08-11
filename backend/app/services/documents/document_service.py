@@ -17,11 +17,6 @@ import pymupdf
 import pymupdf4llm
 
 from langchain_core.documents import Document
-from langchain_text_splitters import (
-    MarkdownHeaderTextSplitter,
-    RecursiveCharacterTextSplitter,
-)
-
 from app.core.config import (
     PDF_OCR_ADAPTIVE_REINDEX_ENABLED,
     PDF_OCR_DPI,
@@ -39,6 +34,10 @@ from app.services.documents.pdf_ocr_engine import (
     parse_tesseract_tsv_confidence,
     run_pdf_page_ocr,
     validate_pdf_ocr_runtime_config,
+)
+from app.services.documents.parent_child_chunking import (
+    ParentChildSplitResult,
+    split_parent_child_documents,
 )
 from app.services.llm_service import (
     chat_model_supports_images,
@@ -83,22 +82,11 @@ PYMUPDF4LLM_OMITTED_PICTURE_PATTERN = re.compile(
     r"\*\*==>\s*picture\s*\[[^\]]+\]\s*intentionally omitted\s*<==\*\*",
     flags=re.IGNORECASE,
 )
-MARKDOWN_HEADERS_TO_SPLIT_ON = [
-    ("#", "h1"),
-    ("##", "h2"),
-    ("###", "h3"),
-    ("####", "h4"),
-    ("#####", "h5"),
-    ("######", "h6"),
-]
-
-
 def normalize_pdf_native_text_for_detection(text: str) -> str:
     """移除 parser 的图片占位提示，避免把扫描页误判成原生文本页。"""
     return PYMUPDF4LLM_OMITTED_PICTURE_PATTERN.sub("", text).strip()
 
 
-TEXT_SEPARATORS = ["\n\n", "\n", "。", "！", "？", "；", "，", " ", ""]
 DOCX_BLOCK_MAX_CHARACTERS = 900
 WORDPROCESSINGML_NAMESPACE = (
     "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
@@ -745,55 +733,20 @@ def load_document(
 
 
 def split_document(document: Document) -> list[Document]:
-    """按照文档内容格式切分单个文档。"""
-    markdown_splitter = MarkdownHeaderTextSplitter(
-        headers_to_split_on=MARKDOWN_HEADERS_TO_SPLIT_ON,
-        strip_headers=False,
-    )
-    markdown_chunk_splitter = RecursiveCharacterTextSplitter(
-        chunk_size=1000,
-        chunk_overlap=200,
-        separators=TEXT_SEPARATORS,
-    )
-    plain_text_splitter = RecursiveCharacterTextSplitter(
-        chunk_size=1000,
-        chunk_overlap=200,
-        separators=TEXT_SEPARATORS,
-    )
+    """按照 parent/child 契约切分单个文档并返回可检索 child chunks。"""
+    return split_parent_child_documents([document]).children
 
-    if document.metadata.get("content_format") == "markdown":
-        sections = markdown_splitter.split_text(document.page_content)
-        for section in sections:
-            # 标题切分器生成标题元数据，这里补回原始文件信息。
-            section.metadata = {
-                **document.metadata,
-                **section.metadata,
-            }
-        return markdown_chunk_splitter.split_documents(sections)
 
-    return plain_text_splitter.split_documents([document])
+def split_documents_with_parents(
+    documents: list[Document],
+) -> ParentChildSplitResult:
+    """批量返回父块与可检索子块，供索引生命周期统一持久化。"""
+    return split_parent_child_documents(documents)
 
 
 def split_documents(documents: list[Document]) -> list[Document]:
-    """批量切分文档，并按用户和文件生成全局连续分块序号。"""
-    chunks: list[Document] = []
-    next_chunk_index_by_file: dict[tuple[str, str], int] = {}
-    for document in documents:
-        document_chunks = split_document(document)
-        metadata = document.metadata
-        sequence_key = (
-            str(metadata.get("user_id") or ""),
-            str(metadata.get("file_id") or metadata.get("source") or ""),
-        )
-        next_chunk_index = next_chunk_index_by_file.get(sequence_key, 0)
-        for chunk in document_chunks:
-            chunk_index = next_chunk_index
-            chunk.metadata["chunk_index"] = chunk_index
-            next_chunk_index += 1
-        next_chunk_index_by_file[sequence_key] = next_chunk_index
-        chunks.extend(document_chunks)
-
-    return chunks
+    """批量切分文档并返回全局连续编号的可检索 child chunks。"""
+    return split_documents_with_parents(documents).children
 
 
 def build_vector_store(

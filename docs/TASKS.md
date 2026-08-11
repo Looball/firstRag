@@ -281,7 +281,7 @@
 | `T-142` | `PLAN-20260811-01` | `P1` | `Todo` | 扩展 Milvus dense/sparse schema 与写入生命周期 |  |  |
 | `T-143` | `PLAN-20260811-01` | `P1` | `Todo` | 将混合召回与 RRF 统一迁移到 Milvus |  |  |
 | `T-144` | `PLAN-20260811-01` | `P1` | `Todo` | 移除 PostgreSQL 关键词检索并完成重建与验收 |  |  |
-| `T-145` | `PLAN-20260811-01` | `P1` | `Todo` | 固化父子块切分、stable ID 与上下文扩展契约 |  |  |
+| `T-145` | `PLAN-20260811-01` | `P1` | `Doing` | 固化父子块切分、stable ID 与上下文扩展契约 |  |  |
 
 ## 新计划接入流程
 
@@ -5768,7 +5768,7 @@ git diff --check
 
 - 来源计划：`PLAN-20260811-01`
 - 优先级：`P1`
-- 状态：`Todo`
+- 状态：`Doing`
 - 执行顺序：在 `T-142` 前完成，避免 Milvus v2 schema 和全量数据重复重建。
 - 目标：把当前统一 `1000` 字符 / `200` overlap 的单层 chunk 升级为结构优先的 parent/child 模型，并冻结可供写入、检索、sources 和重建共同使用的 identity 契约。
 - 技术边界：

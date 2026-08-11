@@ -31,6 +31,9 @@ def get_document_key(document: Document) -> str:
     if file_id != "" and chunk_index != "":
         return f"{user_id}:{file_id}:{chunk_index}"
 
+    if metadata.get("child_id"):
+        return str(metadata["child_id"])
+
     if metadata.get("chunk_id"):
         return str(metadata["chunk_id"])
 
@@ -45,7 +48,8 @@ def reciprocal_rank_fusion(
 ) -> list[Document]:
     """使用 RRF 融合多个有序检索结果列表。
 
-    本函数先根据 user_id:file_id:chunk_index 或 chunk_id 去重，
+    本函数优先按 user_id:file_id:chunk_index 跨新旧通道去重，
+    定位字段缺失时回退到 child_id/chunk_id，
     再累加不同召回器给同一文档带来的倒数排名分数，最后按融合分数
     返回 top-k。
     """

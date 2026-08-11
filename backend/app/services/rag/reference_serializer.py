@@ -119,6 +119,13 @@ def serialize_reference_documents(
             "file_name": original_names.get(doc_file_id)
                           or metadata.get("file_name"),
             "file_type": metadata.get("file_type"),
+            "parent_id": metadata.get("parent_id"),
+            "parent_index": metadata.get("parent_index"),
+            "child_id": (
+                metadata.get("child_id")
+                or metadata.get("chunk_id")
+            ),
+            "child_index": metadata.get("child_index"),
             "chunk_index": metadata.get("chunk_index"),
             "index_version": metadata.get("index_version"),
             "page_index": metadata.get("page_index"),
