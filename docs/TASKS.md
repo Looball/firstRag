@@ -281,7 +281,7 @@
 | `T-142` | `PLAN-20260811-01` | `P1` | `Todo` | 扩展 Milvus dense/sparse schema 与写入生命周期 |  |  |
 | `T-143` | `PLAN-20260811-01` | `P1` | `Todo` | 将混合召回与 RRF 统一迁移到 Milvus |  |  |
 | `T-144` | `PLAN-20260811-01` | `P1` | `Todo` | 移除 PostgreSQL 关键词检索并完成重建与验收 |  |  |
-| `T-145` | `PLAN-20260811-01` | `P1` | `Doing` | 固化父子块切分、stable ID 与上下文扩展契约 |  |  |
+| `T-145` | `PLAN-20260811-01` | `P1` | `Done` | 固化父子块切分、stable ID 与上下文扩展契约 | `2026-08-11` | `14eeca2` |
 
 ## 新计划接入流程
 
@@ -5768,7 +5768,7 @@ git diff --check
 
 - 来源计划：`PLAN-20260811-01`
 - 优先级：`P1`
-- 状态：`Doing`
+- 状态：`Done`
 - 执行顺序：在 `T-142` 前完成，避免 Milvus v2 schema 和全量数据重复重建。
 - 目标：把当前统一 `1000` 字符 / `200` overlap 的单层 chunk 升级为结构优先的 parent/child 模型，并冻结可供写入、检索、sources 和重建共同使用的 identity 契约。
 - 技术边界：
@@ -5783,6 +5783,16 @@ git diff --check
   - 同一 child 不跨 parent，所有非空 parent 至少包含一个 child，parent 顺序与 child 顺序可稳定复现。
   - 真实中文、英文、表格/标题、PDF 和 DOCX fixture 能由 child 精确命中并恢复父块上下文，source 引用仍能定位到命中位置。
   - 在同一 query 集上对照当前单层 chunk，目标文件命中、sources 和 14-case RAG eval 不低于冻结基线，并记录索引数量、上下文长度、P50/P95 与峰值内存变化。
+- 完成记录：
+  - 新增结构优先的 parent/child 切分模块，默认参数集中为 parent `2000/0`、child `600/100`；Markdown 按标题保留结构，PDF/DOCX 沿用 loader 的页/块边界，无可靠结构时使用 recursive fallback，child overlap 不跨 parent。
+  - stable identity 固化为 `{user_id}:{file_id}:v{index_version}:p{parent_index}` 与其 child 后缀 `:c{child_index}`；索引写入、Milvus 写入校验、PostgreSQL 审计、RRF 去重和 sources 序列化共同使用该契约。
+  - 新增 migration `009_create_knowledge_file_chunk_parents.sql`，在 PostgreSQL 持久化 parent 正文并为 child 增加 `parent_id` / `child_index`；重建在同一事务内先 parent 后 child，删除先 child 后 parent，审计检查 ID、version、覆盖关系和无孤儿 child。
+  - source preview 可返回命中 child 所属的完整 parent，且兼容 T-145 前没有 parent identity 的历史 rows；在线检索的按 parent 聚合、候选限制、Cross-Encoder child 精排和 LLM parent 扩展仍按计划由 `T-143` 实现。
+  - Compose 已构建并运行，migration `009` 与 authenticated Milvus probe 成功；容器内全量 backend unittest 428/428、frontend Vitest 181/181、lint 0 error、Next.js production build、教程文档门禁、Actions pin、compileall、Compose config 和 `git diff --check` 均通过。运行时 synthetic smoke 得到 2 parents / 6 children、0 orphan、最大 child 599 字符。
+  - production preflight 的 Docker 资源、Milvus runtime health 和 migration dry-run 通过；整体只因本机 `.env` 未显式配置生产级 `MILVUS_URI` / `MILVUS_TOKEN` 而失败。现有 Milvus 数据尚未按新契约重建，因此真实 indexing、14-case RAG 质量与 P50/P95 对照作为 `T-142` 至 `T-144` 切换后的发布门禁执行，避免用旧 collection 得出无效结论。
+- 验证命令：`docker compose up -d --build`；`docker compose run --rm --no-deps ... backend python -m unittest discover tests`；`cd frontend && npm run lint && npm test && npm run build`；`conda run -n firstrag python -m compileall -q backend/app`；`python3 scripts/check_tutorial_docs.py`；`python3 scripts/check_github_actions_pins.py`；`conda run -n firstrag python scripts/production_preflight.py --env-file .env --migration-method compose --check-runtime-health`；`git diff --check`。
+- 完成日期：`2026-08-11`
+- 相关提交：`14eeca2`
 
 ## 更新规则
 
