@@ -15,6 +15,7 @@ backend/
 │   ├── services/        # 业务逻辑
 │   └── workers/         # 后台 worker
 ├── demo/                # 历史 demo / 兼容入口
+├── sparse_encoder/      # 独立 BGE-M3 sparse HTTP service 与共享 contract
 ├── tests/               # 后端测试
 ├── main.py              # ASGI app 兼容导出
 └── requirements.txt
@@ -27,7 +28,7 @@ backend/
 ```bash
 docker compose up -d --build
 docker compose ps
-docker compose logs --tail=100 redis postgres milvus-etcd milvus-minio milvus-standalone milvus-health-probe migrate backend worker frontend
+docker compose logs --tail=100 redis postgres milvus-etcd milvus-minio milvus-standalone milvus-health-probe sparse-encoder migrate backend worker frontend
 ```
 
 配置从 monorepo 根目录 `.env` 加载，不从 `backend/.env` 加载。常规验证应基于 Compose 容器完成。
@@ -74,6 +75,11 @@ python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 | `knowledge_file_lifecycle_service.py` | 在单文件 advisory lock 下编排当前 vector store、PostgreSQL 与磁盘的永久删除。 |
 | `retrieval/*` | 向量检索、全文检索、RRF 融合、本地 CrossEncoder 或用户级远程 rerank 精排。 |
 | `vectors/*` | embedding 模型、provider-neutral vector store、Milvus adapter、authenticated probes、向量化队列、索引生命周期和 Redis worker 运行态。 |
+| `sparse_encoder_client.py` | backend/query 与 worker/document 共用的内网 sparse encoder client；严格复核 model、revision、mode 和返回数量。 |
+
+## BGE-M3 sparse encoder
+
+`backend/sparse_encoder/` 是独立 FastAPI application，不挂到公开 backend router。real runtime 使用 `FlagEmbedding==1.4.0` 加载固定 Hugging Face snapshot，只返回 lexical weights；CI 的 `fixture` runtime 只验证相同 HTTP contract 和资源门禁，production preflight 会拒绝 fixture。服务限制 batch、单文本字符数、请求体、并发和 timeout，并禁止在异常或访问日志中输出请求正文。Compose 不映射 8090 host port，backend 与 worker 都通过 `http://sparse-encoder:8090` 访问同一个实例。
 
 ## Worker
 

@@ -321,6 +321,68 @@ class ProductionPreflightScriptTests(unittest.TestCase):
         self.assertIn("volume", joined_errors)
         self.assertIn("milvus-health-probe", joined_errors)
 
+    def test_validate_sparse_encoder_settings_rejects_fixture_and_drift(self) -> None:
+        """生产环境不能使用 fixture、漂移 revision 或 CPU FP16。"""
+        errors = production_preflight.validate_sparse_encoder_settings(
+            {
+                "SPARSE_ENCODER_MODE": "fixture",
+                "SPARSE_ENCODER_MODEL": "another/model",
+                "SPARSE_ENCODER_REVISION": "main",
+                "SPARSE_ENCODER_DEVICE": "cpu",
+                "SPARSE_ENCODER_USE_FP16": "true",
+            }
+        )
+
+        joined_errors = "\n".join(errors)
+        self.assertIn("禁止 fixture", joined_errors)
+        self.assertIn("BAAI/bge-m3", joined_errors)
+        self.assertIn("SPARSE_ENCODER_REVISION", joined_errors)
+        self.assertIn("FP16", joined_errors)
+
+    def test_validate_sparse_encoder_settings_accepts_fixed_cpu_runtime(self) -> None:
+        """固定 BGE-M3 CPU 配置应通过 production 门禁。"""
+        errors = production_preflight.validate_sparse_encoder_settings({})
+
+        self.assertEqual(errors, [])
+
+    def test_validate_compose_sparse_encoder_accepts_repository_topology(self) -> None:
+        """仓库拓扑必须是内网单实例并被 backend/worker 共用。"""
+        errors = production_preflight.validate_compose_sparse_encoder_service()
+
+        self.assertEqual(errors, [])
+
+    def test_validate_compose_sparse_encoder_rejects_public_fixture(self) -> None:
+        """host port、fixture target、缺失缓存和 consumers gate 必须失败。"""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            compose_file = Path(tmpdir) / "docker-compose.yml"
+            compose_file.write_text(
+                "\n".join(
+                    [
+                        "services:",
+                        "  sparse-encoder:",
+                        "    build:",
+                        "      target: fixture",
+                        "    ports:",
+                        '      - "8090:8090"',
+                        "  backend:",
+                        "    image: backend",
+                        "  worker:",
+                        "    image: backend",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            errors = production_preflight.validate_compose_sparse_encoder_service(
+                compose_file
+            )
+
+        joined_errors = "\n".join(errors)
+        self.assertIn("target: runtime", joined_errors)
+        self.assertIn("host ports", joined_errors)
+        self.assertIn("bge_m3_cache", joined_errors)
+        self.assertIn("backend", joined_errors)
+
     def test_parse_compose_ps_records_supports_object_and_json_lines(self) -> None:
         """runtime health 兼容 Compose 的单对象和逐行 JSON 输出。"""
         object_records = production_preflight.parse_compose_ps_records(

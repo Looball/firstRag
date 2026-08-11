@@ -276,19 +276,26 @@ def evaluate_policy(
     )
 
 
-def run_pip_audit(requirement: Path) -> dict[str, Any]:
+def run_pip_audit(
+    requirement: Path,
+    *,
+    extra_index_urls: tuple[str, ...] = (),
+) -> dict[str, Any]:
     """运行严格 pip-audit；漏洞导致的 exit 1 交由策略判断。"""
+    command = [
+        sys.executable,
+        "-m",
+        "pip_audit",
+        "--strict",
+        "--progress-spinner=off",
+        "--format=json",
+        "--requirement",
+        str(requirement),
+    ]
+    for url in extra_index_urls:
+        command.extend(("--extra-index-url", url))
     result = subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "pip_audit",
-            "--strict",
-            "--progress-spinner=off",
-            "--format=json",
-            "--requirement",
-            str(requirement),
-        ],
+        command,
         capture_output=True,
         text=True,
         check=False,
@@ -330,6 +337,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="读取已有 pip-audit JSON，主要用于离线测试。",
     )
     parser.add_argument(
+        "--extra-index-url",
+        action="append",
+        default=[],
+        help="传递给 pip-audit resolver 的额外 package index，可重复指定。",
+    )
+    parser.add_argument(
         "--today",
         type=date.fromisoformat,
         default=date.today(),
@@ -347,7 +360,10 @@ def main(argv: list[str] | None = None) -> int:
             if not isinstance(audit_payload, dict):
                 raise ValueError("pip-audit JSON 顶层必须是对象。")
         else:
-            audit_payload = run_pip_audit(args.requirement)
+            audit_payload = run_pip_audit(
+                args.requirement,
+                extra_index_urls=tuple(args.extra_index_url),
+            )
         findings = collect_findings(audit_payload)
         exceptions = load_exceptions(args.exceptions)
         result = evaluate_policy(findings, exceptions, today=args.today)

@@ -1,6 +1,6 @@
 # Docker 启动流程
 
-本文档记录 FirstRAG 使用 Docker Compose 启动本地完整链路的流程。Compose 会启动 Redis、PostgreSQL、Milvus Standalone 及其 etcd/MinIO、migration、FastAPI backend、Next.js frontend 和 vector index worker。
+本文档记录 FirstRAG 使用 Docker Compose 启动本地完整链路的流程。Compose 会启动 Redis、PostgreSQL、Milvus Standalone 及其 etcd/MinIO、单实例 BGE-M3 sparse encoder、migration、FastAPI backend、Next.js frontend 和 vector index worker。
 
 服务器级 secret 写入仓库根目录 `.env`，不要提交、截图或粘贴真实 JWT secret、数据库密码和用户凭据。聊天模型、向量模型和远程 rerank API Key 在用户登录后的“模型设置”页保存为密文，不再写入 `.env`。
 
@@ -10,6 +10,7 @@
 - 仓库位于本机可写目录，例如 `/Users/bing/Desktop/Github/FirstRAG`。
 - 聊天模型、向量模型和远程 rerank Key 可以登录后配置；未配置时服务仍可启动，但聊天调用、向量化和向量检索会提示先补充用户配置。
 - 默认 Docker 镜像不安装 `torch` / `transformers`。本地 CrossEncoder rerank 会自动降级为 RRF 结果；如需启用本地 rerank，再安装可选依赖并下载 Hugging Face 模型 `BAAI/bge-reranker-base`。也可以在设置页改用 Qwen、Voyage、Cohere、Jina 或自定义远程 rerank API。
+- 独立 `sparse-encoder` 镜像会安装 `torch` / `transformers` / `FlagEmbedding`，首次启动下载约 2.3 GB 固定 revision BGE-M3 到 `bge_m3_cache`；请为 Docker 预留额外磁盘和内存。
 
 ## 2. 准备目录
 
@@ -66,6 +67,11 @@ MILVUS_URI=http://milvus-standalone:19530
 MILVUS_TOKEN=replace-with-a-strong-token
 MILVUS_DATABASE=default
 RERANKER_MODEL_PATH=/app/models/rerankers/bge-reranker-base
+SPARSE_ENCODER_MODE=bge_m3
+SPARSE_ENCODER_MODEL=BAAI/bge-m3
+SPARSE_ENCODER_REVISION=5617a9f61b028005a4858fdac845db406aefb181
+SPARSE_ENCODER_DEVICE=cpu
+SPARSE_ENCODER_USE_FP16=false
 FRONTEND_PORT=127.0.0.1:3000
 BACKEND_PORT=127.0.0.1:8000
 POSTGRES_PORT=127.0.0.1:5432
@@ -145,13 +151,13 @@ docker compose config --quiet
 docker compose up -d --build
 ```
 
-首次启动时，`redis`、`postgres`、Milvus Standalone 及其 etcd/MinIO 健康检查通过后会自动运行 `migrate` service 初始化或升级 schema；`backend` 和 `worker` 还会等待 Milvus authenticated probe 与 migration 成功后再启动。
+首次启动时，`redis`、`postgres`、Milvus Standalone 及其 etcd/MinIO 健康检查通过后会自动运行 `migrate` service 初始化或升级 schema；`sparse-encoder` 同时下载/加载 BGE-M3 并执行最小 sparse inference，`backend` 和 `worker` 会等待 Milvus authenticated probe、sparse encoder ready 与 migration 成功后再启动。
 
 ## 7. 查看状态
 
 ```bash
 docker compose ps
-docker compose logs -f redis postgres milvus-etcd milvus-minio milvus-standalone milvus-health-probe migrate backend worker frontend
+docker compose logs -f redis postgres milvus-etcd milvus-minio milvus-standalone milvus-health-probe sparse-encoder migrate backend worker frontend
 conda run -n firstrag python scripts/production_preflight.py --env-file .env --migration-method compose --skip-migration-dry-run --check-runtime-health
 ```
 
@@ -179,7 +185,10 @@ conda run -n firstrag python scripts/production_preflight.py --env-file .env --m
 docker compose ps
 
 # 查看日志
-docker compose logs -f redis postgres milvus-etcd milvus-minio milvus-standalone backend worker frontend
+docker compose logs -f redis postgres milvus-etcd milvus-minio milvus-standalone sparse-encoder backend worker frontend
+
+# 验证 sparse encoder query/document contract
+docker compose exec -T sparse-encoder python -m sparse_encoder.probe
 
 # 只重启后端和 worker
 docker compose up -d --build backend worker
@@ -200,7 +209,7 @@ docker compose down -v
 
 `backend`、`migrate` 和 `worker` 都使用 `deploy/docker/backend.Dockerfile` 构建的 Python runtime 镜像。worker 的启动命令不同，但它仍需要文档解析、embedding、PyMilvus client 和 PostgreSQL 队列依赖，因此不会比后端小很多。backend 与 worker 通过各自的 client 访问同一个 Milvus service。
 
-后端 Dockerfile 使用 multi-stage build：`builder` 阶段安装编译工具并构建 Python virtualenv，最终 `runtime` 镜像只保留运行依赖和 ONNX 可能需要的 `libgomp1`。默认最小镜像不安装 `torch`、`transformers` 和本地 CrossEncoder rerank 依赖。
+后端 Dockerfile 使用 multi-stage build：`builder` 阶段安装编译工具并构建 Python virtualenv，最终 `runtime` 镜像只保留运行依赖和 ONNX 可能需要的 `libgomp1`。默认 backend/worker 镜像不安装 `torch`、`transformers` 和本地 CrossEncoder rerank 依赖；这些重依赖只存在于独立 `sparse-encoder` 镜像，避免两个应用进程重复加载 BGE-M3。
 
 `docker compose images` 可能会分别列出 `backend`、`migrate` 和 `worker` 的镜像大小；这些服务的底层 layer 可复用，不应简单按三份相加估算磁盘占用。修改依赖或 Dockerfile 后，如需释放旧镜像和构建缓存，可在确认不删除数据库 volume 的前提下执行：
 

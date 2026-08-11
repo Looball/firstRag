@@ -277,7 +277,7 @@
 | `T-138` | `PLAN-20260809-01` | `P2` | `Done` | 完成 Milvus 切换观察并移除 Chroma 遗留 | `2026-08-11` | `6feabef` |
 | `T-139` | CI required checks | `P0` | `Done` | 修复 Nano ID 与 cryptography 新增高危依赖漏洞 | `2026-08-09` | `c5b5564` |
 | `T-140` | `PLAN-20260811-01` | `P1` | `Done` | 冻结 PostgreSQL full-text 基线并确定 BGE-M3 sparse ADR | `2026-08-11` | `b0c11b9` |
-| `T-141` | `PLAN-20260811-01` | `P1` | `Todo` | 接入单实例 BGE-M3 sparse encoder runtime |  |  |
+| `T-141` | `PLAN-20260811-01` | `P1` | `Done` | 接入单实例 BGE-M3 sparse encoder runtime | `2026-08-11` |  |
 | `T-142` | `PLAN-20260811-01` | `P1` | `Todo` | 扩展 Milvus dense/sparse schema 与写入生命周期 |  |  |
 | `T-143` | `PLAN-20260811-01` | `P1` | `Todo` | 将混合召回与 RRF 统一迁移到 Milvus |  |  |
 | `T-144` | `PLAN-20260811-01` | `P1` | `Todo` | 移除 PostgreSQL 关键词检索并完成重建与验收 |  |  |
@@ -5696,15 +5696,21 @@ git diff --check
 
 - 来源计划：`PLAN-20260811-01`
 - 优先级：`P1`
-- 状态：`Todo`
+- 状态：`Done`
 - 目标：提供内部批量 document/query sparse encoding 服务，输出 Milvus 可直接接收的 `{dimension_index: weight}` 数据。
 - 技术边界：
-  - 固定 `BAAI/bge-m3` revision、依赖版本、模型缓存目录和 CPU/GPU device 配置。
+  - 固定 `BAAI/bge-m3` revision、依赖版本、模型缓存目录和 CPU-only runtime 配置。
   - API 区分 document/query，限制 batch、文本长度、请求体、并发和超时；日志不得记录原始企业文档正文。
   - 健康检查必须区分进程存活、模型加载完成和真实最小 sparse inference。
 - 验收标准：
   - 同一输入结果稳定、indices 合法、weights 有限且非负，空文本和超限请求明确失败。
   - backend 与 worker 共用同一个 encoder 实例，服务不可从宿主机或前端直接访问。
+- 完成记录：
+  - 新增固定 `BAAI/bge-m3@5617a9f61b028005a4858fdac845db406aefb181` 的 CPU-only 内网 service，区分 live/ready，只有模型加载和最小真实 inference 成功后才 ready；query/document contract、batch/文本/请求体/并发/超时门禁和脱敏日志边界已落地。
+  - backend 与 worker 通过同一个严格身份校验 client 访问 Compose 单实例；服务没有 host port，模型缓存使用 `bge_m3_cache` named volume，E2E overlay 使用同 contract 的 credential-free fixture。
+  - 真实 BGE-M3 在修复版 `FlagEmbedding==1.4.0`、`huggingface-hub==1.27.0`、`torch==2.13.0+cpu`、`transformers==5.15.0` 镜像中以 offline cache 完成 query/document probe；backend client smoke 返回 8 个非零 sparse 权重。最终镜像约 374 MB，实际 snapshot/Xet cache 约 4.3 GB，运行时约 792 MiB。
+  - Linux Python 3.12 dependency audit 0 findings；正式 backend 镜像内 compileall 与全量 unittest 421/421 通过；默认/E2E Compose config、真实与 fixture probe、GitHub Actions pin、教程文档和 `git diff --check` 均通过。
+  - 完整 Compose rebuild 后 `sparse-encoder` healthy，migration 与 Milvus authenticated probe 成功，backend/worker 只在 encoder ready 后启动；production preflight 的 sparse settings、拓扑与 runtime health 均通过，整体门禁仅因本机 `.env` 尚未显式配置生产级 `MILVUS_URI` / `MILVUS_TOKEN` 而失败。
 
 ## T-142 扩展 Milvus dense/sparse schema 与写入生命周期
 

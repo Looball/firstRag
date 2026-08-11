@@ -76,6 +76,7 @@ FirstRAG/
 | 数据库工具 | `backend/app/db` | 连接、执行器、PostgreSQL advisory lock。 |
 | 基础设施 | `backend/app/core` | 配置、JWT、安全和密钥加密。 |
 | Worker | `backend/app/workers` | 异步向量化任务消费；扫描 PDF 页面在容器内通过 Tesseract OCR，主动重识别时比较预处理/PSM/旋转候选，保存页级置信度、选优依据和原始识别历史，一次消费单页或多页受控批次，并在切分前应用持久化人工修订。 |
+| Sparse encoder | `backend/sparse_encoder` | Compose 内网单实例加载固定 revision BGE-M3，提供 document/query learned sparse contract；当前 T-141 已接入 runtime 与共享 client，Milvus 写入/检索接线由后续任务完成。 |
 
 ## 存储组件
 
@@ -85,6 +86,7 @@ FirstRAG/
 - Redis：提供基础设施健康检查、RAG 热点共享缓存、后端分布式限流和 vector worker 运行态，包括知识库画像、retrieval settings、query embedding、登录/业务 API sliding-window 计数、worker 心跳、单文件短租约和运行指标；不作为会话、消息或 vector index job 的持久存储。
 - Vector store boundary：业务层只使用 collection、单文件替换/删除、检索、审计、计数和健康检查契约；collection 命名、scalar filter、distance 规范化和异常分类均收口在 Milvus adapter 内。
 - Milvus：唯一受支持的 vector store。Compose 启动 authenticated Standalone、etcd、MinIO 和一次性 health probe；backend 与 worker 使用独立 PyMilvus client，Strong consistency 与写后 self-hit 保证跨进程可见。
+- BGE-M3 sparse encoder：独立容器只加载一份 `BAAI/bge-m3@5617a9f61b028005a4858fdac845db406aefb181`，不映射 host port；`/health/live` 区分进程存活，`/health/ready` 只有在模型加载和最小 sparse inference 成功后才通过。模型 cache 保存到 `bge_m3_cache` named volume，服务日志只记录 mode、batch 和耗时，不记录企业文本。
 - Tesseract：仅对无有效文本层或用户明确重识别的 PDF 页面执行本地 OCR；首次索引使用单次基线，主动重识别在候选/总超时上限内比较原图、灰度、二值化和页面旋转，同次调用产出正文和 TSV word confidence，原始页面和识别文本不发送到外部 OCR 服务。
 - 本地文件系统：知识文件默认保存到根目录 `uploads/users/...`，聊天图片附件默认保存到 `uploads/chat_attachments/users/...`。
 

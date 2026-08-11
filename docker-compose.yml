@@ -130,6 +130,49 @@ services:
       milvus-standalone:
         condition: service_healthy
 
+  sparse-encoder:
+    build:
+      context: .
+      dockerfile: deploy/docker/sparse-encoder.Dockerfile
+      target: runtime
+    image: firstrag-sparse-encoder:latest
+    restart: unless-stopped
+    environment:
+      SPARSE_ENCODER_MODE: ${SPARSE_ENCODER_MODE:-bge_m3}
+      SPARSE_ENCODER_MODEL: ${SPARSE_ENCODER_MODEL:-BAAI/bge-m3}
+      SPARSE_ENCODER_REVISION: ${SPARSE_ENCODER_REVISION:-5617a9f61b028005a4858fdac845db406aefb181}
+      SPARSE_ENCODER_CACHE_DIR: /models/huggingface
+      SPARSE_ENCODER_DEVICE: ${SPARSE_ENCODER_DEVICE:-cpu}
+      SPARSE_ENCODER_USE_FP16: ${SPARSE_ENCODER_USE_FP16:-false}
+      SPARSE_ENCODER_OFFLINE: ${SPARSE_ENCODER_OFFLINE:-false}
+      SPARSE_ENCODER_BATCH_SIZE: ${SPARSE_ENCODER_BATCH_SIZE:-8}
+      SPARSE_ENCODER_MAX_LENGTH: ${SPARSE_ENCODER_MAX_LENGTH:-1024}
+      SPARSE_ENCODER_MAX_BATCH_SIZE: ${SPARSE_ENCODER_MAX_BATCH_SIZE:-16}
+      SPARSE_ENCODER_MAX_TEXT_CHARACTERS: ${SPARSE_ENCODER_MAX_TEXT_CHARACTERS:-20000}
+      SPARSE_ENCODER_MAX_REQUEST_BYTES: ${SPARSE_ENCODER_MAX_REQUEST_BYTES:-1048576}
+      SPARSE_ENCODER_MAX_CONCURRENCY: ${SPARSE_ENCODER_MAX_CONCURRENCY:-1}
+      SPARSE_ENCODER_REQUEST_TIMEOUT_SECONDS: ${SPARSE_ENCODER_REQUEST_TIMEOUT_SECONDS:-120}
+      HF_HUB_DISABLE_TELEMETRY: "1"
+      HF_XET_CACHE: /models/huggingface/xet
+      TRANSFORMERS_VERBOSITY: error
+    volumes:
+      - bge_m3_cache:/models/huggingface
+    mem_limit: ${SPARSE_ENCODER_MEMORY_LIMIT:-8g}
+    cpus: ${SPARSE_ENCODER_CPU_LIMIT:-4.0}
+    logging: *default-logging
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "from urllib.request import urlopen; urlopen('http://127.0.0.1:8090/health/ready', timeout=5)",
+        ]
+      interval: 30s
+      start_period: ${SPARSE_ENCODER_START_PERIOD:-30m}
+      timeout: 10s
+      retries: 5
+
   backend:
     build:
       context: .
@@ -155,6 +198,10 @@ services:
       MILVUS_COLLECTION_PREFIX: ${MILVUS_COLLECTION_PREFIX:-firstrag}
       MILVUS_TIMEOUT_SECONDS: ${MILVUS_TIMEOUT_SECONDS:-10}
       MILVUS_CONSISTENCY_LEVEL: ${MILVUS_CONSISTENCY_LEVEL:-Strong}
+      SPARSE_ENCODER_URL: http://sparse-encoder:8090
+      SPARSE_ENCODER_MODEL: ${SPARSE_ENCODER_MODEL:-BAAI/bge-m3}
+      SPARSE_ENCODER_REVISION: ${SPARSE_ENCODER_REVISION:-5617a9f61b028005a4858fdac845db406aefb181}
+      SPARSE_ENCODER_CLIENT_TIMEOUT_SECONDS: ${SPARSE_ENCODER_CLIENT_TIMEOUT_SECONDS:-130}
       RERANKER_MODEL_PATH: ${RERANKER_MODEL_PATH:-/app/models/rerankers/bge-reranker-base}
     ports:
       - "${BACKEND_PORT:-8000}:8000"
@@ -171,6 +218,8 @@ services:
         condition: service_completed_successfully
       milvus-health-probe:
         condition: service_completed_successfully
+      sparse-encoder:
+        condition: service_healthy
 
   migrate:
     image: firstrag-backend:latest
@@ -203,6 +252,10 @@ services:
       MILVUS_COLLECTION_PREFIX: ${MILVUS_COLLECTION_PREFIX:-firstrag}
       MILVUS_TIMEOUT_SECONDS: ${MILVUS_TIMEOUT_SECONDS:-10}
       MILVUS_CONSISTENCY_LEVEL: ${MILVUS_CONSISTENCY_LEVEL:-Strong}
+      SPARSE_ENCODER_URL: http://sparse-encoder:8090
+      SPARSE_ENCODER_MODEL: ${SPARSE_ENCODER_MODEL:-BAAI/bge-m3}
+      SPARSE_ENCODER_REVISION: ${SPARSE_ENCODER_REVISION:-5617a9f61b028005a4858fdac845db406aefb181}
+      SPARSE_ENCODER_CLIENT_TIMEOUT_SECONDS: ${SPARSE_ENCODER_CLIENT_TIMEOUT_SECONDS:-130}
       RERANKER_MODEL_PATH: ${RERANKER_MODEL_PATH:-/app/models/rerankers/bge-reranker-base}
     command: ["python", "-m", "app.workers.vector_index_worker"]
     volumes:
@@ -218,6 +271,8 @@ services:
         condition: service_completed_successfully
       milvus-health-probe:
         condition: service_completed_successfully
+      sparse-encoder:
+        condition: service_healthy
 
   frontend:
     build:
@@ -238,3 +293,4 @@ volumes:
   milvus_etcd_data:
   milvus_minio_data:
   milvus_data:
+  bge_m3_cache:
