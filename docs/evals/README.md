@@ -10,6 +10,8 @@
 
 [`milvus_cutover_20260811.md`](milvus_cutover_20260811.md) 记录 T-137 的默认配置、current-data 对账、切换 watermark、运行服务和 rollback 边界；Milvus 已成为默认 runtime，Chroma 容器保持停止且数据保留到 T-138。
 
+[`bge_m3_sparse_baseline_20260811.md`](bge_m3_sparse_baseline_20260811.md) 冻结 T-140 开始时 PostgreSQL full-text、Milvus dense、应用层 RRF、配置/diagnostics 口径和真实质量对照；后续按 [ADR-0002](../adr/0002-bge-m3-sparse-milvus-hybrid.md) 接入固定 revision 的本地 BGE-M3 sparse encoder，并把 dense/sparse hybrid search 统一迁移到 Milvus。
+
 ## 最近整体回归验收
 
 2026-07-02 已刷新一轮真实链路 eval 基线，覆盖 RAG 真实评测门禁、上传与向量化真实链路验收，以及 eval 历史趋势摘要。Compose 启动后的补充验收入口见 `scripts/acceptance_check.sh`。

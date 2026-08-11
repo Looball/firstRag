@@ -131,6 +131,7 @@
 | `PLAN-20260801-01` | 2026-08-01 | `Done` | 拆分聊天工作台通用工具，优先收口 vector indexing 解析、状态和展示 helper。 | `T-121` |
 | `PLAN-20260802-01` | 2026-08-02 | `Done` | 在保留完整可运行实现的前提下，将 `main` 单主线转为分层教程与工程参考实现，并停止非必要功能扩展。 | `T-122` - `T-129` |
 | `PLAN-20260809-01` | 2026-08-09 | `Done` | 在保持 PostgreSQL full-text、RRF、rerank、SSE 和用户隔离行为不变的前提下，将 vector store 从 Chroma 安全迁移到 Milvus，并提供可验证的数据迁移与回滚路径。 | `T-130` - `T-138` |
+| `PLAN-20260811-01` | 2026-08-11 | `Doing` | 使用本地固定版本 BGE-M3 生成 learned sparse embeddings，将 dense/sparse 写入、混合召回与融合统一迁移到 Milvus，并让 PostgreSQL 退出关键词检索职责。 | `T-140` - `T-144` |
 
 ## 任务总览
 
@@ -275,6 +276,11 @@
 | `T-137` | `PLAN-20260809-01` | `P1` | `Done` | 更新 Milvus 架构、部署与教程文档 | `2026-08-11` | `0598254` |
 | `T-138` | `PLAN-20260809-01` | `P2` | `Done` | 完成 Milvus 切换观察并移除 Chroma 遗留 | `2026-08-11` | `6feabef` |
 | `T-139` | CI required checks | `P0` | `Done` | 修复 Nano ID 与 cryptography 新增高危依赖漏洞 | `2026-08-09` | `c5b5564` |
+| `T-140` | `PLAN-20260811-01` | `P1` | `Done` | 冻结 PostgreSQL full-text 基线并确定 BGE-M3 sparse ADR | `2026-08-11` | `b0c11b9` |
+| `T-141` | `PLAN-20260811-01` | `P1` | `Todo` | 接入单实例 BGE-M3 sparse encoder runtime |  |  |
+| `T-142` | `PLAN-20260811-01` | `P1` | `Todo` | 扩展 Milvus dense/sparse schema 与写入生命周期 |  |  |
+| `T-143` | `PLAN-20260811-01` | `P1` | `Todo` | 将混合召回与 RRF 统一迁移到 Milvus |  |  |
+| `T-144` | `PLAN-20260811-01` | `P1` | `Todo` | 移除 PostgreSQL 关键词检索并完成重建与验收 |  |  |
 
 ## 新计划接入流程
 
@@ -5665,6 +5671,83 @@ conda run -n firstrag python scripts/pip_audit_policy.py
 docker compose up -d --build
 git diff --check
 ```
+
+## T-140 冻结 PostgreSQL full-text 基线并确定 BGE-M3 sparse ADR
+
+- 来源计划：`PLAN-20260811-01`
+- 优先级：`P1`
+- 状态：`Done`
+- 目标：冻结当前 PostgreSQL full-text + 应用层 RRF 的行为和质量基线，明确 BGE-M3 只负责 learned sparse embedding、现有用户 embedding provider 继续负责 dense embedding 的目标架构。
+- 技术边界：
+  - BGE-M3 使用固定 model revision；文档与 query 必须由同一 revision 和参数编码，禁止混用 sparse vocabulary。
+  - 使用单独的 Compose 内网 `sparse-encoder` 服务只加载一份模型，避免 backend 与 worker 重复占用模型内存；服务不对宿主机公开端口。
+  - PostgreSQL 继续保存 chunk/source context 和索引对账数据，但不再承担关键词召回。
+- 验收标准：
+  - ADR 记录 schema、索引、服务拓扑、失败降级、版本 identity、重建与回滚边界。
+  - 基线记录 full-text/RRF 现有测试、真实数据量和待迁移配置字段，避免迁移后用口径变化掩盖回退。
+- 完成记录：
+  - 新增 ADR-0002，确定现有用户 provider 继续生成 dense、固定 revision 的本地 BGE-M3 只生成 learned sparse；单独 Compose 内网 encoder 只加载一份模型，Milvus 使用 `SPARSE_FLOAT_VECTOR + SPARSE_INVERTED_INDEX + IP`，通过 `hybrid_search + RRFRanker` 融合。
+  - 固定 `BAAI/bge-m3@5617a9f61b028005a4858fdac845db406aefb181`、MIT license 和 `FlagEmbedding==1.4.0` 起始 pin；记录 2,271,145,830 bytes 权重文件、1024 初始 max length、CI fixture/真实模型双层门禁与 offline cache 边界。
+  - 当前只读基线为 PostgreSQL 119 chunks、0 active jobs，Milvus 1 个业务 collection / 121 entities；冻结 `fulltext_top_k`、diagnostics、sources 与前后端兼容迁移范围。
+  - 正式 backend 镜像只读挂载工作区后，full-text/hybrid/settings/RAG/indexing eval 定向 unittest 54/54 通过；教程文档门禁和 `git diff --check` 通过。
+- 相关提交：`b0c11b9`
+
+## T-141 接入单实例 BGE-M3 sparse encoder runtime
+
+- 来源计划：`PLAN-20260811-01`
+- 优先级：`P1`
+- 状态：`Todo`
+- 目标：提供内部批量 document/query sparse encoding 服务，输出 Milvus 可直接接收的 `{dimension_index: weight}` 数据。
+- 技术边界：
+  - 固定 `BAAI/bge-m3` revision、依赖版本、模型缓存目录和 CPU/GPU device 配置。
+  - API 区分 document/query，限制 batch、文本长度、请求体、并发和超时；日志不得记录原始企业文档正文。
+  - 健康检查必须区分进程存活、模型加载完成和真实最小 sparse inference。
+- 验收标准：
+  - 同一输入结果稳定、indices 合法、weights 有限且非负，空文本和超限请求明确失败。
+  - backend 与 worker 共用同一个 encoder 实例，服务不可从宿主机或前端直接访问。
+
+## T-142 扩展 Milvus dense/sparse schema 与写入生命周期
+
+- 来源计划：`PLAN-20260811-01`
+- 优先级：`P1`
+- 状态：`Todo`
+- 目标：为每个 chunk 同时写入 dense `FLOAT_VECTOR` 与 BGE-M3 `SPARSE_FLOAT_VECTOR`，保持 stable ID、用户隔离、重建、删除和写后审计。
+- 技术边界：
+  - learned sparse 使用 `SPARSE_INVERTED_INDEX + IP`，不得误用 Milvus BM25 Function 或 BM25 metric。
+  - collection identity 同时包含 dense provider/model/dimension 与 sparse model revision；旧 schema 不原地复用。
+  - 两种向量生成完成后再进入写入；任一路失败都不得发布半成品索引状态。
+- 验收标准：
+  - 新 schema 严格校验 dense/sparse 字段和索引，幂等重建与删除无残留。
+  - 真实写后门禁同时验证 dense self-hit、sparse self-hit、ID/count 和跨用户隔离。
+
+## T-143 将混合召回与 RRF 统一迁移到 Milvus
+
+- 来源计划：`PLAN-20260811-01`
+- 优先级：`P1`
+- 状态：`Todo`
+- 目标：使用 Milvus `hybrid_search()` 并行执行 dense COSINE 与 sparse IP 召回，通过 `RRFRanker` 融合后继续进入现有 Cross-Encoder rerank。
+- 技术边界：
+  - dense 和 sparse request 使用相同 `user_id` / `file_id` scalar filter，并对返回实体再次复核隔离范围。
+  - query dense 与 query sparse 分别缓存，cache identity 必须包含各自模型身份；失败 diagnostics 明确区分 dense、sparse、hybrid。
+  - 保持 SSE sources、持久化 retrieval diagnostics 和最终 `top_k` 契约。
+- 验收标准：
+  - Milvus 单次 hybrid search 返回融合候选；应用层不再查询 PostgreSQL full-text 或重复执行第二次 RRF。
+  - dense 或 sparse 单路失败时按明确策略降级，不能扩大用户或文件范围。
+
+## T-144 移除 PostgreSQL 关键词检索并完成重建与验收
+
+- 来源计划：`PLAN-20260811-01`
+- 优先级：`P1`
+- 状态：`Todo`
+- 目标：删除 PostgreSQL full-text/trigram 检索路径，重建现有 Milvus 数据并完成质量、资源、恢复与教程验收。
+- 技术边界：
+  - 通过新增 PostgreSQL migration 删除仅用于关键词召回的 expression/trigram indexes，不删除 `knowledge_file_chunks` 数据。
+  - 配置/API 从 `fulltext_top_k` 迁移为 `sparse_top_k` 时提供受控数据库迁移和前后端兼容窗口。
+  - 模型下载、缓存和全量重建必须可恢复，默认不删除旧 collection，切换后再显式归档。
+- 验收标准：
+  - 当前源码、Compose、CI 和文档不再把 PostgreSQL 描述或调用为关键词召回器。
+  - 全量后端、前端、Docker Compose、credential-free E2E、真实 indexing/RAG eval、Milvus restart persistence、备份恢复和 production preflight 通过。
+  - 记录 BGE-M3 模型体积、启动时间、CPU/GPU、峰值内存、indexing/query P50/P95 和质量对照。
 
 ## 更新规则
 
