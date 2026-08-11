@@ -271,7 +271,7 @@
 | `T-133` | `PLAN-20260809-01` | `P1` | `Done` | 迁移向量写入、重建与删除生命周期 | `2026-08-09` | `0263bb2` |
 | `T-134` | `PLAN-20260809-01` | `P1` | `Done` | 迁移 Milvus 向量检索与 diagnostics | `2026-08-09` | `95c1bde` |
 | `T-135` | `PLAN-20260809-01` | `P0` | `Done` | 建立 Chroma 到 Milvus 数据迁移与回滚工具 | `2026-08-09` | `cf29b77` |
-| `T-136` | `PLAN-20260809-01` | `P1` | `Todo` | 完成 Milvus 全链路回归、质量与性能验收 | — | — |
+| `T-136` | `PLAN-20260809-01` | `P1` | `Done` | 完成 Milvus 全链路回归、质量与性能验收 | `2026-08-09` | `616d835` |
 | `T-137` | `PLAN-20260809-01` | `P1` | `Todo` | 更新 Milvus 架构、部署与教程文档 | — | — |
 | `T-138` | `PLAN-20260809-01` | `P2` | `Todo` | 完成 Milvus 切换观察并移除 Chroma 遗留 | — | — |
 | `T-139` | CI required checks | `P0` | `Done` | 修复 Nano ID 与 cryptography 新增高危依赖漏洞 | `2026-08-09` | `c5b5564` |
@@ -5556,7 +5556,7 @@ git diff --check
 
 - 来源计划：`PLAN-20260809-01`
 - 优先级：`P1`
-- 状态：`Todo`
+- 状态：`Done`
 - 目标：证明 Milvus 不仅容器存活和数据可见，而且真实上传、索引、ANN、hybrid retrieval、SSE sources、删除与恢复链路均达到当前质量基线。
 - 技术边界：
   - job `succeeded`、entry count 或 full-text 命中不能替代真实 vector similarity search。
@@ -5571,6 +5571,15 @@ git diff --check
   - required CI 四项通过，真实新文件向量命中且 `vector_degraded=false`。
   - RAG/indexing 质量不低于冻结基线，无跨用户或跨文件泄露。
   - 性能或资源回退超出 ADR 阈值时保持 Chroma 为默认，不进入切换阶段。
+- 完成记录：
+  - 新增只读 `milvus_acceptance.py`，按 PostgreSQL current scope 对账 Chroma/Milvus 的 19 files / 119 entries；stable IDs、正文、完整 metadata、dimensions 和 embedding 数值全部一致，35/35 stored-vector Top-1 一致，最低 Top-K overlap 1.0。
+  - 真实 Milvus filtered ANN 精确 `chunk_id` self-hit 20/20，错误用户/文件均返回 0；显式 warm-up 后 p50 5.12ms、p95 7.38ms，低于 ADR 50ms 门槛。
+  - 真实 RAG 14/14 通过、平均 sources 3.36、`vector_degraded=false`；平均 hybrid retrieval 710.62ms，低于 1056.28ms 对照门槛和 3000ms hard gate。真实 indexing eval 覆盖 upload、worker、vector source、删除、22.509s 重建和永久删除，全部通过。
+  - credential-free runner 增加 Chroma/Milvus 双 provider CI；Milvus 隔离环境验证两个用户、16/32 dimensions、浏览器 SSE/source、两轮 indexing lifecycle、Milvus restart persistence、v1/v2 replacement 和 cleanup。restart 后旧 collection readiness 使用 12 次、每次 5 秒的有界门禁，不静默降级。
+  - 真实 eval 期间 73 次资源采样的 FirstRAG containers 内存和峰值为 1,856,126,321 bytes，占 Docker VM 11.26%；无 OOM 和非预期 restart。production preflight 的 runtime health、authenticated probe、migration dry-run 和临时强 secret 静态检查通过，并对 15.35 GiB 低于 16 GiB 推荐值给出 warning。
+  - backend unittest 421/421、前端 Vitest 181/181、ESLint、production build、双 provider Playwright 1/1、compileall、教程文档、Actions pins、Compose config/runtime health 和 `git diff --check` 均通过。验收后本机 backend 已恢复 `VECTOR_STORE_PROVIDER=chroma`。
+  - 验收结论为 Milvus 可以进入受控默认切换；T-137 在同一变更中同步默认配置与全量文档，T-138 观察期前保留 Chroma rollback 能力。详细证据见 `docs/evals/milvus_acceptance_20260809.md`。
+- 相关提交：`616d835`
 
 ## T-137 更新 Milvus 架构、部署与教程文档
 

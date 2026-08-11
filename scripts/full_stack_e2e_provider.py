@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import time
 from typing import Any
 from uuid import uuid4
@@ -16,6 +17,7 @@ APP = FastAPI(title="FirstRAG Full-stack E2E Provider")
 MODEL_NAME = "firstrag-e2e-model"
 ANSWER = "FirstRAG 全栈验收标识是 T089 FULL STACK SOURCE。"
 EMBEDDING_DIMENSIONS = 16
+INDEXING_MARKER_PATTERN = re.compile(r"FirstRAGIndexingEval-[0-9A-Za-z-]+")
 
 
 class EmbeddingRequest(BaseModel):
@@ -39,13 +41,23 @@ def _embedding_vector(dimensions: int) -> list[float]:
     return [1.0, *([0.0] * (dimensions - 1))]
 
 
-def _stream_chat_completion(request: ChatCompletionRequest):
+def _answer_for_request(request: ChatCompletionRequest) -> str:
+    """按验收问题中的唯一 marker 返回确定性答案。"""
+    for message in reversed(request.messages):
+        content = str(message.get("content") or "")
+        match = INDEXING_MARKER_PATTERN.search(content)
+        if match:
+            return f"FirstRAG 索引验收标识是 {match.group(0)}。"
+    return ANSWER
+
+
+def _stream_chat_completion(request: ChatCompletionRequest, answer: str):
     """按 OpenAI SSE 协议流式返回确定性回答。"""
     completion_id = f"chatcmpl-{uuid4().hex}"
     created_at = int(time.time())
     chunks = (
         {"role": "assistant"},
-        {"content": ANSWER},
+        {"content": answer},
     )
     for delta in chunks:
         payload = {
@@ -124,9 +136,10 @@ def create_chat_completion(
     request: ChatCompletionRequest,
 ) -> dict[str, object] | StreamingResponse:
     """返回普通或流式 chat completion。"""
+    answer = _answer_for_request(request)
     if request.stream:
         return StreamingResponse(
-            _stream_chat_completion(request),
+            _stream_chat_completion(request, answer),
             media_type="text/event-stream",
         )
     return {
@@ -136,7 +149,7 @@ def create_chat_completion(
         "model": request.model,
         "choices": [{
             "index": 0,
-            "message": {"role": "assistant", "content": ANSWER},
+            "message": {"role": "assistant", "content": answer},
             "finish_reason": "stop",
         }],
         "usage": {

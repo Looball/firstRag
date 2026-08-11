@@ -41,6 +41,11 @@ def parse_args() -> argparse.Namespace:
         "--provider-base-url",
         default="http://provider-stub:8080/v1",
     )
+    parser.add_argument(
+        "--embedding-dimensions",
+        type=int,
+        default=16,
+    )
     return parser.parse_args()
 
 
@@ -64,8 +69,14 @@ def validate_e2e_provider_base_url(value: str) -> str:
     return normalized
 
 
-def seed_user_settings(username: str, provider_base_url: str) -> None:
+def seed_user_settings(
+    username: str,
+    provider_base_url: str,
+    embedding_dimensions: int = 16,
+) -> None:
     """为已注册测试用户写入隔离 provider 和强制检索设置。"""
+    if embedding_dimensions <= 0:
+        raise ValueError("embedding dimensions 必须大于 0")
     user = get_user_by_username(username)
     if user is None:
         raise RuntimeError("全栈 E2E 用户尚未注册")
@@ -93,7 +104,7 @@ def seed_user_settings(username: str, provider_base_url: str) -> None:
         "provider": E2E_PROVIDER,
         "model": E2E_MODEL,
         "base_url": provider_base_url,
-        "dimensions": 16,
+        "dimensions": embedding_dimensions,
         "timeout_seconds": 10.0,
         "max_retries": 0,
     }
@@ -138,7 +149,11 @@ def main() -> None:
     provider_base_url = validate_e2e_provider_base_url(
         args.provider_base_url,
     )
-    seed_user_settings(args.username, provider_base_url)
+    seed_user_settings(
+        args.username,
+        provider_base_url,
+        args.embedding_dimensions,
+    )
     print("Full-stack E2E settings seeded.")
 
 
