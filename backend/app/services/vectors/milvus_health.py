@@ -19,7 +19,7 @@ MilvusClientFactory = Callable[..., Any]
 
 
 def _load_milvus_client() -> MilvusClientFactory:
-    """延迟加载 PyMilvus，避免 Chroma 默认链路承担额外 import 开销。"""
+    """延迟加载 PyMilvus，缩短静态检查和非向量命令启动时间。"""
     from pymilvus import MilvusClient
 
     return MilvusClient

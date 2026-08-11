@@ -184,8 +184,6 @@ class DocumentServiceTests(unittest.TestCase):
         with TemporaryDirectory() as temporary_directory:
             root = Path(temporary_directory)
             (root / "sample.md").write_text("# 标题\n\n正文内容", encoding="utf-8")
-            persist_directory = root / "vector_db"
-
             mock_vector_store = Mock()
             mock_vector_store.count_vectors.return_value = 1
             stdout = StringIO()
@@ -196,7 +194,6 @@ class DocumentServiceTests(unittest.TestCase):
             ), redirect_stdout(stdout):
                 result = build_vector_store(
                     folder_path=root,
-                    persist_directory=persist_directory,
                     user_id=42,
                 )
 

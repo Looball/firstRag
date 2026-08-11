@@ -218,46 +218,6 @@ class ProductionPreflightScriptTests(unittest.TestCase):
         self.assertTrue(any("ports" in error for error in errors))
         self.assertTrue(any("healthcheck" in error for error in errors))
 
-    def test_validate_chroma_settings_accepts_compose_defaults(self) -> None:
-        """Compose 默认 Chroma service 地址和端口应通过检查。"""
-        errors = production_preflight.validate_chroma_settings({})
-
-        self.assertEqual(errors, [])
-
-    def test_validate_chroma_settings_rejects_unsafe_values(self) -> None:
-        """Chroma loopback、非法端口和非法 SSL 值应被拦截。"""
-        errors = production_preflight.validate_chroma_settings(
-            {
-                "CHROMA_HOST": "localhost",
-                "CHROMA_PORT": "not-a-port",
-                "CHROMA_SSL": "sometimes",
-            }
-        )
-
-        self.assertTrue(any("loopback" in error for error in errors))
-        self.assertTrue(any("CHROMA_PORT" in error for error in errors))
-        self.assertTrue(any("CHROMA_SSL" in error for error in errors))
-
-    def test_validate_chroma_settings_requires_ssl_for_external_host(self) -> None:
-        """外部 Chroma 地址必须启用 TLS。"""
-        insecure_errors = production_preflight.validate_chroma_settings(
-            {
-                "CHROMA_HOST": "chroma.example.com",
-                "CHROMA_SSL": "false",
-            }
-        )
-        secure_errors = production_preflight.validate_chroma_settings(
-            {
-                "CHROMA_HOST": "chroma.example.com",
-                "CHROMA_SSL": "true",
-            }
-        )
-
-        self.assertTrue(
-            any("必须启用 CHROMA_SSL" in error for error in insecure_errors)
-        )
-        self.assertEqual(secure_errors, [])
-
     def test_validate_milvus_settings_accepts_secure_compose_values(self) -> None:
         """Milvus 内网 URI、强 token、MinIO secret 和 Strong 应通过。"""
         errors = production_preflight.validate_milvus_settings(
@@ -315,54 +275,10 @@ class ProductionPreflightScriptTests(unittest.TestCase):
         self.assertIn("root", joined_errors)
         self.assertNotIn("strong-password$", joined_errors)
 
-    def test_validate_vector_store_settings_dispatches_current_provider(self) -> None:
-        """未知 provider 失败，默认 provider 走 Milvus 并要求强认证。"""
+    def test_validate_vector_store_settings_requires_milvus_auth(self) -> None:
+        """唯一 vector store 配置必须通过 Milvus 强认证门禁。"""
         default_errors = production_preflight.validate_vector_store_settings({})
         self.assertTrue(any("MILVUS" in error for error in default_errors))
-        errors = production_preflight.validate_vector_store_settings(
-            {"VECTOR_STORE_PROVIDER": "unknown"}
-        )
-        self.assertTrue(any("VECTOR_STORE_PROVIDER" in error for error in errors))
-
-    def test_validate_compose_chroma_service_accepts_repository_topology(self) -> None:
-        """仓库 Compose 应保留隔离的 Chroma 回滚拓扑。"""
-        errors = production_preflight.validate_compose_chroma_service()
-
-        self.assertEqual(errors, [])
-
-    def test_validate_compose_chroma_service_rejects_embedded_fallback(self) -> None:
-        """公网端口、缺失健康检查和共享 embedded 目录应失败。"""
-        with tempfile.TemporaryDirectory() as tmpdir:
-            compose_file = Path(tmpdir) / "docker-compose.yml"
-            compose_file.write_text(
-                "\n".join(
-                    [
-                        "services:",
-                        "  chroma:",
-                        "    image: chromadb/chroma:latest",
-                        "    ports:",
-                        "      - \"8000:8000\"",
-                        "  backend:",
-                        "    image: backend",
-                        "    volumes:",
-                        "      - ./vector_db:/app/vector_db",
-                        "  worker:",
-                        "    image: backend",
-                    ]
-                ),
-                encoding="utf-8",
-            )
-
-            errors = production_preflight.validate_compose_chroma_service(
-                compose_file,
-            )
-
-        self.assertTrue(any("ports" in error for error in errors))
-        self.assertTrue(any("healthcheck" in error for error in errors))
-        self.assertTrue(any("/data" in error for error in errors))
-        self.assertTrue(any("固定版本" in error for error in errors))
-        self.assertTrue(any("/app/vector_db" in error for error in errors))
-        self.assertTrue(any("可选回滚依赖" in error for error in errors))
 
     def test_validate_compose_milvus_services_accepts_repository_topology(self) -> None:
         """仓库默认 Milvus 应满足固定版本、内网和认证门禁。"""
@@ -408,12 +324,12 @@ class ProductionPreflightScriptTests(unittest.TestCase):
     def test_parse_compose_ps_records_supports_object_and_json_lines(self) -> None:
         """runtime health 兼容 Compose 的单对象和逐行 JSON 输出。"""
         object_records = production_preflight.parse_compose_ps_records(
-            '{"Service":"chroma","State":"running","Health":"healthy"}'
+            '{"Service":"milvus-standalone","State":"running","Health":"healthy"}'
         )
         line_records = production_preflight.parse_compose_ps_records(
             "\n".join(
                 [
-                    '{"Service":"chroma","State":"running","Health":"healthy"}',
+                    '{"Service":"milvus-standalone","State":"running","Health":"healthy"}',
                     '{"Service":"backend","State":"running","Health":""}',
                 ]
             )
@@ -421,37 +337,6 @@ class ProductionPreflightScriptTests(unittest.TestCase):
 
         self.assertEqual(len(object_records), 1)
         self.assertEqual(len(line_records), 2)
-
-    def test_run_chroma_runtime_health_check_requires_healthy_container(self) -> None:
-        """Chroma runtime check 只接受 running/healthy。"""
-        healthy_result = CompletedProcess(
-            args=[],
-            returncode=0,
-            stdout='{"Service":"chroma","State":"running","Health":"healthy"}\n',
-            stderr="",
-        )
-        unhealthy_result = CompletedProcess(
-            args=[],
-            returncode=0,
-            stdout='{"Service":"chroma","State":"running","Health":"unhealthy"}\n',
-            stderr="",
-        )
-
-        with patch.object(
-            production_preflight.subprocess,
-            "run",
-            return_value=healthy_result,
-        ):
-            healthy_check = production_preflight.run_chroma_runtime_health_check({})
-        with patch.object(
-            production_preflight.subprocess,
-            "run",
-            return_value=unhealthy_result,
-        ):
-            unhealthy_check = production_preflight.run_chroma_runtime_health_check({})
-
-        self.assertTrue(healthy_check.success)
-        self.assertFalse(unhealthy_check.success)
 
     def test_run_milvus_runtime_health_check_requires_container_and_two_probes(self) -> None:
         """Milvus runtime 必须 healthy，且 backend/worker probe 均成功。"""
@@ -491,15 +376,13 @@ class ProductionPreflightScriptTests(unittest.TestCase):
         self.assertTrue(result.success)
         self.assertIn("warning", result.message)
 
-    def test_validate_runtime_paths_checks_provider_specific_directories(self) -> None:
-        """Milvus 不依赖宿主 Chroma 目录，回滚模式仍应检查该目录。"""
+    def test_validate_runtime_paths_checks_persistent_directories(self) -> None:
+        """Milvus runtime 只要求 uploads、models 与可选 reranker 目录。"""
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
             uploads = root / "uploads"
-            vector_db = root / "vector_db"
             models = root / "models"
             uploads.mkdir()
-            vector_db.mkdir()
             models.mkdir()
 
             errors = production_preflight.validate_runtime_paths(
@@ -508,18 +391,9 @@ class ProductionPreflightScriptTests(unittest.TestCase):
                     "MODELS_DIR": os.fspath(models),
                 }
             )
-            chroma_errors = production_preflight.validate_runtime_paths(
-                {
-                    "VECTOR_STORE_PROVIDER": "chroma",
-                    "UPLOADS_DIR": os.fspath(uploads),
-                    "VECTOR_DB_DIR": os.fspath(root / "missing-vector-db"),
-                    "MODELS_DIR": os.fspath(models),
-                }
-            )
             reranker_errors = production_preflight.validate_runtime_paths(
                 {
                     "UPLOADS_DIR": os.fspath(uploads),
-                    "VECTOR_DB_DIR": os.fspath(vector_db),
                     "MODELS_DIR": os.fspath(models),
                 },
                 require_reranker=True,
@@ -529,13 +403,11 @@ class ProductionPreflightScriptTests(unittest.TestCase):
             fixed_errors = production_preflight.validate_runtime_paths(
                 {
                     "UPLOADS_DIR": os.fspath(uploads),
-                    "VECTOR_DB_DIR": os.fspath(vector_db),
                     "MODELS_DIR": os.fspath(models),
                 }
             )
 
         self.assertEqual(errors, [])
-        self.assertTrue(any("VECTOR_DB_DIR" in error for error in chroma_errors))
         self.assertTrue(any("reranker" in error for error in reranker_errors))
         self.assertEqual(fixed_errors, [])
 

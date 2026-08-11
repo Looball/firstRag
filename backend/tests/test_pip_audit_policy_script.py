@@ -23,8 +23,8 @@ def build_audit_payload(
     advisory_id: str = "PYSEC-2026-311",
     *,
     aliases: list[str] | None = None,
-    package: str = "chromadb",
-    version: str = "1.5.9",
+    package: str = "samplepkg",
+    version: str = "2.0.0",
     fix_versions: list[str] | None = None,
 ) -> dict[str, object]:
     """构造最小 pip-audit JSON。"""
@@ -36,7 +36,7 @@ def build_audit_payload(
                 "vulns": [
                     {
                         "id": advisory_id,
-                        "aliases": aliases or ["GHSA-f4j7-r4q5-qw2c"],
+                        "aliases": aliases or ["GHSA-1111-2222-3333"],
                         "fix_versions": fix_versions or [],
                         "description": "test advisory",
                     }
@@ -48,10 +48,10 @@ def build_audit_payload(
 
 
 def build_exception(
-    advisory_id: str = "GHSA-F4J7-R4Q5-QW2C",
+    advisory_id: str = "GHSA-1111-2222-3333",
     *,
-    package: str = "chromadb",
-    affected_version: str = "1.5.9",
+    package: str = "samplepkg",
+    affected_version: str = "2.0.0",
     expires_on: date = date(2026, 8, 20),
 ) -> pip_audit_policy.AuditException:
     """构造测试安全例外。"""
@@ -87,7 +87,7 @@ class PipAuditPolicyScriptTests(unittest.TestCase):
         dependency["vulns"].append(
             {
                 "id": "CVE-2026-45829",
-                "aliases": ["GHSA-f4j7-r4q5-qw2c", "PYSEC-2026-311"],
+                "aliases": ["GHSA-1111-2222-3333", "PYSEC-2026-311"],
                 "fix_versions": [],
                 "description": "duplicate",
             }
@@ -96,7 +96,7 @@ class PipAuditPolicyScriptTests(unittest.TestCase):
         findings = pip_audit_policy.collect_findings(payload)
 
         self.assertEqual(len(findings), 1)
-        self.assertEqual(findings[0].advisory_id, "GHSA-F4J7-R4Q5-QW2C")
+        self.assertEqual(findings[0].advisory_id, "GHSA-1111-2222-3333")
 
     def test_fixable_finding_blocks_even_with_exception(self) -> None:
         """已有安全升级版本的漏洞禁止通过例外放行。"""
@@ -174,9 +174,9 @@ class PipAuditPolicyScriptTests(unittest.TestCase):
             "version": 1,
             "exceptions": [
                 {
-                    "advisory_id": "GHSA-F4J7-R4Q5-QW2C",
-                    "package": "chromadb",
-                    "affected_version": "1.5.9",
+                    "advisory_id": "GHSA-1111-2222-3333",
+                    "package": "samplepkg",
+                    "affected_version": "2.0.0",
                     "reviewed_on": "2026-07-20",
                     "expires_on": "2026-08-21",
                     "reason": "too long",

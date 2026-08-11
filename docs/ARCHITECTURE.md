@@ -83,9 +83,8 @@ FirstRAG/
 - PostgreSQL OCR corrections：按用户、文件和页码保存人工修订、原始 OCR 文本与 revision；知识文件永久删除时级联清理。
 - PostgreSQL OCR history：按用户、文件、页码和 index version 保存有上限的 Tesseract 最佳原始识别记录、质量指标、文本 SHA、所选策略、候选摘要和来源 job；与 chunks 生命周期解耦，文件删除时级联清理。
 - Redis：提供基础设施健康检查、RAG 热点共享缓存、后端分布式限流和 vector worker 运行态，包括知识库画像、retrieval settings、query embedding、登录/业务 API sliding-window 计数、worker 心跳、单文件短租约和运行指标；不作为会话、消息或 vector index job 的持久存储。
-- Vector store boundary：业务层只使用 collection、单文件替换/删除、检索、审计、计数和健康检查契约；collection 命名、scalar/metadata filter、distance 规范化和 provider 异常分类均收口在 adapter 内。
-- Milvus：当前默认 vector store adapter。Compose 默认启动 authenticated Standalone、etcd、MinIO 和一次性 health probe；backend 与 worker 使用独立 PyMilvus client，Strong consistency 与写后 self-hit 保证跨进程可见。
-- Chroma：仅作为 T-138 观察期前的 rollback adapter。旧数据不自动删除，显式回滚时通过 `chroma-rollback` profile 启动独立 server；迁移、对账和回滚步骤见 `docs/MILVUS_MIGRATION_RUNBOOK.md`。
+- Vector store boundary：业务层只使用 collection、单文件替换/删除、检索、审计、计数和健康检查契约；collection 命名、scalar filter、distance 规范化和异常分类均收口在 Milvus adapter 内。
+- Milvus：唯一受支持的 vector store。Compose 启动 authenticated Standalone、etcd、MinIO 和一次性 health probe；backend 与 worker 使用独立 PyMilvus client，Strong consistency 与写后 self-hit 保证跨进程可见。
 - Tesseract：仅对无有效文本层或用户明确重识别的 PDF 页面执行本地 OCR；首次索引使用单次基线，主动重识别在候选/总超时上限内比较原图、灰度、二值化和页面旋转，同次调用产出正文和 TSV word confidence，原始页面和识别文本不发送到外部 OCR 服务。
 - 本地文件系统：知识文件默认保存到根目录 `uploads/users/...`，聊天图片附件默认保存到 `uploads/chat_attachments/users/...`。
 

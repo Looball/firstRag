@@ -3,10 +3,6 @@ services:
     volumes:
       - e2e_postgres_data:/var/lib/postgresql/data
 
-  chroma:
-    volumes:
-      - e2e_chroma_data:/data
-
   milvus-etcd:
     volumes:
       - e2e_milvus_etcd_data:/etcd
@@ -81,7 +77,6 @@ services:
 
 volumes:
   e2e_postgres_data:
-  e2e_chroma_data:
   e2e_milvus_etcd_data:
   e2e_milvus_minio_data:
   e2e_milvus_data:

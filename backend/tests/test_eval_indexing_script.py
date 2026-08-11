@@ -62,7 +62,7 @@ class EvalIndexingScriptTests(unittest.TestCase):
                 "diagnostics": {
                     "vector_degraded": vector_degraded,
                     "vector_errors": (
-                        ["Chroma 单文件向量检索失败：file-id"]
+                        ["Milvus 单文件向量检索失败：file-id"]
                         if vector_degraded
                         else []
                     ),
@@ -122,7 +122,7 @@ class EvalIndexingScriptTests(unittest.TestCase):
         self.assertFalse(results["chat_vector_not_degraded"]["passed"])
         self.assertFalse(results["uploaded_file_source_uses_vector"]["passed"])
         self.assertIn(
-            "Chroma 单文件向量检索失败：file-id",
+            "Milvus 单文件向量检索失败：file-id",
             results["chat_vector_not_degraded"]["actual"]["vector_errors"],
         )
 
@@ -160,7 +160,7 @@ class EvalIndexingScriptTests(unittest.TestCase):
 
         self.assertIn("- 向量降级：True", report)
         self.assertIn(
-            "- 向量错误：['Chroma 单文件向量检索失败：file-id']",
+            "- 向量错误：['Milvus 单文件向量检索失败：file-id']",
             report,
         )
 

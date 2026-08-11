@@ -159,25 +159,6 @@ CHAT_IMAGE_MAX_TOTAL_BYTES = read_int_env(
     15 * 1024 * 1024,
 )
 
-# Milvus 是当前默认 vector store；Chroma 仅在 T-138 前保留回滚能力。
-VECTOR_STORE_PROVIDER = os.environ.get(
-    "VECTOR_STORE_PROVIDER",
-    "milvus",
-).strip().lower()
-
-# 设置 Chroma 向量库存储路径和集合名称。
-VECTOR_STORE_PATH = resolve_project_path(
-    os.environ.get("VECTOR_STORE_PATH", ""),
-    PROJECT_ROOT / "vector_db/chroma",
-)
-CHROMA_COLLECTION_NAME = os.environ.get(
-    "CHROMA_COLLECTION_NAME",
-    "langchain",
-)
-CHROMA_HOST = os.environ.get("CHROMA_HOST", "").strip()
-CHROMA_PORT = read_int_env("CHROMA_PORT", 8000)
-CHROMA_SSL = read_bool_env("CHROMA_SSL", False)
-
 # Milvus Standalone 运行时、认证、collection 和强一致性配置。
 MILVUS_URI = os.environ.get(
     "MILVUS_URI",

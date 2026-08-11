@@ -188,23 +188,13 @@ jobs:
         working-directory: frontend
         run: npx --no-install playwright install --with-deps chromium
 
-      - name: Run Chroma credential-free full-stack E2E
-        id: full_stack_chroma_e2e
-        env:
-          FIRSTRAG_E2E_VECTOR_STORE_PROVIDER: chroma
-        run: scripts/run_full_stack_e2e.sh
-
       - name: Run Milvus credential-free full-stack E2E
         id: full_stack_milvus_e2e
-        env:
-          FIRSTRAG_E2E_VECTOR_STORE_PROVIDER: milvus
         run: scripts/run_full_stack_e2e.sh
 
       - name: Upload full-stack E2E diagnostics
         if: >-
-          failure() &&
-          (steps.full_stack_chroma_e2e.outcome == 'failure' ||
-          steps.full_stack_milvus_e2e.outcome == 'failure')
+          failure() && steps.full_stack_milvus_e2e.outcome == 'failure'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: full-stack-e2e-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}

@@ -58,7 +58,7 @@ class ObservabilityTests(unittest.TestCase):
         """常见生产错误应落入稳定的错误来源分类。"""
         cases = [
             (RuntimeError("OpenAI provider timeout"), "llm_provider"),
-            (RuntimeError("Chroma HNSW Error finding id"), "vector_store"),
+            (RuntimeError("Milvus HNSW search unavailable"), "vector_store"),
             (RuntimeError("psycopg database timeout"), "postgres"),
             (RuntimeError("CrossEncoder rerank failed"), "rerank"),
             (RuntimeError("Zhipu embedding failed"), "embedding"),

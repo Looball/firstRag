@@ -137,7 +137,7 @@ FirstRAG/
 
 ## 7. Database Rules
 
-- PostgreSQL 存储关系型数据，Milvus 存储向量数据；Chroma 仅在 T-138 前保留回滚能力。
+- PostgreSQL 存储关系型数据，Milvus 是唯一受支持的向量数据库。
 - 数据库 SQL 位于 `backend/app/db/sql/`。
 - `000_initial_schema.sql` 是当前空库初始化基线；后续新增表、字段、索引或约束从 `001_xxx.sql` 开始新增 migration SQL，不直接假定数据库已手动修改。
 - migration 文件按三位编号递增命名，例如 `001_create_message_tags.sql`。

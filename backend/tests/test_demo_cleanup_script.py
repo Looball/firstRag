@@ -147,18 +147,15 @@ class DemoCleanupScriptTests(unittest.TestCase):
         self.assertIsNone(resolved_path)
         self.assertIn("uploads", reason or "")
 
-    def test_vector_cleanup_defaults_to_milvus(self) -> None:
-        """未显式配置 provider 时，demo cleanup 应遵循 Milvus 默认值。"""
-        provider, results, warnings = demo_cleanup.cleanup_vector_entries(
+    def test_vector_cleanup_uses_milvus(self) -> None:
+        """demo cleanup 的唯一 vector store 应为 Milvus。"""
+        results, warnings = demo_cleanup.cleanup_milvus_entries(
             [],
             {},
-            Path("vector_db/chroma"),
-            "langchain",
             execute=False,
             skip_vector_store=False,
         )
 
-        self.assertEqual(provider, "milvus")
         self.assertEqual(results, [])
         self.assertEqual(warnings, [])
 

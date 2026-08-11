@@ -703,7 +703,7 @@ class VectorIndexJobHealthTests(unittest.TestCase):
         ), patch(
             "app.api.vector_indexes.delete_file_vector_entries",
             side_effect=RuntimeError(
-                "Chroma path /srv/firstrag/vector_db failed with api_key=secret",
+                "Milvus collection firstrag_u1 failed with api_key=secret",
             ),
         ), patch(
             "app.api.vector_indexes.update_knowledge_file_status",

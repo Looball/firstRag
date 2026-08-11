@@ -566,7 +566,7 @@ def delete_knowledge_file_vectors(
 ):
     """删除单个知识文件的向量化存储。
 
-    同时清理 Chroma 向量库和 PostgreSQL 全文检索分块，
+    同时清理 Milvus entities 和 PostgreSQL 全文检索分块，
     并将文件状态重置为 pending，允许重新向量化。
     """
     file_record = get_user_knowledge_file(user_id, knowledge_file_id)
@@ -583,14 +583,14 @@ def delete_knowledge_file_vectors(
             "用户删除了该文件的向量化结果",
         )
 
-        # 2. 依次删除 Chroma 和 PostgreSQL 数据；任一失败都不发布 pending。
+        # 2. 依次删除 Milvus 和 PostgreSQL 数据；任一失败都不发布 pending。
         try:
             delete_file_vector_entries(user_id, knowledge_file_id)
             chunks_deleted = delete_file_chunks(user_id, knowledge_file_id)
             reset_file_index_state(user_id, knowledge_file_id)
             invalidate_file_knowledge_base_contexts(user_id, knowledge_file_id)
         except Exception as exc:
-            # Chroma 已删除但 PG 清理失败时，标记 failed，避免读取半完成索引。
+            # Milvus 已删除但 PG 清理失败时，标记 failed，避免读取半完成索引。
             update_knowledge_file_status(
                 user_id,
                 knowledge_file_id,
