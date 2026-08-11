@@ -276,7 +276,7 @@
 | `T-137` | `PLAN-20260809-01` | `P1` | `Done` | 更新 Milvus 架构、部署与教程文档 | `2026-08-11` | `0598254` |
 | `T-138` | `PLAN-20260809-01` | `P2` | `Done` | 完成 Milvus 切换观察并移除 Chroma 遗留 | `2026-08-11` | `6feabef` |
 | `T-139` | CI required checks | `P0` | `Done` | 修复 Nano ID 与 cryptography 新增高危依赖漏洞 | `2026-08-09` | `c5b5564` |
-| `T-140` | `PLAN-20260811-01` | `P1` | `Doing` | 冻结 PostgreSQL full-text 基线并确定 BGE-M3 sparse ADR |  |  |
+| `T-140` | `PLAN-20260811-01` | `P1` | `Done` | 冻结 PostgreSQL full-text 基线并确定 BGE-M3 sparse ADR | `2026-08-11` | `b0c11b9` |
 | `T-141` | `PLAN-20260811-01` | `P1` | `Todo` | 接入单实例 BGE-M3 sparse encoder runtime |  |  |
 | `T-142` | `PLAN-20260811-01` | `P1` | `Todo` | 扩展 Milvus dense/sparse schema 与写入生命周期 |  |  |
 | `T-143` | `PLAN-20260811-01` | `P1` | `Todo` | 将混合召回与 RRF 统一迁移到 Milvus |  |  |
@@ -5676,7 +5676,7 @@ git diff --check
 
 - 来源计划：`PLAN-20260811-01`
 - 优先级：`P1`
-- 状态：`Doing`
+- 状态：`Done`
 - 目标：冻结当前 PostgreSQL full-text + 应用层 RRF 的行为和质量基线，明确 BGE-M3 只负责 learned sparse embedding、现有用户 embedding provider 继续负责 dense embedding 的目标架构。
 - 技术边界：
   - BGE-M3 使用固定 model revision；文档与 query 必须由同一 revision 和参数编码，禁止混用 sparse vocabulary。
@@ -5685,6 +5685,12 @@ git diff --check
 - 验收标准：
   - ADR 记录 schema、索引、服务拓扑、失败降级、版本 identity、重建与回滚边界。
   - 基线记录 full-text/RRF 现有测试、真实数据量和待迁移配置字段，避免迁移后用口径变化掩盖回退。
+- 完成记录：
+  - 新增 ADR-0002，确定现有用户 provider 继续生成 dense、固定 revision 的本地 BGE-M3 只生成 learned sparse；单独 Compose 内网 encoder 只加载一份模型，Milvus 使用 `SPARSE_FLOAT_VECTOR + SPARSE_INVERTED_INDEX + IP`，通过 `hybrid_search + RRFRanker` 融合。
+  - 固定 `BAAI/bge-m3@5617a9f61b028005a4858fdac845db406aefb181`、MIT license 和 `FlagEmbedding==1.4.0` 起始 pin；记录 2,271,145,830 bytes 权重文件、1024 初始 max length、CI fixture/真实模型双层门禁与 offline cache 边界。
+  - 当前只读基线为 PostgreSQL 119 chunks、0 active jobs，Milvus 1 个业务 collection / 121 entities；冻结 `fulltext_top_k`、diagnostics、sources 与前后端兼容迁移范围。
+  - 正式 backend 镜像只读挂载工作区后，full-text/hybrid/settings/RAG/indexing eval 定向 unittest 54/54 通过；教程文档门禁和 `git diff --check` 通过。
+- 相关提交：`b0c11b9`
 
 ## T-141 接入单实例 BGE-M3 sparse encoder runtime
 
