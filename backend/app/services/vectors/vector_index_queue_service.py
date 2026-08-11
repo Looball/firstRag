@@ -144,8 +144,8 @@ def classify_vector_index_failure(error_message: str | None) -> str | None:
     if any(
         keyword in normalized
         for keyword in [
-            "chroma",
-            "chromadb",
+            "milvus",
+            "pymilvus",
             "vector store",
             "vector database",
             "collection",
@@ -173,7 +173,7 @@ def build_vector_index_failure_hint(failure_type: str | None) -> str | None:
     if failure_type == "embedding_error":
         return "Embedding 调用失败。请检查向量模型 API Key、网络连通性或稍后重新向量化。"
     if failure_type == "vector_store_error":
-        return "向量库写入失败。请确认 Chroma/vector_db 可用，可删除向量后重新向量化。"
+        return "向量库写入失败。请确认 Milvus 可用，可删除向量后重新向量化。"
     if failure_type == "chunk_write_error":
         return "全文分块写入失败。请检查 PostgreSQL chunk 表和迁移状态，然后重新向量化。"
     if failure_type == "database_error":

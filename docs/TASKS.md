@@ -40,13 +40,13 @@
 
 ## 当前基线
 
-- 2026-07-27 已增加无外部密钥的全栈浏览器门禁：隔离 Compose project 使用临时 PostgreSQL、Chroma、uploads volumes 和本地 OpenAI-compatible stub，真实覆盖注册、前端登录、TXT 上传、worker 向量化、SSE 回答与 sources 展示；测试结束自动清理专用容器和数据。
+- 2026-08-11 无外部密钥的全栈浏览器门禁已收敛为 Milvus-only：隔离 Compose project 使用临时 PostgreSQL、Milvus/etcd/MinIO、uploads volumes 和本地 OpenAI-compatible stub，覆盖注册、前端登录、TXT 上传、worker 向量化、restart persistence、SSE 回答与 sources 展示；测试结束自动清理专用容器和数据。
 - 2026-08-01 已刷新静态回归验收：后端最近一次全量 373 项测试通过；前端 Vitest 181 项通过、lint 0 error（保留 2 个 `<img>` 性能 warning），Next.js 16.2.12 production build 与 Playwright E2E 3/3 通过。
 - 2026-08-09 已刷新前端依赖安全审计：Next.js 与 eslint-config-next 保持 16.2.12、PostCSS 固定到 8.5.23，transitive Nano ID 升级到 3.3.18；当前 production npm audit policy 为 `0 findings / 0 exceptions`。
-- 2026-08-09 已刷新后端依赖安全审计：`cryptography` 升级到 50.0.0；`pip-audit` 只剩 ChromaDB 1.5.9 的 no-fix finding，由精确到版本且 2026-08-20 到期的内网不可达例外管理；Trivy 对最近一次 backend/frontend 镜像的可修复 high/critical OS finding 均为 0。
+- 2026-08-11 已刷新后端依赖安全审计：移除旧 vector store 依赖和限时 no-fix 例外，production `pip-audit` 为 `0 findings / 0 exceptions`；Trivy 继续由 CI 检查 backend/frontend 镜像的可修复 high/critical OS finding。
 - 2026-07-27 已刷新 GitHub Actions supply chain 基线：13 个外部 Action 引用均固定到官方 release 的 40 位 commit SHA，CI 自动拒绝 tag/branch/短 SHA 和缺失版本注释；Dependabot 每周聚合提出 Action 更新 PR。
 - 2026-07-20 已完成 Chroma 跨进程索引可见性真实回归：Compose 使用独立 `chroma` service，worker 重建文件向量后 backend 无需重启即可召回 16 条 vector 结果，`vector_degraded=false`、`vector_errors=[]`，目标资料同时包含 `fulltext` 和 `vector` 来源。
-- 当前默认验证路径为 `docker compose up -d --build` 后检查 `docker compose ps` 与 Redis、PostgreSQL、Milvus（etcd/MinIO/authenticated probe）、migration、backend、worker、frontend 关键日志；Chroma 仅通过 `chroma-rollback` profile 保留到 T-138。`scripts/acceptance_check.sh` 作为补充验收脚本，静态补充检查可运行 `scripts/acceptance_check.sh --skip-real-eval`。
+- 当前默认验证路径为 `docker compose up -d --build` 后检查 `docker compose ps` 与 Redis、PostgreSQL、Milvus（etcd/MinIO/authenticated probe）、migration、backend、worker、frontend 关键日志；Milvus 是唯一受支持的 vector store。`scripts/acceptance_check.sh` 作为补充验收脚本，静态补充检查可运行 `scripts/acceptance_check.sh --skip-real-eval`。
 - 当前阶段优先做“可维护性 + 可观测性 + 验收自动化”，避免在关键链路刚稳定后继续堆叠大功能；前端工作台已开始引入 React Query 和 Zod 做请求层集中化与轻量响应校验。
 - 2026-08-02 已确认后续不建立长期 `tutorial` 分支：`main` 继续作为唯一长期主线，项目停止非必要功能扩展，转向“可运行的全栈 RAG 工程教程与参考实现”；每项教程任务仍从 `main` 创建短期分支并通过 PR 合并。
 - 修改项目文件后，继续遵守只暂存当前任务相关文件、不混入 unrelated refactor 的规则。
@@ -130,7 +130,7 @@
 | `PLAN-20260731-11` | 2026-07-31 | `Done` | 继续拆分会话操作 hook，独立管理 active session 消息懒加载与错误回写。 | `T-120` |
 | `PLAN-20260801-01` | 2026-08-01 | `Done` | 拆分聊天工作台通用工具，优先收口 vector indexing 解析、状态和展示 helper。 | `T-121` |
 | `PLAN-20260802-01` | 2026-08-02 | `Done` | 在保留完整可运行实现的前提下，将 `main` 单主线转为分层教程与工程参考实现，并停止非必要功能扩展。 | `T-122` - `T-129` |
-| `PLAN-20260809-01` | 2026-08-09 | `Doing` | 在保持 PostgreSQL full-text、RRF、rerank、SSE 和用户隔离行为不变的前提下，将 vector store 从 Chroma 安全迁移到 Milvus，并提供可验证的数据迁移与回滚路径。 | `T-130` - `T-138` |
+| `PLAN-20260809-01` | 2026-08-09 | `Done` | 在保持 PostgreSQL full-text、RRF、rerank、SSE 和用户隔离行为不变的前提下，将 vector store 从 Chroma 安全迁移到 Milvus，并提供可验证的数据迁移与回滚路径。 | `T-130` - `T-138` |
 
 ## 任务总览
 
@@ -273,7 +273,7 @@
 | `T-135` | `PLAN-20260809-01` | `P0` | `Done` | 建立 Chroma 到 Milvus 数据迁移与回滚工具 | `2026-08-09` | `cf29b77` |
 | `T-136` | `PLAN-20260809-01` | `P1` | `Done` | 完成 Milvus 全链路回归、质量与性能验收 | `2026-08-09` | `616d835` |
 | `T-137` | `PLAN-20260809-01` | `P1` | `Done` | 更新 Milvus 架构、部署与教程文档 | `2026-08-11` | `0598254` |
-| `T-138` | `PLAN-20260809-01` | `P2` | `Todo` | 完成 Milvus 切换观察并移除 Chroma 遗留 | — | — |
+| `T-138` | `PLAN-20260809-01` | `P2` | `Done` | 完成 Milvus 切换观察并移除 Chroma 遗留 | `2026-08-11` | `6feabef` |
 | `T-139` | CI required checks | `P0` | `Done` | 修复 Nano ID 与 cryptography 新增高危依赖漏洞 | `2026-08-09` | `c5b5564` |
 
 ## 新计划接入流程
@@ -5613,7 +5613,7 @@ git diff --check
 
 - 来源计划：`PLAN-20260809-01`
 - 优先级：`P2`
-- 状态：`Todo`
+- 状态：`Done`
 - 目标：在 Milvus 默认运行并通过观察期后，删除只为 rollback 保留的 Chroma adapter、依赖、配置、容器和当前文档，结束长期双后端维护。
 - 技术边界：
   - 删除前必须确认 Milvus 数据备份、恢复演练、真实 eval 和 main post-merge CI 均完成。
@@ -5627,6 +5627,14 @@ git diff --check
   - 生产代码、默认 Compose、CI 和当前文档只依赖 Milvus；历史证据不被改写。
   - clean clone 能完成 credential-free quickstart 和 full-stack E2E。
   - Chroma 数据归档/删除步骤为显式人工操作且默认不执行。
+- 完成记录：
+  - active vector index job 为 0 后进入维护窗口；Milvus 基线为 1 个 collection / 121 entities。三个 named volume 已生成 Git 忽略的压缩备份和 SHA-256，并恢复到隔离 project；恢复实例为 1 个 collection / 121 entities，authenticated probe 与真实 filtered ANN self-hit 均通过。证据见 `docs/evals/milvus_chroma_removal_20260811.md`。
+  - 移除 Chroma adapter、迁移/回滚工具、repository、依赖、Compose service/profile、环境变量、preflight 分支、demo cleanup 分支、双 provider CI 和失效 runbook；Milvus factory、写入、检索、删除、diagnostics 和教程源码地图保留 provider-neutral boundary。
+  - `docker compose up -d --build --remove-orphans` 成功构建并启动 Milvus-only stack，精确移除了停止的旧 Chroma 容器但未删除 `vector_db/` 旧数据；migration 与 authenticated health probe 成功，backend/worker/frontend 无启动错误。
+  - 正式 backend 镜像挂载 clean working tree 后完整 unittest 408/408 通过；credential-free full-stack E2E 的浏览器 1/1、双用户/双 dimensions、restart persistence、v1/v2 replacement、filtered ANN、两轮 indexing lifecycle 和自动清理全部通过。restart 后首次旧 collection query 暂不可用，由已有 12 次有界 readiness retry 恢复并最终通过。
+  - 教程文档、Python compileall、Compose config、`git diff --check` 和 production `pip-audit` 均通过，dependency audit 为 `0 findings / 0 exceptions`。production preflight 的 Compose、资源、runtime health 和 migration 通过；本机 `.env` 仍因未显式配置生产级 `MILVUS_URI` / `MILVUS_TOKEN` 保持 secret gate 失败，正式部署前必须在目标环境注入并复验。
+  - 迁移前 `vector_db/` 仅保留为人工归档，不被 runtime 读取；本任务未执行数据目录删除。
+- 相关提交：`6feabef`
 
 ## T-139 修复 Nano ID 与 cryptography 新增高危依赖漏洞
 

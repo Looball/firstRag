@@ -29,7 +29,7 @@ class VectorIndexFailureRecoveryTests(unittest.TestCase):
             "PDF OCR 引擎不可用，请安装 Tesseract": "ocr_error",
             "PDF loader 解析失败": "parse_error",
             "Embedding request returned 429": "embedding_error",
-            "Chroma collection write failed": "vector_store_error",
+            "Milvus collection write failed": "vector_store_error",
             "knowledge_file_chunks chunk insert failed": "chunk_write_error",
             "psycopg database connection closed": "database_error",
             "vector index task timeout after 600 seconds": "task_timeout",

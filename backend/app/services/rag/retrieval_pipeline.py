@@ -95,7 +95,7 @@ def get_knowledge_base_file_ids(
 ) -> list[str]:
     """查询知识库中已完成向量化的文件 ID 列表。
 
-    只返回 status='indexed' 的文件，避免 ChromaDB 查找未向量化
+    只返回 status='indexed' 的文件，避免 Milvus 查找未向量化
     文件 ID 时触发 HNSW 内部错误。
     """
     context = get_cached_knowledge_base_context(

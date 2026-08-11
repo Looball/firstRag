@@ -36,7 +36,8 @@ conda run -n firstrag python scripts/npm_audit_policy.py
 - 例外最长有效 31 天；过期、package version 变化、finding 消失或 advisory ID 不再匹配都会阻断。
 - resolver、网络、scanner 或 JSON 解析异常属于审计失败，不会被当作零 finding 放行。
 
-当前 ChromaDB 例外记录在 `pip-audit-exceptions.json`。它只覆盖 `GHSA-F4J7-R4Q5-QW2C / chromadb / 1.5.9`：该漏洞需要攻击者直连 Chroma collection API 并提交恶意 model repository 与 `trust_remote_code=true`。FirstRAG 支持的 Compose 拓扑不映射 Chroma 端口，Nginx 也没有 Chroma upstream；如果部署时额外暴露 Chroma，该例外不再成立。
+当前 `pip-audit-exceptions.json` 为空；Milvus-only runtime 不再携带历史
+旧 vector store 依赖和对应 no-fix 例外。
 
 本地复核：
 
@@ -45,10 +46,10 @@ conda run -n firstrag python -m pip install pip-audit==2.10.1
 conda run -n firstrag python scripts/pip_audit_policy.py
 ```
 
-处理到期例外时：
+未来处理到期例外时：
 
-1. 先检查 ChromaDB 是否已经发布修复版本，并同时升级 Python package 与 `chromadb/chroma` image。
-2. 没有修复版本时重新核对 Compose、Nginx 和生产网络，确保 Chroma 仍未直接暴露。
+1. 先检查受影响 package 是否已经发布修复版本并优先升级。
+2. 没有修复版本时重新核对调用可达性、Compose、Nginx 和生产网络边界。
 3. 只有 triage 结论仍成立时，才能更新 `reviewed_on` 和最多 31 天后的 `expires_on`。
 
 ## Docker image OS package 策略

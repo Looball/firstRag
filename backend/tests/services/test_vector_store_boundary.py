@@ -1,274 +1,127 @@
-"""provider-neutral vector store boundary 契约测试。"""
+"""Provider-neutral vector store 契约回归测试。"""
 
 import unittest
+from uuid import UUID
 
 from langchain_core.documents import Document
 
-from app.services.vectors.chroma_vector_store import ChromaVectorStore
-from app.services.vectors.vector_store import VectorStoreProviderError
+from app.services.vectors.vector_store import (
+    VectorRecord,
+    VectorSearchResponse,
+    VectorStoreBoundary,
+    VectorStoreHealth,
+    build_chunk_ids,
+)
 
 
-def matches_filter(metadata: dict[str, object], where: dict) -> bool:
-    """为测试 fake 执行 Chroma 等值、$in 与 $and filter。"""
-    if "$and" in where:
-        return all(matches_filter(metadata, item) for item in where["$and"])
-    for key, value in where.items():
-        if isinstance(value, dict) and "$in" in value:
-            if str(metadata.get(key)) not in {
-                str(candidate)
-                for candidate in value["$in"]
-            }:
-                return False
-        elif str(metadata.get(key)) != str(value):
-            return False
-    return True
+class FakeVectorStore:
+    """实现完整契约的最小测试 vector store。"""
 
+    provider = "fake"
+    collection_name = "fake_collection"
 
-class FakeCollection:
-    """保存在内存中的最小 Chroma collection fake。"""
+    def ensure_collection(self) -> str:
+        """返回测试 collection。"""
+        return self.collection_name
 
-    name = "test-collection"
-
-    def __init__(self, client: "FakeChromaClient") -> None:
-        """绑定记录所属 client。"""
-        self.client = client
-
-    def count(self) -> int:
-        """返回当前记录总数。"""
-        return len(self.client.records)
-
-    def get(self, *, where: dict, include: list[str]) -> dict[str, object]:
-        """按 metadata filter 返回审计字段。"""
-        rows = [
-            row
-            for row in self.client.records.values()
-            if matches_filter(row["document"].metadata, where)
-        ]
-        return {
-            "ids": [row["id"] for row in rows],
-            "documents": [row["document"].page_content for row in rows],
-            "metadatas": [row["document"].metadata for row in rows],
-            "embeddings": [row["embedding"] for row in rows]
-            if "embeddings" in include
-            else None,
-        }
-
-
-class FakeChromaClient:
-    """支持写入、删除、过滤检索的 LangChain Chroma fake。"""
-
-    def __init__(self) -> None:
-        """初始化空记录和 collection。"""
-        self.records: dict[str, dict] = {}
-        self._collection = FakeCollection(self)
-
-    def delete(self, *, where: dict) -> None:
-        """仅删除符合用户和文件过滤条件的记录。"""
-        self.records = {
-            record_id: row
-            for record_id, row in self.records.items()
-            if not matches_filter(row["document"].metadata, where)
-        }
-
-    def add_documents(
+    def replace_file_vectors(
         self,
         *,
+        user_id: int,
+        file_id: UUID | str,
         documents: list[Document],
         ids: list[str],
     ) -> None:
-        """按稳定 ID 覆盖写入记录。"""
-        for record_id, document in zip(ids, documents, strict=True):
-            score = float(document.metadata.get("test_distance", 0.5))
-            self.records[record_id] = {
-                "id": record_id,
-                "document": document,
-                "embedding": [1.0 - score, score],
-                "distance": score,
-            }
+        """测试 fake 不持久化数据。"""
 
-    def similarity_search_by_vector_with_relevance_scores(
+    def delete_file_vectors(
         self,
         *,
-        embedding: list[float],
+        user_id: int,
+        file_id: UUID | str,
+    ) -> None:
+        """测试 fake 不持久化数据。"""
+
+    def search_vectors(
+        self,
+        *,
+        query_embedding: list[float],
+        user_id: int,
+        file_ids: list[UUID | str] | None,
         k: int,
-        filter: dict | None = None,
-    ) -> list[tuple[Document, float]]:
-        """按 filter 返回故意未排序的候选，验证 adapter 排序。"""
-        del embedding
-        rows = list(reversed(list(self.records.values())))
-        if filter is not None:
-            rows = [
-                row
-                for row in rows
-                if matches_filter(row["document"].metadata, filter)
-            ]
-        return [
-            (row["document"], row["distance"])
-            for row in rows[:k]
-        ]
+    ) -> VectorSearchResponse:
+        """返回空检索结果。"""
+        return VectorSearchResponse()
 
+    def list_file_vectors(
+        self,
+        *,
+        user_id: int,
+        file_id: UUID | str,
+        include_embeddings: bool = False,
+    ) -> list[VectorRecord]:
+        """返回空审计结果。"""
+        return []
 
-def make_document(
-    *,
-    content: str,
-    user_id: int,
-    file_id: str,
-    distance: float,
-) -> Document:
-    """创建带隔离字段与测试 distance 的文档。"""
-    return Document(
-        page_content=content,
-        metadata={
-            "user_id": str(user_id),
-            "file_id": file_id,
-            "chunk_index": 0,
-            "index_version": 0,
-            "test_distance": distance,
-        },
-    )
+    def count_vectors(
+        self,
+        *,
+        user_id: int | None = None,
+        file_id: UUID | str | None = None,
+    ) -> int:
+        """返回空计数。"""
+        return 0
+
+    def health_check(self) -> VectorStoreHealth:
+        """返回健康测试结果。"""
+        return VectorStoreHealth(
+            healthy=True,
+            provider=self.provider,
+            collection_name=self.collection_name,
+        )
 
 
 class VectorStoreBoundaryTests(unittest.TestCase):
-    """验证 Chroma adapter 遵守统一业务契约。"""
+    """验证业务层只接受统一 vector store 契约。"""
 
-    def setUp(self) -> None:
-        """为每个测试创建独立 adapter。"""
-        self.client = FakeChromaClient()
-        self.store = ChromaVectorStore(self.client, "test-collection")
+    def test_complete_implementation_matches_runtime_protocol(self) -> None:
+        """实现完整 Protocol 的 adapter 应匹配 runtime contract。"""
+        self.assertIsInstance(FakeVectorStore(), VectorStoreBoundary)
 
-    def test_replace_is_idempotent_and_delete_is_user_file_scoped(self) -> None:
-        """重复替换不应累加，删除不得越过用户和文件边界。"""
-        first = make_document(
-            content="旧内容",
-            user_id=1,
-            file_id="shared-file",
-            distance=0.4,
-        )
-        other_user = make_document(
-            content="其它用户",
-            user_id=2,
-            file_id="shared-file",
-            distance=0.2,
-        )
-        self.store.replace_file_vectors(
-            user_id=1,
-            file_id="shared-file",
-            documents=[first],
-            ids=["1:shared-file:v0:0"],
-        )
-        self.store.replace_file_vectors(
-            user_id=2,
-            file_id="shared-file",
-            documents=[other_user],
-            ids=["2:shared-file:v0:0"],
-        )
-        replacement = make_document(
-            content="新内容",
-            user_id=1,
-            file_id="shared-file",
-            distance=0.1,
-        )
-        self.store.replace_file_vectors(
-            user_id=1,
-            file_id="shared-file",
-            documents=[replacement],
-            ids=["1:shared-file:v1:0"],
-        )
+    def test_raw_provider_client_does_not_match_runtime_protocol(self) -> None:
+        """原始 provider client 不应匹配业务层 contract。"""
+        self.assertNotIsInstance(object(), VectorStoreBoundary)
 
-        self.assertEqual(self.store.count_vectors(), 2)
-        self.assertEqual(
-            self.store.list_file_vectors(
-                user_id=1,
-                file_id="shared-file",
-            )[0].document.page_content,
-            "新内容",
-        )
-        self.store.delete_file_vectors(user_id=1, file_id="shared-file")
-        self.assertEqual(self.store.count_vectors(), 1)
-        self.assertEqual(
-            self.store.count_vectors(user_id=2, file_id="shared-file"),
-            1,
-        )
-
-    def test_search_enforces_scope_and_normalizes_sort_order(self) -> None:
-        """搜索只返回指定用户/文件，并按 distance 升序输出。"""
-        fixtures = [
-            ("user-one-a", 1, "a", 0.3),
-            ("user-one-b", 1, "b", 0.1),
-            ("other-user", 2, "a", 0.01),
-            ("other-file", 1, "c", 0.02),
+    def test_chunk_ids_are_stable_across_provider_changes(self) -> None:
+        """向量 ID 只由业务 metadata 决定。"""
+        chunks = [
+            Document(
+                page_content="first",
+                metadata={
+                    "user_id": 7,
+                    "file_id": "00000000-0000-0000-0000-000000000001",
+                    "index_version": 3,
+                    "chunk_index": 0,
+                },
+            ),
+            Document(
+                page_content="second",
+                metadata={
+                    "user_id": 7,
+                    "file_id": "00000000-0000-0000-0000-000000000001",
+                    "index_version": 3,
+                    "chunk_index": 1,
+                },
+            ),
         ]
-        for index, (content, user_id, file_id, distance) in enumerate(fixtures):
-            self.store.replace_file_vectors(
-                user_id=user_id,
-                file_id=file_id,
-                documents=[make_document(
-                    content=content,
-                    user_id=user_id,
-                    file_id=file_id,
-                    distance=distance,
-                )],
-                ids=[f"record-{index}"],
-            )
-
-        response = self.store.search_vectors(
-            query_embedding=[1.0, 0.0],
-            user_id=1,
-            file_ids=["a", "b"],
-            k=5,
-        )
 
         self.assertEqual(
-            [result.document.page_content for result in response.results],
-            ["user-one-b", "user-one-a"],
+            build_chunk_ids(chunks),
+            [
+                "7:00000000-0000-0000-0000-000000000001:v3:0",
+                "7:00000000-0000-0000-0000-000000000001:v3:1",
+            ],
         )
-        self.assertEqual(
-            [result.distance for result in response.results],
-            [0.1, 0.3],
-        )
-        self.assertEqual(response.issues, [])
-
-    def test_audit_health_and_provider_error_are_provider_neutral(self) -> None:
-        """审计、健康和异常均通过稳定契约暴露。"""
-        document = make_document(
-            content="可审计记录",
-            user_id=1,
-            file_id="audit-file",
-            distance=0.25,
-        )
-        self.store.replace_file_vectors(
-            user_id=1,
-            file_id="audit-file",
-            documents=[document],
-            ids=["audit-id"],
-        )
-
-        records = self.store.list_file_vectors(
-            user_id=1,
-            file_id="audit-file",
-            include_embeddings=True,
-        )
-        self.assertEqual(records[0].id, "audit-id")
-        self.assertEqual(records[0].embedding, [0.75, 0.25])
-        self.assertTrue(self.store.health_check().healthy)
-        self.assertEqual(self.store.ensure_collection(), "test-collection")
-
-        self.client.similarity_search_by_vector_with_relevance_scores = (
-            lambda **_: (_ for _ in ()).throw(
-                TimeoutError("connection timeout api_key=secret"),
-            )
-        )
-        with self.assertRaises(VectorStoreProviderError) as raised:
-            self.store.search_vectors(
-                query_embedding=[1.0, 0.0],
-                user_id=1,
-                file_ids=None,
-                k=1,
-            )
-        self.assertEqual(raised.exception.provider, "chroma")
-        self.assertEqual(raised.exception.category, "unavailable")
-        self.assertEqual(raised.exception.operation, "search_vectors")
-        self.assertNotIn("secret", str(raised.exception))
 
 
 if __name__ == "__main__":

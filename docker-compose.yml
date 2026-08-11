@@ -40,19 +40,6 @@ services:
       timeout: 5s
       retries: 5
 
-  chroma:
-    profiles: ["chroma-rollback"]
-    image: chromadb/chroma:1.5.9
-    restart: unless-stopped
-    volumes:
-      - ${VECTOR_DB_DIR:-./vector_db}/chroma:/data
-    logging: *default-logging
-    healthcheck:
-      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/8000"]
-      interval: 10s
-      timeout: 5s
-      retries: 10
-
   milvus-etcd:
     image: quay.io/coreos/etcd:v3.5.25
     restart: unless-stopped
@@ -162,11 +149,6 @@ services:
       VECTOR_WORKER_FILE_LOCK_TTL_SECONDS: ${VECTOR_WORKER_FILE_LOCK_TTL_SECONDS:-900}
       RATE_LIMIT_BACKEND: ${RATE_LIMIT_BACKEND:-redis}
       RATE_LIMIT_REDIS_FAILURE_MODE: ${RATE_LIMIT_REDIS_FAILURE_MODE:-fail_closed}
-      VECTOR_STORE_PATH: ${VECTOR_STORE_PATH:-/app/vector_db/chroma}
-      CHROMA_HOST: ${CHROMA_HOST:-chroma}
-      CHROMA_PORT: ${CHROMA_PORT:-8000}
-      CHROMA_SSL: ${CHROMA_SSL:-false}
-      VECTOR_STORE_PROVIDER: ${VECTOR_STORE_PROVIDER:-milvus}
       MILVUS_URI: ${MILVUS_URI:-http://milvus-standalone:19530}
       MILVUS_TOKEN: ${MILVUS_TOKEN:-root:firstrag-milvus-local-password}
       MILVUS_DATABASE: ${MILVUS_DATABASE:-default}
@@ -187,9 +169,6 @@ services:
         condition: service_healthy
       migrate:
         condition: service_completed_successfully
-      chroma:
-        condition: service_healthy
-        required: false
       milvus-health-probe:
         condition: service_completed_successfully
 
@@ -218,11 +197,6 @@ services:
       REDIS_COMMAND_TIMEOUT_SECONDS: ${REDIS_COMMAND_TIMEOUT_SECONDS:-1}
       VECTOR_WORKER_HEARTBEAT_TTL_SECONDS: ${VECTOR_WORKER_HEARTBEAT_TTL_SECONDS:-30}
       VECTOR_WORKER_FILE_LOCK_TTL_SECONDS: ${VECTOR_WORKER_FILE_LOCK_TTL_SECONDS:-900}
-      VECTOR_STORE_PATH: ${VECTOR_STORE_PATH:-/app/vector_db/chroma}
-      CHROMA_HOST: ${CHROMA_HOST:-chroma}
-      CHROMA_PORT: ${CHROMA_PORT:-8000}
-      CHROMA_SSL: ${CHROMA_SSL:-false}
-      VECTOR_STORE_PROVIDER: ${VECTOR_STORE_PROVIDER:-milvus}
       MILVUS_URI: ${MILVUS_URI:-http://milvus-standalone:19530}
       MILVUS_TOKEN: ${MILVUS_TOKEN:-root:firstrag-milvus-local-password}
       MILVUS_DATABASE: ${MILVUS_DATABASE:-default}
@@ -242,9 +216,6 @@ services:
         condition: service_healthy
       migrate:
         condition: service_completed_successfully
-      chroma:
-        condition: service_healthy
-        required: false
       milvus-health-probe:
         condition: service_completed_successfully
 

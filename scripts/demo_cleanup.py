@@ -17,8 +17,6 @@ from uuid import UUID
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_ENV_FILE = PROJECT_ROOT / ".env"
 DEFAULT_UPLOADS_DIR = PROJECT_ROOT / "uploads"
-DEFAULT_VECTOR_STORE_PATH = PROJECT_ROOT / "vector_db/chroma"
-DEFAULT_CHROMA_COLLECTION_NAME = "langchain"
 DEFAULT_CONFIRM_TEXT = "cleanup-demo-data"
 APP_UPLOADS_PREFIX = Path("/app/uploads")
 
@@ -130,19 +128,6 @@ def build_arg_parser() -> argparse.ArgumentParser:
         help="Host/container uploads root. Defaults to UPLOADS_DIR or ./uploads.",
     )
     parser.add_argument(
-        "--vector-store-path",
-        type=Path,
-        help=(
-            "Chroma persist directory. Defaults to VECTOR_STORE_PATH, "
-            "then VECTOR_DB_DIR/chroma, then ./vector_db/chroma."
-        ),
-    )
-    parser.add_argument(
-        "--chroma-collection-name",
-        default=None,
-        help="Base Chroma collection name. Defaults to CHROMA_COLLECTION_NAME.",
-    )
-    parser.add_argument(
         "--older-than-days",
         type=int,
         default=7,
@@ -188,7 +173,6 @@ def build_arg_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--skip-vector-store",
-        "--skip-chroma",
         dest="skip_vector_store",
         action="store_true",
         help="Skip vector entry counting/deletion. PostgreSQL/uploads still run.",
@@ -258,28 +242,6 @@ def resolve_uploads_dir(args: argparse.Namespace, env: Mapping[str, str]) -> Pat
 
     env_uploads_dir = env.get("UPLOADS_DIR", "")
     return resolve_project_path(env_uploads_dir, DEFAULT_UPLOADS_DIR)
-
-
-def resolve_vector_store_path(
-    args: argparse.Namespace,
-    env: Mapping[str, str],
-) -> Path:
-    """解析 Chroma 持久化目录。"""
-    if args.vector_store_path is not None:
-        return resolve_project_path(
-            args.vector_store_path,
-            DEFAULT_VECTOR_STORE_PATH,
-        )
-
-    vector_store_path = env.get("VECTOR_STORE_PATH", "")
-    if vector_store_path:
-        return resolve_project_path(vector_store_path, DEFAULT_VECTOR_STORE_PATH)
-
-    vector_db_dir = env.get("VECTOR_DB_DIR", "")
-    if vector_db_dir:
-        return resolve_project_path(vector_db_dir, PROJECT_ROOT / "vector_db") / "chroma"
-
-    return DEFAULT_VECTOR_STORE_PATH
 
 
 def load_database_url(
@@ -807,100 +769,6 @@ def count_database_targets(connection, selection: CleanupSelection) -> dict[str,
     return counts
 
 
-def normalize_collection_name_part(value: str) -> str:
-    """将 collection 名称片段规范化为 Chroma 可接受的安全字符。"""
-    normalized = "".join(
-        character if character.isalnum() or character in {"_", "-"} else "-"
-        for character in value.strip().lower()
-    ).strip("-_")
-    return normalized or "collection"
-
-
-def is_demo_collection_name(collection_name: str, base_collection_name: str) -> bool:
-    """判断 collection 是否属于 FirstRAG 的默认或用户隔离集合。"""
-    normalized_base = normalize_collection_name_part(base_collection_name)[:24]
-    return (
-        collection_name == base_collection_name
-        or collection_name == normalized_base
-        or collection_name.startswith(f"{normalized_base}-u")
-    )
-
-
-def build_chroma_filter(user_id: int, file_id: str) -> dict[str, Any]:
-    """构造按用户和文件清理 Chroma entries 的 metadata filter。"""
-    return {
-        "$and": [
-            {"user_id": str(user_id)},
-            {"file_id": file_id},
-        ]
-    }
-
-
-def cleanup_chroma_entries(
-    files: Sequence[Row],
-    vector_store_path: Path,
-    collection_name: str,
-    *,
-    execute: bool,
-    skip_vector_store: bool,
-) -> tuple[list[VectorCleanupResult], list[str]]:
-    """统计或删除 Chroma 中与待清理文件对应的向量 entries。"""
-    warnings: list[str] = []
-    if skip_vector_store:
-        warnings.append("已跳过 Chroma 统计和清理。")
-        return [], warnings
-
-    if not files:
-        return [], warnings
-
-    if not vector_store_path.exists():
-        warnings.append(f"Chroma 路径不存在，向量 entries 统计为 0：{vector_store_path}")
-        return [], warnings
-
-    try:
-        import chromadb
-    except ImportError as exc:  # pragma: no cover - 依赖缺失时才触发。
-        raise DemoCleanupError(
-            "缺少 chromadb 依赖，无法审计或清理 Chroma entries。"
-        ) from exc
-
-    client = chromadb.PersistentClient(path=str(vector_store_path))
-    collection_refs = client.list_collections()
-    collection_names = [
-        getattr(collection_ref, "name", collection_ref)
-        for collection_ref in collection_refs
-    ]
-    target_collection_names = [
-        name
-        for name in collection_names
-        if isinstance(name, str) and is_demo_collection_name(name, collection_name)
-    ]
-
-    results: list[VectorCleanupResult] = []
-    for target_collection_name in target_collection_names:
-        collection = client.get_collection(target_collection_name)
-        for file_row in files:
-            file_id = normalize_uuid(file_row["id"])
-            user_id = int(file_row["user_id"])
-            where = build_chroma_filter(user_id, file_id)
-            matched = collection.get(where=where, include=[])
-            matched_ids = list(matched.get("ids", []))
-            deleted_count = 0
-            if execute and matched_ids:
-                collection.delete(ids=matched_ids)
-                deleted_count = len(matched_ids)
-            results.append(
-                VectorCleanupResult(
-                    collection_name=target_collection_name,
-                    file_id=file_id,
-                    user_id=user_id,
-                    matched_count=len(matched_ids),
-                    deleted_count=deleted_count,
-                )
-            )
-    return results, warnings
-
-
 def normalize_milvus_prefix(value: str) -> str:
     """将 Milvus collection prefix 规范为与业务 factory 一致的形式。"""
     normalized = "".join(
@@ -1018,44 +886,11 @@ def cleanup_milvus_entries(
     return results, []
 
 
-def cleanup_vector_entries(
-    files: Sequence[Row],
-    env: Mapping[str, str],
-    vector_store_path: Path,
-    collection_name: str,
-    *,
-    execute: bool,
-    skip_vector_store: bool,
-) -> tuple[str, list[VectorCleanupResult], list[str]]:
-    """按当前 provider 路由 vector 统计和清理。"""
-    provider = (env.get("VECTOR_STORE_PROVIDER") or "milvus").strip().lower()
-    if provider == "milvus":
-        results, warnings = cleanup_milvus_entries(
-            files,
-            env,
-            execute=execute,
-            skip_vector_store=skip_vector_store,
-        )
-        return provider, results, warnings
-    if provider == "chroma":
-        results, warnings = cleanup_chroma_entries(
-            files,
-            vector_store_path,
-            collection_name,
-            execute=execute,
-            skip_vector_store=skip_vector_store,
-        )
-        return provider, results, warnings
-    raise DemoCleanupError("VECTOR_STORE_PROVIDER 只能设置为 milvus 或 chroma。")
-
-
 def build_cleanup_plan(
     connection,
     snapshot: DatabaseSnapshot,
     retention: RetentionConfig,
     uploads_dir: Path,
-    vector_store_path: Path,
-    collection_name: str,
     env: Mapping[str, str],
     *,
     skip_vector_store: bool,
@@ -1071,11 +906,9 @@ def build_cleanup_plan(
     counts["upload_files"] = len(upload_targets)
     counts["upload_bytes"] = sum(target.size_bytes for target in upload_targets)
 
-    provider, vector_results, warnings = cleanup_vector_entries(
+    vector_results, warnings = cleanup_milvus_entries(
         candidate_files,
         env,
-        vector_store_path,
-        collection_name,
         execute=False,
         skip_vector_store=skip_vector_store,
     )
@@ -1084,7 +917,7 @@ def build_cleanup_plan(
         result.deleted_count
         for result in vector_results
     )
-    counts[f"{provider}_entries"] = counts["vector_entries"]
+    counts["milvus_entries"] = counts["vector_entries"]
 
     return CleanupPlan(
         cutoff=retention.cutoff,
@@ -1345,7 +1178,6 @@ def print_plan(plan: CleanupPlan, uploads_dir: Path, *, execute: bool) -> None:
             "vector_entries",
             "vector_deleted_entries",
             "milvus_entries",
-            "chroma_entries",
         }:
             continue
         print(f"  {key}: {plan.counts[key]}")
@@ -1387,8 +1219,6 @@ def execute_cleanup(
     connection,
     plan: CleanupPlan,
     uploads_dir: Path,
-    vector_store_path: Path,
-    collection_name: str,
     candidate_files: Sequence[Row],
     env: Mapping[str, str],
     *,
@@ -1400,11 +1230,9 @@ def execute_cleanup(
             "存在越界或不可解析的上传路径，已停止执行；请先修正 storage_path 或保留这些文件。"
         )
 
-    _provider, vector_results, vector_warnings = cleanup_vector_entries(
+    vector_results, vector_warnings = cleanup_milvus_entries(
         candidate_files,
         env,
-        vector_store_path,
-        collection_name,
         execute=True,
         skip_vector_store=skip_vector_store,
     )
@@ -1428,12 +1256,6 @@ def run(args: argparse.Namespace) -> int:
     env = build_runtime_env(args.env_file)
     database_url = load_database_url(args.database_url, env)
     uploads_dir = resolve_uploads_dir(args, env)
-    vector_store_path = resolve_vector_store_path(args, env)
-    collection_name = (
-        args.chroma_collection_name
-        or env.get("CHROMA_COLLECTION_NAME")
-        or DEFAULT_CHROMA_COLLECTION_NAME
-    )
     if args.older_than_days < 0:
         raise DemoCleanupError("--older-than-days 不能小于 0。")
     if args.execute and args.confirm != DEFAULT_CONFIRM_TEXT:
@@ -1469,8 +1291,6 @@ def run(args: argparse.Namespace) -> int:
             snapshot,
             retention,
             uploads_dir,
-            vector_store_path,
-            collection_name,
             env,
             skip_vector_store=args.skip_vector_store,
         )
@@ -1492,8 +1312,6 @@ def run(args: argparse.Namespace) -> int:
             connection,
             plan,
             uploads_dir,
-            vector_store_path,
-            collection_name,
             candidate_files,
             env,
             skip_vector_store=args.skip_vector_store,

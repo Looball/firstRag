@@ -120,7 +120,7 @@ def classify_exception(
     ):
         source = "embedding"
         retryable = True
-    elif "chroma" in text or "hnsw" in text or "vector" in text:
+    elif "milvus" in text or "hnsw" in text or "vector" in text:
         source = "vector_store"
         retryable = True
     elif source == "rerank" or "rerank" in text or "crossencoder" in text:

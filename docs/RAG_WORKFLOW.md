@@ -45,7 +45,7 @@ OCR 参数回归默认由 `pdf_ocr_eval_v2.json` 定义的合成评测集约束�
 5. 普通问题加载历史消息，构建 RAG 链。
 6. `rag_service` 兼容入口委托 `app/services/rag/` 内部模块读取 retrieval settings、判断是否需要检索，并可改写多轮问题。
 7. 召回候选片段：
-   - Milvus 向量检索和 PostgreSQL 全文检索并行粗召回。应用层预先生成 query embedding，Milvus scalar filter 始终包含 `user_id` 与可选 `file_id` 范围；COSINE similarity 由 adapter 转换为越小越近的 `vector_score`。Chroma metadata filter 仅用于观察期回滚。
+   - Milvus 向量检索和 PostgreSQL 全文检索并行粗召回。应用层预先生成 query embedding，Milvus scalar filter 始终包含 `user_id` 与可选 `file_id` 范围；COSINE similarity 由 adapter 转换为越小越近的 `vector_score`。
    - RRF 融合多路结果。
    - 可选 reranker 精排，默认本地 CrossEncoder；也可在用户设置中切换到 Qwen、Voyage、Cohere、Jina 或自定义 rerank API。
 8. 用户配置的 OpenAI 兼容聊天模型流式生成回答；带图片时，最终用户消息按 OpenAI-compatible 多模态 payload 发送。

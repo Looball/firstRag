@@ -2,7 +2,7 @@
 
 本模块采用三阶段检索策略：
 
-1. 粗召回：使用 Chroma 向量检索和 PostgreSQL 全文检索分别召回候选。
+1. 粗召回：使用 Milvus 向量检索和 PostgreSQL 全文检索分别召回候选。
    向量检索擅长语义相似，全文检索擅长精确关键词、专有名词和编号。
    两者都是低成本召回器，目标是尽量提高候选覆盖率，而不是最终排序。
 
@@ -40,9 +40,6 @@ from app.services.retrieval.rrf import reciprocal_rank_fusion
 from app.services.vectors.embedding_model import (
     create_embedding_model,
     get_embedding_cache_identity,
-)
-from app.services.vectors.chroma_vector_store import (
-    ensure_vector_store_boundary,
 )
 from app.services.vectors.vector_store_factory import get_vector_store
 
@@ -309,9 +306,7 @@ def get_vector_documents(
         return []
     record_retrieval_timing("embedding", embedding_started_at)
 
-    vector_store = ensure_vector_store_boundary(
-        get_vector_store(user_id=user_id),
-    )
+    vector_store = get_vector_store(user_id=user_id)
     provider_name = vector_store.provider.capitalize()
     vector_started_at = perf_counter()
     try:

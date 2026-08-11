@@ -244,7 +244,7 @@ GET /api/settings/embedding
 }
 ```
 
-切换向量模型 provider、model 或 dimensions 后，前端应提示用户重新向量化相关文件；后端会按用户和 embedding 配置隔离 Chroma collection。
+切换向量模型 provider、model 或 dimensions 后，前端应提示用户重新向量化相关文件；后端会按用户和 embedding 配置隔离 Milvus collection。
 
 向量 provider 支持 `qwen`、`zhipuai`、`openai`、`voyage`、`cohere`、`jina` 和 `openai_compatible`。后端按 `(user_id, provider)` 保存多份向量 API Key，切换回已保存厂商时前端可省略 `api_key`。
 

@@ -261,7 +261,7 @@ Content-Type: application/json
 }
 ```
 
-切换向量模型 provider、model 或 dimensions 后，已有文件需要重新向量化。后端会按用户和 embedding 配置隔离 Chroma collection，避免不同维度的向量写入同一 collection。
+切换向量模型 provider、model 或 dimensions 后，已有文件需要重新向量化。后端会按用户和 embedding 配置隔离 Milvus collection，避免不同维度的向量写入同一 collection。
 
 当前内置向量 provider：`qwen`、`zhipuai`、`openai`、`voyage`、`cohere`、`jina`、`openai_compatible`。用户可按厂商保存多份 API Key，切换回已保存厂商时可省略 `api_key`。`openai_compatible` 仅在服务端开启 `ALLOW_USER_CUSTOM_LLM_BASE_URL=true` 后可用。
 

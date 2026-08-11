@@ -7,11 +7,7 @@ from uuid import UUID
 
 from langchain_core.documents import Document
 
-from app.core.config import (
-    CHROMA_COLLECTION_NAME,
-    PDF_OCR_HISTORY_MAX_RUNS_PER_PAGE,
-    VECTOR_STORE_PATH,
-)
+from app.core.config import PDF_OCR_HISTORY_MAX_RUNS_PER_PAGE
 from app.db.locks import file_index_lock
 from app.db.executor import Row
 from app.repositories.knowledge_chunk_repository import (
@@ -35,9 +31,6 @@ from app.services.documents.document_service import (
 )
 from app.services.knowledge_profile_cache import (
     invalidate_file_knowledge_base_contexts,
-)
-from app.services.vectors.chroma_vector_store import (
-    ensure_vector_store_boundary,
 )
 from app.services.vectors.vector_store import (
     VectorStoreBoundary,
@@ -355,10 +348,9 @@ def delete_file_vector_entries(
         try:
             resolved_vectordb = get_vector_store(user_id=user_id)
         except ValueError:
-            # 兼容迁移前的旧 collection 清理：删除操作不应要求用户先配置 Key。
+            # 删除操作不应要求用户先配置 embedding API Key。
             resolved_vectordb = get_vector_store_for_cleanup(user_id)
-    boundary = ensure_vector_store_boundary(resolved_vectordb)
-    boundary.delete_file_vectors(user_id=user_id, file_id=file_id)
+    resolved_vectordb.delete_file_vectors(user_id=user_id, file_id=file_id)
 
 
 def compensate_failed_file_index(
@@ -406,8 +398,6 @@ def index_file_vectors(
     storage_path: str | Path,
     index_version: int,
     original_name: str | None = None,
-    persist_directory: str | Path = VECTOR_STORE_PATH,
-    collection_name: str = CHROMA_COLLECTION_NAME,
     force_ocr_page_numbers: set[int] | None = None,
     pdf_ocr_corrections: dict[int, dict[str, object]] | None = None,
     previous_ocr_attempts: dict[int, int] | None = None,
@@ -444,11 +434,7 @@ def index_file_vectors(
     normalized_file_id = str(file_id)
     vectordb: VectorStoreBoundary | None = None
     try:
-        vectordb = get_vector_store(
-            user_id=user_id,
-            persist_directory=persist_directory,
-            collection_name=collection_name,
-        )
+        vectordb = get_vector_store(user_id=user_id)
         chunk_ids = build_chunk_ids(chunks)
         vectordb.replace_file_vectors(
             user_id=user_id,
@@ -493,7 +479,6 @@ def index_file_vectors(
             for chunk in chunks
         ),
         "collection_name": actual_collection_name,
-        "persist_directory": str(persist_directory),
         "force_ocr_page_numbers": sorted(force_ocr_page_numbers or set()),
         "ocr_correction_page_numbers": sorted(
             (pdf_ocr_corrections or {}).keys(),

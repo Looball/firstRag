@@ -257,7 +257,7 @@ class RagReferenceFilteringTests(unittest.TestCase):
         ])
         diagnostics = {
             "vector_degraded": True,
-            "vector_errors": ["Chroma 单文件向量检索失败：file-1"],
+            "vector_errors": ["Milvus 单文件向量检索失败：file-1"],
             "vector_count": 0,
             "fulltext_count": 5,
             "fused_count": 5,
@@ -285,7 +285,7 @@ class RagReferenceFilteringTests(unittest.TestCase):
         self.assertEqual(events[0]["retrieval_sources"], ["fulltext"])
         self.assertEqual(
             events[0]["diagnostics"]["vector_errors"],
-            ["Chroma 单文件向量检索失败：file-1"],
+            ["Milvus 单文件向量检索失败：file-1"],
         )
         self.assertTrue(events[0]["diagnostics"]["knowledge_profile_cache_hit"])
         timing = events[0]["diagnostics"]["timing"]

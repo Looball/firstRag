@@ -14,8 +14,8 @@ class ConfigPathTests(unittest.TestCase):
     def test_relative_path_resolves_from_project_root(self) -> None:
         """相对路径应固定解析到项目根目录。"""
         self.assertEqual(
-            resolve_project_path("vector_db/chroma", PROJECT_ROOT / "fallback"),
-            PROJECT_ROOT / "vector_db/chroma",
+            resolve_project_path("uploads", PROJECT_ROOT / "fallback"),
+            PROJECT_ROOT / "uploads",
         )
 
     def test_absolute_path_is_kept(self) -> None:

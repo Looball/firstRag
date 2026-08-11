@@ -23,32 +23,41 @@ from app.services.retrieval.reranker import (
     load_reranker_runtime,
 )
 from app.services.retrieval.rrf import reciprocal_rank_fusion
+from app.services.vectors.vector_store import (
+    VectorSearchResponse,
+    VectorSearchResult,
+)
 
 
 class FakeVectorStore:
-    """模拟按单文件范围返回候选的 Chroma 向量库。"""
+    """模拟按单文件范围返回候选的 Milvus adapter。"""
 
-    def similarity_search_by_vector_with_relevance_scores(
+    provider = "milvus"
+
+    def search_vectors(
         self,
-        embedding: list[float],
+        *,
+        query_embedding: list[float],
+        user_id: int,
+        file_ids: list[str] | None,
         k: int,
-        filter: dict,
-    ) -> list[tuple[Document, float]]:
-        """返回符合单文件 filter 的测试文档。"""
-        file_filter = filter["$and"][1]["file_id"]
-        return [
-            (
+    ) -> VectorSearchResponse:
+        """返回符合用户和文件 scope 的测试文档。"""
+        del query_embedding, k
+        file_id = (file_ids or ["good-file"])[0]
+        return VectorSearchResponse(results=[
+            VectorSearchResult(
                 Document(
                     page_content="第二条 民事诉讼法的任务...",
                     metadata={
-                        "user_id": "6",
-                        "file_id": file_filter,
+                        "user_id": str(user_id),
+                        "file_id": file_id,
                         "chunk_index": 2,
                     },
                 ),
-                0.1,
-            )
-        ]
+                distance=0.1,
+            ),
+        ])
 
 
 class FakeFailingMilvusBoundary:
@@ -117,9 +126,6 @@ class RetrievalResilienceTests(unittest.TestCase):
             return_value=("6", "zhipuai", "embedding-3", ""),
         ), unittest.mock.patch(
             "app.services.retrieval.hybrid_retriever.get_vector_store",
-            return_value=failing_store,
-        ), unittest.mock.patch(
-            "app.services.retrieval.hybrid_retriever.ensure_vector_store_boundary",
             return_value=failing_store,
         ), unittest.mock.patch(
             "app.services.retrieval.hybrid_retriever.get_fulltext_documents",

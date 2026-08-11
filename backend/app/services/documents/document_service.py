@@ -30,7 +30,6 @@ from app.core.config import (
     PDF_OCR_LOW_CONFIDENCE_THRESHOLD,
     PDF_OCR_MAX_PAGES,
     PDF_OCR_MIN_NATIVE_TEXT_CHARACTERS,
-    VECTOR_STORE_PATH,
 )
 from app.services.documents.pdf_ocr_engine import (
     PdfOcrError,
@@ -799,7 +798,6 @@ def split_documents(documents: list[Document]) -> list[Document]:
 
 def build_vector_store(
     folder_path: str | Path = "./local_doc",
-    persist_directory: str | Path = VECTOR_STORE_PATH,
     user_id: int | None = None,
 ) -> VectorStoreBoundary:
     """加载、切分本地文档并通过统一 boundary 写入向量库。"""
@@ -826,10 +824,7 @@ def build_vector_store(
     )
     logger.debug("文档切分样例：%s", split_docs[:3])
 
-    vector_store = get_vector_store(
-        user_id=user_id,
-        persist_directory=persist_directory,
-    )
+    vector_store = get_vector_store(user_id=user_id)
     documents_by_file: dict[str, list[Document]] = {}
     for document in split_docs:
         document.metadata.setdefault("index_version", 0)

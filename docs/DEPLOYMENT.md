@@ -26,15 +26,13 @@ cp .env.example .env
 | `USER_SETTINGS_ENCRYPTION_KEY` | 用户聊天模型、向量模型和远程 rerank API Key 的加密主密钥。 |
 | `LLM_TEMPERATURE` / `LLM_MAX_TOKENS` / `LLM_TIMEOUT_SECONDS` / `LLM_MAX_RETRIES` | 聊天模型设置页的默认生成参数；provider、model 和 API Key 由用户登录后配置。 |
 | `RERANK_PROVIDER` / `RERANK_MODEL` / `RERANK_BASE_URL` / `RERANK_API_KEY` | 历史环境变量兼容；新版本远程 rerank 推荐在登录后的“模型设置”页按用户配置。 |
-| `VECTOR_STORE_PROVIDER` | 当前 vector store provider；默认 `milvus`。T-138 前仍可显式设为 `chroma` 回滚。 |
 | `MILVUS_URI` / `MILVUS_TOKEN` / `MILVUS_DATABASE` | Milvus 内网连接、认证 token 和 database；Compose 默认 URI 为 `http://milvus-standalone:19530`，真实 token 只放 `.env`。 |
 | `MILVUS_COLLECTION_PREFIX` / `MILVUS_TIMEOUT_SECONDS` / `MILVUS_CONSISTENCY_LEVEL` | Milvus collection 前缀、client timeout 与一致性；当前 ADR 固定 `Strong`。 |
 | `MILVUS_MINIO_ACCESS_KEY` / `MILVUS_MINIO_SECRET_KEY` | Milvus 内置 MinIO 的本地凭据；非本机隔离环境必须覆盖模板值。 |
 | `MILVUS_MEMORY_LIMIT` / `MILVUS_CPU_LIMIT` | Milvus Standalone 容器资源上限，默认 `8g` / `4.0`。 |
-| `VECTOR_STORE_PATH` / `CHROMA_*` | 仅供观察期回滚；Compose 需配合 `chroma-rollback` profile。 |
 | `RERANKER_MODEL_PATH` | 本地 reranker 模型路径；compose 会把 `./models` 只读挂载到 `/app/models`。 |
 | `PDF_OCR_*` | 扫描 PDF 本地 OCR 开关、语言、DPI、单页/自适应总超时、原生文本阈值、低置信度阈值、单文件最大 OCR 页数、重识别批次页数、候选上限和二值化阈值；Compose 镜像内置 Tesseract `chi_sim/eng`。 |
-| `UPLOADS_DIR` / `MODELS_DIR` | Docker Compose 宿主机持久化目录；生产环境建议指向独立数据盘。`VECTOR_DB_DIR` 仅供 Chroma 回滚。 |
+| `UPLOADS_DIR` / `MODELS_DIR` | Docker Compose 宿主机持久化目录；生产环境建议指向独立数据盘。Milvus 使用 Compose named volumes 或生产级外部实例。 |
 | `DOCKER_LOG_MAX_SIZE` / `DOCKER_LOG_MAX_FILE` | Docker stdout/stderr 日志轮转参数。 |
 
 ## 本地启动
@@ -56,7 +54,7 @@ docker compose logs --tail=100 redis postgres milvus-etcd milvus-minio milvus-st
 
 默认访问 `http://localhost:3000`。后端、前端和 worker 的常规验证都应基于 Compose 容器；本地 conda / npm 启动仅用于专项调试。
 
-### Milvus 默认 runtime 与 Chroma 回滚
+### Milvus runtime
 
 Milvus 已通过 T-136 全链路验收，现在是默认 runtime。启动命令：
 
@@ -99,7 +97,11 @@ docker compose exec -T worker \
   python -m app.services.vectors.milvus_retrieval_probe cleanup
 ```
 
-T-135 的 current-data 导入必须在维护窗口内执行，不允许直接从日常 backend/worker 进程触发。完整的备份清单、dry-run、checkpoint/resume、失败清单、Top-K 对账和 rollback 命令见 [`MILVUS_MIGRATION_RUNBOOK.md`](MILVUS_MIGRATION_RUNBOOK.md)。观察期如需回滚，使用 `VECTOR_STORE_PROVIDER=chroma docker compose --profile chroma-rollback up -d --build`；不要删除旧 Chroma 数据。
+T-135 已完成 current-data 导入与对账，历史决策和验收证据保存在
+[`adr/0001-milvus-migration.md`](adr/0001-milvus-migration.md) 与
+[`evals/milvus_migration_20260809.md`](evals/milvus_migration_20260809.md)。当前 runtime
+不再提供旧 vector store 回滚开关。仓库中的 `vector_db/` 只作为迁移前数据归档，
+不被应用读取；确认 Milvus 备份与隔离恢复演练通过后，仓库所有者可另行归档或删除。
 
 ### 数据库初始化与迁移
 
@@ -247,7 +249,7 @@ CI 覆盖：
 
 - 后端：先执行 GitHub Actions pin policy 和 `python3 scripts/check_tutorial_docs.py` 文档门禁，再安装 `backend/requirements.txt` 与 Tesseract 中英文 runtime、执行 Python production dependency audit policy、`python -m compileall app`、`python -m unittest discover tests -v`、PDF OCR regression gate、`python scripts/migrate_db.py --list` 和 `docker compose config --quiet`。教程门禁检查内部链接/anchor、显式源码路径、三级练习、fixture 来源、shell 命令格式和高置信度敏感模式，不访问网络。OCR gate 用有界 cache 恢复同 benchmark suite、runner 和 Tesseract 历史，每次上传当前报告 artifact（保留 30 天），并把质量、耗时趋势写入 job summary；cache 不可用或 suite 改变时降级为新 baseline，不跳过当前门禁。
 - 前端：`npm ci`、production dependency audit policy、`npm run lint`、`npm run test`、`npm run build` 和 Playwright Chromium E2E。OCR source 回归使用本地受控 fixture，不依赖真实账号、后端或外部模型；E2E 失败时上传 HTML report、截图和 trace 诊断 artifact，保留 14 天。
-- 全栈 E2E：使用独立 Compose project、临时 named volumes 和本地确定性 OpenAI-compatible provider stub，分别覆盖 Milvus 默认链路和 Chroma 回滚链路中的真实注册、前端登录、上传、worker 向量化、hybrid retrieval、SSE 回答与 sources 展示。该 job 不读取真实 provider Key，失败时额外上传 Compose 日志。
+- 全栈 E2E：使用独立 Compose project、临时 named volumes 和本地确定性 OpenAI-compatible provider stub，覆盖 Milvus 链路中的真实注册、前端登录、上传、worker 向量化、hybrid retrieval、SSE 回答与 sources 展示。该 job 不读取真实 provider Key，失败时额外上传 Compose 日志。
 - 容器：从当前 Dockerfile 构建 backend/frontend 第一方镜像，使用 Trivy 扫描 OS packages。
 - Workflow supply chain：检查所有外部 GitHub Action 都固定到官方 release 的 40 位 commit SHA，并保留同一行版本注释。
 
@@ -432,7 +434,7 @@ preflight 会拦截以下问题：
 - `RATE_LIMIT_BACKEND=redis` 但 Redis 未启用，或生产 Redis 限流故障策略不是 `fail_closed`。
 - Compose `redis` service 缺少 healthcheck、日志轮转配置，或直接配置了 `ports` 暴露到宿主机。
 - `FRONTEND_PORT`、`BACKEND_PORT`、`POSTGRES_PORT` 未绑定到 `127.0.0.1` / `localhost`。
-- `UPLOADS_DIR`、`MODELS_DIR` 缺失；Chroma 回滚模式还会检查 `VECTOR_DB_DIR`，使用 `--require-reranker` 时还会要求 reranker 模型目录存在。
+- `UPLOADS_DIR`、`MODELS_DIR` 缺失；使用 `--require-reranker` 时还会要求 reranker 模型目录存在。
 - `docker compose config --quiet` 失败。
 - migration dry-run 失败。
 
@@ -494,7 +496,7 @@ MODELS_DIR=/srv/firstrag/models
 
 - `uploads/` 是用户上传原文，必须和 PostgreSQL metadata（包括 OCR 人工修订）一起备份；恢复时路径结构要保持不变。
 - `milvus_data`、`milvus_etcd_data`、`milvus_minio_data` 是当前向量库的三个 named volumes，必须在停止 backend/worker 写入后做一致性快照；也可以按 Milvus 官方备份流程导出到独立存储。
-- `vector_db/` 只保存观察期 Chroma 回滚数据；T-138 前保持只读备份，不要在默认启动中删除或覆盖。
+- `vector_db/` 是迁移前的旧向量数据归档，当前 runtime 不读取。完成独立备份和恢复核验前不要删除；需要清理时应由仓库所有者明确确认目标目录和恢复点。
 - `models/` 仅在启用本地 reranker 时保存模型，生产以只读方式挂载到 `/app/models`。模型文件可从制品仓库或模型源重建；默认最小镜像不依赖该目录。
 - 日志当前走 Docker stdout/stderr，由 Docker 日志驱动持久化和轮转；接入集中日志前不要新增会写入 secret 或用户原文的应用文件日志。
 
@@ -635,7 +637,7 @@ docker run --rm -v "$PWD/deploy/nginx:/etc/nginx/conf.d:ro" nginx:alpine nginx -
 
 ### 数据清理策略
 
-公开 demo 应使用 `scripts/demo_cleanup.py` 定期清理临时数据。脚本默认 `dry-run`，执行模式必须显式传入 `--execute --confirm cleanup-demo-data`，并且会按 `VECTOR_STORE_PROVIDER` 同时处理 PostgreSQL metadata、knowledge chunks、vector index jobs、Milvus entities 和 uploads 文件。
+公开 demo 应使用 `scripts/demo_cleanup.py` 定期清理临时数据。脚本默认 `dry-run`，执行模式必须显式传入 `--execute --confirm cleanup-demo-data`，并同时处理 PostgreSQL metadata、knowledge chunks、vector index jobs、Milvus entities 和 uploads 文件。
 
 推荐频率：
 
@@ -673,8 +675,7 @@ conda run -n firstrag python scripts/demo_cleanup.py \
 | `--cleanup-user` / `--cleanup-user-id` | 按用户白名单清理临时账号，不受 `--older-than-days` 限制，但不能与保留用户冲突。 |
 | `--older-than-days` | 清理早于指定天数的非保留用户、知识库、文件和会话；默认 7 天。 |
 | `--uploads-dir` | 指定宿主机或容器中的 uploads 根目录，默认读取 `UPLOADS_DIR`，否则使用仓库根目录 `uploads/`。 |
-| `--skip-vector-store` | 跳过 Milvus/Chroma 统计与清理；只有明确接受向量残留时才使用。 |
-| `--vector-store-path` | 仅在 `VECTOR_STORE_PROVIDER=chroma` 回滚时指定持久化目录。 |
+| `--skip-vector-store` | 跳过 Milvus 统计与清理；只有明确接受向量残留时才使用。 |
 
 脚本只输出数量、ID 和安全路径摘要，不打印用户上传原文、API Key、JWT 或数据库密码。文件删除只允许发生在配置的 uploads 根目录内；如果发现越界或不可解析路径，执行模式会停止。
 

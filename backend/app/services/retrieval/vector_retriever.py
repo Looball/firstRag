@@ -14,15 +14,12 @@ from typing import Any
 from langchain_core.documents import Document
 from langchain_core.runnables import Runnable, RunnableLambda
 
-from app.core.config import CHROMA_COLLECTION_NAME, VECTOR_STORE_PATH
 from app.services.vectors.embedding_model import create_embedding_model
 from app.services.vectors.vector_store_factory import get_vector_store
 
 
 def get_retriever(
     user_id: int | None = None,
-    store_path: str = str(VECTOR_STORE_PATH),
-    collection_name: str = CHROMA_COLLECTION_NAME,
     search_type: str = "similarity",
     search_kwargs: dict[str, Any] | None = None,
     **kwargs: Any,
@@ -35,11 +32,7 @@ def get_retriever(
     if kwargs:
         raise ValueError("provider-neutral 检索器不接受额外 provider 参数")
 
-    vector_store = get_vector_store(
-        user_id=user_id,
-        persist_directory=store_path,
-        collection_name=collection_name,
-    )
+    vector_store = get_vector_store(user_id=user_id)
     embedding_model = create_embedding_model(user_id)
     resolved_search_kwargs = search_kwargs or {"k": 5}
     k = int(resolved_search_kwargs.get("k", 5))

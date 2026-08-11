@@ -12,7 +12,6 @@ from langchain_core.documents import Document
 from app.services.vectors.vector_index_service import (
     audit_postgres_chunk_identity,
     build_pdf_ocr_history_entries,
-    get_vector_store,
     index_file_vectors,
     index_knowledge_file_record,
 )
@@ -143,36 +142,6 @@ class VectorIndexServiceTests(unittest.TestCase):
                         expected_index_version=4,
                     )
 
-    def test_get_vector_store_uses_http_client_when_host_is_configured(
-        self,
-    ) -> None:
-        """Compose 配置 Chroma host 后应连接独立 server。"""
-        with patch.object(
-            vector_store_factory,
-            "VECTOR_STORE_PROVIDER",
-            "chroma",
-        ), patch(
-            "app.services.vectors.vector_store_factory.CHROMA_HOST",
-            "chroma",
-        ), patch(
-            "app.services.vectors.vector_store_factory.CHROMA_PORT",
-            8000,
-        ), patch(
-            "app.services.vectors.vector_store_factory.CHROMA_SSL",
-            False,
-        ), patch(
-            "app.services.vectors.vector_store_factory.Chroma",
-        ) as chroma:
-            get_vector_store(collection_name="test-collection")
-
-        chroma.assert_called_once_with(
-            collection_name="test-collection",
-            embedding_function=None,
-            host="chroma",
-            port=8000,
-            ssl=False,
-        )
-
     def test_index_record_loads_persistent_pdf_ocr_corrections(self) -> None:
         """worker 索引文件时应加载并传递全部持久化页级修订。"""
         file_id = uuid4()
@@ -230,29 +199,6 @@ class VectorIndexServiceTests(unittest.TestCase):
             {2: 3},
         )
 
-    def test_get_vector_store_keeps_embedded_mode_without_host(self) -> None:
-        """未配置 Chroma host 时应保留单进程本地持久化模式。"""
-        with patch.object(
-            vector_store_factory,
-            "VECTOR_STORE_PROVIDER",
-            "chroma",
-        ), patch(
-            "app.services.vectors.vector_store_factory.CHROMA_HOST",
-            "",
-        ), patch(
-            "app.services.vectors.vector_store_factory.Chroma",
-        ) as chroma:
-            get_vector_store(
-                persist_directory="/tmp/firstrag-test-chroma",
-                collection_name="test-collection",
-            )
-
-        chroma.assert_called_once_with(
-            collection_name="test-collection",
-            embedding_function=None,
-            persist_directory="/tmp/firstrag-test-chroma",
-        )
-
     def test_factory_builds_milvus_adapter_and_safe_collection_name(self) -> None:
         """Milvus provider 应使用 ADR collection identity 和用户 embedding。"""
         settings = EmbeddingModelSettings(
@@ -267,10 +213,6 @@ class VectorIndexServiceTests(unittest.TestCase):
         client = object()
         embedding_model = object()
         with patch.object(
-            vector_store_factory,
-            "VECTOR_STORE_PROVIDER",
-            "milvus",
-        ), patch.object(
             vector_store_factory,
             "get_effective_embedding_model_settings",
             return_value=settings,
@@ -298,10 +240,6 @@ class VectorIndexServiceTests(unittest.TestCase):
         """永久删除在用户凭据缺失时仍应能扫描 Milvus identities。"""
         client = object()
         with patch.object(
-            vector_store_factory,
-            "VECTOR_STORE_PROVIDER",
-            "milvus",
-        ), patch.object(
             vector_store_factory,
             "_create_milvus_client",
             return_value=client,

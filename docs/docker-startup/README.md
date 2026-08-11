@@ -1,6 +1,6 @@
 # Docker 启动流程
 
-本文档记录 FirstRAG 使用 Docker Compose 启动本地完整链路的流程。Compose 会启动 Redis、PostgreSQL、migration、FastAPI backend、Next.js frontend 和 vector index worker。
+本文档记录 FirstRAG 使用 Docker Compose 启动本地完整链路的流程。Compose 会启动 Redis、PostgreSQL、Milvus Standalone 及其 etcd/MinIO、migration、FastAPI backend、Next.js frontend 和 vector index worker。
 
 服务器级 secret 写入仓库根目录 `.env`，不要提交、截图或粘贴真实 JWT secret、数据库密码和用户凭据。聊天模型、向量模型和远程 rerank API Key 在用户登录后的“模型设置”页保存为密文，不再写入 `.env`。
 
@@ -17,7 +17,7 @@
 
 ```bash
 cd /Users/bing/Desktop/Github/FirstRAG
-mkdir -p uploads vector_db models/rerankers
+mkdir -p uploads models/rerankers
 ```
 
 这些目录会挂载到容器内：
@@ -25,8 +25,11 @@ mkdir -p uploads vector_db models/rerankers
 | 宿主路径 | 容器路径 | 说明 |
 | --- | --- | --- |
 | `./uploads` | `/app/uploads` | 用户上传文件。 |
-| `./vector_db` | `/app/vector_db` | Chroma 持久化数据。 |
 | `./models` | `/app/models` | 可选本地 reranker 模型，只读挂载。 |
+
+Milvus 数据保存在 Compose named volumes 中，不映射到仓库目录。历史
+`vector_db/` 仅是迁移前的旧数据，不再被当前 runtime 读取；确认备份与恢复演练
+完成前不要手工删除。
 
 ## 3. 准备 `.env`
 
@@ -58,11 +61,10 @@ Docker Compose 运行时还建议确认这些路径配置：
 
 ```bash
 MODELS_DIR=./models
-VECTOR_DB_DIR=./vector_db
 UPLOADS_DIR=./uploads
-CHROMA_HOST=chroma
-CHROMA_PORT=8000
-CHROMA_SSL=false
+MILVUS_URI=http://milvus-standalone:19530
+MILVUS_TOKEN=replace-with-a-strong-token
+MILVUS_DATABASE=default
 RERANKER_MODEL_PATH=/app/models/rerankers/bge-reranker-base
 FRONTEND_PORT=127.0.0.1:3000
 BACKEND_PORT=127.0.0.1:8000
@@ -97,7 +99,7 @@ RERANK_API_KEY=your-rerank-api-key
 docker compose up -d --force-recreate backend worker
 ```
 
-注意：切换用户级 embedding provider、模型或维度后，需要重新向量化相关知识文件。系统会按用户和 embedding 配置隔离 Chroma collection，避免不同维度互相污染。
+注意：切换用户级 embedding provider、模型或维度后，需要重新向量化相关知识文件。系统会按用户和 embedding identity 隔离 Milvus collection，避免不同维度互相污染。
 
 ## 5. 可选：启用本地 reranker
 
@@ -196,9 +198,9 @@ docker compose down -v
 
 ## 9. 镜像体积与 worker
 
-`backend`、`migrate` 和 `worker` 都使用 `deploy/docker/backend.Dockerfile` 构建的 Python runtime 镜像。worker 的启动命令不同，但它仍需要文档解析、embedding、Chroma HTTP client 和 PostgreSQL 队列依赖，因此不会比后端小很多。Compose 另启独立 `chroma` service，backend 与 worker 不再以两个 embedded 进程直接访问同一持久化目录。
+`backend`、`migrate` 和 `worker` 都使用 `deploy/docker/backend.Dockerfile` 构建的 Python runtime 镜像。worker 的启动命令不同，但它仍需要文档解析、embedding、PyMilvus client 和 PostgreSQL 队列依赖，因此不会比后端小很多。backend 与 worker 通过各自的 client 访问同一个 Milvus service。
 
-后端 Dockerfile 使用 multi-stage build：`builder` 阶段安装编译工具并构建 Python virtualenv，最终 `runtime` 镜像只保留运行依赖和 Chroma/ONNX 可能需要的 `libgomp1`。默认最小镜像不安装 `torch`、`transformers` 和本地 CrossEncoder rerank 依赖。
+后端 Dockerfile 使用 multi-stage build：`builder` 阶段安装编译工具并构建 Python virtualenv，最终 `runtime` 镜像只保留运行依赖和 ONNX 可能需要的 `libgomp1`。默认最小镜像不安装 `torch`、`transformers` 和本地 CrossEncoder rerank 依赖。
 
 `docker compose images` 可能会分别列出 `backend`、`migrate` 和 `worker` 的镜像大小；这些服务的底层 layer 可复用，不应简单按三份相加估算磁盘占用。修改依赖或 Dockerfile 后，如需释放旧镜像和构建缓存，可在确认不删除数据库 volume 的前提下执行：
 
