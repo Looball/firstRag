@@ -143,13 +143,13 @@ docker compose config --quiet
 docker compose up -d --build
 ```
 
-首次启动时，`redis` 和 `postgres` 健康检查通过后会自动运行 `migrate` service 初始化或升级 schema；`backend` 和 `worker` 会等待 Redis 健康且 migration 成功后再启动。
+首次启动时，`redis`、`postgres`、Milvus Standalone 及其 etcd/MinIO 健康检查通过后会自动运行 `migrate` service 初始化或升级 schema；`backend` 和 `worker` 还会等待 Milvus authenticated probe 与 migration 成功后再启动。
 
 ## 7. 查看状态
 
 ```bash
 docker compose ps
-docker compose logs -f redis postgres chroma migrate backend worker frontend
+docker compose logs -f redis postgres milvus-etcd milvus-minio milvus-standalone milvus-health-probe migrate backend worker frontend
 conda run -n firstrag python scripts/production_preflight.py --env-file .env --migration-method compose --skip-migration-dry-run --check-runtime-health
 ```
 
@@ -177,7 +177,7 @@ conda run -n firstrag python scripts/production_preflight.py --env-file .env --m
 docker compose ps
 
 # 查看日志
-docker compose logs -f redis postgres chroma backend worker frontend
+docker compose logs -f redis postgres milvus-etcd milvus-minio milvus-standalone backend worker frontend
 
 # 只重启后端和 worker
 docker compose up -d --build backend worker

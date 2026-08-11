@@ -31,7 +31,7 @@ FirstRAG 是一个全栈 RAG（Retrieval-Augmented Generation，检索增强生�
 ## 你将学到什么
 
 - 如何把文件上传、SHA-256 去重、持久任务队列、worker、OCR、chunk 和 embedding 组织成异步入库链路。
-- 如何组合 Chroma vector search、PostgreSQL full-text、RRF 和可选 rerank，并保留可解释的 retrieval diagnostics。
+- 如何组合 Milvus filtered ANN、PostgreSQL full-text、RRF 和可选 rerank，并保留可解释的 retrieval diagnostics。
 - 如何通过 FastAPI、LCEL 和 Next.js API proxy 传递 SSE token、sources、usage 与失败状态。
 - 如何隔离用户数据和 provider API Key，并在 route、service、repository 之间保持清晰边界。
 - 如何使用 Docker Compose、migration、单元测试、Playwright、真实 eval 和 GitHub Actions 验证完整系统。
@@ -77,11 +77,11 @@ FirstRAG 是一个全栈 RAG（Retrieval-Augmented Generation，检索增强生�
 docker compose up -d --build
 ```
 
-compose 会先运行 `migrate` service 初始化或升级 PostgreSQL schema，并启动独立 Chroma server，再启动 FastAPI 后端、Next.js 前端和 worker。backend 与 worker 通过 HTTP client 共享同一向量库实例。启动后查看服务状态和关键日志：
+Compose 会先运行 `migrate` 初始化或升级 PostgreSQL schema，启动固定版本的 Milvus Standalone、etcd 与 MinIO，通过 authenticated health probe 后再启动 FastAPI backend 和 worker。启动后查看服务状态和关键日志：
 
 ```bash
 docker compose ps
-docker compose logs --tail=100 redis postgres chroma migrate backend worker frontend
+docker compose logs --tail=100 redis postgres milvus-etcd milvus-minio milvus-standalone milvus-health-probe migrate backend worker frontend
 conda run -n firstrag python scripts/production_preflight.py --env-file .env --migration-method compose --skip-migration-dry-run --check-runtime-health
 ```
 
@@ -115,7 +115,7 @@ Docker 中的 `backend`、`migrate` 和 `worker` 复用精简后的 Python runti
 | 后端 | FastAPI, Pydantic |
 | 数据库 | PostgreSQL |
 | 缓存基础设施 | Redis（健康检查、RAG 热点共享缓存、后端分布式限流和 vector worker 运行态） |
-| 向量库 | Chroma |
+| 向量库 | Milvus Standalone 3.0.0（etcd + MinIO） |
 | RAG 编排 | LangChain / LCEL |
 | 检索 | 向量检索、PostgreSQL 全文检索、RRF、可选本地 CrossEncoder 或用户级远程 rerank |
 | 模型接口 | OpenAI 兼容协议，支持 DeepSeek、Qwen、Zhipu、Kimi、Doubao、Minimax 等 |

@@ -272,7 +272,7 @@ describe("chat workspace vector status parsing", () => {
 
   it("maps vector failure types to recovery actions", () => {
     expect(getVectorFailureRecoveryActions("vector_store_error", true)).toEqual([
-      "确认 Chroma/vector_db 可写",
+      "确认 Milvus 及其 etcd/MinIO 依赖健康",
       "清理残留向量后重新向量化",
     ]);
     expect(getVectorFailureRecoveryActions("empty_document", true)).toEqual([
@@ -321,7 +321,7 @@ describe("chat workspace vector status parsing", () => {
       workerHint: "查看 worker 日志。",
       canRetry: true,
       recoveryActions: [
-        "确认 Chroma/vector_db 可写",
+        "确认 Milvus 及其 etcd/MinIO 依赖健康",
         "清理残留向量后重新向量化",
       ],
     });

@@ -9,7 +9,7 @@
 | [`frontend/src/app/page.tsx`](../../frontend/src/app/page.tsx) | 聊天工作台页面编排。 | 页面如何组合会话、知识库、文件、检索设置、消息和质量反馈 hooks。 |
 | [`frontend/src/app/api/chat/route.ts`](../../frontend/src/app/api/chat/route.ts) | 浏览器到 FastAPI `/chat` 的 SSE proxy。 | Authorization 转发、streaming body 和错误适配。 |
 | [`backend/app/main.py`](../../backend/app/main.py) | FastAPI app 与 router 注册入口。 | middleware、request ID、八个业务 router 的装配。 |
-| [`docker-compose.yml`](../../docker-compose.yml) | 默认完整运行拓扑。 | Redis、PostgreSQL、Chroma、migrate、backend、worker、frontend 的依赖关系。 |
+| [`docker-compose.yml`](../../docker-compose.yml) | 默认完整运行拓扑。 | Redis、PostgreSQL、Milvus/etcd/MinIO、authenticated probe、migrate、backend、worker、frontend 的依赖关系。 |
 | [`.github/workflows/ci.yml`](../../.github/workflows/ci.yml) | PR 与 `main` 的自动门禁。 | Backend、Frontend、Full-stack E2E、Container OS Security 四个稳定 job。 |
 
 ## 文件入库与异步索引
@@ -23,7 +23,7 @@ Next.js proxy
   -> queue service + vector_index_jobs
   -> vector_index_worker
   -> document service + embedding
-  -> Chroma vectors + PostgreSQL chunks
+  -> Milvus entities + PostgreSQL chunks
 ```
 
 | 层 | 源码入口 | 职责 |
@@ -37,7 +37,7 @@ Next.js proxy
 | Worker | [`vector_index_worker.py`](../../backend/app/workers/vector_index_worker.py) | 领取任务、租约/心跳、单文件锁和最终状态。 |
 | 文档解析 | [`document_service.py`](../../backend/app/services/documents/document_service.py) | PDF、DOCX、Markdown、TXT、图片解析与 chunk。 |
 | 向量化 | [`embedding_model.py`](../../backend/app/services/vectors/embedding_model.py)、[`vector_index_service.py`](../../backend/app/services/vectors/vector_index_service.py) | 用户 embedding 配置、向量生成、vector store 与 chunk 写入。 |
-| Vector store boundary | [`vector_store.py`](../../backend/app/services/vectors/vector_store.py)、[`vector_store_factory.py`](../../backend/app/services/vectors/vector_store_factory.py)、[`chroma_vector_store.py`](../../backend/app/services/vectors/chroma_vector_store.py)、[`milvus_vector_store.py`](../../backend/app/services/vectors/milvus_vector_store.py) | 统一 collection、写入、删除、检索、审计、计数和健康契约；默认 Chroma 与迁移候选 Milvus 使用同一应用层契约。 |
+| Vector store boundary | [`vector_store.py`](../../backend/app/services/vectors/vector_store.py)、[`vector_store_factory.py`](../../backend/app/services/vectors/vector_store_factory.py)、[`milvus_vector_store.py`](../../backend/app/services/vectors/milvus_vector_store.py)、[`chroma_vector_store.py`](../../backend/app/services/vectors/chroma_vector_store.py) | 统一 collection、写入、删除、检索、审计、计数和健康契约；Milvus 是当前 adapter，Chroma 仅保留观察期 rollback。 |
 | 锁与 SQL | [`backend/app/db/locks.py`](../../backend/app/db/locks.py)、[`000_initial_schema.sql`](../../backend/app/db/sql/000_initial_schema.sql) | PostgreSQL advisory lock 与空库 schema 基线。 |
 
 继续阅读：[文件入库与异步索引教程](FILE_INGESTION_AND_INDEXING.md)和[RAG 核心流程：文件入库与向量化任务](../RAG_WORKFLOW.md#文件入库)。

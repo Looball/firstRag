@@ -2,6 +2,14 @@
   "schema_version": 1,
   "index_path": "docs/tutorials/README.md",
   "ci_workflow_path": ".github/workflows/ci.yml",
+  "forbidden_current_runtime_patterns": [
+    "docker compose logs --tail=100 redis postgres chroma",
+    "firstrag_tutorial_compose stop chroma",
+    "participant Vector as Query embedding + Chroma",
+    "Chroma vectors",
+    "PostgreSQL / Redis / Chroma",
+    "默认 Chroma"
+  ],
   "core_chapters": [
     {
       "path": "docs/tutorials/CREDENTIAL_FREE_QUICKSTART.md",

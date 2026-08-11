@@ -558,7 +558,7 @@ def validate_milvus_settings(env: Mapping[str, str]) -> list[str]:
 
 def validate_vector_store_settings(env: Mapping[str, str]) -> list[str]:
     """只对当前 provider 执行连接配置校验，并阻止未知 provider。"""
-    provider = (env.get("VECTOR_STORE_PROVIDER") or "chroma").strip().lower()
+    provider = (env.get("VECTOR_STORE_PROVIDER") or "milvus").strip().lower()
     if provider not in VECTOR_STORE_PROVIDERS:
         return ["VECTOR_STORE_PROVIDER 只能设置为 chroma 或 milvus。"]
     if provider == "milvus":
@@ -608,7 +608,7 @@ def validate_compose_redis_service(
 def validate_compose_chroma_service(
     compose_file: Path = PROJECT_ROOT / "docker-compose.yml",
 ) -> list[str]:
-    """静态校验 Compose Chroma service 和 backend/worker client-server 拓扑。"""
+    """静态校验回滚用 Chroma service 与 provider 隔离拓扑。"""
     errors: list[str] = []
     if not compose_file.exists():
         return ["docker-compose.yml 不存在，无法检查 Chroma service。"]
@@ -633,6 +633,8 @@ def validate_compose_chroma_service(
         or "chromadb/chroma:latest" in chroma_block
     ):
         errors.append("chroma service 必须使用固定版本的 chromadb/chroma 镜像。")
+    if '\n    profiles: ["chroma-rollback"]' not in chroma_block:
+        errors.append("chroma service 必须仅属于 chroma-rollback profile。")
 
     for service_name in ("backend", "worker"):
         service_block = extract_compose_service_block(compose_text, service_name)
@@ -653,8 +655,14 @@ def validate_compose_chroma_service(
                 f"{service_name} 不应挂载 /app/vector_db，"
                 "避免回退为多进程 embedded Chroma。"
             )
-        if "\n      chroma:\n        condition: service_healthy" not in service_block:
-            errors.append(f"{service_name} 必须等待 chroma service_healthy 后启动。")
+        if (
+            "\n      chroma:\n"
+            "        condition: service_healthy\n"
+            "        required: false"
+        ) not in service_block:
+            errors.append(
+                f"{service_name} 必须把 chroma 声明为可选回滚依赖。"
+            )
 
     return errors
 
@@ -682,8 +690,8 @@ def validate_compose_milvus_services(
             errors.append(f"{service_name} 必须固定为 {image}。")
         if "\n    ports:" in service_block:
             errors.append(f"{service_name} 不得声明 host ports。")
-        if "\n    profiles: [\"milvus\"]" not in service_block:
-            errors.append(f"{service_name} 必须属于可选 milvus profile。")
+        if "\n    profiles:" in service_block:
+            errors.append(f"{service_name} 必须属于默认 Compose runtime。")
         if "\n    volumes:" not in service_block:
             errors.append(f"{service_name} 必须配置持久化 volume。")
         if "\n    logging:" not in service_block:
@@ -714,6 +722,8 @@ def validate_compose_milvus_services(
         errors.append("docker-compose.yml 缺少 authenticated milvus-health-probe。")
     elif "app.services.vectors.milvus_health" not in probe_block:
         errors.append("milvus-health-probe 必须执行 PyMilvus authenticated round-trip。")
+    elif "\n    profiles:" in probe_block:
+        errors.append("milvus-health-probe 必须属于默认 Compose runtime。")
 
     for service_name in ("backend", "worker"):
         service_block = extract_compose_service_block(compose_text, service_name) or ""
@@ -730,10 +740,11 @@ def validate_compose_milvus_services(
                 errors.append(f"{service_name} 缺少 {key.rstrip(':')} 配置。")
         if (
             "\n      milvus-health-probe:\n"
-            "        condition: service_completed_successfully\n"
-            "        required: false"
+            "        condition: service_completed_successfully"
         ) not in service_block:
-            errors.append(f"{service_name} 必须声明可选 authenticated startup probe。")
+            errors.append(f"{service_name} 必须等待 authenticated startup probe。")
+        if "${VECTOR_STORE_PROVIDER:-milvus}" not in service_block:
+            errors.append(f"{service_name} 必须默认使用 Milvus provider。")
 
     return errors
 
@@ -767,9 +778,12 @@ def validate_runtime_paths(
     errors: list[str] = []
     required_dirs = {
         "UPLOADS_DIR": resolve_host_path(env.get("UPLOADS_DIR"), "./uploads"),
-        "VECTOR_DB_DIR": resolve_host_path(env.get("VECTOR_DB_DIR"), "./vector_db"),
         "MODELS_DIR": resolve_host_path(env.get("MODELS_DIR"), "./models"),
     }
+    if (env.get("VECTOR_STORE_PROVIDER") or "milvus").strip().lower() == "chroma":
+        required_dirs["VECTOR_DB_DIR"] = resolve_host_path(
+            env.get("VECTOR_DB_DIR"), "./vector_db"
+        )
 
     for key, path in required_dirs.items():
         if not path.exists():
@@ -919,8 +933,6 @@ def run_milvus_runtime_health_check(env: Mapping[str, str]) -> ExternalCheck:
             [
                 "docker",
                 "compose",
-                "--profile",
-                "milvus",
                 "ps",
                 "--format",
                 "json",
@@ -956,7 +968,7 @@ def run_milvus_runtime_health_check(env: Mapping[str, str]) -> ExternalCheck:
             success=False,
             message=(
                 "Milvus service 未运行；请先执行 "
-                "docker compose --profile milvus up -d --build。"
+                "docker compose up -d --build。"
             ),
         )
     record = records[0]
@@ -980,8 +992,6 @@ def run_milvus_runtime_health_check(env: Mapping[str, str]) -> ExternalCheck:
             (
                 "docker",
                 "compose",
-                "--profile",
-                "milvus",
                 "exec",
                 "-T",
                 service_name,
@@ -1002,7 +1012,7 @@ def run_vector_store_runtime_health_check(
     env: Mapping[str, str],
 ) -> ExternalCheck:
     """按当前 provider 选择 Compose runtime 健康门禁。"""
-    provider = (env.get("VECTOR_STORE_PROVIDER") or "chroma").strip().lower()
+    provider = (env.get("VECTOR_STORE_PROVIDER") or "milvus").strip().lower()
     if provider == "milvus":
         return run_milvus_runtime_health_check(env)
     return run_chroma_runtime_health_check(env)
@@ -1158,7 +1168,7 @@ def run(args: argparse.Namespace) -> int:
     if not args.skip_compose_check:
         external_checks.append(run_compose_check(env))
     if args.check_runtime_health:
-        if (env.get("VECTOR_STORE_PROVIDER") or "chroma").strip().lower() == "milvus":
+        if (env.get("VECTOR_STORE_PROVIDER") or "milvus").strip().lower() == "milvus":
             external_checks.append(run_milvus_resource_check(env))
         external_checks.append(run_vector_store_runtime_health_check(env))
     if not args.skip_migration_dry_run:

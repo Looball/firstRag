@@ -38,7 +38,7 @@ RRF 主要解决的问题是：如何融合向量检索和全文检索结果，�
 FirstRAG 的 RAG pipeline 包含：
 
 - 用户上传文件后异步执行 vector index job。
-- 文档解析、chunk 切分后写入 PostgreSQL full-text chunks 和 Chroma vector store。
+- 文档解析、chunk 切分后写入 PostgreSQL full-text chunks 和 Milvus vector store。
 - 用户提问时先读取当前知识库检索设置。
 - Query Router 判断是否需要检索。
 - vector retriever 使用用户配置的 embedding provider 召回语义相似 chunk。
@@ -55,4 +55,3 @@ RAG eval 应重点检查：
 - 对“RRF 是什么”或“RRF 是如何融合向量检索和全文检索结果的”这类问题，答案应包含“排名”和“融合”。
 - sources 应能命中本文件或配套的 RAG 检索策略文档。
 - retrieval diagnostics 应保留 top_k、vector_top_k、fulltext_top_k、rrf_k、enable_query_router 和 enable_rerank。
-

@@ -147,7 +147,11 @@ class VectorIndexServiceTests(unittest.TestCase):
         self,
     ) -> None:
         """Compose 配置 Chroma host 后应连接独立 server。"""
-        with patch(
+        with patch.object(
+            vector_store_factory,
+            "VECTOR_STORE_PROVIDER",
+            "chroma",
+        ), patch(
             "app.services.vectors.vector_store_factory.CHROMA_HOST",
             "chroma",
         ), patch(
@@ -228,7 +232,11 @@ class VectorIndexServiceTests(unittest.TestCase):
 
     def test_get_vector_store_keeps_embedded_mode_without_host(self) -> None:
         """未配置 Chroma host 时应保留单进程本地持久化模式。"""
-        with patch(
+        with patch.object(
+            vector_store_factory,
+            "VECTOR_STORE_PROVIDER",
+            "chroma",
+        ), patch(
             "app.services.vectors.vector_store_factory.CHROMA_HOST",
             "",
         ), patch(

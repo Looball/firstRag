@@ -159,10 +159,10 @@ CHAT_IMAGE_MAX_TOTAL_BYTES = read_int_env(
     15 * 1024 * 1024,
 )
 
-# Vector store provider 在 Milvus adapter 和迁移验收完成前保持 Chroma。
+# Milvus 是当前默认 vector store；Chroma 仅在 T-138 前保留回滚能力。
 VECTOR_STORE_PROVIDER = os.environ.get(
     "VECTOR_STORE_PROVIDER",
-    "chroma",
+    "milvus",
 ).strip().lower()
 
 # 设置 Chroma 向量库存储路径和集合名称。
@@ -178,8 +178,7 @@ CHROMA_HOST = os.environ.get("CHROMA_HOST", "").strip()
 CHROMA_PORT = read_int_env("CHROMA_PORT", 8000)
 CHROMA_SSL = read_bool_env("CHROMA_SSL", False)
 
-# Milvus candidate runtime 配置。T-132 只用于 authenticated health probe，
-# 业务写入和检索 adapter 分别由 T-133/T-134 接入。
+# Milvus Standalone 运行时、认证、collection 和强一致性配置。
 MILVUS_URI = os.environ.get(
     "MILVUS_URI",
     "http://milvus-standalone:19530",

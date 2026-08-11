@@ -195,7 +195,7 @@ export function getVectorFailureRecoveryActions(
 
   if (failureType === "vector_store_error") {
     return [
-      "确认 Chroma/vector_db 可写",
+      "确认 Milvus 及其 etcd/MinIO 依赖健康",
       "清理残留向量后重新向量化",
     ];
   }

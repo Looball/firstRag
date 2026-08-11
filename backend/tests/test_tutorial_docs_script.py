@@ -64,6 +64,7 @@ class TutorialDocsScriptTests(unittest.TestCase):
             "schema_version": 1,
             "index_path": "docs/tutorials/README.md",
             "ci_workflow_path": ".github/workflows/ci.yml",
+            "forbidden_current_runtime_patterns": ["当前 Chroma runtime"],
             "core_chapters": [
                 {
                     "path": "docs/tutorials/CHAPTER.md",
@@ -250,6 +251,23 @@ class TutorialDocsScriptTests(unittest.TestCase):
             self.assertEqual(exit_code, 0)
             self.assertTrue(output_path.is_file())
             self.assertEqual(output_path.read_bytes()[:8], b"\x89PNG\r\n\x1a\n")
+
+    def test_current_chroma_runtime_fragment_is_blocked(self) -> None:
+        """教程不得恢复已冻结的 Chroma 当前运行时说法。"""
+        with TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            chapter_path = self._build_repository(root)
+            chapter_path.write_text(
+                chapter_path.read_text(encoding="utf-8")
+                + "\n当前 Chroma runtime\n",
+                encoding="utf-8",
+            )
+
+            violations = check_tutorial_docs.collect_violations(root)
+
+        self.assertTrue(
+            any("当前 Milvus 基线" in item.message for item in violations)
+        )
 
 
 if __name__ == "__main__":

@@ -8,6 +8,8 @@
 
 [`milvus_acceptance_20260809.md`](milvus_acceptance_20260809.md) 记录 T-136 的 current data 一致性、真实 filtered ANN、双用户/双 dimensions 隔离、restart persistence、indexing lifecycle、14-case RAG 质量、资源和 Chroma/Milvus 双 provider E2E。结论为 Milvus 已满足受控默认切换条件；实际默认值与全量文档同步由 T-137 完成，Chroma rollback 能力保留到 T-138。
 
+[`milvus_cutover_20260811.md`](milvus_cutover_20260811.md) 记录 T-137 的默认配置、current-data 对账、切换 watermark、运行服务和 rollback 边界；Milvus 已成为默认 runtime，Chroma 容器保持停止且数据保留到 T-138。
+
 ## 最近整体回归验收
 
 2026-07-02 已刷新一轮真实链路 eval 基线，覆盖 RAG 真实评测门禁、上传与向量化真实链路验收，以及 eval 历史趋势摘要。Compose 启动后的补充验收入口见 `scripts/acceptance_check.sh`。
@@ -37,7 +39,7 @@
 ```bash
 docker compose up -d --build
 docker compose ps
-docker compose logs --tail=100 redis postgres chroma migrate backend worker frontend
+docker compose logs --tail=100 redis postgres milvus-etcd milvus-minio milvus-standalone milvus-health-probe migrate backend worker frontend
 ```
 
 需要补充真实链路验收时，再使用一键脚本串行运行主要检查：
@@ -50,7 +52,7 @@ scripts/acceptance_check.sh
 
 该脚本会在 Compose 服务可用的前提下依次执行：
 
-1. infrastructure preflight，包括 Redis/Chroma 配置、Compose 拓扑和 Chroma runtime health。
+1. infrastructure preflight，包括 Redis/Milvus 配置、Compose 拓扑、资源与 authenticated runtime health。
 2. migration 文件检查，存在数据库连接时额外执行 dry-run。
 3. 后端 `compileall`。
 4. 后端 `unittest discover`。
@@ -68,7 +70,7 @@ scripts/acceptance_check.sh --skip-real-eval
 ```
 
 无 Docker 服务、明确只做纯静态检查时使用
-`--skip-infrastructure-check`；常规验收不应跳过 Chroma runtime health。
+`--skip-infrastructure-check`；常规验收不应跳过 Milvus authenticated runtime health。
 
 如果本地沙箱限制 Turbopack 创建辅助进程或绑定本地端口，`npm run build` 可能需要在非沙箱环境或提权环境中重跑确认。常规构建和启动验证仍以 Docker Compose 为准。
 

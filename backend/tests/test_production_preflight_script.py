@@ -316,18 +316,16 @@ class ProductionPreflightScriptTests(unittest.TestCase):
         self.assertNotIn("strong-password$", joined_errors)
 
     def test_validate_vector_store_settings_dispatches_current_provider(self) -> None:
-        """未知 provider 失败，默认 provider 继续走 Chroma。"""
-        self.assertEqual(
-            production_preflight.validate_vector_store_settings({}),
-            [],
-        )
+        """未知 provider 失败，默认 provider 走 Milvus 并要求强认证。"""
+        default_errors = production_preflight.validate_vector_store_settings({})
+        self.assertTrue(any("MILVUS" in error for error in default_errors))
         errors = production_preflight.validate_vector_store_settings(
             {"VECTOR_STORE_PROVIDER": "unknown"}
         )
         self.assertTrue(any("VECTOR_STORE_PROVIDER" in error for error in errors))
 
     def test_validate_compose_chroma_service_accepts_repository_topology(self) -> None:
-        """仓库默认 Compose 应满足独立 Chroma server 拓扑。"""
+        """仓库 Compose 应保留隔离的 Chroma 回滚拓扑。"""
         errors = production_preflight.validate_compose_chroma_service()
 
         self.assertEqual(errors, [])
@@ -364,10 +362,10 @@ class ProductionPreflightScriptTests(unittest.TestCase):
         self.assertTrue(any("/data" in error for error in errors))
         self.assertTrue(any("固定版本" in error for error in errors))
         self.assertTrue(any("/app/vector_db" in error for error in errors))
-        self.assertTrue(any("service_healthy" in error for error in errors))
+        self.assertTrue(any("可选回滚依赖" in error for error in errors))
 
     def test_validate_compose_milvus_services_accepts_repository_topology(self) -> None:
-        """仓库 Milvus profile 应满足固定版本、内网和认证门禁。"""
+        """仓库默认 Milvus 应满足固定版本、内网和认证门禁。"""
         errors = production_preflight.validate_compose_milvus_services()
 
         self.assertEqual(errors, [])
@@ -493,8 +491,8 @@ class ProductionPreflightScriptTests(unittest.TestCase):
         self.assertTrue(result.success)
         self.assertIn("warning", result.message)
 
-    def test_validate_runtime_paths_checks_required_directories(self) -> None:
-        """持久化目录和模型目录缺失时应失败。"""
+    def test_validate_runtime_paths_checks_provider_specific_directories(self) -> None:
+        """Milvus 不依赖宿主 Chroma 目录，回滚模式仍应检查该目录。"""
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
             uploads = root / "uploads"
@@ -507,7 +505,14 @@ class ProductionPreflightScriptTests(unittest.TestCase):
             errors = production_preflight.validate_runtime_paths(
                 {
                     "UPLOADS_DIR": os.fspath(uploads),
-                    "VECTOR_DB_DIR": os.fspath(vector_db),
+                    "MODELS_DIR": os.fspath(models),
+                }
+            )
+            chroma_errors = production_preflight.validate_runtime_paths(
+                {
+                    "VECTOR_STORE_PROVIDER": "chroma",
+                    "UPLOADS_DIR": os.fspath(uploads),
+                    "VECTOR_DB_DIR": os.fspath(root / "missing-vector-db"),
                     "MODELS_DIR": os.fspath(models),
                 }
             )
@@ -530,6 +535,7 @@ class ProductionPreflightScriptTests(unittest.TestCase):
             )
 
         self.assertEqual(errors, [])
+        self.assertTrue(any("VECTOR_DB_DIR" in error for error in chroma_errors))
         self.assertTrue(any("reranker" in error for error in reranker_errors))
         self.assertEqual(fixed_errors, [])
 
