@@ -26,6 +26,14 @@ services:
     environment:
       MILVUS_TOKEN: root:firstrag-e2e-milvus-password
 
+  sparse-encoder:
+    build:
+      target: fixture
+    environment:
+      SPARSE_ENCODER_MODE: fixture
+      SPARSE_ENCODER_OFFLINE: "true"
+    volumes: !reset []
+
   provider-stub:
     image: firstrag-backend:latest
     command: ["python", "/app/e2e-scripts/full_stack_e2e_provider.py"]

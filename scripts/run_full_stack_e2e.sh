@@ -102,6 +102,8 @@ docker compose "${COMPOSE_ARGS[@]}" exec -T backend \
   python /app/e2e-scripts/seed_full_stack_e2e.py \
   --username "${USERNAME}" \
   --embedding-dimensions "${EMBEDDING_DIMENSIONS}"
+docker compose "${COMPOSE_ARGS[@]}" exec -T sparse-encoder \
+  python -m sparse_encoder.probe
 
 cd "${REPO_ROOT}/frontend"
 FIRSTRAG_E2E_BASE_URL="http://127.0.0.1:${E2E_FRONTEND_PORT}" \

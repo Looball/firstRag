@@ -200,6 +200,5 @@ class PipAuditPolicyScriptTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "执行失败"):
             pip_audit_policy.run_pip_audit(Path("requirements.txt"))
 
-
 if __name__ == "__main__":
     unittest.main()

@@ -30,6 +30,12 @@ cp .env.example .env
 | `MILVUS_COLLECTION_PREFIX` / `MILVUS_TIMEOUT_SECONDS` / `MILVUS_CONSISTENCY_LEVEL` | Milvus collection 前缀、client timeout 与一致性；当前 ADR 固定 `Strong`。 |
 | `MILVUS_MINIO_ACCESS_KEY` / `MILVUS_MINIO_SECRET_KEY` | Milvus 内置 MinIO 的本地凭据；非本机隔离环境必须覆盖模板值。 |
 | `MILVUS_MEMORY_LIMIT` / `MILVUS_CPU_LIMIT` | Milvus Standalone 容器资源上限，默认 `8g` / `4.0`。 |
+| `SPARSE_ENCODER_MODEL` / `SPARSE_ENCODER_REVISION` | 固定为 `BAAI/bge-m3` 与 ADR 冻结 commit；production preflight 拒绝漂移。 |
+| `SPARSE_ENCODER_DEVICE` / `SPARSE_ENCODER_USE_FP16` / `SPARSE_ENCODER_OFFLINE` | 当前镜像固定 CPU 且必须关闭 FP16；已预热环境可启用 offline cache 模式。 |
+| `SPARSE_ENCODER_BATCH_SIZE` / `SPARSE_ENCODER_MAX_LENGTH` | 模型内部 batch 和 tokenizer 截断长度，默认 `8` / `1024`。 |
+| `SPARSE_ENCODER_MAX_BATCH_SIZE` / `SPARSE_ENCODER_MAX_TEXT_CHARACTERS` / `SPARSE_ENCODER_MAX_REQUEST_BYTES` | 内网 API 的批量、单文本和请求体上限。 |
+| `SPARSE_ENCODER_MAX_CONCURRENCY` / `SPARSE_ENCODER_REQUEST_TIMEOUT_SECONDS` / `SPARSE_ENCODER_CLIENT_TIMEOUT_SECONDS` | 单实例 inference 并发、服务端 timeout 和 consumer timeout；默认 `1` / `120` / `130` 秒。 |
+| `SPARSE_ENCODER_MEMORY_LIMIT` / `SPARSE_ENCODER_CPU_LIMIT` | BGE-M3 容器资源上限，默认 `8g` / `4.0`。 |
 | `RERANKER_MODEL_PATH` | 本地 reranker 模型路径；compose 会把 `./models` 只读挂载到 `/app/models`。 |
 | `PDF_OCR_*` | 扫描 PDF 本地 OCR 开关、语言、DPI、单页/自适应总超时、原生文本阈值、低置信度阈值、单文件最大 OCR 页数、重识别批次页数、候选上限和二值化阈值；Compose 镜像内置 Tesseract `chi_sim/eng`。 |
 | `UPLOADS_DIR` / `MODELS_DIR` | Docker Compose 宿主机持久化目录；生产环境建议指向独立数据盘。Milvus 使用 Compose named volumes 或生产级外部实例。 |
@@ -43,13 +49,13 @@ cp .env.example .env
 docker compose up -d --build
 ```
 
-Compose 会启动 Redis、PostgreSQL、Milvus Standalone 及其 etcd/MinIO、authenticated health probe、migration、FastAPI backend、Next.js frontend 和 vector index worker。backend 与 worker 使用各自的 PyMilvus client，只有 probe 成功后才启动。`migrate` service 会先初始化或升级当前完整 schema。
+Compose 会启动 Redis、PostgreSQL、Milvus Standalone 及其 etcd/MinIO、authenticated health probe、BGE-M3 sparse encoder、migration、FastAPI backend、Next.js frontend 和 vector index worker。backend 与 worker 使用各自的 PyMilvus client，并共用一个内网 sparse encoder；只有 Milvus probe 与 sparse encoder ready 均成功后才启动。`migrate` service 会先初始化或升级当前完整 schema。
 
 启动后检查服务状态和关键日志：
 
 ```bash
 docker compose ps
-docker compose logs --tail=100 redis postgres milvus-etcd milvus-minio milvus-standalone milvus-health-probe migrate backend worker frontend
+docker compose logs --tail=100 redis postgres milvus-etcd milvus-minio milvus-standalone milvus-health-probe sparse-encoder migrate backend worker frontend
 ```
 
 默认访问 `http://localhost:3000`。后端、前端和 worker 的常规验证都应基于 Compose 容器；本地 conda / npm 启动仅用于专项调试。
@@ -66,6 +72,17 @@ docker compose logs --tail=100 \
 ```
 
 默认 Compose stack 固定 Milvus `v3.0.0`、etcd `v3.5.25` 和 MinIO `RELEASE.2024-05-28T17-19-04Z`，使用 named volumes 持久化 metadata、object/WAL 和本地数据，显式启用 Woodpecker 与 authentication。Milvus、etcd 和 MinIO 均不映射 host port；backend 和 worker 必须等待 authenticated probe 成功。首次启动前在 `.env` 中覆盖 `MILVUS_TOKEN` 与 MinIO 凭据，禁止把真实值提交到仓库。
+
+### BGE-M3 sparse encoder runtime
+
+`sparse-encoder` 使用独立 CPU-only 镜像与 named volume `bge_m3_cache`，固定 `BAAI/bge-m3@5617a9f61b028005a4858fdac845db406aefb181`、`FlagEmbedding==1.4.0`、`huggingface-hub==1.27.0`、`torch==2.13.0+cpu` 和 `transformers==5.15.0`。安全审计使用等价的 PyPI base version `torch==2.13.0`，并由测试保证除 `+cpu` local label 外不得与 runtime pins 漂移。模型权重约 2.3 GB；Hugging Face snapshot 与 Xet cache 会产生额外占用，建议为 named volume 预留至少 5 GB。下载、加载和最小 inference 完成前 `/health/ready` 返回 503，backend/worker 保持等待。预热 cache 后可设置 `SPARSE_ENCODER_OFFLINE=true`，此时缺失固定 snapshot 会明确启动失败。
+
+```bash
+docker compose logs -f sparse-encoder
+docker compose exec -T sparse-encoder python -m sparse_encoder.probe
+```
+
+服务只在 Compose 网络监听 8090，不对宿主机或前端开放。CI overlay 使用 `fixture` target 避免每轮下载模型，但仍执行同一个 query/document probe；production preflight 明确拒绝 `SPARSE_ENCODER_MODE=fixture`。
 
 Milvus 至少需要为 Docker Desktop 分配 4 CPU / 8 GiB；低于 16 GiB 时 preflight 会提示容量余量不足。`docker compose restart milvus-standalone` 会按 `stop_grace_period=2m` 优雅退出，命令可能需要等待约两分钟；HTTP health 先恢复后，仍应以 PyMilvus authenticated round-trip 作为 gRPC ready 标准。
 
@@ -247,7 +264,7 @@ conda run -n firstrag python scripts/eval_indexing.py \
 
 CI 覆盖：
 
-- 后端：先执行 GitHub Actions pin policy 和 `python3 scripts/check_tutorial_docs.py` 文档门禁，再安装 `backend/requirements.txt` 与 Tesseract 中英文 runtime、执行 Python production dependency audit policy、`python -m compileall app`、`python -m unittest discover tests -v`、PDF OCR regression gate、`python scripts/migrate_db.py --list` 和 `docker compose config --quiet`。教程门禁检查内部链接/anchor、显式源码路径、三级练习、fixture 来源、shell 命令格式和高置信度敏感模式，不访问网络。OCR gate 用有界 cache 恢复同 benchmark suite、runner 和 Tesseract 历史，每次上传当前报告 artifact（保留 30 天），并把质量、耗时趋势写入 job summary；cache 不可用或 suite 改变时降级为新 baseline，不跳过当前门禁。
+- 后端：先执行 GitHub Actions pin policy 和 `python3 scripts/check_tutorial_docs.py` 文档门禁，再安装 `backend/requirements.txt` 与 Tesseract 中英文 runtime、分别审计 backend 和 `requirements-sparse-encoder.txt` production dependencies、`python -m compileall app sparse_encoder`、`python -m unittest discover tests -v`、PDF OCR regression gate、`python scripts/migrate_db.py --list` 和 `docker compose config --quiet`。教程门禁检查内部链接/anchor、显式源码路径、三级练习、fixture 来源、shell 命令格式和高置信度敏感模式，不访问网络。OCR gate 用有界 cache 恢复同 benchmark suite、runner 和 Tesseract 历史，每次上传当前报告 artifact（保留 30 天），并把质量、耗时趋势写入 job summary；cache 不可用或 suite 改变时降级为新 baseline，不跳过当前门禁。
 - 前端：`npm ci`、production dependency audit policy、`npm run lint`、`npm run test`、`npm run build` 和 Playwright Chromium E2E。OCR source 回归使用本地受控 fixture，不依赖真实账号、后端或外部模型；E2E 失败时上传 HTML report、截图和 trace 诊断 artifact，保留 14 天。
 - 全栈 E2E：使用独立 Compose project、临时 named volumes 和本地确定性 OpenAI-compatible provider stub，覆盖 Milvus 链路中的真实注册、前端登录、上传、worker 向量化、hybrid retrieval、SSE 回答与 sources 展示。该 job 不读取真实 provider Key，失败时额外上传 Compose 日志。
 - 容器：从当前 Dockerfile 构建 backend/frontend 第一方镜像，使用 Trivy 扫描 OS packages。
@@ -278,6 +295,7 @@ docker compose up -d --build
 | `milvus-etcd` / `milvus-minio` | 仅 Compose 内网 | Milvus metadata/coordination 与 object storage，使用 named volumes。 |
 | `milvus-standalone` | 仅 Compose 内网 | Milvus 3.0.0 vector database，数据保存在 `milvus_data`。 |
 | `milvus-health-probe` | 不暴露端口 | 执行 authenticated PyMilvus round-trip，成功退出后 backend/worker 才启动。 |
+| `sparse-encoder` | 仅 Compose 内网 | 单实例 BGE-M3 learned sparse encoder；ready 前完成真实最小 inference。 |
 | `migrate` | 不暴露端口 | 执行 `scripts/migrate_db.py`，初始化或升级 PostgreSQL schema。 |
 | `backend` | `http://127.0.0.1:8000` | FastAPI 后端。 |
 | `frontend` | `http://localhost:3000` | Next.js 前端，容器内代理到 `http://backend:8000`。 |
@@ -293,6 +311,7 @@ docker compose up -d --build
 | `milvus_data` | `/var/lib/milvus` | Milvus Standalone 数据。 |
 | `milvus_etcd_data` | `/etcd` | Milvus metadata/coordination 数据。 |
 | `milvus_minio_data` | `/minio_data` | Milvus object/WAL 数据。 |
+| `bge_m3_cache` | `/models/huggingface` | 固定 revision BGE-M3 snapshot cache；可通过 offline 模式复用。 |
 | `${MODELS_DIR:-./models}` | `/app/models` | 本地 reranker 模型，只读挂载；默认最小镜像可不准备。 |
 | `postgres_data` | `/var/lib/postgresql/data` | PostgreSQL 数据。 |
 

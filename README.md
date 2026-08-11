@@ -77,11 +77,11 @@ FirstRAG 是一个全栈 RAG（Retrieval-Augmented Generation，检索增强生�
 docker compose up -d --build
 ```
 
-Compose 会先运行 `migrate` 初始化或升级 PostgreSQL schema，启动固定版本的 Milvus Standalone、etcd 与 MinIO，通过 authenticated health probe 后再启动 FastAPI backend 和 worker。启动后查看服务状态和关键日志：
+Compose 会先运行 `migrate` 初始化或升级 PostgreSQL schema，启动固定版本的 Milvus Standalone、etcd 与 MinIO，并启动只在 Compose 内网提供服务的 CPU-only BGE-M3 sparse encoder；Milvus authenticated probe 与 sparse encoder 最小 inference 均通过后才启动 FastAPI backend 和 worker。BGE-M3 首次启动需要下载约 2.3 GB 固定 revision 权重，snapshot 与 Xet cache 建议预留至少 5 GB named volume 空间，CPU 环境加载会较慢。启动后查看服务状态和关键日志：
 
 ```bash
 docker compose ps
-docker compose logs --tail=100 redis postgres milvus-etcd milvus-minio milvus-standalone milvus-health-probe migrate backend worker frontend
+docker compose logs --tail=100 redis postgres milvus-etcd milvus-minio milvus-standalone milvus-health-probe sparse-encoder migrate backend worker frontend
 conda run -n firstrag python scripts/production_preflight.py --env-file .env --migration-method compose --skip-migration-dry-run --check-runtime-health
 ```
 
@@ -105,7 +105,7 @@ conda run -n firstrag python scripts/eval_pdf_ocr.py
 门禁覆盖正常页、90° 旋转、低对比度、模糊、中英文混排、轻度倾斜、盐椒噪点、侧边阴影、小字号和表格布局，直接复用生产 OCR engine，并同时约束逐样本相似度、旋转策略、宏平均质量和总耗时。每份报告带稳定 suite fingerprint，历史趋势不会混合不同版本的评测集。
 CI 会保留每次 OCR 报告 artifact，并按相同 benchmark suite、runner 和 Tesseract 环境在 job summary 展示最近质量和耗时趋势；本地趋势命令与阈值见 [`docs/evals/README.md`](docs/evals/README.md#pdf-ocr-回归门禁)。
 
-Docker 中的 `backend`、`migrate` 和 `worker` 复用精简后的 Python runtime 镜像；worker 不单独安装 `torch`、`transformers` 等可选 rerank 依赖。
+Docker 中的 `backend`、`migrate` 和 `worker` 复用精简后的 Python runtime 镜像；`torch`、`transformers` 和 `FlagEmbedding` 只安装在独立 `sparse-encoder` 镜像，避免 backend 与 worker 各加载一份 BGE-M3。当前 T-141 只交付 runtime 与共享 client，dense/sparse 写入和 Milvus hybrid search 分别由 T-142/T-143 接入。
 
 ## 技术栈
 
@@ -116,6 +116,7 @@ Docker 中的 `backend`、`migrate` 和 `worker` 复用精简后的 Python runti
 | 数据库 | PostgreSQL |
 | 缓存基础设施 | Redis（健康检查、RAG 热点共享缓存、后端分布式限流和 vector worker 运行态） |
 | 向量库 | Milvus Standalone 3.0.0（etcd + MinIO） |
+| 稀疏编码 | BGE-M3 fixed revision + FlagEmbedding 1.4.0（Compose 内网单实例） |
 | RAG 编排 | LangChain / LCEL |
 | 检索 | 向量检索、PostgreSQL 全文检索、RRF、可选本地 CrossEncoder 或用户级远程 rerank |
 | 模型接口 | OpenAI 兼容协议，支持 DeepSeek、Qwen、Zhipu、Kimi、Doubao、Minimax 等 |

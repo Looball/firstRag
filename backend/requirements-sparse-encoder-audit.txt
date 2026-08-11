@@ -1,0 +1,9 @@
+# Security-audit view of the runtime dependencies.
+# PyTorch CPU wheels use the local version label +cpu outside PyPI; pip-audit's
+# PyPI service requires the equivalent upstream base version without that label.
+-r requirements-sparse-encoder-api.txt
+
+FlagEmbedding==1.4.0
+huggingface-hub==1.27.0
+torch==2.13.0
+transformers==5.15.0

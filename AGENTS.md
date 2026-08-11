@@ -19,6 +19,7 @@ FirstRAG 是一个全栈 RAG（Retrieval-Augmented Generation）应用，采用 
 - 用户可配置自己的 LLM provider、model 和 API Key。
 - 用户可配置自己的 embedding provider（千问/Qwen 或智谱/ZhipuAI）、model 和 API Key。
 - rerank 支持本地 BGE Cross-Encoder 和远程 Qwen rerank API 两种 provider。
+- Compose 内置单实例 BGE-M3 sparse encoder runtime；T-141 已交付固定 revision、共享 client 和健康门禁，dense/sparse 写入与 Milvus hybrid retrieval 仍由后续任务接入。
 
 核心数据流：
 
@@ -82,6 +83,7 @@ FirstRAG/
 | `backend/app/db/` | 数据库连接、executor、migration SQL、advisory lock。 |
 | `backend/app/core/` | config、security、secret cipher。 |
 | `backend/app/workers/` | background worker。 |
+| `backend/sparse_encoder/` | 内网 BGE-M3 sparse encoding service、共享 contract 和 probe。 |
 | `backend/tests/` | 后端测试。 |
 
 前端关键目录：
@@ -241,10 +243,10 @@ docker compose up -d --build
 docker compose ps
 ```
 
-- 查看关键服务日志，确认 `migrate` 和 `milvus-health-probe` 成功结束，`redis`、`postgres`、`milvus-etcd`、`milvus-minio`、`milvus-standalone`、`backend`、`worker` 和 `frontend` 没有启动错误：
+- 查看关键服务日志，确认 `migrate` 和 `milvus-health-probe` 成功结束，`redis`、`postgres`、`milvus-etcd`、`milvus-minio`、`milvus-standalone`、`sparse-encoder`、`backend`、`worker` 和 `frontend` 没有启动错误：
 
 ```bash
-docker compose logs --tail=100 redis postgres milvus-etcd milvus-minio milvus-standalone milvus-health-probe migrate backend worker frontend
+docker compose logs --tail=100 redis postgres milvus-etcd milvus-minio milvus-standalone milvus-health-probe sparse-encoder migrate backend worker frontend
 ```
 
 - 涉及数据库结构、部署配置或公开 demo 前置检查时，补充运行：
@@ -266,13 +268,13 @@ conda run -n firstrag python scripts/production_preflight.py --env-file .env --m
 docker compose up -d --build
 ```
 
-默认访问 `http://localhost:3000`。FastAPI backend、Next.js frontend、PostgreSQL、Redis、Milvus Standalone 及其 etcd/MinIO、migration 和 vector index worker 均由 Compose 管理。
+默认访问 `http://localhost:3000`。FastAPI backend、Next.js frontend、PostgreSQL、Redis、Milvus Standalone 及其 etcd/MinIO、BGE-M3 sparse encoder、migration 和 vector index worker 均由 Compose 管理。
 
 ### 查看服务状态和日志
 
 ```bash
 docker compose ps
-docker compose logs --tail=100 redis postgres milvus-etcd milvus-minio milvus-standalone milvus-health-probe migrate backend worker frontend
+docker compose logs --tail=100 redis postgres milvus-etcd milvus-minio milvus-standalone milvus-health-probe sparse-encoder migrate backend worker frontend
 ```
 
 ### 本地调试后端

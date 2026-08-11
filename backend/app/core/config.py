@@ -176,6 +176,24 @@ MILVUS_CONSISTENCY_LEVEL = os.environ.get(
     "Strong",
 ).strip()
 
+# 内网 BGE-M3 sparse encoder。backend/query 与 worker/document 共用同一实例。
+SPARSE_ENCODER_URL = os.environ.get(
+    "SPARSE_ENCODER_URL",
+    "http://sparse-encoder:8090",
+).strip().rstrip("/")
+SPARSE_ENCODER_MODEL = os.environ.get(
+    "SPARSE_ENCODER_MODEL",
+    "BAAI/bge-m3",
+).strip()
+SPARSE_ENCODER_REVISION = os.environ.get(
+    "SPARSE_ENCODER_REVISION",
+    "5617a9f61b028005a4858fdac845db406aefb181",
+).strip()
+SPARSE_ENCODER_TIMEOUT_SECONDS = read_float_env(
+    "SPARSE_ENCODER_CLIENT_TIMEOUT_SECONDS",
+    130.0,
+)
+
 # Rerank provider 历史环境变量兼容。新版本远程 rerank 推荐在
 # 登录后的设置页按用户保存 provider/model/API Key。
 RERANK_PROVIDER = os.environ.get("RERANK_PROVIDER", "local").strip().lower()

@@ -68,6 +68,8 @@ MILVUS_DEFAULT_PORT = 19530
 MILVUS_MIN_MEMORY_BYTES = 8 * 1024**3
 MILVUS_RECOMMENDED_MEMORY_BYTES = 16 * 1024**3
 MILVUS_MIN_CPUS = 4
+BGE_M3_MODEL_ID = "BAAI/bge-m3"
+BGE_M3_REVISION = "5617a9f61b028005a4858fdac845db406aefb181"
 
 
 @dataclass(frozen=True)
@@ -524,6 +526,47 @@ def validate_vector_store_settings(env: Mapping[str, str]) -> list[str]:
     return validate_milvus_settings(env)
 
 
+def validate_sparse_encoder_settings(env: Mapping[str, str]) -> list[str]:
+    """校验生产环境固定 BGE-M3 身份、runtime 和资源边界。"""
+    errors: list[str] = []
+    mode = (env.get("SPARSE_ENCODER_MODE") or "bge_m3").strip()
+    model = (env.get("SPARSE_ENCODER_MODEL") or BGE_M3_MODEL_ID).strip()
+    revision = (env.get("SPARSE_ENCODER_REVISION") or BGE_M3_REVISION).strip()
+    device = (env.get("SPARSE_ENCODER_DEVICE") or "cpu").strip()
+    use_fp16 = (env.get("SPARSE_ENCODER_USE_FP16") or "false").strip().lower()
+
+    if mode != "bge_m3":
+        errors.append("生产 SPARSE_ENCODER_MODE 必须为 bge_m3，禁止 fixture。")
+    if model != BGE_M3_MODEL_ID:
+        errors.append("SPARSE_ENCODER_MODEL 必须固定为 BAAI/bge-m3。")
+    if revision != BGE_M3_REVISION:
+        errors.append("SPARSE_ENCODER_REVISION 必须使用冻结 commit。")
+    if device != "cpu":
+        errors.append("当前 sparse encoder 镜像只允许 SPARSE_ENCODER_DEVICE=cpu。")
+    if use_fp16 not in BOOLEAN_ENV_VALUES:
+        errors.append("SPARSE_ENCODER_USE_FP16 必须是布尔值。")
+    elif device == "cpu" and use_fp16 in {"1", "true", "yes", "on"}:
+        errors.append("CPU sparse encoder 禁止启用 FP16。")
+
+    numeric_limits = {
+        "SPARSE_ENCODER_BATCH_SIZE": (1, 64, 8),
+        "SPARSE_ENCODER_MAX_LENGTH": (1, 8192, 1024),
+        "SPARSE_ENCODER_MAX_BATCH_SIZE": (1, 64, 16),
+        "SPARSE_ENCODER_MAX_TEXT_CHARACTERS": (1, 200_000, 20_000),
+        "SPARSE_ENCODER_MAX_REQUEST_BYTES": (1024, 10_485_760, 1_048_576),
+        "SPARSE_ENCODER_MAX_CONCURRENCY": (1, 8, 1),
+    }
+    for key, (minimum, maximum, default) in numeric_limits.items():
+        try:
+            value = int((env.get(key) or str(default)).strip())
+        except ValueError:
+            errors.append(f"{key} 必须是整数。")
+            continue
+        if value < minimum or value > maximum:
+            errors.append(f"{key} 必须在 {minimum}-{maximum} 范围内。")
+    return errors
+
+
 def extract_compose_service_block(compose_text: str, service_name: str) -> str | None:
     """从 docker-compose.yml 文本中提取指定 service 的缩进块。"""
     pattern = re.compile(rf"^  {re.escape(service_name)}:\s*$", re.MULTILINE)
@@ -638,6 +681,62 @@ def validate_compose_milvus_services(
             "        condition: service_completed_successfully"
         ) not in service_block:
             errors.append(f"{service_name} 必须等待 authenticated startup probe。")
+    return errors
+
+
+def validate_compose_sparse_encoder_service(
+    compose_file: Path = PROJECT_ROOT / "docker-compose.yml",
+) -> list[str]:
+    """校验 BGE-M3 单实例、内网、缓存、健康与共享 client 拓扑。"""
+    errors: list[str] = []
+    if not compose_file.exists():
+        return ["docker-compose.yml 不存在，无法检查 sparse-encoder service。"]
+    compose_text = compose_file.read_text(encoding="utf-8")
+    service_block = extract_compose_service_block(
+        compose_text,
+        "sparse-encoder",
+    )
+    if service_block is None:
+        return ["docker-compose.yml 缺少 sparse-encoder service。"]
+
+    required_fragments = (
+        "dockerfile: deploy/docker/sparse-encoder.Dockerfile",
+        "target: runtime",
+        "SPARSE_ENCODER_MODE:",
+        "SPARSE_ENCODER_MODEL:",
+        BGE_M3_REVISION,
+        "bge_m3_cache:/models/huggingface",
+        "/health/ready",
+        "mem_limit:",
+        "cpus:",
+        "logging:",
+    )
+    for fragment in required_fragments:
+        if fragment not in service_block:
+            errors.append(f"sparse-encoder 缺少固定配置：{fragment}")
+    if "\n    ports:" in service_block:
+        errors.append("sparse-encoder 不得声明 host ports。")
+    if "\n    profiles:" in service_block:
+        errors.append("sparse-encoder 必须属于默认 Compose runtime。")
+
+    for service_name in ("backend", "worker"):
+        consumer_block = extract_compose_service_block(
+            compose_text,
+            service_name,
+        ) or ""
+        for key in (
+            "SPARSE_ENCODER_URL:",
+            "SPARSE_ENCODER_MODEL:",
+            "SPARSE_ENCODER_REVISION:",
+            "SPARSE_ENCODER_CLIENT_TIMEOUT_SECONDS:",
+        ):
+            if key not in consumer_block:
+                errors.append(f"{service_name} 缺少 {key.rstrip(':')} 配置。")
+        if (
+            "\n      sparse-encoder:\n"
+            "        condition: service_healthy"
+        ) not in consumer_block:
+            errors.append(f"{service_name} 必须等待 sparse-encoder ready。")
     return errors
 
 
@@ -969,6 +1068,11 @@ def run(args: argparse.Namespace) -> int:
         ("Redis Compose service", validate_compose_redis_service()),
         ("Vector store settings", validate_vector_store_settings(env)),
         ("Milvus Compose services", validate_compose_milvus_services()),
+        ("Sparse encoder settings", validate_sparse_encoder_settings(env)),
+        (
+            "Sparse encoder Compose service",
+            validate_compose_sparse_encoder_service(),
+        ),
         ("Port bindings", validate_port_bindings(env)),
     ]
     if not args.skip_path_check:

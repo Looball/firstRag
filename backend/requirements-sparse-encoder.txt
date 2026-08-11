@@ -1,0 +1,10 @@
+# Fixed BGE-M3 learned sparse runtime. The model snapshot revision is pinned in code/config.
+# CPU-only PyTorch wheel，避免默认 Linux wheel 引入无用 CUDA runtime。
+--extra-index-url https://download.pytorch.org/whl/cpu
+
+-r requirements-sparse-encoder-api.txt
+
+FlagEmbedding==1.4.0
+huggingface-hub==1.27.0
+torch==2.13.0+cpu
+transformers==5.15.0

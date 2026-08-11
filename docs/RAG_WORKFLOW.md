@@ -24,6 +24,8 @@
 7. PostgreSQL `knowledge_file_chunks` 保存 chunk 正文和 metadata，用于全文检索。
 8. 更新文件状态和任务状态。
 
+T-141 已在 Compose 中加入固定 revision BGE-M3 sparse encoder 和 backend/worker 共享 client，但本节当前生产链路仍是 dense Milvus + PostgreSQL full-text；worker 尚未把 learned sparse vector 写入 collection，聊天检索也尚未调用该 service。T-142/T-143 完成并通过重建门禁前，不把 runtime 就绪误写成 sparse retrieval 已切换。
+
 用户可从低质量 OCR 引用的原文预览中提交指定页重新识别。后端只允许当前用户、已完成索引且确由 OCR 生成的 PDF 页面；请求递增文件 `index_version`，把经过校验的强制页写入内部 job options，再由原有 worker 异步重建整个文件索引。主动重识别在共享总超时内比较原图自动布局、灰度/二值化单块文本和 90°/180°/270° 旋转候选，按有效文本与 confidence 确定性选优；首次 OCR 仍只运行一次基线候选。重建期间该文件暂不可检索，旧回答继续绑定旧 index version，不会被后台静默替换；任务成功后需要重新提问才能获得采用新文本的引用。
 
 用户也可读取指定 OCR 页的完整正文并保存人工修订。修订独立存放在 PostgreSQL，不直接覆盖当前 chunks；worker 每次重建仍运行 Tesseract 获取文本和质量分数，再在 chunk 切分前用当前 revision 的人工文本替换页面正文。撤销修订会删除 correction 并再建一个新 index version，从原 PDF 恢复 Tesseract 文本。保存、更新和撤销均沿用 file advisory lock、vector job、版本隔离和历史 source 语义。
