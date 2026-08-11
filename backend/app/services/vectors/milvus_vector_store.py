@@ -12,6 +12,7 @@ from langchain_core.documents import Document
 from langchain_core.embeddings import Embeddings
 
 from app.core.sensitive_data import sanitize_sensitive_text
+from app.services.sparse_encoder_client import SparseEncoderClient
 from app.services.vectors.vector_store import (
     VectorRecord,
     VectorSearchResponse,
@@ -20,6 +21,7 @@ from app.services.vectors.vector_store import (
     VectorStoreHealth,
     VectorStoreProviderError,
     build_child_id,
+    build_parent_id,
 )
 
 
@@ -30,10 +32,14 @@ FILE_ID_MAX_CHARACTERS = 64
 WRITE_BATCH_SIZE = 256
 AUDIT_QUERY_BATCH_SIZE = 1_000
 VECTOR_INDEX_NAME = "idx_embedding_hnsw"
+SPARSE_INDEX_NAME = "idx_sparse_embedding_inverted"
 SCALAR_INDEX_NAMES = {
     "user_id": "idx_user_id_inverted",
     "file_id": "idx_file_id_inverted",
     "index_version": "idx_index_version_inverted",
+}
+HIERARCHY_INDEX_NAMES = {
+    "parent_id": "idx_parent_id_inverted",
 }
 
 
@@ -89,12 +95,14 @@ class MilvusVectorStore:
         dimensions: int | None,
         timeout_seconds: float,
         consistency_level: str,
+        sparse_encoder: SparseEncoderClient | None = None,
     ) -> None:
         """保存已认证 client、隔离 collection 和 embedding identity。"""
         self._client = client
         self._collection_name = collection_name
         self._user_collection_prefix = user_collection_prefix
         self._embedding_model = embedding_model
+        self._sparse_encoder = sparse_encoder
         self._dimensions = dimensions
         self._timeout_seconds = timeout_seconds
         self._consistency_level = consistency_level
@@ -108,6 +116,11 @@ class MilvusVectorStore:
     def collection_name(self) -> str:
         """返回当前 collection 名称。"""
         return self._collection_name
+
+    @property
+    def dense_sparse_write_enabled(self) -> bool:
+        """返回当前 adapter 是否绑定 v2 dense+sparse schema/write。"""
+        return self._sparse_encoder is not None
 
     def _provider_error(
         self,
@@ -161,6 +174,11 @@ class MilvusVectorStore:
             datatype=DataType.FLOAT_VECTOR,
             dim=dimensions,
         )
+        if self.dense_sparse_write_enabled:
+            schema.add_field(
+                field_name="sparse_embedding",
+                datatype=DataType.SPARSE_FLOAT_VECTOR,
+            )
         schema.add_field(
             field_name="content",
             datatype=DataType.VARCHAR,
@@ -174,6 +192,14 @@ class MilvusVectorStore:
         )
         schema.add_field(field_name="chunk_index", datatype=DataType.INT64)
         schema.add_field(field_name="index_version", datatype=DataType.INT64)
+        if self.dense_sparse_write_enabled:
+            schema.add_field(
+                field_name="parent_id",
+                datatype=DataType.VARCHAR,
+                max_length=CHUNK_ID_MAX_CHARACTERS,
+            )
+            schema.add_field(field_name="parent_index", datatype=DataType.INT64)
+            schema.add_field(field_name="child_index", datatype=DataType.INT64)
         schema.add_field(field_name="metadata", datatype=DataType.JSON)
 
         index_params = self._client.prepare_index_params()
@@ -184,7 +210,18 @@ class MilvusVectorStore:
             metric_type="COSINE",
             params={"M": 16, "efConstruction": 200},
         )
-        for field_name, index_name in SCALAR_INDEX_NAMES.items():
+        if self.dense_sparse_write_enabled:
+            index_params.add_index(
+                field_name="sparse_embedding",
+                index_name=SPARSE_INDEX_NAME,
+                index_type="SPARSE_INVERTED_INDEX",
+                metric_type="IP",
+                params={"inverted_index_algo": "DAAT_MAXSCORE"},
+            )
+        scalar_indexes = dict(SCALAR_INDEX_NAMES)
+        if self.dense_sparse_write_enabled:
+            scalar_indexes.update(HIERARCHY_INDEX_NAMES)
+        for field_name, index_name in scalar_indexes.items():
             index_params.add_index(
                 field_name=field_name,
                 index_name=index_name,
@@ -214,6 +251,13 @@ class MilvusVectorStore:
             "index_version": DataType.INT64,
             "metadata": DataType.JSON,
         }
+        if self.dense_sparse_write_enabled:
+            expected_types.update({
+                "sparse_embedding": DataType.SPARSE_FLOAT_VECTOR,
+                "parent_id": DataType.VARCHAR,
+                "parent_index": DataType.INT64,
+                "child_index": DataType.INT64,
+            })
         if set(fields) != set(expected_types):
             raise ValueError("collection schema fields 与 ADR 不一致")
         for field_name, expected_type in expected_types.items():
@@ -226,6 +270,8 @@ class MilvusVectorStore:
             "content": CONTENT_MAX_BYTES,
             "file_id": FILE_ID_MAX_CHARACTERS,
         }
+        if self.dense_sparse_write_enabled:
+            expected_max_lengths["parent_id"] = CHUNK_ID_MAX_CHARACTERS
         for field_name, expected_max_length in expected_max_lengths.items():
             actual_max_length = int(
                 fields[field_name].get("params", {}).get("max_length") or 0,
@@ -243,6 +289,11 @@ class MilvusVectorStore:
             collection_name=self.collection_name,
         ))
         expected_indexes = {VECTOR_INDEX_NAME, *SCALAR_INDEX_NAMES.values()}
+        if self.dense_sparse_write_enabled:
+            expected_indexes.update({
+                SPARSE_INDEX_NAME,
+                *HIERARCHY_INDEX_NAMES.values(),
+            })
         if not expected_indexes.issubset(index_names):
             raise ValueError("collection indexes 与 ADR 不一致")
         vector_index = self._client.describe_index(
@@ -258,7 +309,23 @@ class MilvusVectorStore:
             or int(vector_index.get("efConstruction") or 0) != 200
         ):
             raise ValueError("embedding HNSW index 参数与 ADR 不一致")
-        for field_name, index_name in SCALAR_INDEX_NAMES.items():
+        if self.dense_sparse_write_enabled:
+            sparse_index = self._client.describe_index(
+                collection_name=self.collection_name,
+                index_name=SPARSE_INDEX_NAME,
+                timeout=self._timeout_seconds,
+            )
+            if (
+                sparse_index.get("field_name") != "sparse_embedding"
+                or sparse_index.get("index_type") != "SPARSE_INVERTED_INDEX"
+                or sparse_index.get("metric_type") != "IP"
+                or sparse_index.get("inverted_index_algo") != "DAAT_MAXSCORE"
+            ):
+                raise ValueError("sparse inverted index 参数与 ADR 不一致")
+        scalar_indexes = dict(SCALAR_INDEX_NAMES)
+        if self.dense_sparse_write_enabled:
+            scalar_indexes.update(HIERARCHY_INDEX_NAMES)
+        for field_name, index_name in scalar_indexes.items():
             scalar_index = self._client.describe_index(
                 collection_name=self.collection_name,
                 index_name=index_name,
@@ -358,6 +425,30 @@ class MilvusVectorStore:
                 timeout=self._timeout_seconds,
             )
 
+    def _delete_file_for_replace(
+        self,
+        user_id: int,
+        file_id: UUID | str,
+    ) -> None:
+        """v2 重建只替换当前 identity，保留 dense-only rollback collection。"""
+        if not self.dense_sparse_write_enabled:
+            self._delete_file_from_user_collections(user_id, file_id)
+            return
+        if not self._client.has_collection(
+            collection_name=self.collection_name,
+            timeout=self._timeout_seconds,
+        ):
+            return
+        self._client.delete(
+            collection_name=self.collection_name,
+            filter=_file_filter(user_id, file_id),
+            timeout=self._timeout_seconds,
+        )
+        self._client.flush(
+            collection_name=self.collection_name,
+            timeout=self._timeout_seconds,
+        )
+
     @staticmethod
     def _normalize_embeddings(
         embeddings: Sequence[Sequence[float]],
@@ -386,6 +477,33 @@ class MilvusVectorStore:
         return normalized, dimensions
 
     @staticmethod
+    def _normalize_sparse_embeddings(
+        sparse_embeddings: Sequence[dict[int, float]],
+        expected_count: int,
+    ) -> list[dict[int, float]]:
+        """校验 learned sparse 数量、indices 和非负有限 weights。"""
+        if len(sparse_embeddings) != expected_count:
+            raise ValueError("sparse embedding 数量与 documents 不一致")
+        normalized: list[dict[int, float]] = []
+        for sparse_embedding in sparse_embeddings:
+            if not sparse_embedding:
+                raise ValueError("sparse embedding 不能为空")
+            normalized_embedding: dict[int, float] = {}
+            for raw_index, raw_weight in sparse_embedding.items():
+                if isinstance(raw_index, bool) or not isinstance(raw_index, int):
+                    raise ValueError("sparse embedding index 必须是整数")
+                if raw_index < 0 or raw_index >= 2**32:
+                    raise ValueError("sparse embedding index 超出合法范围")
+                weight = float(raw_weight)
+                if not math.isfinite(weight) or weight < 0:
+                    raise ValueError("sparse embedding weight 必须有限且非负")
+                normalized_embedding[raw_index] = weight
+            if not any(weight > 0 for weight in normalized_embedding.values()):
+                raise ValueError("sparse embedding 不能是零向量")
+            normalized.append(normalized_embedding)
+        return normalized
+
+    @staticmethod
     def _build_entities(
         *,
         user_id: int,
@@ -393,20 +511,21 @@ class MilvusVectorStore:
         documents: list[Document],
         ids: list[str],
         embeddings: list[list[float]],
+        sparse_embeddings: list[dict[int, float]] | None = None,
     ) -> list[dict[str, Any]]:
-        """验证隔离字段与大小约束，并转换为 ADR entity schema。"""
+        """验证隔离/层级字段与大小约束，并转换为 ADR entity schema。"""
         normalized_file_id = str(file_id)
         if len(normalized_file_id) > FILE_ID_MAX_CHARACTERS:
             raise ValueError("file_id 超过 Milvus VARCHAR(64) 限制")
         if len(set(ids)) != len(ids):
             raise ValueError("同一批写入包含重复 chunk_id")
         entities: list[dict[str, Any]] = []
-        for document, chunk_id, embedding in zip(
+        for row_index, (document, chunk_id, embedding) in enumerate(zip(
             documents,
             ids,
             embeddings,
             strict=True,
-        ):
+        )):
             metadata = dict(document.metadata)
             if int(metadata.get("user_id")) != int(user_id):
                 raise ValueError("document user_id 与写入范围不一致")
@@ -414,7 +533,21 @@ class MilvusVectorStore:
                 raise ValueError("document file_id 与写入范围不一致")
             chunk_index = int(metadata["chunk_index"])
             index_version = int(metadata["index_version"])
-            if "parent_index" in metadata and "child_index" in metadata:
+            if sparse_embeddings is not None:
+                required_hierarchy_fields = (
+                    "parent_id",
+                    "parent_index",
+                    "child_index",
+                )
+                if any(
+                    metadata.get(field_name) is None
+                    for field_name in required_hierarchy_fields
+                ):
+                    raise ValueError("v2 entity 缺少 parent/child identity")
+                if str(metadata["parent_id"]) != build_parent_id(metadata):
+                    raise ValueError("parent_id 不符合 stable ID 契约")
+                expected_id = build_child_id(metadata)
+            elif "parent_index" in metadata and "child_index" in metadata:
                 expected_id = build_child_id(metadata)
             else:
                 # 兼容 T-145 前的 probe/旧调用；生产切分统一走 parent/child ID。
@@ -429,7 +562,18 @@ class MilvusVectorStore:
             content = document.page_content
             if len(content.encode("utf-8")) > CONTENT_MAX_BYTES:
                 raise ValueError("chunk content 超过 Milvus VARCHAR 上限")
-            for key in ("user_id", "file_id", "chunk_index", "index_version"):
+            parent_id = str(metadata.get("parent_id") or "")
+            if sparse_embeddings is not None and len(parent_id) > CHUNK_ID_MAX_CHARACTERS:
+                raise ValueError("parent_id 超过 Milvus VARCHAR(192) 限制")
+            for key in (
+                "user_id",
+                "file_id",
+                "chunk_index",
+                "index_version",
+                "parent_id",
+                "parent_index",
+                "child_index",
+            ):
                 metadata.pop(key, None)
             metadata_bytes = json.dumps(
                 metadata,
@@ -438,7 +582,7 @@ class MilvusVectorStore:
             ).encode("utf-8")
             if len(metadata_bytes) > METADATA_MAX_BYTES:
                 raise ValueError("chunk metadata 超过 Milvus JSON 上限")
-            entities.append({
+            entity = {
                 "chunk_id": chunk_id,
                 "embedding": embedding,
                 "content": content,
@@ -447,7 +591,15 @@ class MilvusVectorStore:
                 "chunk_index": chunk_index,
                 "index_version": index_version,
                 "metadata": metadata,
-            })
+            }
+            if sparse_embeddings is not None:
+                entity.update({
+                    "sparse_embedding": sparse_embeddings[row_index],
+                    "parent_id": parent_id,
+                    "parent_index": int(document.metadata["parent_index"]),
+                    "child_index": int(document.metadata["child_index"]),
+                })
+            entities.append(entity)
         return entities
 
     def _query_file_rows(
@@ -497,18 +649,42 @@ class MilvusVectorStore:
         *,
         user_id: int,
         file_id: UUID | str,
+        documents: list[Document],
         ids: list[str],
         embeddings: list[list[float]],
+        sparse_embeddings: list[dict[int, float]] | None = None,
     ) -> None:
-        """对账 IDs/count，并执行 filtered ANN top-1 self-hit。"""
+        """对账 IDs/count/hierarchy，并执行 dense/sparse filtered self-hit。"""
+        output_fields = ["chunk_id", "index_version"]
+        if sparse_embeddings is not None:
+            output_fields.extend(["parent_id", "parent_index", "child_index"])
         rows = self._query_file_rows(
             user_id=user_id,
             file_id=file_id,
-            output_fields=["chunk_id", "index_version"],
+            output_fields=output_fields,
         )
         actual_ids = {str(row.get("chunk_id")) for row in rows}
         if len(rows) != len(ids) or actual_ids != set(ids):
             raise RuntimeError("Milvus 写后 ID/count 对账失败")
+        if sparse_embeddings is not None:
+            expected_hierarchy = {
+                chunk_id: (
+                    str(document.metadata["parent_id"]),
+                    int(document.metadata["parent_index"]),
+                    int(document.metadata["child_index"]),
+                )
+                for chunk_id, document in zip(ids, documents, strict=True)
+            }
+            actual_hierarchy = {
+                str(row.get("chunk_id")): (
+                    str(row.get("parent_id") or ""),
+                    int(row.get("parent_index")),
+                    int(row.get("child_index")),
+                )
+                for row in rows
+            }
+            if actual_hierarchy != expected_hierarchy:
+                raise RuntimeError("Milvus 写后 parent/child identity 对账失败")
         if not ids:
             return
         search_results = self._client.search(
@@ -531,6 +707,32 @@ class MilvusVectorStore:
         ).get("chunk_id")
         if str(candidate_id) != ids[0]:
             raise RuntimeError("Milvus 写后 filtered ANN self-hit 失败")
+        if sparse_embeddings is None:
+            return
+        sparse_search_results = self._client.search(
+            collection_name=self.collection_name,
+            data=[sparse_embeddings[0]],
+            anns_field="sparse_embedding",
+            filter=_file_filter(user_id, file_id),
+            limit=1,
+            output_fields=["chunk_id"],
+            search_params={
+                "metric_type": "IP",
+                "params": {"drop_ratio_search": 0.0},
+            },
+            consistency_level=self._consistency_level,
+            timeout=self._timeout_seconds,
+        )
+        sparse_candidate = (
+            sparse_search_results[0][0]
+            if sparse_search_results and sparse_search_results[0]
+            else {}
+        )
+        sparse_candidate_id = sparse_candidate.get("id") or (
+            sparse_candidate.get("entity") or {}
+        ).get("chunk_id")
+        if str(sparse_candidate_id) != ids[0]:
+            raise RuntimeError("Milvus 写后 sparse filtered ANN self-hit 失败")
 
     def replace_file_vectors(
         self,
@@ -540,7 +742,7 @@ class MilvusVectorStore:
         documents: list[Document],
         ids: list[str],
     ) -> None:
-        """生成 embeddings 后删除旧 identities，批量 upsert 并完成写后门禁。"""
+        """生成所需向量后替换当前 identity，并完成写后门禁。"""
         if len(documents) != len(ids):
             raise ValueError("documents 与 ids 数量必须一致")
         if not documents:
@@ -550,14 +752,21 @@ class MilvusVectorStore:
             raise ValueError("Milvus 写入需要当前用户的 embedding model")
         mutation_started = False
         try:
-            raw_embeddings = self._embedding_model.embed_documents([
+            texts = [
                 document.page_content
                 for document in documents
-            ])
+            ]
+            raw_embeddings = self._embedding_model.embed_documents(texts)
             embeddings, dimensions = self._normalize_embeddings(
                 raw_embeddings,
                 len(documents),
             )
+            sparse_embeddings = None
+            if self._sparse_encoder is not None:
+                sparse_embeddings = self._normalize_sparse_embeddings(
+                    self._sparse_encoder.encode_documents(texts),
+                    len(documents),
+                )
             if self._dimensions is not None and dimensions != self._dimensions:
                 raise ValueError("embedding provider 返回的 dimension 与设置不一致")
             entities = self._build_entities(
@@ -566,10 +775,11 @@ class MilvusVectorStore:
                 documents=documents,
                 ids=ids,
                 embeddings=embeddings,
+                sparse_embeddings=sparse_embeddings,
             )
             self._ensure_collection(dimensions)
             mutation_started = True
-            self._delete_file_from_user_collections(user_id, file_id)
+            self._delete_file_for_replace(user_id, file_id)
             for start in range(0, len(entities), WRITE_BATCH_SIZE):
                 self._client.upsert(
                     collection_name=self.collection_name,
@@ -583,13 +793,15 @@ class MilvusVectorStore:
             self._verify_write(
                 user_id=user_id,
                 file_id=file_id,
+                documents=documents,
                 ids=ids,
                 embeddings=embeddings,
+                sparse_embeddings=sparse_embeddings,
             )
         except Exception as exc:
             if mutation_started:
                 try:
-                    self._delete_file_from_user_collections(user_id, file_id)
+                    self._delete_file_for_replace(user_id, file_id)
                 except Exception:
                     pass
             raise self._provider_error("replace_file_vectors", exc) from exc
@@ -604,7 +816,7 @@ class MilvusVectorStore:
         embeddings: Sequence[Sequence[float]],
         batch_size: int = WRITE_BATCH_SIZE,
     ) -> None:
-        """使用既有 embeddings 幂等导入单文件，不调用外部 provider。"""
+        """使用既有 dense embeddings 导入，并按 v2 配置补充 learned sparse。"""
         if len(documents) != len(ids):
             raise ValueError("documents 与 ids 数量必须一致")
         if batch_size < 1 or batch_size > 1_000:
@@ -615,6 +827,15 @@ class MilvusVectorStore:
                 embeddings,
                 len(documents),
             )
+            sparse_embeddings = None
+            if self._sparse_encoder is not None:
+                sparse_embeddings = self._normalize_sparse_embeddings(
+                    self._sparse_encoder.encode_documents([
+                        document.page_content
+                        for document in documents
+                    ]),
+                    len(documents),
+                )
             if self._dimensions is not None and dimensions != self._dimensions:
                 raise ValueError("既有 embedding dimension 与设置不一致")
             entities = self._build_entities(
@@ -623,6 +844,7 @@ class MilvusVectorStore:
                 documents=documents,
                 ids=ids,
                 embeddings=normalized_embeddings,
+                sparse_embeddings=sparse_embeddings,
             )
             self._ensure_collection(dimensions)
             mutation_started = True
@@ -644,8 +866,10 @@ class MilvusVectorStore:
             self._verify_write(
                 user_id=user_id,
                 file_id=file_id,
+                documents=documents,
                 ids=ids,
                 embeddings=normalized_embeddings,
+                sparse_embeddings=sparse_embeddings,
             )
         except Exception as exc:
             if mutation_started:
@@ -703,6 +927,34 @@ class MilvusVectorStore:
         except Exception as exc:
             raise self._provider_error("delete_file_vectors", exc) from exc
 
+    def delete_current_file_vectors(
+        self,
+        *,
+        user_id: int,
+        file_id: UUID | str,
+    ) -> None:
+        """只删除当前 collection 的文件 entities，保留 rollback identities。"""
+        try:
+            if not self.collection_name or not self._client.has_collection(
+                collection_name=self.collection_name,
+                timeout=self._timeout_seconds,
+            ):
+                return
+            self._client.delete(
+                collection_name=self.collection_name,
+                filter=_file_filter(user_id, file_id),
+                timeout=self._timeout_seconds,
+            )
+            self._client.flush(
+                collection_name=self.collection_name,
+                timeout=self._timeout_seconds,
+            )
+        except Exception as exc:
+            raise self._provider_error(
+                "delete_current_file_vectors",
+                exc,
+            ) from exc
+
     def search_vectors(
         self,
         *,
@@ -738,6 +990,12 @@ class MilvusVectorStore:
                 "index_version",
                 "metadata",
             ]
+            if self.dense_sparse_write_enabled:
+                output_fields.extend([
+                    "parent_id",
+                    "parent_index",
+                    "child_index",
+                ])
             search_options = {
                 "collection_name": self.collection_name,
                 "data": embeddings,
@@ -797,6 +1055,17 @@ class MilvusVectorStore:
                     "chunk_index": int(entity.get("chunk_index")),
                     "index_version": int(entity.get("index_version")),
                 })
+                if self.dense_sparse_write_enabled:
+                    metadata.update({
+                        "parent_id": str(entity.get("parent_id") or ""),
+                        "parent_index": int(entity.get("parent_index")),
+                        "child_id": str(
+                            entity.get("chunk_id")
+                            or candidate.get("id")
+                            or ""
+                        ),
+                        "child_index": int(entity.get("child_index")),
+                    })
                 results.append(VectorSearchResult(
                     document=Document(
                         page_content=str(entity.get("content") or ""),
@@ -828,6 +1097,12 @@ class MilvusVectorStore:
             "index_version",
             "metadata",
         ]
+        if self.dense_sparse_write_enabled:
+            output_fields.extend([
+                "parent_id",
+                "parent_index",
+                "child_index",
+            ])
         if include_embeddings:
             output_fields.append("embedding")
         try:
@@ -848,6 +1123,13 @@ class MilvusVectorStore:
                 "chunk_index": row.get("chunk_index"),
                 "index_version": row.get("index_version"),
             })
+            if self.dense_sparse_write_enabled:
+                metadata.update({
+                    "parent_id": row.get("parent_id"),
+                    "parent_index": row.get("parent_index"),
+                    "child_id": row.get("chunk_id"),
+                    "child_index": row.get("child_index"),
+                })
             embedding = row.get("embedding") if include_embeddings else None
             records.append(VectorRecord(
                 id=str(row.get("chunk_id") or ""),

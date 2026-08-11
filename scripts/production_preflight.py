@@ -552,10 +552,12 @@ def validate_sparse_encoder_settings(env: Mapping[str, str]) -> list[str]:
         "SPARSE_ENCODER_BATCH_SIZE": (1, 64, 8),
         "SPARSE_ENCODER_MAX_LENGTH": (1, 8192, 1024),
         "SPARSE_ENCODER_MAX_BATCH_SIZE": (1, 64, 16),
+        "SPARSE_ENCODER_CLIENT_BATCH_SIZE": (1, 64, 16),
         "SPARSE_ENCODER_MAX_TEXT_CHARACTERS": (1, 200_000, 20_000),
         "SPARSE_ENCODER_MAX_REQUEST_BYTES": (1024, 10_485_760, 1_048_576),
         "SPARSE_ENCODER_MAX_CONCURRENCY": (1, 8, 1),
     }
+    numeric_values: dict[str, int] = {}
     for key, (minimum, maximum, default) in numeric_limits.items():
         try:
             value = int((env.get(key) or str(default)).strip())
@@ -564,6 +566,18 @@ def validate_sparse_encoder_settings(env: Mapping[str, str]) -> list[str]:
             continue
         if value < minimum or value > maximum:
             errors.append(f"{key} 必须在 {minimum}-{maximum} 范围内。")
+            continue
+        numeric_values[key] = value
+    if (
+        "SPARSE_ENCODER_CLIENT_BATCH_SIZE" in numeric_values
+        and "SPARSE_ENCODER_MAX_BATCH_SIZE" in numeric_values
+        and numeric_values["SPARSE_ENCODER_CLIENT_BATCH_SIZE"]
+        > numeric_values["SPARSE_ENCODER_MAX_BATCH_SIZE"]
+    ):
+        errors.append(
+            "SPARSE_ENCODER_CLIENT_BATCH_SIZE 不得超过 "
+            "SPARSE_ENCODER_MAX_BATCH_SIZE。",
+        )
     return errors
 
 

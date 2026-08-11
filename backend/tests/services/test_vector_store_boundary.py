@@ -43,6 +43,14 @@ class FakeVectorStore:
     ) -> None:
         """测试 fake 不持久化数据。"""
 
+    def delete_current_file_vectors(
+        self,
+        *,
+        user_id: int,
+        file_id: UUID | str,
+    ) -> None:
+        """测试 fake 不持久化当前 identity 数据。"""
+
     def search_vectors(
         self,
         *,

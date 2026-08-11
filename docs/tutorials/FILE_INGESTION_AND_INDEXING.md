@@ -464,12 +464,16 @@ conda run -n firstrag python scripts/eval_pdf_ocr.py
 sequenceDiagram
     participant Indexer as vector_index_service
     participant Embed as user embedding provider
+    participant Sparse as BGE-M3 sparse encoder
     participant Vector as Milvus
     participant PG as PostgreSQL chunks
     participant File as knowledge_files
 
     Indexer->>Indexer: split parents/children and attach index_version
     Indexer->>Embed: embed child chunks with current user's settings
+    opt MILVUS_DENSE_SPARSE_WRITE_ENABLED=true
+        Indexer->>Sparse: encode all child texts in document mode
+    end
     Indexer->>Vector: delete old file entities, add stable IDs
     Indexer->>PG: replace same-user parents and child chunks
     alt both writes succeed
@@ -490,13 +494,14 @@ parent_id = {user_id}:{file_id}:v{index_version}:p{parent_index}
 child_id  = {parent_id}:c{child_index}
 ```
 
-Embedding 使用当前用户保存的 provider、model、dimensions 和加密凭据。Milvus collection 按用户与 embedding identity 派生，避免不同用户或不兼容维度混放。每个 chunk 同时写入：
+Dense embedding 使用当前用户保存的 provider、model、dimensions 和加密凭据。T-142 的 v2 collection identity 还包含固定 BGE-M3 model/revision；设置 `MILVUS_DENSE_SPARSE_WRITE_ENABLED=true` 后，worker 会先为所有 child 生成 dense 与 learned sparse，两路都成功才开始 Milvus mutation。T-144 全量重建验收前该 flag 默认关闭，避免把旧 dense-only collection 原地升级。每个 child 写入：
 
-- Milvus：embedding、正文和 metadata JSON，服务 filtered ANN retrieval。
+- Milvus v1：dense `embedding`、正文和 metadata JSON，继续服务当前 filtered ANN retrieval。
+- Milvus v2：额外写入 `sparse_embedding`、`parent_id`、`parent_index`、`child_index`，并执行 dense/sparse filtered self-hit；在线 hybrid search 由 T-143 接入。
 - PostgreSQL `knowledge_file_chunk_parents`：parent 正文和位置 metadata，服务 source context 与后续父块扩展。
 - PostgreSQL `knowledge_file_chunks`：child 正文、`parent_id` 外键、metadata、`tsvector`/trigram 索引，当前仍服务 full-text retrieval 和引用定位。
 
-两套存储不能共享事务，所以失败路径会尽力删除该用户、该文件的两边半成品，并把文件标记为 `failed`。`job.status=succeeded` 证明本次写入流程结束，但不单独证明任意 query 的 ANN 召回质量；检索质量要用当前 indexing/RAG eval 验证。
+两套存储不能共享事务，所以失败路径会删除当前 collection identity 的半成品和 PostgreSQL chunks，并把文件标记为 `failed`；补偿不会删除独立 dense-only rollback collection。用户永久删除文件时才扫描该用户全部 collection identities。`job.status=succeeded` 证明本次写入流程结束，但不单独证明任意 query 的 ANN 召回质量；检索质量要用当前 indexing/RAG eval 验证。
 
 ### 源码入口
 
@@ -504,7 +509,8 @@ Embedding 使用当前用户保存的 provider、model、dimensions 和加密凭
 | --- | --- | --- |
 | Index 编排 | [`backend/app/services/vectors/vector_index_service.py`](../../backend/app/services/vectors/vector_index_service.py) | stable IDs、用户 collection、双写与补偿清理。 |
 | Vector store 契约 | [`backend/app/services/vectors/vector_store.py`](../../backend/app/services/vectors/vector_store.py) | `Document`、stable ID、单文件替换/删除、检索、审计、计数和健康检查。 |
-| Milvus adapter | [`backend/app/services/vectors/milvus_vector_store.py`](../../backend/app/services/vectors/milvus_vector_store.py) | scalar filter、Strong consistency、distance 归一化和异常分类。 |
+| Milvus adapter | [`backend/app/services/vectors/milvus_vector_store.py`](../../backend/app/services/vectors/milvus_vector_store.py) | v1/v2 schema、双编码原子写入、scalar filter、Strong consistency 和写后审计。 |
+| Sparse client | [`backend/app/services/sparse_encoder_client.py`](../../backend/app/services/sparse_encoder_client.py) | 固定 BGE-M3 identity、document/query mode 与安全错误边界。 |
 | Embedding 设置 | [`backend/app/services/vectors/embedding_settings_service.py`](../../backend/app/services/vectors/embedding_settings_service.py) | 当前用户 provider/model/dimensions。 |
 | Embedding client | [`backend/app/services/vectors/embedding_model.py`](../../backend/app/services/vectors/embedding_model.py) | OpenAI-compatible/Qwen/ZhipuAI 请求适配。 |
 | Chunk Repository | [`backend/app/repositories/knowledge_chunk_repository.py`](../../backend/app/repositories/knowledge_chunk_repository.py) | 同用户、同文件 replace 和 full-text 查询。 |
@@ -516,7 +522,7 @@ Embedding 使用当前用户保存的 provider、model、dimensions 和加密凭
 | PostgreSQL parent | `parent_id`, `user_id`, `knowledge_file_id`, `parent_index`, `index_version` | 完整上下文与用户隔离。 |
 | PostgreSQL child | `chunk_id`, `parent_id`, `child_index`, `chunk_index`, `index_version` | 精确命中、父块归属与旧 API 兼容。 |
 | PostgreSQL chunk | `content`, `metadata` | full-text retrieval 与引用原文。 |
-| Milvus fields/metadata | `user_id`, `file_id`, `chunk_index`, `index_version`, location fields | scalar filter、引用和版本诊断。 |
+| Milvus v2 fields | `embedding`, `sparse_embedding`, `parent_id`, `parent_index`, `child_index`, `user_id`, `file_id`, `chunk_index`, `index_version` | 双路向量、父块归属、scalar filter 和版本审计。 |
 | `knowledge_files` | `status`, `error_message`, `index_version` | 当前文件索引状态。 |
 
 ### 可运行检查：PostgreSQL chunks

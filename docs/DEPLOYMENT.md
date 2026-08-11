@@ -28,6 +28,8 @@ cp .env.example .env
 | `RERANK_PROVIDER` / `RERANK_MODEL` / `RERANK_BASE_URL` / `RERANK_API_KEY` | 历史环境变量兼容；新版本远程 rerank 推荐在登录后的“模型设置”页按用户配置。 |
 | `MILVUS_URI` / `MILVUS_TOKEN` / `MILVUS_DATABASE` | Milvus 内网连接、认证 token 和 database；Compose 默认 URI 为 `http://milvus-standalone:19530`，真实 token 只放 `.env`。 |
 | `MILVUS_COLLECTION_PREFIX` / `MILVUS_TIMEOUT_SECONDS` / `MILVUS_CONSISTENCY_LEVEL` | Milvus collection 前缀、client timeout 与一致性；当前 ADR 固定 `Strong`。 |
+| `MILVUS_DENSE_SPARSE_WRITE_ENABLED` | T-142 v2 collection/write feature flag；T-144 全量重建与切流前默认 `false`，启用后每个 child 同时写入 dense 与 BGE-M3 learned sparse。 |
+| `SPARSE_ENCODER_CLIENT_BATCH_SIZE` | backend/worker 调用 encoder 的 document batch 大小，默认 `16`，必须不大于 encoder service 的 `SPARSE_ENCODER_MAX_BATCH_SIZE`。 |
 | `MILVUS_MINIO_ACCESS_KEY` / `MILVUS_MINIO_SECRET_KEY` | Milvus 内置 MinIO 的本地凭据；非本机隔离环境必须覆盖模板值。 |
 | `MILVUS_MEMORY_LIMIT` / `MILVUS_CPU_LIMIT` | Milvus Standalone 容器资源上限，默认 `8g` / `4.0`。 |
 | `SPARSE_ENCODER_MODEL` / `SPARSE_ENCODER_REVISION` | 固定为 `BAAI/bge-m3` 与 ADR 冻结 commit；production preflight 拒绝漂移。 |

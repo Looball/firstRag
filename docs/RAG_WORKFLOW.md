@@ -24,7 +24,7 @@
 7. PostgreSQL `knowledge_file_chunk_parents` 保存父块正文，`knowledge_file_chunks` 保存带 `parent_id` 外键的 child 正文和 metadata；当前 full-text 仍只检索 child，父块用于 source context 与后续 LLM 上下文扩展。
 8. 更新文件状态和任务状态。
 
-T-141 已在 Compose 中加入固定 revision BGE-M3 sparse encoder 和 backend/worker 共享 client；T-145 已建立 parent/child 切分、持久化和 identity 契约，但聊天链当前仍把命中的 child 直接交给 rerank/LLM。生产检索仍是 dense Milvus + PostgreSQL full-text，worker 尚未把 learned sparse vector 写入 collection，聊天检索也尚未调用 sparse service 或执行 parent 聚合。T-142/T-143 完成并通过重建门禁前，不把 runtime 就绪误写成 sparse retrieval 或父块上下文扩展已经切换。
+T-141 已在 Compose 中加入固定 revision BGE-M3 sparse encoder 和 backend/worker 共享 client；T-145 已建立 parent/child 切分、持久化和 identity 契约。T-142 已在 `MILVUS_DENSE_SPARSE_WRITE_ENABLED` feature flag 后实现独立 v2 collection identity、dense+sparse 双写和写后双 self-hit，但在 T-144 全量重建验收前该 flag 默认关闭，生产检索仍使用旧 dense-only collection + PostgreSQL full-text。聊天链也尚未调用 sparse query 或执行 parent 聚合，这部分由 T-143 完成。
 
 用户可从低质量 OCR 引用的原文预览中提交指定页重新识别。后端只允许当前用户、已完成索引且确由 OCR 生成的 PDF 页面；请求递增文件 `index_version`，把经过校验的强制页写入内部 job options，再由原有 worker 异步重建整个文件索引。主动重识别在共享总超时内比较原图自动布局、灰度/二值化单块文本和 90°/180°/270° 旋转候选，按有效文本与 confidence 确定性选优；首次 OCR 仍只运行一次基线候选。重建期间该文件暂不可检索，旧回答继续绑定旧 index version，不会被后台静默替换；任务成功后需要重新提问才能获得采用新文本的引用。
 

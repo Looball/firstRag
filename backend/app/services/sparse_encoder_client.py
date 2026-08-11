@@ -8,6 +8,7 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 from app.core.config import (
+    SPARSE_ENCODER_CLIENT_BATCH_SIZE,
     SPARSE_ENCODER_MODEL,
     SPARSE_ENCODER_REVISION,
     SPARSE_ENCODER_TIMEOUT_SECONDS,
@@ -28,10 +29,19 @@ class SparseEncoderClient:
     model: str = SPARSE_ENCODER_MODEL
     revision: str = SPARSE_ENCODER_REVISION
     timeout_seconds: float = SPARSE_ENCODER_TIMEOUT_SECONDS
+    batch_size: int = SPARSE_ENCODER_CLIENT_BATCH_SIZE
 
     def encode_documents(self, texts: list[str]) -> list[dict[int, float]]:
         """为 indexing worker 批量生成 document sparse vectors。"""
-        return self._encode(texts, mode="document")
+        if self.batch_size < 1:
+            raise SparseEncoderClientError("Sparse encoder batch size 必须大于 0。")
+        vectors: list[dict[int, float]] = []
+        for start in range(0, len(texts), self.batch_size):
+            vectors.extend(self._encode(
+                texts[start:start + self.batch_size],
+                mode="document",
+            ))
+        return vectors
 
     def encode_query(self, text: str) -> dict[int, float]:
         """为 backend retrieval 生成单条 query sparse vector。"""

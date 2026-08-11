@@ -278,7 +278,7 @@
 | `T-139` | CI required checks | `P0` | `Done` | 修复 Nano ID 与 cryptography 新增高危依赖漏洞 | `2026-08-09` | `c5b5564` |
 | `T-140` | `PLAN-20260811-01` | `P1` | `Done` | 冻结 PostgreSQL full-text 基线并确定 BGE-M3 sparse ADR | `2026-08-11` | `b0c11b9` |
 | `T-141` | `PLAN-20260811-01` | `P1` | `Done` | 接入单实例 BGE-M3 sparse encoder runtime | `2026-08-11` | `8534823` |
-| `T-142` | `PLAN-20260811-01` | `P1` | `Todo` | 扩展 Milvus dense/sparse schema 与写入生命周期 |  |  |
+| `T-142` | `PLAN-20260811-01` | `P1` | `Doing` | 扩展 Milvus dense/sparse schema 与写入生命周期 |  |  |
 | `T-143` | `PLAN-20260811-01` | `P1` | `Todo` | 将混合召回与 RRF 统一迁移到 Milvus |  |  |
 | `T-144` | `PLAN-20260811-01` | `P1` | `Todo` | 移除 PostgreSQL 关键词检索并完成重建与验收 |  |  |
 | `T-145` | `PLAN-20260811-01` | `P1` | `Done` | 固化父子块切分、stable ID 与上下文扩展契约 | `2026-08-11` | `14eeca2` |
@@ -5718,7 +5718,7 @@ git diff --check
 
 - 来源计划：`PLAN-20260811-01`
 - 优先级：`P1`
-- 状态：`Todo`
+- 状态：`Doing`
 - 前置任务：`T-145`。
 - 目标：为每个 child chunk 同时写入 dense `FLOAT_VECTOR` 与 BGE-M3 `SPARSE_FLOAT_VECTOR`，保持 parent/child stable ID、用户隔离、重建、删除和写后审计。
 - 技术边界：

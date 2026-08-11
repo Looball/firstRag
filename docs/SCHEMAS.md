@@ -148,6 +148,21 @@ parent stable ID 为 `{user_id}:{file_id}:v{index_version}:p{parent_index}`，ch
 stable ID 为 `{parent_id}:c{child_index}`。为兼容既有 source API，同一文件的全局
 `chunk_index` 仍跨 PDF page 或 DOCX block 连续分配。
 
+Milvus v2 collection 由 `MILVUS_DENSE_SPARSE_WRITE_ENABLED=true` 显式启用，
+collection digest 同时包含当前用户 dense provider/model/dimensions 与固定 BGE-M3
+model/revision，禁止原地复用旧 dense-only schema。每个 child entity 显式保存：
+
+- `embedding FLOAT_VECTOR(dim)`：当前用户 dense provider 输出，HNSW + COSINE。
+- `sparse_embedding SPARSE_FLOAT_VECTOR`：BGE-M3 learned sparse 输出，
+  `SPARSE_INVERTED_INDEX + IP + DAAT_MAXSCORE`。
+- `parent_id`、`parent_index`、`child_index`：父块归属和无孤儿审计。
+- `user_id`、`file_id`、`chunk_index`、`index_version`：隔离、版本和生命周期。
+
+两种向量都生成并完成值域校验后才允许删除旧 entities；写后同时执行 dense/sparse
+filtered top-1 self-hit 和 parent/child ID/count 对账。T-144 重建完成前 feature flag
+默认关闭，因此该 schema 已可验收但尚未替换当前生产 collection。失败补偿只删除当前
+v2 identity，保留 dense-only rollback；永久文件删除才清理该用户的全部 identities。
+
 `knowledge_file_chunks.metadata` 会随文件类型保存解析上下文。文本文件常见字段包括
 `source`、`file_id`、`file_name`、`user_id`、`parent_id`、`parent_index`、
 `child_id`、`child_index` 和 `chunk_index`。PDF 额外保存

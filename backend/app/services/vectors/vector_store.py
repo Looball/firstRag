@@ -115,6 +115,15 @@ class VectorStoreBoundary(Protocol):
         """删除单个用户文件的全部向量。"""
         ...
 
+    def delete_current_file_vectors(
+        self,
+        *,
+        user_id: int,
+        file_id: UUID | str,
+    ) -> None:
+        """只删除当前 identity 的文件向量，用于失败补偿。"""
+        ...
+
     def search_vectors(
         self,
         *,

@@ -360,9 +360,28 @@ def compensate_failed_file_index(
     file_id: UUID | str,
     vectordb: VectorStoreBoundary | Any | None = None,
 ) -> None:
-    """尽力清除一次失败索引留下的向量与全文检索分块。"""
+    """尽力清除当前失败 identity 与 PostgreSQL chunks，保留 rollback 向量。"""
     try:
-        delete_file_vector_entries(user_id, file_id, vectordb)
+        resolved_vectordb = vectordb
+        if resolved_vectordb is None:
+            try:
+                resolved_vectordb = get_vector_store(user_id=user_id)
+            except ValueError:
+                resolved_vectordb = get_vector_store_for_cleanup(user_id)
+        delete_current = getattr(
+            resolved_vectordb,
+            "delete_current_file_vectors",
+            None,
+        )
+        if callable(delete_current) and bool(
+            getattr(resolved_vectordb, "collection_name", ""),
+        ):
+            delete_current(user_id=user_id, file_id=file_id)
+        else:
+            resolved_vectordb.delete_file_vectors(
+                user_id=user_id,
+                file_id=file_id,
+            )
     except Exception:
         logger.exception("补偿清理向量失败 file_id=%s", file_id)
 

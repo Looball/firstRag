@@ -345,6 +345,18 @@ class ProductionPreflightScriptTests(unittest.TestCase):
 
         self.assertEqual(errors, [])
 
+    def test_validate_sparse_encoder_rejects_oversized_client_batch(self) -> None:
+        """worker client batch 不得超过 encoder service contract 上限。"""
+        errors = production_preflight.validate_sparse_encoder_settings({
+            "SPARSE_ENCODER_CLIENT_BATCH_SIZE": "17",
+            "SPARSE_ENCODER_MAX_BATCH_SIZE": "16",
+        })
+
+        self.assertTrue(any(
+            "CLIENT_BATCH_SIZE" in error and "MAX_BATCH_SIZE" in error
+            for error in errors
+        ))
+
     def test_validate_compose_sparse_encoder_accepts_repository_topology(self) -> None:
         """仓库拓扑必须是内网单实例并被 backend/worker 共用。"""
         errors = production_preflight.validate_compose_sparse_encoder_service()
