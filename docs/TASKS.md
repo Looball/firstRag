@@ -46,7 +46,7 @@
 - 2026-08-09 已刷新后端依赖安全审计：`cryptography` 升级到 50.0.0；`pip-audit` 只剩 ChromaDB 1.5.9 的 no-fix finding，由精确到版本且 2026-08-20 到期的内网不可达例外管理；Trivy 对最近一次 backend/frontend 镜像的可修复 high/critical OS finding 均为 0。
 - 2026-07-27 已刷新 GitHub Actions supply chain 基线：13 个外部 Action 引用均固定到官方 release 的 40 位 commit SHA，CI 自动拒绝 tag/branch/短 SHA 和缺失版本注释；Dependabot 每周聚合提出 Action 更新 PR。
 - 2026-07-20 已完成 Chroma 跨进程索引可见性真实回归：Compose 使用独立 `chroma` service，worker 重建文件向量后 backend 无需重启即可召回 16 条 vector 结果，`vector_degraded=false`、`vector_errors=[]`，目标资料同时包含 `fulltext` 和 `vector` 来源。
-- 当前默认验证路径为 `docker compose up -d --build` 后检查 `docker compose ps` 与 Redis、PostgreSQL、Chroma、migration、backend、worker、frontend 关键日志；`scripts/acceptance_check.sh` 作为补充验收脚本，静态补充检查可运行 `scripts/acceptance_check.sh --skip-real-eval`。
+- 当前默认验证路径为 `docker compose up -d --build` 后检查 `docker compose ps` 与 Redis、PostgreSQL、Milvus（etcd/MinIO/authenticated probe）、migration、backend、worker、frontend 关键日志；Chroma 仅通过 `chroma-rollback` profile 保留到 T-138。`scripts/acceptance_check.sh` 作为补充验收脚本，静态补充检查可运行 `scripts/acceptance_check.sh --skip-real-eval`。
 - 当前阶段优先做“可维护性 + 可观测性 + 验收自动化”，避免在关键链路刚稳定后继续堆叠大功能；前端工作台已开始引入 React Query 和 Zod 做请求层集中化与轻量响应校验。
 - 2026-08-02 已确认后续不建立长期 `tutorial` 分支：`main` 继续作为唯一长期主线，项目停止非必要功能扩展，转向“可运行的全栈 RAG 工程教程与参考实现”；每项教程任务仍从 `main` 创建短期分支并通过 PR 合并。
 - 修改项目文件后，继续遵守只暂存当前任务相关文件、不混入 unrelated refactor 的规则。
@@ -272,7 +272,7 @@
 | `T-134` | `PLAN-20260809-01` | `P1` | `Done` | 迁移 Milvus 向量检索与 diagnostics | `2026-08-09` | `95c1bde` |
 | `T-135` | `PLAN-20260809-01` | `P0` | `Done` | 建立 Chroma 到 Milvus 数据迁移与回滚工具 | `2026-08-09` | `cf29b77` |
 | `T-136` | `PLAN-20260809-01` | `P1` | `Done` | 完成 Milvus 全链路回归、质量与性能验收 | `2026-08-09` | `616d835` |
-| `T-137` | `PLAN-20260809-01` | `P1` | `Todo` | 更新 Milvus 架构、部署与教程文档 | — | — |
+| `T-137` | `PLAN-20260809-01` | `P1` | `Done` | 更新 Milvus 架构、部署与教程文档 | `2026-08-11` | `0598254` |
 | `T-138` | `PLAN-20260809-01` | `P2` | `Todo` | 完成 Milvus 切换观察并移除 Chroma 遗留 | — | — |
 | `T-139` | CI required checks | `P0` | `Done` | 修复 Nano ID 与 cryptography 新增高危依赖漏洞 | `2026-08-09` | `c5b5564` |
 
@@ -5585,7 +5585,7 @@ git diff --check
 
 - 来源计划：`PLAN-20260809-01`
 - 优先级：`P1`
-- 状态：`Todo`
+- 状态：`Done`
 - 目标：让 README、架构/API/部署说明、源码地图和核心教程与真实 Milvus 实现一致，保留 Chroma 历史说明但不把它描述为当前 runtime。
 - 技术边界：
   - 文档只描述已实现并验证的 Milvus 行为，不提前宣称迁移完成。
@@ -5599,6 +5599,15 @@ git diff --check
 - 验收标准：
   - 文档中的 service、环境变量、volume、日志、healthcheck 和检索语义与 Compose/代码一致。
   - 教程文档检查、链接/源码路径检查和敏感信息门禁通过。
+- 完成记录：
+  - 默认配置已切换为 Milvus：backend/worker、`.env.example`、production config、demo cleanup 与 full-stack E2E 均默认使用 `milvus`；Milvus Standalone、etcd、MinIO 和 authenticated probe 进入默认 Compose runtime，Chroma 只保留在 `chroma-rollback` profile 且本机容器已停止、数据未删除。
+  - README、AGENTS、架构、后端、API/schema、RAG、前端、部署、Docker startup、eval 索引、六篇核心教程与源码地图已同步真实 Milvus service、named volumes、scalar filter、COSINE distance、diagnostics、备份和回滚边界。
+  - demo cleanup 增加 provider-aware Milvus entity 统计/清理，严格按 `user_id + UUID file_id` filter 和用户 collection prefix 限定范围；教程门禁新增当前 runtime 禁用片段，防止旧 Chroma 命令或叙述回流。
+  - current-data 切换复验为 19 files / 119 entries / 0 failures，35/35 Top-1 一致、最低 Top-K overlap 1.0、filtered ANN self-hit 10/10、隔离检查 2/2，warmed p95 8.133ms；active jobs 为 0。详细 watermark 与 rollback 边界见 `docs/evals/milvus_cutover_20260811.md`。
+  - Docker backend 完整测试 425/425、前端 Vitest 181/181、ESLint（0 errors，2 个既有 `<img>` warnings）、frontend/backend production build、Python compileall、48 项切换专项测试、教程文档门禁、Compose config 和 `git diff --check` 通过。
+  - 未显式传 provider 的 credential-free full-stack E2E 走 Milvus 默认链路：浏览器 1/1、两轮 indexing eval、restart persistence、双用户/双 dimensions、v1/v2 replacement 和 probe cleanup 全部通过，隔离 containers/volumes 已自动清理。
+  - production preflight 的 Compose、Milvus topology/resources、authenticated runtime health 和 migration dry-run 通过；本机 `.env` 尚未显式注入生产级 `MILVUS_URI` / `MILVUS_TOKEN`，完整生产 secret gate 保持失败，正式部署前需由仓库所有者完成凭据轮换。
+- 相关提交：`0598254`
 
 ## T-138 完成 Milvus 切换观察并移除 Chroma 遗留
 
