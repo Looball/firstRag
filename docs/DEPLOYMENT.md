@@ -75,7 +75,7 @@ docker compose logs --tail=100 \
 
 ### BGE-M3 sparse encoder runtime
 
-`sparse-encoder` 使用独立 CPU-only 镜像与 named volume `bge_m3_cache`，固定 `BAAI/bge-m3@5617a9f61b028005a4858fdac845db406aefb181`、`FlagEmbedding==1.4.0`、`huggingface-hub==1.27.0`、`torch==2.13.0+cpu` 和 `transformers==5.15.0`。模型权重约 2.3 GB；Hugging Face snapshot 与 Xet cache 会产生额外占用，建议为 named volume 预留至少 5 GB。下载、加载和最小 inference 完成前 `/health/ready` 返回 503，backend/worker 保持等待。预热 cache 后可设置 `SPARSE_ENCODER_OFFLINE=true`，此时缺失固定 snapshot 会明确启动失败。
+`sparse-encoder` 使用独立 CPU-only 镜像与 named volume `bge_m3_cache`，固定 `BAAI/bge-m3@5617a9f61b028005a4858fdac845db406aefb181`、`FlagEmbedding==1.4.0`、`huggingface-hub==1.27.0`、`torch==2.13.0+cpu` 和 `transformers==5.15.0`。安全审计使用等价的 PyPI base version `torch==2.13.0`，并由测试保证除 `+cpu` local label 外不得与 runtime pins 漂移。模型权重约 2.3 GB；Hugging Face snapshot 与 Xet cache 会产生额外占用，建议为 named volume 预留至少 5 GB。下载、加载和最小 inference 完成前 `/health/ready` 返回 503，backend/worker 保持等待。预热 cache 后可设置 `SPARSE_ENCODER_OFFLINE=true`，此时缺失固定 snapshot 会明确启动失败。
 
 ```bash
 docker compose logs -f sparse-encoder

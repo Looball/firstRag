@@ -7,6 +7,7 @@ import json
 import math
 import time
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
 from fastapi.testclient import TestClient
@@ -90,6 +91,33 @@ class SparseEncoderRuntimeTests(unittest.TestCase):
         """CPU-only image 不得接受无法兑现的 CUDA 配置。"""
         with self.assertRaisesRegex(ValueError, "仅支持 CPU"):
             SparseEncoderSettings(device="cuda").validate()
+
+    def test_audit_requirement_matches_cpu_runtime_base_versions(self) -> None:
+        """审计视图只能移除 torch 的 +cpu local version label。"""
+        backend_root = Path(__file__).resolve().parents[1]
+        runtime_lines = {
+            line.strip()
+            for line in (backend_root / "requirements-sparse-encoder.txt")
+            .read_text(encoding="utf-8")
+            .splitlines()
+            if line.strip() and not line.startswith(("#", "--", "-r"))
+        }
+        audit_lines = {
+            line.strip()
+            for line in (backend_root / "requirements-sparse-encoder-audit.txt")
+            .read_text(encoding="utf-8")
+            .splitlines()
+            if line.strip() and not line.startswith(("#", "--", "-r"))
+        }
+
+        normalized_runtime_lines = {
+            line.replace("torch==2.13.0+cpu", "torch==2.13.0")
+            for line in runtime_lines
+        }
+        self.assertEqual(
+            normalized_runtime_lines,
+            audit_lines,
+        )
 
 
 class SparseEncoderServiceTests(unittest.TestCase):

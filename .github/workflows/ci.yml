@@ -40,6 +40,7 @@ jobs:
           cache-dependency-path: |
             backend/requirements.txt
             backend/requirements-sparse-encoder-api.txt
+            backend/requirements-sparse-encoder-audit.txt
             backend/requirements-sparse-encoder.txt
 
       - name: Install backend dependencies
@@ -62,8 +63,7 @@ jobs:
         run: |
           python scripts/pip_audit_policy.py
           python scripts/pip_audit_policy.py \
-            --requirement backend/requirements-sparse-encoder.txt \
-            --extra-index-url https://download.pytorch.org/whl/cpu
+            --requirement backend/requirements-sparse-encoder-audit.txt
 
       - name: Compile backend
         working-directory: backend

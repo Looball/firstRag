@@ -200,25 +200,5 @@ class PipAuditPolicyScriptTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "执行失败"):
             pip_audit_policy.run_pip_audit(Path("requirements.txt"))
 
-    @patch("scripts.pip_audit_policy.subprocess.run")
-    def test_scanner_receives_extra_index_url(
-        self,
-        run_mock: unittest.mock.Mock,
-    ) -> None:
-        """CPU-only wheel index 必须显式传递给 pip-audit resolver。"""
-        run_mock.return_value = subprocess.CompletedProcess(
-            args=[], returncode=0, stdout='{"dependencies": []}', stderr=""
-        )
-
-        pip_audit_policy.run_pip_audit(
-            Path("requirements.txt"),
-            extra_index_urls=("https://download.pytorch.org/whl/cpu",),
-        )
-
-        command = run_mock.call_args.args[0]
-        self.assertIn("--extra-index-url", command)
-        self.assertIn("https://download.pytorch.org/whl/cpu", command)
-
-
 if __name__ == "__main__":
     unittest.main()
