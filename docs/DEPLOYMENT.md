@@ -26,16 +26,15 @@ cp .env.example .env
 | `USER_SETTINGS_ENCRYPTION_KEY` | 用户聊天模型、向量模型和远程 rerank API Key 的加密主密钥。 |
 | `LLM_TEMPERATURE` / `LLM_MAX_TOKENS` / `LLM_TIMEOUT_SECONDS` / `LLM_MAX_RETRIES` | 聊天模型设置页的默认生成参数；provider、model 和 API Key 由用户登录后配置。 |
 | `RERANK_PROVIDER` / `RERANK_MODEL` / `RERANK_BASE_URL` / `RERANK_API_KEY` | 历史环境变量兼容；新版本远程 rerank 推荐在登录后的“模型设置”页按用户配置。 |
-| `VECTOR_STORE_PATH` | 单进程 embedded Chroma 的持久化路径，本地默认 `./vector_db/chroma`。 |
-| `CHROMA_HOST` / `CHROMA_PORT` / `CHROMA_SSL` | Chroma server 连接；Compose 默认使用内置 `chroma:8000`，本地单进程调试留空 `CHROMA_HOST` 可继续 embedded。 |
-| `VECTOR_STORE_PROVIDER` | 当前 vector store provider；迁移完成前默认 `chroma`，Milvus candidate runtime 使用 `milvus` profile 单独验收。 |
+| `VECTOR_STORE_PROVIDER` | 当前 vector store provider；默认 `milvus`。T-138 前仍可显式设为 `chroma` 回滚。 |
 | `MILVUS_URI` / `MILVUS_TOKEN` / `MILVUS_DATABASE` | Milvus 内网连接、认证 token 和 database；Compose 默认 URI 为 `http://milvus-standalone:19530`，真实 token 只放 `.env`。 |
 | `MILVUS_COLLECTION_PREFIX` / `MILVUS_TIMEOUT_SECONDS` / `MILVUS_CONSISTENCY_LEVEL` | Milvus collection 前缀、client timeout 与一致性；当前 ADR 固定 `Strong`。 |
 | `MILVUS_MINIO_ACCESS_KEY` / `MILVUS_MINIO_SECRET_KEY` | Milvus 内置 MinIO 的本地凭据；非本机隔离环境必须覆盖模板值。 |
 | `MILVUS_MEMORY_LIMIT` / `MILVUS_CPU_LIMIT` | Milvus Standalone 容器资源上限，默认 `8g` / `4.0`。 |
+| `VECTOR_STORE_PATH` / `CHROMA_*` | 仅供观察期回滚；Compose 需配合 `chroma-rollback` profile。 |
 | `RERANKER_MODEL_PATH` | 本地 reranker 模型路径；compose 会把 `./models` 只读挂载到 `/app/models`。 |
 | `PDF_OCR_*` | 扫描 PDF 本地 OCR 开关、语言、DPI、单页/自适应总超时、原生文本阈值、低置信度阈值、单文件最大 OCR 页数、重识别批次页数、候选上限和二值化阈值；Compose 镜像内置 Tesseract `chi_sim/eng`。 |
-| `UPLOADS_DIR` / `VECTOR_DB_DIR` / `MODELS_DIR` | Docker Compose 宿主机持久化目录；生产环境建议指向独立数据盘。 |
+| `UPLOADS_DIR` / `MODELS_DIR` | Docker Compose 宿主机持久化目录；生产环境建议指向独立数据盘。`VECTOR_DB_DIR` 仅供 Chroma 回滚。 |
 | `DOCKER_LOG_MAX_SIZE` / `DOCKER_LOG_MAX_FILE` | Docker stdout/stderr 日志轮转参数。 |
 
 ## 本地启动
@@ -46,61 +45,61 @@ cp .env.example .env
 docker compose up -d --build
 ```
 
-Compose 会启动 Redis、PostgreSQL、独立 Chroma server、migration、FastAPI backend、Next.js frontend 和 vector index worker。backend 与 worker 统一通过 HTTP client 访问 Chroma，避免两个进程直接打开同一 embedded 持久化目录。`migrate` service 会先初始化或升级当前完整 schema；后续数据库结构变化会从 `001_xxx.sql` 开始追加增量 migration。
+Compose 会启动 Redis、PostgreSQL、Milvus Standalone 及其 etcd/MinIO、authenticated health probe、migration、FastAPI backend、Next.js frontend 和 vector index worker。backend 与 worker 使用各自的 PyMilvus client，只有 probe 成功后才启动。`migrate` service 会先初始化或升级当前完整 schema。
 
 启动后检查服务状态和关键日志：
 
 ```bash
 docker compose ps
-docker compose logs --tail=100 redis migrate backend worker frontend postgres
+docker compose logs --tail=100 redis postgres milvus-etcd milvus-minio milvus-standalone milvus-health-probe migrate backend worker frontend
 ```
 
 默认访问 `http://localhost:3000`。后端、前端和 worker 的常规验证都应基于 Compose 容器；本地 conda / npm 启动仅用于专项调试。
 
-### Milvus candidate runtime
+### Milvus 默认 runtime 与 Chroma 回滚
 
-T-132 起提供可选 `milvus` profile，用于迁移期间构建和验收固定版本的 Milvus Standalone；默认业务链路仍使用 Chroma，直到迁移、对账和回滚任务完成。启动命令：
+Milvus 已通过 T-136 全链路验收，现在是默认 runtime。启动命令：
 
 ```bash
-docker compose --profile milvus up -d --build
-docker compose --profile milvus ps -a
-docker compose --profile milvus logs --tail=100 \
+docker compose up -d --build
+docker compose ps -a
+docker compose logs --tail=100 \
   milvus-etcd milvus-minio milvus-standalone milvus-health-probe
 ```
 
-该 profile 固定 Milvus `v3.0.0`、etcd `v3.5.25` 和 MinIO `RELEASE.2024-05-28T17-19-04Z`，使用 named volumes 持久化 metadata、object/WAL 和本地数据，显式启用 Woodpecker 与 authentication。Milvus、etcd 和 MinIO 均不映射 host port；backend 和 worker 必须等待 authenticated probe 成功。首次启动前在 `.env` 中覆盖 `MILVUS_TOKEN` 与 MinIO 凭据，禁止把真实值提交到仓库。
+默认 Compose stack 固定 Milvus `v3.0.0`、etcd `v3.5.25` 和 MinIO `RELEASE.2024-05-28T17-19-04Z`，使用 named volumes 持久化 metadata、object/WAL 和本地数据，显式启用 Woodpecker 与 authentication。Milvus、etcd 和 MinIO 均不映射 host port；backend 和 worker 必须等待 authenticated probe 成功。首次启动前在 `.env` 中覆盖 `MILVUS_TOKEN` 与 MinIO 凭据，禁止把真实值提交到仓库。
 
 Milvus 至少需要为 Docker Desktop 分配 4 CPU / 8 GiB；低于 16 GiB 时 preflight 会提示容量余量不足。`docker compose restart milvus-standalone` 会按 `stop_grace_period=2m` 优雅退出，命令可能需要等待约两分钟；HTTP health 先恢复后，仍应以 PyMilvus authenticated round-trip 作为 gRPC ready 标准。
 
 T-133 提供隔离的写入生命周期 probe，可在 backend/worker 两个进程间组合验证新写入可见、同文件版本替换和永久删除。它只使用 `firstrag_t133_probe_u900133_identity`，最后必须执行 `cleanup`；该 probe 不会切换默认 provider，也不会读取用户 embedding credential：
 
 ```bash
-docker compose --profile milvus exec -T worker \
+docker compose exec -T worker \
   python -m app.services.vectors.milvus_write_lifecycle_probe write --version 1
-docker compose --profile milvus exec -T backend \
+docker compose exec -T backend \
   python -m app.services.vectors.milvus_write_lifecycle_probe verify --version 1
-docker compose --profile milvus exec -T worker \
+docker compose exec -T worker \
   python -m app.services.vectors.milvus_write_lifecycle_probe write --version 2
-docker compose --profile milvus exec -T backend \
+docker compose exec -T backend \
   python -m app.services.vectors.milvus_write_lifecycle_probe verify --version 2
-docker compose --profile milvus exec -T backend \
+docker compose exec -T backend \
   python -m app.services.vectors.milvus_write_lifecycle_probe delete
-docker compose --profile milvus exec -T backend \
+docker compose exec -T backend \
   python -m app.services.vectors.milvus_write_lifecycle_probe cleanup
 ```
 
 T-134 另提供 filtered ANN probe，使用两个独立用户 collection 和三个文件验证用户隔离、单/多文件 scalar filter、COSINE distance 排序及 backend/worker 跨 client 可见性。它只创建两个 `firstrag_t134_probe_*` collection，结束后按 exact name 清理：
 
 ```bash
-docker compose --profile milvus exec -T worker \
+docker compose exec -T worker \
   python -m app.services.vectors.milvus_retrieval_probe write
-docker compose --profile milvus exec -T backend \
+docker compose exec -T backend \
   python -m app.services.vectors.milvus_retrieval_probe search
-docker compose --profile milvus exec -T worker \
+docker compose exec -T worker \
   python -m app.services.vectors.milvus_retrieval_probe cleanup
 ```
 
-T-135 的 current-data 导入必须在维护窗口内执行，不允许直接从日常 backend/worker 进程触发。完整的备份清单、dry-run、checkpoint/resume、失败清单、Top-K 对账和 rollback 命令见 [`MILVUS_MIGRATION_RUNBOOK.md`](MILVUS_MIGRATION_RUNBOOK.md)。T-136 完整验收前，`.env` 和 Compose 的默认 `VECTOR_STORE_PROVIDER` 继续保持 `chroma`。
+T-135 的 current-data 导入必须在维护窗口内执行，不允许直接从日常 backend/worker 进程触发。完整的备份清单、dry-run、checkpoint/resume、失败清单、Top-K 对账和 rollback 命令见 [`MILVUS_MIGRATION_RUNBOOK.md`](MILVUS_MIGRATION_RUNBOOK.md)。观察期如需回滚，使用 `VECTOR_STORE_PROVIDER=chroma docker compose --profile chroma-rollback up -d --build`；不要删除旧 Chroma 数据。
 
 ### 数据库初始化与迁移
 
@@ -165,7 +164,7 @@ python -m app.workers.vector_index_worker
 
 1. 同步代码后检查 `.env` 是否仍符合本地环境。
 2. 运行 `docker compose up -d --build` 启动完整链路。
-3. 运行 `docker compose ps` 和 `docker compose logs --tail=100 redis postgres chroma migrate backend worker frontend` 检查状态。
+3. 运行 `docker compose ps` 和 `docker compose logs --tail=100 redis postgres milvus-etcd milvus-minio milvus-standalone milvus-health-probe migrate backend worker frontend` 检查状态。
 4. 完成代码或文档修改。
 5. 基于 Compose 容器完成相关 smoke test。
 6. 修改 OCR engine、参数或 runtime 时运行 PDF OCR regression gate；涉及真实链路时再运行其他 eval / acceptance 脚本作为补充验收。
@@ -178,8 +177,8 @@ python -m app.workers.vector_index_worker
 scripts/acceptance_check.sh --skip-real-eval
 ```
 
-该脚本会先运行 infrastructure preflight，检查 Redis/Chroma 配置、Compose 拓扑和
-Chroma runtime health，再运行 migration 文件检查、后端 compileall、后端 unittest、PDF OCR regression gate、前端
+该脚本会先运行 infrastructure preflight，检查 Redis/Milvus 配置、Compose 拓扑和
+authenticated Milvus runtime health，再运行 migration 文件检查、后端 compileall、后端 unittest、PDF OCR regression gate、前端
 lint、前端单测和前端 build，作为 Compose 验证后的补充检查。如果当前环境配置了 `DATABASE_URL` 或
 `COMPOSE_DATABASE_URL`，脚本会额外执行 migration dry-run；如果没有数据库连接，
 则只检查本地 migration 文件列表并提示跳过 dry-run。
@@ -248,7 +247,7 @@ CI 覆盖：
 
 - 后端：先执行 GitHub Actions pin policy 和 `python3 scripts/check_tutorial_docs.py` 文档门禁，再安装 `backend/requirements.txt` 与 Tesseract 中英文 runtime、执行 Python production dependency audit policy、`python -m compileall app`、`python -m unittest discover tests -v`、PDF OCR regression gate、`python scripts/migrate_db.py --list` 和 `docker compose config --quiet`。教程门禁检查内部链接/anchor、显式源码路径、三级练习、fixture 来源、shell 命令格式和高置信度敏感模式，不访问网络。OCR gate 用有界 cache 恢复同 benchmark suite、runner 和 Tesseract 历史，每次上传当前报告 artifact（保留 30 天），并把质量、耗时趋势写入 job summary；cache 不可用或 suite 改变时降级为新 baseline，不跳过当前门禁。
 - 前端：`npm ci`、production dependency audit policy、`npm run lint`、`npm run test`、`npm run build` 和 Playwright Chromium E2E。OCR source 回归使用本地受控 fixture，不依赖真实账号、后端或外部模型；E2E 失败时上传 HTML report、截图和 trace 诊断 artifact，保留 14 天。
-- 全栈 E2E：使用独立 Compose project、临时 named volumes 和本地确定性 OpenAI-compatible provider stub，覆盖真实注册、前端登录、上传、worker 向量化、Chroma/PostgreSQL 检索、SSE 回答与 sources 展示。该 job 不读取真实 provider Key，失败时额外上传 Compose 日志。
+- 全栈 E2E：使用独立 Compose project、临时 named volumes 和本地确定性 OpenAI-compatible provider stub，分别覆盖 Milvus 默认链路和 Chroma 回滚链路中的真实注册、前端登录、上传、worker 向量化、hybrid retrieval、SSE 回答与 sources 展示。该 job 不读取真实 provider Key，失败时额外上传 Compose 日志。
 - 容器：从当前 Dockerfile 构建 backend/frontend 第一方镜像，使用 Trivy 扫描 OS packages。
 - Workflow supply chain：检查所有外部 GitHub Action 都固定到官方 release 的 40 位 commit SHA，并保留同一行版本注释。
 
@@ -274,20 +273,24 @@ docker compose up -d --build
 | 服务 | 默认地址 | 说明 |
 | --- | --- | --- |
 | `postgres` | `localhost:5432` | PostgreSQL 16，数据保存在 named volume `postgres_data`。 |
-| `chroma` | 仅 Compose 内网 | Chroma 1.5.9 server，数据保存在 `${VECTOR_DB_DIR:-./vector_db}/chroma`。 |
+| `milvus-etcd` / `milvus-minio` | 仅 Compose 内网 | Milvus metadata/coordination 与 object storage，使用 named volumes。 |
+| `milvus-standalone` | 仅 Compose 内网 | Milvus 3.0.0 vector database，数据保存在 `milvus_data`。 |
+| `milvus-health-probe` | 不暴露端口 | 执行 authenticated PyMilvus round-trip，成功退出后 backend/worker 才启动。 |
 | `migrate` | 不暴露端口 | 执行 `scripts/migrate_db.py`，初始化或升级 PostgreSQL schema。 |
 | `backend` | `http://127.0.0.1:8000` | FastAPI 后端。 |
 | `frontend` | `http://localhost:3000` | Next.js 前端，容器内代理到 `http://backend:8000`。 |
 | `worker` | 不暴露端口 | 消费 `vector_index_jobs` 的向量化 worker。 |
 
-`backend`、`migrate` 和 `worker` 复用同一份 multi-stage Python runtime 镜像。构建阶段会临时安装 `build-essential`，最终运行镜像只保留 Python 依赖和 Chroma/ONNX 可能需要的 `libgomp1`，避免把编译工具带入 worker 运行环境。
+`backend`、`migrate` 和 `worker` 复用同一份 multi-stage Python runtime 镜像。构建阶段会临时安装 `build-essential`，最终运行镜像只保留 Python 依赖和本地 reranker/回滚依赖可能需要的 `libgomp1`，避免把编译工具带入 worker 运行环境。
 
 持久化挂载：
 
 | 宿主路径 | 容器路径 | 说明 |
 | --- | --- | --- |
 | `${UPLOADS_DIR:-./uploads}` | `/app/uploads` | 上传文件。 |
-| `${VECTOR_DB_DIR:-./vector_db}/chroma` | `chroma:/data` | Chroma server 持久化数据；backend/worker 不直接挂载该目录。 |
+| `milvus_data` | `/var/lib/milvus` | Milvus Standalone 数据。 |
+| `milvus_etcd_data` | `/etcd` | Milvus metadata/coordination 数据。 |
+| `milvus_minio_data` | `/minio_data` | Milvus object/WAL 数据。 |
 | `${MODELS_DIR:-./models}` | `/app/models` | 本地 reranker 模型，只读挂载；默认最小镜像可不准备。 |
 | `postgres_data` | `/var/lib/postgresql/data` | PostgreSQL 数据。 |
 
@@ -342,7 +345,7 @@ compose 已为所有服务配置 Docker `json-file` 日志轮转，默认 `10m *
 | `chat_first_answer_token` | chat streaming | 统计首 token 等待时间。 |
 | `chat_stream_completed` / `chat_stream_failed` / `chat_stream_cancelled` | chat streaming | 区分完成、模型失败、客户端中断和回答总耗时。 |
 | `retrieval_embedding_failed` | hybrid retrieval | 定位 embedding provider 或网络异常。 |
-| `retrieval_vector_failed` / `retrieval_vector_file_failed` | Chroma vector retrieval | 定位 Chroma、HNSW 或单文件向量残留问题。 |
+| `retrieval_vector_failed` / `retrieval_vector_file_failed` | Milvus vector retrieval | 定位 Milvus ANN、scalar filter 或单文件向量残留问题。 |
 | `retrieval_fulltext_failed` | PostgreSQL full-text retrieval | 定位 PostgreSQL 或全文检索异常。 |
 | `retrieval_rerank_failed` | rerank provider | 定位本地 reranker 模型、远程 rerank API 或运行时异常；当前会降级为 RRF 结果。 |
 | `vector_index_job_claimed` / `vector_index_job_succeeded` / `vector_index_job_failed` | vector worker | 统计任务吞吐、失败率、处理耗时和失败来源。 |
@@ -429,7 +432,7 @@ preflight 会拦截以下问题：
 - `RATE_LIMIT_BACKEND=redis` 但 Redis 未启用，或生产 Redis 限流故障策略不是 `fail_closed`。
 - Compose `redis` service 缺少 healthcheck、日志轮转配置，或直接配置了 `ports` 暴露到宿主机。
 - `FRONTEND_PORT`、`BACKEND_PORT`、`POSTGRES_PORT` 未绑定到 `127.0.0.1` / `localhost`。
-- `UPLOADS_DIR`、`VECTOR_DB_DIR`、`MODELS_DIR` 缺失；使用 `--require-reranker` 时还会要求 reranker 模型目录存在。
+- `UPLOADS_DIR`、`MODELS_DIR` 缺失；Chroma 回滚模式还会检查 `VECTOR_DB_DIR`，使用 `--require-reranker` 时还会要求 reranker 模型目录存在。
 - `docker compose config --quiet` 失败。
 - migration dry-run 失败。
 
@@ -441,7 +444,7 @@ preflight 会拦截以下问题：
 | --- | --- | --- | --- |
 | 逻辑备份 `pg_dump --format=custom` | 每日 1 次 | 最近 7 份每日备份、4 份周备份、3 份月备份 | 定时任务。 |
 | 发布前备份 | 每次部署前 | 至少保留到本次发布验证完成后 7 天 | 执行 migration 或升级镜像前。 |
-| 目录快照 | 每日或随云盘快照策略 | 与 PostgreSQL 备份周期一致 | 覆盖 `uploads/`、`vector_db/` 和必要模型文件。 |
+| 数据快照 | 每日或随云盘快照策略 | 与 PostgreSQL 备份周期一致 | 覆盖 `uploads/`、Milvus 三个 named volumes 和必要模型文件。 |
 | 恢复演练 | 每月至少 1 次 | 保留演练记录 | 在 staging 或临时实例恢复最近一次备份。 |
 
 备份文件必须受控保存且不能提交到 Git；本仓库已忽略 `/backups/`，但生产备份更建议放到独立磁盘或对象存储，并开启加密和访问审计。
@@ -470,32 +473,32 @@ docker compose up -d backend worker frontend
 2. 登录预置账号，确认知识库、文件 metadata、会话和历史消息存在。
 3. 打开文件管理，确认文件状态和 vector index job 状态可读。
 4. 对已索引知识库提问，确认回答能返回 sources。
-5. 检查 backend、worker、postgres 日志，不应出现数据库连接、Chroma 读取或文件缺失错误。
+5. 检查 backend、worker、postgres、Milvus 日志，不应出现数据库连接、Milvus 读取或文件缺失错误。
 
 ### 文件、向量库和模型目录
 
 生产环境建议将数据目录放在独立数据盘，例如：
 
 ```bash
-mkdir -p /srv/firstrag/uploads /srv/firstrag/vector_db /srv/firstrag/models /srv/firstrag/backups
+mkdir -p /srv/firstrag/uploads /srv/firstrag/models /srv/firstrag/backups
 ```
 
 `.env` 中设置：
 
 ```bash
 UPLOADS_DIR=/srv/firstrag/uploads
-VECTOR_DB_DIR=/srv/firstrag/vector_db
 MODELS_DIR=/srv/firstrag/models
 ```
 
 目录策略：
 
 - `uploads/` 是用户上传原文，必须和 PostgreSQL metadata（包括 OCR 人工修订）一起备份；恢复时路径结构要保持不变。
-- `vector_db/` 保存 Chroma 数据，建议随 `uploads/` 一起备份。理论上可通过重新 vector indexing 重建，但恢复成本高，公开环境优先保留备份。
+- `milvus_data`、`milvus_etcd_data`、`milvus_minio_data` 是当前向量库的三个 named volumes，必须在停止 backend/worker 写入后做一致性快照；也可以按 Milvus 官方备份流程导出到独立存储。
+- `vector_db/` 只保存观察期 Chroma 回滚数据；T-138 前保持只读备份，不要在默认启动中删除或覆盖。
 - `models/` 仅在启用本地 reranker 时保存模型，生产以只读方式挂载到 `/app/models`。模型文件可从制品仓库或模型源重建；默认最小镜像不依赖该目录。
 - 日志当前走 Docker stdout/stderr，由 Docker 日志驱动持久化和轮转；接入集中日志前不要新增会写入 secret 或用户原文的应用文件日志。
 
-迁移数据盘或换机时，顺序为：停止写入服务、完成 PostgreSQL dump、同步 `uploads/` 和 `vector_db/`、按需同步或重新准备 `models/`、在新机器恢复数据库、运行 migration dry-run、启动服务并完成 smoke test。
+迁移数据盘或换机时，顺序为：停止写入服务、完成 PostgreSQL dump、同步 `uploads/` 并快照 Milvus 三个 named volumes、按需同步或重新准备 `models/`、在新机器恢复数据库和 Milvus、运行 migration dry-run、启动服务并完成 smoke test。
 
 ## 在线演示环境方案
 
@@ -503,7 +506,7 @@ MODELS_DIR=/srv/firstrag/models
 
 ### 推荐目标
 
-第一阶段选择“单台云服务器 / VPS + Docker Compose + HTTPS 反向代理”的自托管方案。原因是当前应用由 PostgreSQL、FastAPI backend、Next.js frontend、vector index worker、uploads 和独立 Chroma server 共同组成；如启用本地 reranker，还需要共享 `models/`。单机 Compose 可让 backend 与 worker 通过内网 HTTP 访问同一 Chroma 实例，同时保留持久化数据目录。
+第一阶段选择“单台云服务器 / VPS + Docker Compose + HTTPS 反向代理”的自托管方案。原因是当前应用由 PostgreSQL、FastAPI backend、Next.js frontend、vector index worker、uploads 和 Milvus Standalone（etcd/MinIO）共同组成；如启用本地 reranker，还需要共享 `models/`。单机 Compose 可让 backend 与 worker 通过内网访问同一 Milvus 实例，同时保留持久化边界。
 
 暂不优先选择 Vercel + 独立 backend 或纯托管 PaaS。该路线更适合后续拆分静态前端、托管数据库、对象存储和独立 worker 后再推进；现在会额外引入跨服务文件持久化、worker 常驻、模型缓存和内网访问控制问题。
 
@@ -515,7 +518,7 @@ MODELS_DIR=/srv/firstrag/models
   -> 反向代理（Caddy / Nginx / Cloudflare Tunnel）
   -> frontend:3000（Next.js 页面和 API proxy）
   -> backend:8000（FastAPI，仅内网或本机可达）
-  -> PostgreSQL / Redis / Chroma / uploads / worker
+  -> PostgreSQL / Redis / Milvus / uploads / worker
 ```
 
 公网只暴露 80/443。`frontend`、`backend` 和 `postgres` 的宿主机端口应绑定到 `127.0.0.1` 或通过防火墙限制访问；Redis 默认不映射宿主机端口，生产不要直接公网暴露 Redis。
@@ -524,12 +527,12 @@ MODELS_DIR=/srv/firstrag/models
 
 | 资源 | 建议 | 说明 |
 | --- | --- | --- |
-| 云服务器 | 2 vCPU / 4 GB RAM 起步，推荐 4 vCPU / 8 GB RAM | RAG、PDF 解析和 reranker 会占用 CPU 与内存；演示并发不宜过高。 |
-| 系统盘 | 30 GB 起步，推荐独立数据盘或快照 | `uploads/`、`vector_db/` 和 PostgreSQL volume 会增长；启用本地 reranker 时 `models/` 也会占用空间。 |
+| 云服务器 | 至少 4 vCPU / 8 GiB RAM，推荐 16 GiB RAM | Milvus Standalone 的最低资源门禁为 4 CPU / 8 GiB；RAG、PDF 解析和 reranker 还需要额外余量。 |
+| 系统盘 | 30 GB 起步，推荐独立数据盘或快照 | `uploads/`、Milvus/etcd/MinIO 和 PostgreSQL volumes 会增长；启用本地 reranker 时 `models/` 也会占用空间。 |
 | PostgreSQL | 使用 compose named volume `postgres_data` | 定期做卷快照或 `pg_dump`，避免误删演示数据。 |
 | Redis | 默认使用 Compose 内置 service 或托管 Redis 内网地址 | 只存缓存、限流和 worker 运行态，不作为会话、消息或 vector job 持久队列；外部 Redis 必须开启认证，公网不直接暴露。 |
 | 上传文件 | 通过 `UPLOADS_DIR` 挂载到 `/app/uploads` | 公开 demo 禁止上传私密文件，并需要清理策略。 |
-| Chroma 数据 | `${VECTOR_DB_DIR}/chroma` 只挂载到 Chroma server 的 `/data` | backend/worker 通过 HTTP client 访问；可从上传文件重建，但保留备份能减少恢复时间。 |
+| Milvus 数据 | `milvus_data`、`milvus_etcd_data`、`milvus_minio_data` | 三个 volume 必须作为同一恢复点备份，并通过 authenticated probe 与实际 ANN 查询验证恢复。 |
 | reranker 模型 | 可选，通过 `MODELS_DIR` 只读挂载到 `/app/models` | 默认最小镜像可不准备；启用本地 reranker 前确认模型文件已存在。 |
 | 日志 | 使用 Docker `json-file` 轮转，后续接入集中日志 | 日志不得包含 API Key、JWT、数据库密码或用户上传原文。 |
 
@@ -548,7 +551,7 @@ MODELS_DIR=/srv/firstrag/models
 | Rerank provider / model / API Key / base_url | 登录后在“模型设置”页按厂商配置并加密保存；本地 rerank 不需要 API Key。 |
 | `ALLOW_USER_CUSTOM_LLM_BASE_URL` | 公开 demo 保持 `false`，避免用户通过自定义模型地址访问服务器内网。 |
 | `REDIS_ENABLED` / `REDIS_URL` | 使用 Compose 内置 Redis 时保持 `redis://redis:6379/0`；使用托管 Redis 时填内网认证连接串，TLS 连接使用 `rediss://`。 |
-| `CHROMA_HOST` / `CHROMA_PORT` / `CHROMA_SSL` | Compose 内保持 `chroma` / `8000` / `false`；Chroma 不映射公网端口。 |
+| `MILVUS_URI` / `MILVUS_TOKEN` / `MILVUS_DATABASE` | Compose 内 URI 保持 `http://milvus-standalone:19530`，通过 secret 注入强 token；Milvus 不映射公网端口。 |
 | `REDIS_CONNECT_TIMEOUT_SECONDS` / `REDIS_COMMAND_TIMEOUT_SECONDS` | 保持较短超时，避免 Redis 故障拖慢请求；默认 1 秒。 |
 | `VECTOR_WORKER_HEARTBEAT_TTL_SECONDS` / `VECTOR_WORKER_FILE_LOCK_TTL_SECONDS` | 控制 worker 在线状态和单文件短租约 TTL；不改变 PostgreSQL 持久任务队列。 |
 | `MAX_UPLOAD_FILE_SIZE_BYTES` | 公开 demo 建议调低到 10-20 MB，并与反向代理 body size 一致。 |
@@ -587,7 +590,6 @@ VECTOR_INDEX_RATE_LIMIT_MAX_REQUESTS=20
 MODEL_TEST_RATE_LIMIT_MAX_REQUESTS=10
 ALLOW_USER_CUSTOM_LLM_BASE_URL=false
 UPLOADS_DIR=/srv/firstrag/uploads
-VECTOR_DB_DIR=/srv/firstrag/vector_db
 MODELS_DIR=/srv/firstrag/models
 ```
 
@@ -633,13 +635,13 @@ docker run --rm -v "$PWD/deploy/nginx:/etc/nginx/conf.d:ro" nginx:alpine nginx -
 
 ### 数据清理策略
 
-公开 demo 应使用 `scripts/demo_cleanup.py` 定期清理临时数据。脚本默认 `dry-run`，执行模式必须显式传入 `--execute --confirm cleanup-demo-data`，并且会同时处理 PostgreSQL metadata、knowledge chunks、vector index jobs、Chroma entries 和 uploads 文件。
+公开 demo 应使用 `scripts/demo_cleanup.py` 定期清理临时数据。脚本默认 `dry-run`，执行模式必须显式传入 `--execute --confirm cleanup-demo-data`，并且会按 `VECTOR_STORE_PROVIDER` 同时处理 PostgreSQL metadata、knowledge chunks、vector index jobs、Milvus entities 和 uploads 文件。
 
 推荐频率：
 
 - 受控测试阶段：每周 1 次，或每次集中测试结束后执行。
 - 公开 demo 阶段：每日 1 次，访问量较高时可提高到每 6-12 小时 1 次。
-- 每次执行模式前先完成 PostgreSQL 备份，并确认 `uploads/` 与 `vector_db/` 已被快照或纳入同周期备份。
+- 每次执行模式前先完成 PostgreSQL 备份，并确认 `uploads/` 与三个 Milvus volumes 已被快照或纳入同周期备份。
 
 示例 dry-run：
 
@@ -671,7 +673,8 @@ conda run -n firstrag python scripts/demo_cleanup.py \
 | `--cleanup-user` / `--cleanup-user-id` | 按用户白名单清理临时账号，不受 `--older-than-days` 限制，但不能与保留用户冲突。 |
 | `--older-than-days` | 清理早于指定天数的非保留用户、知识库、文件和会话；默认 7 天。 |
 | `--uploads-dir` | 指定宿主机或容器中的 uploads 根目录，默认读取 `UPLOADS_DIR`，否则使用仓库根目录 `uploads/`。 |
-| `--vector-store-path` | 指定 Chroma 持久化目录，默认读取 `VECTOR_STORE_PATH` 或 `VECTOR_DB_DIR/chroma`。 |
+| `--skip-vector-store` | 跳过 Milvus/Chroma 统计与清理；只有明确接受向量残留时才使用。 |
+| `--vector-store-path` | 仅在 `VECTOR_STORE_PROVIDER=chroma` 回滚时指定持久化目录。 |
 
 脚本只输出数量、ID 和安全路径摘要，不打印用户上传原文、API Key、JWT 或数据库密码。文件删除只允许发生在配置的 uploads 根目录内；如果发现越界或不可解析路径，执行模式会停止。
 
@@ -687,7 +690,7 @@ conda run -n firstrag python scripts/demo_cleanup.py \
 
 1. 准备云服务器、域名和 TLS 方案，只开放 80/443 和受控 SSH。
 2. 在服务器拉取仓库，复制 `.env.example` 为 `.env`，填写非默认密钥；provider Key 可先留空，公开 smoke test 前再补齐。
-3. 确认 `UPLOADS_DIR`、`VECTOR_DB_DIR` 可持久化；如启用本地 reranker，再准备 `MODELS_DIR/rerankers/bge-reranker-base`。
+3. 确认 `UPLOADS_DIR` 与 Milvus 三个 named volumes 已纳入持久化/备份策略；如启用本地 reranker，再准备 `MODELS_DIR/rerankers/bge-reranker-base`。
 4. 运行 `conda run -n firstrag python scripts/production_preflight.py --env-file .env --skip-migration-dry-run` 检查 secret、端口和目录。
 5. 运行 `docker compose config --quiet` 检查 Compose 配置。
 6. 运行 `docker compose build` 构建镜像。
@@ -715,7 +718,7 @@ conda run -n firstrag python scripts/demo_cleanup.py \
 | 前端 | `http://localhost:3000` |
 | 后端 | `http://127.0.0.1:8000` |
 | PostgreSQL | `localhost:5432` |
-| Chroma | Compose 内网 `chroma:8000`，不映射宿主机端口 |
+| Milvus | Compose 内网 `milvus-standalone:19530`，不映射宿主机端口 |
 
 ## 部署目录
 

@@ -35,7 +35,7 @@ Next.js API proxy
   v
 FastAPI
   |  authenticated user_id + validated business parameters
-  +---------------------> PostgreSQL / Redis / Chroma
+  +---------------------> PostgreSQL / Redis / Milvus
   |                              ^
   | enqueue job                  | indexed chunks / vectors
   v                              |
@@ -226,27 +226,32 @@ PR required checks 是交付门禁，不替代本地最小验证；本地验证�
 
 ## 7. Docker Compose、migration 与 preflight
 
-### 7.1 七个 service
+### 7.1 默认 services
 
 运行 `docker compose config --services` 会得到：
 
 ```text
-redis
-chroma
 postgres
 migrate
+milvus-minio
+milvus-etcd
+milvus-standalone
+milvus-health-probe
+redis
+frontend
 worker
 backend
-frontend
 ```
 
 | Service | 职责 | 持久化/边界 |
 | --- | --- | --- |
 | `redis` | shared rate limit、热点缓存、worker runtime 状态。 | 默认不发布 host port；不是业务真相存储。 |
 | `postgres` | 用户、知识库、文件 metadata、chunks、jobs、messages 与 settings。 | named volume `postgres_data`；必须备份。 |
-| `chroma` | 向量集合和 similarity search。 | `${VECTOR_DB_DIR}/chroma`；不发布 host port。 |
+| `milvus-etcd` / `milvus-minio` | Milvus metadata/coordination 与 object storage。 | named volumes；不发布 host port。 |
+| `milvus-standalone` | 用户/embedding identity 隔离 collection 和 filtered ANN。 | `milvus_data`；强认证，不发布 host port。 |
+| `milvus-health-probe` | 在 backend/worker 前执行 authenticated round-trip。 | 一次性 job，成功退出是正常状态。 |
 | `migrate` | 在应用启动前执行数据库 migration。 | 一次性 job，成功退出是正常状态。 |
-| `backend` | FastAPI route、权限、业务 service、SSE。 | 依赖健康的 Redis/PostgreSQL/Chroma 和成功 migration。 |
+| `backend` | FastAPI route、权限、业务 service、SSE。 | 依赖健康的 Redis/PostgreSQL/Milvus、authenticated probe 和成功 migration。 |
 | `worker` | 领取 vector index job、解析/OCR、embedding 和双存储写入。 | 与 HTTP request 解耦；需要 uploads/models 和相同后端配置。 |
 | `frontend` | Next.js UI 和 API proxy。 | 容器内只访问 `http://backend:8000`。 |
 
@@ -255,7 +260,7 @@ frontend
 ```bash
 docker compose up -d --build
 docker compose ps
-docker compose logs --tail=100 redis postgres chroma migrate backend worker frontend
+docker compose logs --tail=100 redis postgres milvus-etcd milvus-minio milvus-standalone milvus-health-probe migrate backend worker frontend
 ```
 
 不要把 `migrate` 的 `Exited (0)` 当成服务崩溃；应把非零退出、重复失败或应用等待 migration 视为异常。
@@ -277,7 +282,7 @@ conda run -n firstrag python scripts/production_preflight.py \
   --check-runtime-health
 ```
 
-preflight 会检查 secret 是否仍为模板/弱值、JWT 与 Fernet key 是否分离、数据库与 Redis 配置、生产限流是否 `fail_closed`、数据目录、端口暴露、Compose config、migration dry-run，以及启用 runtime flag 后的 Chroma 健康状态。它只输出变量名和检查结果，不应输出 secret 值。
+preflight 会检查 secret 是否仍为模板/弱值、JWT 与 Fernet key 是否分离、数据库与 Redis 配置、Milvus token/MinIO secret/collection 命名、Docker 资源、生产限流是否 `fail_closed`、Compose config、migration dry-run 和 authenticated runtime health。它只输出变量名和检查结果，不应输出 secret 值。
 
 通过 preflight 仍不代表部署完成。它不会替你验证域名、TLS、反向代理、真实 provider、用户旅程或备份可恢复性。
 
@@ -290,7 +295,7 @@ preflight 会检查 secret 是否仍为模板/弱值、JWT 与 Fernet key 是否
 ```bash
 docker compose ps
 docker compose logs --tail=100 backend worker frontend
-docker compose logs --tail=100 redis postgres chroma migrate
+docker compose logs --tail=100 redis postgres milvus-etcd milvus-minio milvus-standalone milvus-health-probe migrate
 curl -fsS http://127.0.0.1:8000/health
 ```
 
@@ -302,10 +307,10 @@ curl -fsS http://127.0.0.1:8000/health
 
 - PostgreSQL custom-format dump；
 - `uploads/` 原始文件；
-- `vector_db/` Chroma 数据；
+- `milvus_data`、`milvus_etcd_data` 和 `milvus_minio_data` volumes；
 - 必要时的 `models/`，以及独立保存的 secret/配置恢复流程。
 
-`uploads/` 与 PostgreSQL metadata 必须保持一致。Chroma 理论上可重新 indexing，但重建需要原文件、用户 embedding 配置、provider 可用性和时间成本，因此公开环境仍应备份。
+`uploads/` 与 PostgreSQL metadata 必须保持一致。Milvus 理论上可重新 indexing，但重建需要原文件、用户 embedding 配置、provider 可用性和时间成本，因此公开环境应同时备份三个 Milvus volumes 并定期演练恢复。
 
 恢复是破坏性运维操作，本教程不让读者在日常实验中执行。按[部署文档的 PostgreSQL 备份与恢复 runbook](../DEPLOYMENT.md#postgresql-备份与恢复)在 staging 演练：停止写入服务、恢复数据库和目录、运行 migration dry-run、启动服务，再验证登录、文件、任务、检索、sources 和日志。
 
@@ -323,7 +328,7 @@ curl -fsS http://127.0.0.1:8000/health
 
 公网环境还应保证：
 
-- 只公开 80/443，frontend/backend/PostgreSQL 绑定 loopback，Redis/Chroma 不发布 host port；
+- 只公开 80/443，frontend/backend/PostgreSQL 绑定 loopback，Redis/Milvus/etcd/MinIO 不发布 host port；
 - 反向代理只面向 frontend，保留 SSE 并关闭 buffering，限制上传体积；
 - `ALLOW_PUBLIC_REGISTRATION`、自定义 provider URL、rate limit 和数据清理策略符合环境目标；
 - secret 不进入 image、Git、日志和 artifact；
@@ -351,7 +356,7 @@ cd ..
 ```bash
 docker compose up -d --build
 docker compose ps
-docker compose logs --tail=100 redis postgres chroma migrate backend worker frontend
+docker compose logs --tail=100 redis postgres milvus-etcd milvus-minio milvus-standalone milvus-health-probe migrate backend worker frontend
 docker compose config --quiet
 conda run -n firstrag python scripts/production_preflight.py \
   --env-file .env \
@@ -359,7 +364,7 @@ conda run -n firstrag python scripts/production_preflight.py \
   --check-runtime-health
 ```
 
-观察点：`redis`、`postgres`、`chroma`、`backend`、`worker` 和 `frontend` healthy/running；`migrate` 成功退出；preflight 报告通过且不打印 secret。
+观察点：`redis`、`postgres`、`milvus-etcd`、`milvus-minio`、`milvus-standalone`、`backend`、`worker` 和 `frontend` healthy/running；`migrate` 与 `milvus-health-probe` 成功退出；preflight 报告通过且不打印 secret。
 
 ### 第三步：CI 配置和文档差异
 

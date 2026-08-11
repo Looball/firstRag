@@ -9,7 +9,7 @@
 3. 后端计算 SHA-256 和文件大小。
 4. 若同一用户已上传过相同内容，则复用 `knowledge_files` 记录，只补充知识库关联。
 
-知识库移入回收站只隐藏知识库及其会话，不删除可复用文件或索引；恢复后原关联重新生效。永久删除知识文件会使用与 indexing 相同的单文件 advisory lock，取消 active jobs，并清理 Chroma、PostgreSQL 和磁盘内容，避免旧 worker 在删除后写回数据。
+知识库移入回收站只隐藏知识库及其会话，不删除可复用文件或索引；恢复后原关联重新生效。永久删除知识文件会使用与 indexing 相同的单文件 advisory lock，取消 active jobs，并清理当前 vector store、PostgreSQL 和磁盘内容，避免旧 worker 在删除后写回数据。
 5. 新文件保存到根目录 `uploads/users/{user_id}/{hash_prefix}/{file_id}/source.ext`。
 6. `auto_index=true` 时创建 `vector_index_jobs` 任务。
 
@@ -20,8 +20,7 @@
 3. `document_service` 加载 PDF、DOCX、Markdown、TXT 或图片知识文件。PDF 先按页解析原生文本，并剔除 `pymupdf4llm` 为纯图片生成的 `picture ... intentionally omitted` 占位提示；无有效文本层的页面渲染为 PNG 并通过本地 Tesseract OCR。同一次识别同时生成正文和 TSV word confidence，写入真实页码、解析方式、字符加权置信度、质量等级和识别次数 metadata。DOCX 从 OOXML 主文档按标题和段落边界加载，保留原始段落范围。图片文件会使用当前用户配置的 vision 聊天模型解析为可检索 Markdown；聊天图片附件不走这条入库链路。
 4. 文本或图片解析结果切分为 chunk；同一文件跨 PDF page 或 DOCX block 使用全局连续的 `chunk_index`。
 5. 当前登录用户保存的 embedding provider 生成向量，支持 Qwen、智谱、OpenAI、Voyage、Cohere、Jina 和自定义 OpenAI-compatible embedding API。用户可按厂商保存多份 API Key，当前生效配置决定实际调用的 provider/model/base_url。
-6. Chroma 保存向量；Compose 中 worker 与 backend 均通过 HTTP client 访问独立
-   `chroma` service，避免多个 embedded 进程共享目录产生索引可见性问题。
+6. Milvus 保存向量；Compose 中 worker 与 backend 通过各自的 authenticated PyMilvus client 访问同一 Standalone，Strong consistency 和写后 self-hit 保证跨进程可见。
 7. PostgreSQL `knowledge_file_chunks` 保存 chunk 正文和 metadata，用于全文检索。
 8. 更新文件状态和任务状态。
 
@@ -33,7 +32,7 @@
 
 OCR 参数回归默认由 `pdf_ocr_eval_v2.json` 定义的合成评测集约束。门禁生成没有原生文本层的正常、90° 旋转、低对比度、模糊、中英文混排、轻度倾斜、盐椒噪点、侧边阴影、小字号和表格 PDF，并直接复用生产 OCR engine 比较基线与自适应结果；质量、策略和耗时不满足阈值时 CI 失败。报告的 suite fingerprint 随 case、阈值或退化参数变化，历史趋势只比较相同 suite。该评测不进入上传、数据库、chunk 或 embedding 链路。
 
-真实混合 PDF 回归由 `scripts/eval_indexing.py --file-kind mixed-pdf` 执行。fixture 固定为三页 `native_text -> scanned image -> native_text`，上传后等待 Compose worker 完成真实 OCR、chunk、embedding、Chroma 和 PostgreSQL 写入，再查询只存在于第 2 页扫描图中的唯一标识。门禁要求 source 指向第 2 页且 `pdf_parse_method=ocr`，同时通过 source chunk context 验证第 1、3 页仍为 `native_text`、全局 chunk index 按页递增；随后读取第 2 页 PNG preview，并与原 PDF 三页渲染图进行内容比较，防止只验证响应格式却返回错误页。该模式需要登录账号及已保存的 LLM/embedding 配置，结束时恢复 retrieval settings 并默认解除临时文件关联。
+真实混合 PDF 回归由 `scripts/eval_indexing.py --file-kind mixed-pdf` 执行。fixture 固定为三页 `native_text -> scanned image -> native_text`，上传后等待 Compose worker 完成真实 OCR、chunk、embedding、Milvus 和 PostgreSQL 写入，再查询只存在于第 2 页扫描图中的唯一标识。门禁要求 source 指向第 2 页且 `pdf_parse_method=ocr`，同时通过 source chunk context 验证第 1、3 页仍为 `native_text`、全局 chunk index 按页递增；随后读取第 2 页 PNG preview，并与原 PDF 三页渲染图进行内容比较，防止只验证响应格式却返回错误页。该模式需要登录账号及已保存的 LLM/embedding 配置，结束时恢复 retrieval settings 并默认解除临时文件关联。
 
 索引成功时，扫描页的本次 Tesseract 原始结果独立写入 `knowledge_file_ocr_history`，不随 `knowledge_file_chunks` 替换而丢失。页级 attempt 从最近历史递增；迁移前旧文件在下一次重建前从上一版 chunks 写入 baseline。历史保留 confidence、quality、word count、文本 SHA、trigger、source job 和 correction revision，前端据此判断重识别是改善、下降、持平还是仅文字发生变化。
 
@@ -46,14 +45,14 @@ OCR 参数回归默认由 `pdf_ocr_eval_v2.json` 定义的合成评测集约束�
 5. 普通问题加载历史消息，构建 RAG 链。
 6. `rag_service` 兼容入口委托 `app/services/rag/` 内部模块读取 retrieval settings、判断是否需要检索，并可改写多轮问题。
 7. 召回候选片段：
-   - 当前 vector store adapter 的向量检索和 PostgreSQL 全文检索并行粗召回。应用层预先生成 query embedding；Chroma 使用严格 metadata filter，Milvus 使用始终包含 `user_id`、可选 `file_id` 范围的 scalar filter。两者统一输出越小越近的 `vector_score`。
+   - Milvus 向量检索和 PostgreSQL 全文检索并行粗召回。应用层预先生成 query embedding，Milvus scalar filter 始终包含 `user_id` 与可选 `file_id` 范围；COSINE similarity 由 adapter 转换为越小越近的 `vector_score`。Chroma metadata filter 仅用于观察期回滚。
    - RRF 融合多路结果。
    - 可选 reranker 精排，默认本地 CrossEncoder；也可在用户设置中切换到 Qwen、Voyage、Cohere、Jina 或自定义 rerank API。
 8. 用户配置的 OpenAI 兼容聊天模型流式生成回答；带图片时，最终用户消息按 OpenAI-compatible 多模态 payload 发送。
 9. SSE 返回 token、sources、retrieval 诊断。
 10. 回答完成后持久化到 `messages`，用户图片 metadata 通过 `message_attachments` 与用户消息关联。
 
-聊天图片附件通过 `POST /chat/attachments` 先上传到本地文件系统，后端只向前端返回安全 metadata 和读取 URL。附件用于当前会话消息的视觉问答，不会自动进入 `knowledge_files`、`knowledge_file_chunks` 或 Chroma。需要长期检索的图片应作为知识文件上传，worker 会用当前用户的 vision 模型解析图片内容并写入既有 chunk 与向量链路。
+聊天图片附件通过 `POST /chat/attachments` 先上传到本地文件系统，后端只向前端返回安全 metadata 和读取 URL。附件用于当前会话消息的视觉问答，不会自动进入 `knowledge_files`、`knowledge_file_chunks` 或 Milvus。需要长期检索的图片应作为知识文件上传，worker 会用当前用户的 vision 模型解析图片内容并写入既有 chunk 与向量链路。
 
 知识库级 retrieval settings 可通过
 `GET/PATCH /chat/knowledge-base/{knowledge_base_id}/retrieval-settings`

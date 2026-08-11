@@ -1,6 +1,6 @@
 # 混合检索与流式回答
 
-本教程沿一次真实提问，追踪它如何经过检索决策、query embedding、Chroma vector search、PostgreSQL full-text search、RRF、可选 rerank 和 LCEL，最后以 SSE 持续返回回答，并把答案、sources 与 retrieval diagnostics 写回 PostgreSQL。
+本教程沿一次真实提问，追踪它如何经过检索决策、query embedding、Milvus filtered ANN、PostgreSQL full-text search、RRF、可选 rerank 和 LCEL，最后以 SSE 持续返回回答，并把答案、sources 与 retrieval diagnostics 写回 PostgreSQL。
 
 ## 学习目标与实验边界
 
@@ -22,7 +22,7 @@ sequenceDiagram
     participant Proxy as Next.js proxy
     participant API as FastAPI /chat
     participant LCEL as LCEL chain
-    participant Vector as Query embedding + Chroma
+    participant Vector as Query embedding + Milvus
     participant Fulltext as PostgreSQL full-text
     participant Rank as RRF + optional rerank
     participant LLM as Chat provider
@@ -94,10 +94,10 @@ Hybrid retriever 使用两个线程并行执行粗召回；两路目标不同，
 
 | 通道 | 存储与排序依据 | 擅长 | 当前隔离边界 |
 | --- | --- | --- | --- |
-| Vector | 当前 vector store；query embedding 与 chunk embedding 的距离 | 改写、近义表达和语义相似 | Chroma metadata filter 或 Milvus scalar filter 中的 `user_id` 与 `file_id`。 |
+| Vector | Milvus；query embedding 与 chunk embedding 的 COSINE similarity | 改写、近义表达和语义相似 | scalar filter 中必有 `user_id`，并带可选 `file_id` 范围。 |
 | Full-text | PostgreSQL；`ts_rank_cd` 加词项/完整短语 `ILIKE` bonus | 精确词、编号、专名和短语 | SQL 中的 `user_id` 与可选 `knowledge_file_id`。 |
 
-Vector 通道先在应用中生成 query embedding，再把该向量交给当前 vector store adapter；它不会让存储层使用另一套隐式 embedding。结果统一记录越小越近的 `vector_score`：Chroma 直接返回 distance，Milvus 的 COSINE similarity 由 adapter 转换为 `1 - similarity`。Full-text 结果记录 `fulltext_score`，越大越靠前。两者尺度完全不同，不能直接相加或横向比较。
+Vector 通道先在应用中生成 query embedding，再把该向量交给 Milvus adapter；它不会让存储层使用另一套隐式 embedding。Milvus 的 COSINE similarity 由 adapter 转换为越小越近的 `vector_score = 1 - similarity`。Full-text 结果记录 `fulltext_score`，越大越靠前。两者尺度完全不同，不能直接相加或横向比较。
 
 Query embedding 成功后会缓存 300 秒，读取顺序是进程内 memory、Redis、provider。缓存 key 由以下五部分组成：
 
@@ -110,7 +110,6 @@ Query 会 trim、转小写并压缩连续空白。用户、provider、model 或 
 | 源码入口 | 作用 |
 | --- | --- |
 | [`backend/app/services/retrieval/hybrid_retriever.py`](../../backend/app/services/retrieval/hybrid_retriever.py) | 两路并行、query embedding cache、provider-neutral 结果与总诊断。 |
-| [`backend/app/services/vectors/chroma_vector_store.py`](../../backend/app/services/vectors/chroma_vector_store.py) | Chroma 用户/文件 metadata filter、distance 转换与异常分类。 |
 | [`backend/app/services/vectors/milvus_vector_store.py`](../../backend/app/services/vectors/milvus_vector_store.py) | Milvus scalar filter、filtered ANN、COSINE distance 归一化与防御性范围校验。 |
 | [`backend/app/services/vectors/embedding_model.py`](../../backend/app/services/vectors/embedding_model.py) | 用户 embedding 设置与 cache identity。 |
 | [`backend/app/services/retrieval/fulltext_retriever.py`](../../backend/app/services/retrieval/fulltext_retriever.py) | 把 PostgreSQL rows 转为 LangChain `Document`。 |
@@ -311,18 +310,19 @@ curl -fsS \
 
 使用相同规范化 query 再发一次请求，然后重新读取最后一条 diagnostics。在 300 秒 TTL 内且同一 backend process 未重启时，`query_embedding_cache_hit` 应为 `true`，source 通常是 `memory`；若由另一个进程接手且 Redis 中仍有值，则可能是 `redis`。第一次请求也可能命中 T-124 已经产生的缓存，因此不要把“第一次一定是 provider”写成断言。
 
-### 可选故障观察：Chroma 降级
+### 可选故障观察：Milvus 降级
 
-只在隔离 project 中停止 Chroma，再用一个新会话发送同一问题：
+只在隔离 project 中停止 Milvus Standalone，再用一个新会话发送同一问题：
 
 ```bash
-firstrag_tutorial_compose stop chroma
+firstrag_tutorial_compose stop milvus-standalone
 ```
 
 若 PostgreSQL full-text 和 provider 仍可用，预期回答链路继续，diagnostics 中 `vector_degraded=true`、`vector_count=0`、`fulltext_count>0`，sources 只包含 `fulltext` 通道。观察完成后立即恢复并确认健康：
 
 ```bash
-firstrag_tutorial_compose start chroma
+firstrag_tutorial_compose start milvus-standalone
+firstrag_tutorial_compose run --rm milvus-health-probe
 firstrag_tutorial_compose ps
 ```
 
@@ -378,7 +378,7 @@ performance_thresholds, quality_gate, summary, cases
 ```bash
 docker compose up -d --build
 docker compose ps
-docker compose logs --tail=100 redis postgres chroma migrate backend worker frontend
+docker compose logs --tail=100 redis postgres milvus-etcd milvus-minio milvus-standalone milvus-health-probe migrate backend worker frontend
 docker compose exec -T backend python -m unittest \
   tests.test_retrieval_resilience \
   tests.test_rag_service \

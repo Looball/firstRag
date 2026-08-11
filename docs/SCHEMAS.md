@@ -267,7 +267,7 @@ DOCX 额外保存 `location_type=docx_paragraphs` 以及 1-based
 
 `vector_index_jobs.options` 是后端生成的内部控制参数，不接受前端透传任意 worker 参数。PDF OCR 重新识别任务会写入 `trigger=pdf_page_ocr_reindex|pdf_pages_ocr_reindex` 和经过校验、去重、升序排列的 `force_ocr_page_numbers`；单页或多页批次都只创建一个 job，worker 仍重建完整文件索引，并通过新的 `index_version` 隔离旧结果。批次失败重试会从原 job 的受控 options 恢复页码，不接受前端重新指定页面。
 
-扫描 PDF chunk 的 `metadata` 额外保存 `ocr_confidence`、`ocr_quality`、`ocr_word_count`、`ocr_attempt`、`ocr_strategy`、`ocr_preprocessing`、`ocr_psm`、`ocr_rotation` 和 `ocr_candidate_count`。`ocr_confidence` 是 Tesseract TSV word confidence 按有效字符数加权后的 0-100 分数；没有有效 word 时不写入虚构分数，并将 `ocr_quality` 记为 `unknown`。低于 `PDF_OCR_LOW_CONFIDENCE_THRESHOLD` 时记为 `low`，否则为 `good`。未选中候选摘要不会写入 Chroma metadata，避免复杂 JSON 破坏向量存储约束。
+扫描 PDF chunk 的 `metadata` 额外保存 `ocr_confidence`、`ocr_quality`、`ocr_word_count`、`ocr_attempt`、`ocr_strategy`、`ocr_preprocessing`、`ocr_psm`、`ocr_rotation` 和 `ocr_candidate_count`。`ocr_confidence` 是 Tesseract TSV word confidence 按有效字符数加权后的 0-100 分数；没有有效 word 时不写入虚构分数，并将 `ocr_quality` 记为 `unknown`。低于 `PDF_OCR_LOW_CONFIDENCE_THRESHOLD` 时记为 `low`，否则为 `good`。未选中候选摘要不会写入 Milvus metadata JSON，避免过大或复杂 payload 破坏向量存储约束。
 
 人工校对按用户、文件和 1-based 页码唯一保存。首次修订固定记录 `original_ocr_text`，后续保存只更新 `corrected_text` 并递增 `revision`；知识文件永久删除时由外键级联清理。应用修订后的 chunk metadata 增加 `ocr_text_source=manual_correction`、`ocr_correction_applied=true`、revision、字符数和更新时间，同时继续保留本次 Tesseract OCR 置信度。
 

@@ -1,6 +1,6 @@
 # 后端结构说明
 
-后端位于 `backend/`，使用 FastAPI 提供 HTTP API，并通过 PostgreSQL 与 provider-neutral vector store boundary 完成 RAG 数据存储。默认 provider 仍为 Chroma；Milvus candidate 已接入写入、重建、删除和 filtered ANN 检索，current stored embeddings 已通过可恢复工具导入，默认切换与全链路验收由 T-136 完成。
+后端位于 `backend/`，使用 FastAPI 提供 HTTP API，并通过 PostgreSQL 与 provider-neutral vector store boundary 完成 RAG 数据存储。Milvus 是当前默认 provider，已接入写入、重建、删除、filtered ANN、diagnostics 和 authenticated health gate；Chroma 仅在 T-138 前保留 rollback adapter 和历史数据。
 
 ## 目录结构
 
@@ -27,7 +27,7 @@ backend/
 ```bash
 docker compose up -d --build
 docker compose ps
-docker compose logs --tail=100 redis migrate backend worker frontend postgres
+docker compose logs --tail=100 redis postgres milvus-etcd milvus-minio milvus-standalone milvus-health-probe migrate backend worker frontend
 ```
 
 配置从 monorepo 根目录 `.env` 加载，不从 `backend/.env` 加载。常规验证应基于 Compose 容器完成。
@@ -85,7 +85,7 @@ conda activate firstrag
 python -m app.workers.vector_index_worker
 ```
 
-worker 从 PostgreSQL `vector_index_jobs` 领取任务，解析文件、切分文本、通过当前 vector store adapter 写向量、写 PostgreSQL chunk，并更新任务状态。PDF 逐页解析并保存真实页码；parser 为纯图片生成的 `picture ... intentionally omitted` 占位提示会先被剔除，无有效文本层的页面才会渲染并调用本地 Tesseract，默认使用 `chi_sim+eng`，一次调用同时产出正文和 TSV confidence，并把字符加权页级置信度写入 chunk metadata，不调用用户 LLM。低质量 OCR 页可通过受控 `vector_index_jobs.options` 强制再次识别；多页选择合并进同一个 `force_ocr_page_numbers`，一次只生成一个版本和一个整文件重建 job，失败重试从原 job 恢复 options。`pdf_ocr_engine.py` 让主动重识别在有界总超时内比较原图、灰度、二值化和旋转候选；首次索引只运行基线，单候选失败不会阻断其他候选，选中结果与候选摘要写入 metadata。每次成功解析还会把页级 Tesseract 原文、SHA-256、confidence、word count、attempt、trigger、strategy/PSM/rotation、候选摘要和 source job 写入 `knowledge_file_ocr_history`；attempt 从历史单调递增，迁移前文件会先从旧 chunks 衔接 baseline。人工修订持久化到 `knowledge_file_ocr_corrections`；worker 在 OCR 后、切分前应用当前 revision，但不会用人工正文覆盖 OCR history。DOCX 从 OOXML 保存原始段落范围；同一文件跨 page/block 的 chunk index 保持全局连续。默认 Chroma 路径中，Compose backend 与 worker 通过 HTTP 访问独立 `chroma` service；Milvus candidate 路径使用各自独立的 authenticated PyMilvus client，并由 Strong consistency 和写后 self-hit 保证跨进程可见。Redis 只保存短 TTL 运行态：worker 心跳、当前任务摘要、单文件短租约和运行指标；Redis 不可用时 worker 会继续依赖 PostgreSQL 队列处理任务。图片知识文件会在 worker 中通过当前用户的 vision 聊天模型解析为可检索 Markdown；解析失败只会标记当前任务失败，不阻塞后续队列。常规验证仍以 Docker Compose 中的 `worker` service 为准。
+worker 从 PostgreSQL `vector_index_jobs` 领取任务，解析文件、切分文本、通过当前 vector store adapter 写向量、写 PostgreSQL chunk，并更新任务状态。PDF 逐页解析并保存真实页码；parser 为纯图片生成的 `picture ... intentionally omitted` 占位提示会先被剔除，无有效文本层的页面才会渲染并调用本地 Tesseract，默认使用 `chi_sim+eng`，一次调用同时产出正文和 TSV confidence，并把字符加权页级置信度写入 chunk metadata，不调用用户 LLM。低质量 OCR 页可通过受控 `vector_index_jobs.options` 强制再次识别；多页选择合并进同一个 `force_ocr_page_numbers`，一次只生成一个版本和一个整文件重建 job，失败重试从原 job 恢复 options。`pdf_ocr_engine.py` 让主动重识别在有界总超时内比较原图、灰度、二值化和旋转候选；首次索引只运行基线，单候选失败不会阻断其他候选，选中结果与候选摘要写入 metadata。每次成功解析还会把页级 Tesseract 原文、SHA-256、confidence、word count、attempt、trigger、strategy/PSM/rotation、候选摘要和 source job 写入 `knowledge_file_ocr_history`；attempt 从历史单调递增，迁移前文件会先从旧 chunks 衔接 baseline。人工修订持久化到 `knowledge_file_ocr_corrections`；worker 在 OCR 后、切分前应用当前 revision，但不会用人工正文覆盖 OCR history。DOCX 从 OOXML 保存原始段落范围；同一文件跨 page/block 的 chunk index 保持全局连续。默认 Milvus 路径使用各自独立的 authenticated PyMilvus client，并由 Strong consistency 和写后 self-hit 保证跨进程可见；Chroma HTTP client 仅供显式回滚。Redis 只保存短 TTL 运行态：worker 心跳、当前任务摘要、单文件短租约和运行指标；Redis 不可用时 worker 会继续依赖 PostgreSQL 队列处理任务。图片知识文件会在 worker 中通过当前用户的 vision 聊天模型解析为可检索 Markdown；解析失败只会标记当前任务失败，不阻塞后续队列。常规验证仍以 Docker Compose 中的 `worker` service 为准。
 
 OCR 校对工作台不依赖浏览器内置 PDF plugin。`pdf_page_preview_service.py` 在用户权限与 uploads 路径校验后，用 PyMuPDF 将单个目标页即时渲染为最长边不超过 1800px 的 RGB PNG；响应使用私有短缓存且不写入磁盘。无效页码或非 PDF 返回 `400`，损坏或暂时无法渲染的 PDF 返回安全的 `422` 提示。
 

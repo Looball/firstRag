@@ -30,7 +30,7 @@
 | --- | --- |
 | 适合读者 | 第一次接触 RAG，或只想先理解 FirstRAG 如何运行。 |
 | 先修条件 | 能使用 Git、Docker 和命令行；不要求先掌握 LangChain。 |
-| 预计产出 | 能画出上传与提问两条流程，知道 PostgreSQL、Redis、Chroma、worker 各自负责什么。 |
+| 预计产出 | 能画出上传与提问两条流程，知道 PostgreSQL、Redis、Milvus、worker 各自负责什么。 |
 | 第一步 | 阅读 [系统架构](../ARCHITECTURE.md) 和 [源码地图的全局入口](CODE_MAP.md#全局入口)。 |
 | 第二步 | 完成 [无外部密钥入门实验](CREDENTIAL_FREE_QUICKSTART.md)，观察真实全栈链路。 |
 | 第三步 | 需要连接真实 provider 时，再按 [Docker Compose 启动 runbook](../docker-startup/README.md) 运行完整应用。 |
@@ -46,7 +46,7 @@
 | 先修条件 | Python、HTTP、SQL 基础；了解 embedding 和向量相似度更佳。 |
 | 预计产出 | 能从 file ID 追踪到 job/chunk/vector，也能从一次提问追踪到 RRF、rerank、sources 和 diagnostics。 |
 | 第一步 | 阅读 [RAG 核心流程](../RAG_WORKFLOW.md) 和 [后端结构](../BACKEND.md)。 |
-| 第二步 | 完成 [文件入库与异步索引](FILE_INGESTION_AND_INDEXING.md)，从 `file_id` 追踪到 job、chunk 和 Chroma metadata。 |
+| 第二步 | 完成 [文件入库与异步索引](FILE_INGESTION_AND_INDEXING.md)，从 `file_id` 追踪到 job、chunk 和 Milvus entity。 |
 | 第三步 | 完成[混合检索与流式回答](HYBRID_RETRIEVAL_AND_STREAMING.md)，从一次提问追踪到 RRF、SSE 与消息落库。 |
 | 可以跳过 | 前端视觉组件、公开 demo 部署和 OCR 校对 UI；需要时再回查。 |
 

@@ -167,7 +167,7 @@ ID 随聊天请求提交。当前支持 `image/png`、`image/jpeg` 和 `image/we
 
 上传入口当前支持 `.pdf`、`.docx`、`.md`、`.txt`、`.png`、`.jpg/.jpeg` 和 `.webp`。不支持的扩展名、明显不匹配的 MIME 类型或伪装成图片的无效文件头会返回 `400`，不会创建无效文件记录或向量化任务。
 
-图片知识文件上传成功后仍然走异步向量化。worker 会使用当前登录用户保存的 vision-capable 聊天模型把图片解析为可检索 Markdown，再切分为 chunk，写入 PostgreSQL full-text chunks 和 Chroma。若用户未配置聊天模型，或当前模型不支持 vision，单文件/整库向量化提交会返回 `400`；通过 `auto_index=true` 自动入队的任务会在 worker 阶段失败，并返回安全的恢复提示。
+图片知识文件上传成功后仍然走异步向量化。worker 会使用当前登录用户保存的 vision-capable 聊天模型把图片解析为可检索 Markdown，再切分为 chunk，写入 PostgreSQL full-text chunks 和 Milvus。若用户未配置聊天模型，或当前模型不支持 vision，单文件/整库向量化提交会返回 `400`；通过 `auto_index=true` 自动入队的任务会在 worker 阶段失败，并返回安全的恢复提示。
 
 PDF 优先解析原生文本层；没有有效文本层的页面由 worker 使用本地 Tesseract OCR，默认语言为简体中文和英文，不调用用户聊天模型或第三方 OCR API。Tesseract 单次识别同时输出文本和 TSV word confidence，页面分数按有效字符长度加权，并随 `ocr_confidence`、`ocr_quality`、`ocr_word_count` 和 `ocr_attempt` 持久化；没有有效 word confidence 时 `ocr_quality=unknown`，不会伪造分数。OCR 引擎不可用、语言包缺失、单页超时或页数超过配置上限时，任务返回 `ocr_error` 和安全恢复提示。
 
@@ -193,7 +193,7 @@ PDF 优先解析原生文本层；没有有效文本层的页面由 worker 使�
 
 超过单文件或用户配额时返回 `413`，`detail` 会说明当前占用、上限或建议删除不需要的文件后重试。同一用户重复上传相同内容时会复用已有文件，不重复计入全局文件数量和容量。
 
-`DELETE /chat/knowledge-files/{knowledge_file_id}` 是不可恢复操作。后端使用单文件 advisory lock 与正在执行的 indexing 串行化，取消 active jobs，并清理所有知识库关联、Chroma vectors、PostgreSQL chunks、历史消息中的对应 source、source feedback、任务记录和 `uploads/` 下的磁盘文件。删除接口会拒绝不在允许上传目录内的异常存储路径。
+`DELETE /chat/knowledge-files/{knowledge_file_id}` 是不可恢复操作。后端使用单文件 advisory lock 与正在执行的 indexing 串行化，取消 active jobs，并清理所有知识库关联、Milvus entities、PostgreSQL chunks、历史消息中的对应 source、source feedback、任务记录和 `uploads/` 下的磁盘文件。删除接口会拒绝不在允许上传目录内的异常存储路径。
 
 ## 向量化
 
@@ -290,7 +290,7 @@ PDF 优先解析原生文本层；没有有效文本层的页面由 worker 使�
 | `ocr_error` | 扫描 PDF 无法通过本地 Tesseract 完成 OCR。 |
 | `parse_error` | 文件解析、编码或文本分块失败。 |
 | `embedding_error` | Embedding provider 调用失败。 |
-| `vector_store_error` | Chroma/vector_db 写入或查询失败。 |
+| `vector_store_error` | Milvus 写入或查询失败；检查 Standalone、etcd、MinIO 和 authenticated probe。 |
 | `chunk_write_error` | PostgreSQL 文本 chunk 写入失败。 |
 | `database_error` | 数据库连接、SQL 或迁移相关失败。 |
 | `task_timeout` | 向量化任务超时或租约过期。 |

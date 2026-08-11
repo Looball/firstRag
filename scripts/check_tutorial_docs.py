@@ -337,6 +337,40 @@ def check_sensitive_content(paths: list[Path]) -> list[DocumentationViolation]:
     return violations
 
 
+def check_forbidden_current_runtime_patterns(
+    manifest_path: Path,
+    manifest: dict[str, object],
+    documents: dict[Path, MarkdownDocument],
+) -> list[DocumentationViolation]:
+    """拒绝教程把历史 Chroma 路径继续写成当前 runtime。"""
+    raw_patterns = manifest.get("forbidden_current_runtime_patterns")
+    if not isinstance(raw_patterns, list) or not raw_patterns or any(
+        not isinstance(pattern, str) or not pattern
+        for pattern in raw_patterns
+    ):
+        return [
+            DocumentationViolation(
+                manifest_path,
+                1,
+                "forbidden_current_runtime_patterns 必须是非空字符串数组",
+            )
+        ]
+
+    violations: list[DocumentationViolation] = []
+    for document in documents.values():
+        for line_number, line in enumerate(document.lines, start=1):
+            for pattern in raw_patterns:
+                if pattern in line:
+                    violations.append(
+                        DocumentationViolation(
+                            document.path,
+                            line_number,
+                            f"当前 Milvus 基线不应再出现 Chroma runtime 片段：{pattern}",
+                        )
+                    )
+    return violations
+
+
 def _load_manifest(path: Path) -> dict[str, object]:
     """读取教程 manifest，并生成简洁的格式错误。"""
     try:
@@ -575,6 +609,17 @@ def collect_violations(
         resolved_root,
         manifest_path,
         documents,
+    )
+    try:
+        manifest = _load_manifest(manifest_path)
+    except ValueError:
+        manifest = {}
+    violations.extend(
+        check_forbidden_current_runtime_patterns(
+            manifest_path,
+            manifest,
+            documents,
+        )
     )
     violations.extend(check_markdown_links(resolved_root, documents))
     violations.extend(check_inline_repository_paths(resolved_root, documents))

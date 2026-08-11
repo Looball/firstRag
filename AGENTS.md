@@ -13,8 +13,8 @@ FirstRAG 是一个全栈 RAG（Retrieval-Augmented Generation）应用，采用 
 - 用户注册、登录和 JWT 认证。
 - 知识库、知识文件、会话和消息管理。
 - 文件上传、SHA-256 去重、异步 vector index job。
-- 文档解析、chunk 切分、embedding、Chroma 向量入库。
-- PostgreSQL 全文检索、Chroma vector search、RRF 融合、CrossEncoder rerank。
+- 文档解析、chunk 切分、embedding、Milvus 向量入库。
+- PostgreSQL 全文检索、Milvus filtered ANN、RRF 融合、CrossEncoder rerank。
 - OpenAI-compatible LLM 流式回答，并通过 SSE 返回 token、sources 和 retrieval diagnostics。
 - 用户可配置自己的 LLM provider、model 和 API Key。
 - 用户可配置自己的 embedding provider（千问/Qwen 或智谱/ZhipuAI）、model 和 API Key。
@@ -30,7 +30,7 @@ FirstRAG 是一个全栈 RAG（Retrieval-Augmented Generation）应用，采用 
   -> vector_index_jobs
   -> vector_index_worker
   -> document_service 解析/切分
-  -> Chroma vector store + PostgreSQL full-text chunks
+  -> Milvus vector store + PostgreSQL full-text chunks
   -> embedding 使用用户配置的 provider（千问/ZhipuAI）
 
 用户提问
@@ -124,10 +124,10 @@ FirstRAG/
 - vector indexing 必须通过 `vector_index_jobs` 和 `vector_index_worker` 异步执行。
 - indexing 使用的 embedding 来自用户保存的 provider（千问/ZhipuAI），而非系统级环境变量。
 - 同一文件 indexing 需要使用 PostgreSQL advisory lock 或版本号保护，避免旧任务覆盖新结果。
-- 删除向量化结果时必须同时处理 Chroma entries、PostgreSQL chunks 和 active jobs。
+- 删除向量化结果时必须同时处理 Milvus entities、PostgreSQL chunks 和 active jobs。
 - RAG retrieval 需要尽量保留 diagnostics，便于前端展示和后续评估。
 - hybrid retrieval 的顺序和职责：
-  - vector retriever 使用用户配置的 embedding provider 从 Chroma 召回。
+  - vector retriever 使用用户配置的 embedding provider 从 Milvus 召回。
   - full-text retriever 从 PostgreSQL 召回。
   - RRF 融合多路结果。
   - reranker 精排：默认本地 BGE Cross-Encoder，可通过 `RERANK_PROVIDER=qwen` 切到阿里云 Qwen rerank API。
@@ -137,7 +137,7 @@ FirstRAG/
 
 ## 7. Database Rules
 
-- PostgreSQL 存储关系型数据，Chroma 存储向量数据。
+- PostgreSQL 存储关系型数据，Milvus 存储向量数据；Chroma 仅在 T-138 前保留回滚能力。
 - 数据库 SQL 位于 `backend/app/db/sql/`。
 - `000_initial_schema.sql` 是当前空库初始化基线；后续新增表、字段、索引或约束从 `001_xxx.sql` 开始新增 migration SQL，不直接假定数据库已手动修改。
 - migration 文件按三位编号递增命名，例如 `001_create_message_tags.sql`。
@@ -241,10 +241,10 @@ docker compose up -d --build
 docker compose ps
 ```
 
-- 查看关键服务日志，确认 `migrate` 成功结束，`redis`、`postgres`、`chroma`、`backend`、`worker` 和 `frontend` 没有启动错误：
+- 查看关键服务日志，确认 `migrate` 和 `milvus-health-probe` 成功结束，`redis`、`postgres`、`milvus-etcd`、`milvus-minio`、`milvus-standalone`、`backend`、`worker` 和 `frontend` 没有启动错误：
 
 ```bash
-docker compose logs --tail=100 redis postgres chroma migrate backend worker frontend
+docker compose logs --tail=100 redis postgres milvus-etcd milvus-minio milvus-standalone milvus-health-probe migrate backend worker frontend
 ```
 
 - 涉及数据库结构、部署配置或公开 demo 前置检查时，补充运行：
@@ -266,13 +266,13 @@ conda run -n firstrag python scripts/production_preflight.py --env-file .env --m
 docker compose up -d --build
 ```
 
-默认访问 `http://localhost:3000`。FastAPI backend、Next.js frontend、PostgreSQL、Redis、Chroma、migration 和 vector index worker 均由 Compose 管理。
+默认访问 `http://localhost:3000`。FastAPI backend、Next.js frontend、PostgreSQL、Redis、Milvus Standalone 及其 etcd/MinIO、migration 和 vector index worker 均由 Compose 管理。
 
 ### 查看服务状态和日志
 
 ```bash
 docker compose ps
-docker compose logs --tail=100 redis postgres chroma migrate backend worker frontend
+docker compose logs --tail=100 redis postgres milvus-etcd milvus-minio milvus-standalone milvus-health-probe migrate backend worker frontend
 ```
 
 ### 本地调试后端

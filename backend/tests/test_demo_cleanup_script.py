@@ -147,6 +147,89 @@ class DemoCleanupScriptTests(unittest.TestCase):
         self.assertIsNone(resolved_path)
         self.assertIn("uploads", reason or "")
 
+    def test_vector_cleanup_defaults_to_milvus(self) -> None:
+        """未显式配置 provider 时，demo cleanup 应遵循 Milvus 默认值。"""
+        provider, results, warnings = demo_cleanup.cleanup_vector_entries(
+            [],
+            {},
+            Path("vector_db/chroma"),
+            "langchain",
+            execute=False,
+            skip_vector_store=False,
+        )
+
+        self.assertEqual(provider, "milvus")
+        self.assertEqual(results, [])
+        self.assertEqual(warnings, [])
+
+    def test_milvus_filter_is_user_and_file_scoped(self) -> None:
+        """Milvus demo cleanup filter 必须同时限制 user_id 和 UUID file_id。"""
+        file_id = str(uuid4())
+
+        expression = demo_cleanup.build_milvus_filter(42, file_id)
+
+        self.assertEqual(
+            expression,
+            f'user_id == 42 and file_id == "{file_id}"',
+        )
+        with self.assertRaises(ValueError):
+            demo_cleanup.build_milvus_filter(42, '" or user_id > 0')
+
+    def test_count_milvus_entries_consumes_iterator(self) -> None:
+        """Milvus dry-run 统计应遍历全部分页并关闭 iterator。"""
+
+        class FakeIterator:
+            """返回两页结果的最小 iterator fake。"""
+
+            def __init__(self) -> None:
+                self.pages = [[{"chunk_id": "1"}], [{"chunk_id": "2"}], []]
+                self.closed = False
+
+            def next(self) -> list[dict[str, str]]:
+                """返回下一页。"""
+                return self.pages.pop(0)
+
+            def close(self) -> None:
+                """记录资源释放。"""
+                self.closed = True
+
+        class FakeClient:
+            """记录 query iterator 调用的最小 client fake。"""
+
+            def __init__(self) -> None:
+                self.iterator = FakeIterator()
+
+            def query_iterator(self, **_kwargs: object) -> FakeIterator:
+                """返回分页 iterator。"""
+                return self.iterator
+
+        client = FakeClient()
+
+        count = demo_cleanup.count_milvus_entries(
+            client,
+            "firstrag_u42_identity",
+            "user_id == 42",
+        )
+
+        self.assertEqual(count, 2)
+        self.assertTrue(client.iterator.closed)
+
+    def test_milvus_cleanup_rejects_invalid_timeout_before_connecting(self) -> None:
+        """非法 timeout 应返回安全配置错误，不进入 client 连接。"""
+        with self.assertRaisesRegex(
+            demo_cleanup.DemoCleanupError,
+            "MILVUS_TIMEOUT_SECONDS",
+        ):
+            demo_cleanup.cleanup_milvus_entries(
+                [{"id": str(uuid4()), "user_id": 1}],
+                {
+                    "MILVUS_TOKEN": "root:test-only-password",
+                    "MILVUS_TIMEOUT_SECONDS": "invalid",
+                },
+                execute=False,
+                skip_vector_store=False,
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

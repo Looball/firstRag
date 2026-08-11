@@ -85,7 +85,7 @@ class SkippedUploadTarget:
 
 @dataclass(frozen=True)
 class VectorCleanupResult:
-    """Chroma 单个 collection 的清理统计。"""
+    """当前 vector store 单个 collection 的清理统计。"""
 
     collection_name: str
     file_id: str
@@ -187,9 +187,11 @@ def build_arg_parser() -> argparse.ArgumentParser:
         help="User id to clean regardless of age, unless retained.",
     )
     parser.add_argument(
+        "--skip-vector-store",
         "--skip-chroma",
+        dest="skip_vector_store",
         action="store_true",
-        help="Skip Chroma entry counting/deletion. PostgreSQL/uploads still run.",
+        help="Skip vector entry counting/deletion. PostgreSQL/uploads still run.",
     )
     parser.add_argument(
         "--dry-run",
@@ -840,11 +842,11 @@ def cleanup_chroma_entries(
     collection_name: str,
     *,
     execute: bool,
-    skip_chroma: bool,
+    skip_vector_store: bool,
 ) -> tuple[list[VectorCleanupResult], list[str]]:
     """统计或删除 Chroma 中与待清理文件对应的向量 entries。"""
     warnings: list[str] = []
-    if skip_chroma:
+    if skip_vector_store:
         warnings.append("已跳过 Chroma 统计和清理。")
         return [], warnings
 
@@ -899,6 +901,154 @@ def cleanup_chroma_entries(
     return results, warnings
 
 
+def normalize_milvus_prefix(value: str) -> str:
+    """将 Milvus collection prefix 规范为与业务 factory 一致的形式。"""
+    normalized = "".join(
+        character
+        if "a" <= character <= "z" or "0" <= character <= "9" or character == "_"
+        else "_"
+        for character in value.strip().lower()
+    ).strip("_")
+    return (normalized or "firstrag")[:24]
+
+
+def build_milvus_filter(user_id: int, file_id: str) -> str:
+    """构造只包含整数和已校验 UUID 的 Milvus scalar filter。"""
+    normalized_file_id = str(UUID(file_id))
+    return f'user_id == {int(user_id)} and file_id == "{normalized_file_id}"'
+
+
+def count_milvus_entries(
+    client: Any,
+    collection_name: str,
+    expression: str,
+) -> int:
+    """通过分页 iterator 统计匹配 entity，避免固定 query limit 截断。"""
+    iterator = client.query_iterator(
+        collection_name=collection_name,
+        filter=expression,
+        output_fields=["chunk_id"],
+        batch_size=1000,
+        consistency_level="Strong",
+    )
+    count = 0
+    try:
+        while True:
+            batch = iterator.next()
+            if not batch:
+                break
+            count += len(batch)
+    finally:
+        iterator.close()
+    return count
+
+
+def cleanup_milvus_entries(
+    files: Sequence[Row],
+    env: Mapping[str, str],
+    *,
+    execute: bool,
+    skip_vector_store: bool,
+) -> tuple[list[VectorCleanupResult], list[str]]:
+    """统计或删除 Milvus 中待清理用户的文件 entities。"""
+    if skip_vector_store:
+        return [], ["已跳过 Milvus 统计和清理。"]
+    if not files:
+        return [], []
+    uri = (env.get("MILVUS_URI") or "http://milvus-standalone:19530").strip()
+    token = (env.get("MILVUS_TOKEN") or "").strip()
+    database = (env.get("MILVUS_DATABASE") or "default").strip()
+    prefix = normalize_milvus_prefix(env.get("MILVUS_COLLECTION_PREFIX") or "firstrag")
+    try:
+        timeout = float(env.get("MILVUS_TIMEOUT_SECONDS") or "10")
+    except ValueError as exc:
+        raise DemoCleanupError("MILVUS_TIMEOUT_SECONDS 必须是正数。") from exc
+    if timeout <= 0:
+        raise DemoCleanupError("MILVUS_TIMEOUT_SECONDS 必须是正数。")
+    if not token:
+        raise DemoCleanupError("缺少 MILVUS_TOKEN，不能在未认证状态下清理向量。")
+    try:
+        from pymilvus import MilvusClient
+    except ImportError as exc:  # pragma: no cover - 依赖缺失时才触发。
+        raise DemoCleanupError("缺少 pymilvus 依赖，无法审计或清理 Milvus entries。") from exc
+
+    client = None
+    results: list[VectorCleanupResult] = []
+    try:
+        client = MilvusClient(uri=uri, token=token, db_name=database, timeout=timeout)
+        collections = [str(name) for name in client.list_collections(timeout=timeout)]
+        for file_row in files:
+            file_id = normalize_uuid(file_row["id"])
+            user_id = int(file_row["user_id"])
+            user_prefix = f"{prefix}_u{user_id}_"
+            expression = build_milvus_filter(user_id, file_id)
+            for collection_name in sorted(
+                name for name in collections if name.startswith(user_prefix)
+            ):
+                matched_count = count_milvus_entries(
+                    client,
+                    collection_name,
+                    expression,
+                )
+                deleted_count = 0
+                if execute and matched_count:
+                    client.delete(
+                        collection_name=collection_name,
+                        filter=expression,
+                        timeout=timeout,
+                    )
+                    client.flush(collection_name=collection_name, timeout=timeout)
+                    deleted_count = matched_count
+                results.append(
+                    VectorCleanupResult(
+                        collection_name=collection_name,
+                        file_id=file_id,
+                        user_id=user_id,
+                        matched_count=matched_count,
+                        deleted_count=deleted_count,
+                    )
+                )
+    except Exception as exc:
+        raise DemoCleanupError(
+            f"Milvus 向量统计或清理失败：{type(exc).__name__}。"
+        ) from exc
+    finally:
+        if client is not None:
+            client.close()
+    return results, []
+
+
+def cleanup_vector_entries(
+    files: Sequence[Row],
+    env: Mapping[str, str],
+    vector_store_path: Path,
+    collection_name: str,
+    *,
+    execute: bool,
+    skip_vector_store: bool,
+) -> tuple[str, list[VectorCleanupResult], list[str]]:
+    """按当前 provider 路由 vector 统计和清理。"""
+    provider = (env.get("VECTOR_STORE_PROVIDER") or "milvus").strip().lower()
+    if provider == "milvus":
+        results, warnings = cleanup_milvus_entries(
+            files,
+            env,
+            execute=execute,
+            skip_vector_store=skip_vector_store,
+        )
+        return provider, results, warnings
+    if provider == "chroma":
+        results, warnings = cleanup_chroma_entries(
+            files,
+            vector_store_path,
+            collection_name,
+            execute=execute,
+            skip_vector_store=skip_vector_store,
+        )
+        return provider, results, warnings
+    raise DemoCleanupError("VECTOR_STORE_PROVIDER 只能设置为 milvus 或 chroma。")
+
+
 def build_cleanup_plan(
     connection,
     snapshot: DatabaseSnapshot,
@@ -906,10 +1056,11 @@ def build_cleanup_plan(
     uploads_dir: Path,
     vector_store_path: Path,
     collection_name: str,
+    env: Mapping[str, str],
     *,
-    skip_chroma: bool,
+    skip_vector_store: bool,
 ) -> CleanupPlan:
-    """构建完整清理计划，并统计 Chroma 与 uploads 影响面。"""
+    """构建完整清理计划，并统计 vector store 与 uploads 影响面。"""
     selection = build_cleanup_selection(snapshot, retention)
     candidate_files = list_candidate_files(snapshot, selection.cleanup_file_ids)
     upload_targets, skipped_upload_targets = build_upload_targets(
@@ -920,18 +1071,20 @@ def build_cleanup_plan(
     counts["upload_files"] = len(upload_targets)
     counts["upload_bytes"] = sum(target.size_bytes for target in upload_targets)
 
-    vector_results, warnings = cleanup_chroma_entries(
+    provider, vector_results, warnings = cleanup_vector_entries(
         candidate_files,
+        env,
         vector_store_path,
         collection_name,
         execute=False,
-        skip_chroma=skip_chroma,
+        skip_vector_store=skip_vector_store,
     )
-    counts["chroma_entries"] = sum(result.matched_count for result in vector_results)
-    counts["chroma_deleted_entries"] = sum(
+    counts["vector_entries"] = sum(result.matched_count for result in vector_results)
+    counts["vector_deleted_entries"] = sum(
         result.deleted_count
         for result in vector_results
     )
+    counts[f"{provider}_entries"] = counts["vector_entries"]
 
     return CleanupPlan(
         cutoff=retention.cutoff,
@@ -1189,13 +1342,15 @@ def print_plan(plan: CleanupPlan, uploads_dir: Path, *, execute: bool) -> None:
             "conversations",
             "upload_files",
             "upload_bytes",
+            "vector_entries",
+            "vector_deleted_entries",
+            "milvus_entries",
             "chroma_entries",
-            "chroma_deleted_entries",
         }:
             continue
         print(f"  {key}: {plan.counts[key]}")
-    print("Chroma:")
-    print(f"  matched_entries: {plan.counts['chroma_entries']}")
+    print("Vector store:")
+    print(f"  matched_entries: {plan.counts['vector_entries']}")
     collections: dict[str, int] = defaultdict(int)
     for result in plan.vector_results:
         collections[result.collection_name] += result.matched_count
@@ -1235,8 +1390,9 @@ def execute_cleanup(
     vector_store_path: Path,
     collection_name: str,
     candidate_files: Sequence[Row],
+    env: Mapping[str, str],
     *,
-    skip_chroma: bool,
+    skip_vector_store: bool,
 ) -> tuple[dict[str, int], int, list[str], int, list[str]]:
     """执行 PostgreSQL 和 uploads 清理。"""
     if plan.skipped_upload_targets:
@@ -1244,12 +1400,13 @@ def execute_cleanup(
             "存在越界或不可解析的上传路径，已停止执行；请先修正 storage_path 或保留这些文件。"
         )
 
-    vector_results, vector_warnings = cleanup_chroma_entries(
+    _provider, vector_results, vector_warnings = cleanup_vector_entries(
         candidate_files,
+        env,
         vector_store_path,
         collection_name,
         execute=True,
-        skip_chroma=skip_chroma,
+        skip_vector_store=skip_vector_store,
     )
     deleted_rows = delete_database_targets(connection, plan.selection)
     deleted_uploads, upload_errors = delete_upload_targets(
@@ -1314,7 +1471,8 @@ def run(args: argparse.Namespace) -> int:
             uploads_dir,
             vector_store_path,
             collection_name,
-            skip_chroma=args.skip_chroma,
+            env,
+            skip_vector_store=args.skip_vector_store,
         )
         print_plan(plan, uploads_dir, execute=args.execute)
         if not args.execute:
@@ -1337,10 +1495,11 @@ def run(args: argparse.Namespace) -> int:
             vector_store_path,
             collection_name,
             candidate_files,
-            skip_chroma=args.skip_chroma,
+            env,
+            skip_vector_store=args.skip_vector_store,
         )
         print("Execution summary:")
-        print(f"  chroma_deleted_entries: {deleted_vectors}")
+        print(f"  vector_deleted_entries: {deleted_vectors}")
         for name in sorted(deleted_rows):
             print(f"  {name}: {deleted_rows[name]}")
         print(f"  uploads_deleted: {deleted_uploads}")

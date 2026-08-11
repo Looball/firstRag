@@ -1,12 +1,12 @@
 # 文件入库与异步索引
 
-本教程沿一份文件的真实生命周期，追踪它如何从 HTTP upload 变成 PostgreSQL full-text chunk 和 Chroma vector。内容对应当前生产代码，不另造简化版 indexing，也不会把解析、OCR 或 embedding 放回 HTTP request。
+本教程沿一份文件的真实生命周期，追踪它如何从 HTTP upload 变成 PostgreSQL full-text chunk 和 Milvus entity。内容对应当前生产代码，不另造简化版 indexing，也不会把解析、OCR 或 embedding 放回 HTTP request。
 
 ## 学习目标与实验边界
 
 完成后，你将能够：
 
-- 从一个 `file_id` 追踪 `vector_index_jobs`、PostgreSQL chunk、Chroma metadata 和最终状态。
+- 从一个 `file_id` 追踪 `vector_index_jobs`、PostgreSQL chunk、Milvus metadata 和最终状态。
 - 解释 `user_id`、`deleted_at`、SHA-256 和 `index_version` 分别解决什么问题。
 - 区分 PostgreSQL 持久任务队列与 Redis worker 运行态。
 - 解释扫描 PDF fallback、双存储补偿清理和失败后的安全重试。
@@ -91,7 +91,7 @@ flowchart LR
     C --> D["worker claim"]
     D --> E["parse or OCR"]
     E --> F["chunk and embedding"]
-    F --> G["Chroma vectors"]
+    F --> G["Milvus entities"]
     F --> H["PostgreSQL chunks"]
     G --> I["file indexed and job succeeded"]
     H --> I
@@ -199,7 +199,7 @@ sequenceDiagram
 
 去重键是“同一用户 + 相同文件 bytes”，不是文件名。数据库的 partial unique index 只约束 `deleted_at IS NULL` 的活动文件，因此不会跨用户复用，也不会让已软删除记录重新暴露。
 
-知识库软删除只隐藏知识库、原会话和关联视图，不删除可复用的文件与索引。当前 `DELETE /chat/knowledge-files/{file_id}` 是永久删除：它在用户权限、uploads 路径和 advisory lock 边界内清理关系、jobs、PostgreSQL chunks、Chroma entries 与磁盘文件。不要把这两个生命周期混为一谈。
+知识库软删除只隐藏知识库、原会话和关联视图，不删除可复用的文件与索引。当前 `DELETE /chat/knowledge-files/{file_id}` 是永久删除：它在用户权限、uploads 路径和 advisory lock 边界内清理关系、jobs、PostgreSQL chunks、Milvus entities 与磁盘文件。不要把这两个生命周期混为一谈。
 
 ### 源码入口
 
@@ -286,7 +286,7 @@ sequenceDiagram
 
 `vector_index_jobs` 是持久队列和任务状态真相源。Worker 使用 `FOR UPDATE SKIP LOCKED` 领取任务，通过 `locked_at`、`heartbeat_at` 和 lease 回收超时任务。Redis 保存 worker heartbeat、短时文件处理锁和相关共享运行态；Redis 不可用时会降低可观测性和协同能力，但任务本身仍在 PostgreSQL。
 
-同一用户、同一文件最多只有一个 `queued`/`processing` 活跃任务。`index_version` 防止旧任务覆盖新状态：删除 vector、OCR 重识别或人工校对会递增版本；worker 领取旧 job 后发现版本不匹配会取消或失败为 stale，所有文件状态更新也带 `expected_index_version`。PostgreSQL advisory lock 则串行化同一文件的 indexing 与删除，弥补 Chroma 和 PostgreSQL 无法共享单一事务的问题。
+同一用户、同一文件最多只有一个 `queued`/`processing` 活跃任务。`index_version` 防止旧任务覆盖新状态：删除 vector、OCR 重识别或人工校对会递增版本；worker 领取旧 job 后发现版本不匹配会取消或失败为 stale，所有文件状态更新也带 `expected_index_version`。PostgreSQL advisory lock 则串行化同一文件的 indexing 与删除，弥补 Milvus 和 PostgreSQL 无法共享单一事务的问题。
 
 ### 源码入口
 
@@ -464,18 +464,18 @@ conda run -n firstrag python scripts/eval_pdf_ocr.py
 sequenceDiagram
     participant Indexer as vector_index_service
     participant Embed as user embedding provider
-    participant Chroma as Chroma
+    participant Vector as Milvus
     participant PG as PostgreSQL chunks
     participant File as knowledge_files
 
     Indexer->>Indexer: split documents and attach index_version
     Indexer->>Embed: embed chunks with current user's settings
-    Indexer->>Chroma: delete old file entries, add stable IDs
+    Indexer->>Vector: delete old file entities, add stable IDs
     Indexer->>PG: replace same-user file chunks
     alt both writes succeed
         Indexer->>File: status=indexed if version still matches
     else either write fails
-        Indexer->>Chroma: best-effort delete file entries
+        Indexer->>Vector: best-effort delete file entities
         Indexer->>PG: delete same-user file chunks
         Indexer->>File: status=failed if version still matches
     end
@@ -487,9 +487,9 @@ sequenceDiagram
 {user_id}:{file_id}:v{index_version}:{chunk_index}
 ```
 
-Embedding 使用当前用户保存的 provider、model、dimensions 和加密凭据。Chroma collection 也按用户与 embedding 配置派生，避免不同用户或不兼容维度混放。每个 chunk 同时写入：
+Embedding 使用当前用户保存的 provider、model、dimensions 和加密凭据。Milvus collection 按用户与 embedding identity 派生，避免不同用户或不兼容维度混放。每个 chunk 同时写入：
 
-- Chroma：embedding、正文和 metadata，服务 vector retrieval。
+- Milvus：embedding、正文和 metadata JSON，服务 filtered ANN retrieval。
 - PostgreSQL `knowledge_file_chunks`：正文、metadata、`tsvector`/trigram 索引，服务 full-text retrieval 和引用原文。
 
 两套存储不能共享事务，所以失败路径会尽力删除该用户、该文件的两边半成品，并把文件标记为 `failed`。`job.status=succeeded` 证明本次写入流程结束，但不单独证明任意 query 的 ANN 召回质量；检索质量要用当前 indexing/RAG eval 验证。
@@ -500,7 +500,7 @@ Embedding 使用当前用户保存的 provider、model、dimensions 和加密凭
 | --- | --- | --- |
 | Index 编排 | [`backend/app/services/vectors/vector_index_service.py`](../../backend/app/services/vectors/vector_index_service.py) | stable IDs、用户 collection、双写与补偿清理。 |
 | Vector store 契约 | [`backend/app/services/vectors/vector_store.py`](../../backend/app/services/vectors/vector_store.py) | `Document`、stable ID、单文件替换/删除、检索、审计、计数和健康检查。 |
-| Chroma adapter | [`backend/app/services/vectors/chroma_vector_store.py`](../../backend/app/services/vectors/chroma_vector_store.py) | Chroma filter、私有 collection、distance 和异常分类。 |
+| Milvus adapter | [`backend/app/services/vectors/milvus_vector_store.py`](../../backend/app/services/vectors/milvus_vector_store.py) | scalar filter、Strong consistency、distance 归一化和异常分类。 |
 | Embedding 设置 | [`backend/app/services/vectors/embedding_settings_service.py`](../../backend/app/services/vectors/embedding_settings_service.py) | 当前用户 provider/model/dimensions。 |
 | Embedding client | [`backend/app/services/vectors/embedding_model.py`](../../backend/app/services/vectors/embedding_model.py) | OpenAI-compatible/Qwen/ZhipuAI 请求适配。 |
 | Chunk Repository | [`backend/app/repositories/knowledge_chunk_repository.py`](../../backend/app/repositories/knowledge_chunk_repository.py) | 同用户、同文件 replace 和 full-text 查询。 |
@@ -511,7 +511,7 @@ Embedding 使用当前用户保存的 provider、model、dimensions 和加密凭
 | --- | --- | --- |
 | PostgreSQL chunk | `chunk_id`, `user_id`, `knowledge_file_id`, `chunk_index`, `index_version` | 精确定位与用户隔离。 |
 | PostgreSQL chunk | `content`, `metadata` | full-text retrieval 与引用原文。 |
-| Chroma metadata | `user_id`, `file_id`, `chunk_index`, `index_version`, location fields | vector filter、引用和版本诊断。 |
+| Milvus fields/metadata | `user_id`, `file_id`, `chunk_index`, `index_version`, location fields | scalar filter、引用和版本诊断。 |
 | `knowledge_files` | `status`, `error_message`, `index_version` | 当前文件索引状态。 |
 
 ### 可运行检查：PostgreSQL chunks
@@ -531,7 +531,7 @@ firstrag_tutorial_compose exec -T postgres \
 
 预期至少一行，`chunk_id` 包含当前 `index_version`，正文预览包含 `T089 FULL STACK SOURCE`。
 
-### 可运行检查：Chroma metadata
+### 可运行检查：Milvus metadata
 
 通过 backend 使用项目自己的 collection 命名与用户 embedding 设置，且只打印白名单字段：
 
@@ -556,7 +556,7 @@ for row in rows:
 '
 ```
 
-这里故意不打印 `source`，避免把容器内部路径当成 API 数据。预期 Chroma ID 与 PostgreSQL `chunk_id` 一致，`user_id`、`file_id`、`chunk_index`、`index_version` 对齐。
+这里故意不打印 `source`，避免把容器内部路径当成 API 数据。预期 Milvus primary key 与 PostgreSQL `chunk_id` 一致，`user_id`、`file_id`、`chunk_index`、`index_version` 对齐。
 
 最后一次性核对 file、job 与 chunk 计数：
 
@@ -607,10 +607,10 @@ firstrag_tutorial_compose exec -T postgres \
 
 1. `GET /chat/vector-index-jobs/{job_id}` 查看 `status`, `attempts`, `failure_type`, `failure_hint`, `can_retry`。
 2. `GET /chat/vector-index-jobs/health` 区分队列卡住、worker 离线和 Redis 运行态降级。
-3. `firstrag_tutorial_compose logs --tail=100 worker backend chroma provider-stub` 查看详细原因；不要复制 secret。
-4. 修复 provider、Chroma、数据库或文件问题后，再次 `POST /chat/knowledge-files/{file_id}/vectors`。没有活跃任务时会创建新 job；不要手工把旧 job 改成 `queued`。
+3. `firstrag_tutorial_compose logs --tail=100 worker backend milvus-standalone milvus-health-probe provider-stub` 查看详细原因；不要复制 secret。
+4. 修复 provider、Milvus/etcd/MinIO、数据库或文件问题后，再次 `POST /chat/knowledge-files/{file_id}/vectors`。没有活跃任务时会创建新 job；不要手工把旧 job 改成 `queued`。
 
-Worker 对可重试失败最多执行 `max_attempts` 次并使用指数退避；达到上限才进入 `failed`。索引过程任何一边失败时，补偿逻辑会清除 Chroma 和 PostgreSQL 中该文件的半成品，避免把不完整数据标成 `indexed`。
+Worker 对可重试失败最多执行 `max_attempts` 次并使用指数退避；达到上限才进入 `failed`。索引过程任何一边失败时，补偿逻辑会清除 Milvus 和 PostgreSQL 中该文件的半成品，避免把不完整数据标成 `indexed`。
 
 ## 状态追踪速查
 
@@ -620,7 +620,7 @@ Worker 对可重试失败最多执行 `max_attempts` 次并使用指数退避；
 | 哪个任务代表当前索引 | `vector_index_jobs` | `knowledge_file_id + user_id + index_version`。 |
 | worker 是否领取或卡住 | PostgreSQL job + Redis runtime | job endpoint 和 health endpoint 联合判断。 |
 | full-text 数据是否存在 | `knowledge_file_chunks` | 同用户、同文件、同版本查询。 |
-| vector metadata 是否存在 | 用户隔离 Chroma collection | 同时 filter `user_id` 和 `file_id`。 |
+| vector metadata 是否存在 | 用户/embedding identity 隔离的 Milvus collection | scalar filter 同时包含 `user_id` 和 `file_id`。 |
 | 是否真正可检索 | retrieval/evaluation | 不能只看 job 成功；继续 T-126 或运行当前 eval。 |
 
 ## 分级练习

@@ -1,13 +1,13 @@
 # 无外部密钥入门实验
 
-本实验复用 FirstRAG 的真实 FastAPI、Next.js、PostgreSQL、Redis、Chroma、worker 和 Playwright 链路，但把聊天与 embedding provider 替换为 Compose 网络内的确定性 OpenAI-compatible stub。你不需要真实账号、API Key 或公网模型服务，也不会读取仓库根目录 `.env`。
+本实验复用 FirstRAG 的真实 FastAPI、Next.js、PostgreSQL、Redis、Milvus Standalone、worker 和 Playwright 链路，但把聊天与 embedding provider 替换为 Compose 网络内的确定性 OpenAI-compatible stub。你不需要真实账号、API Key 或公网模型服务，也不会读取仓库根目录 `.env`。
 
 ## 学习目标
 
 完成实验后，你将能够：
 
 - 观察注册、登录、TXT 上传、异步向量化、hybrid retrieval、SSE 回答和 sources 展示的完整结果。
-- 区分 PostgreSQL 持久任务、worker 运行态、Chroma vectors 和前端 streaming 状态的职责。
+- 区分 PostgreSQL 持久任务、worker 运行态、Milvus entities 和前端 streaming 状态的职责。
 - 使用 Compose project、独立 volumes 和 `/dev/null` env file 解释实验为何不会污染默认 FirstRAG 环境。
 - 知道确定性 stub 能验证工程链路，但不能替代真实 provider 的质量、延迟、限流和费用评估。
 
@@ -154,14 +154,14 @@ scripts/run_full_stack_e2e.sh
 | Docker daemon 不可用 | 启动 Docker Desktop，重新运行 `docker version`。 |
 | `npx --no-install` 找不到 Playwright | 在 `frontend/` 运行 `npm ci` 和 Playwright Chromium 安装命令。 |
 | 服务 180 秒内未健康 | 查看失败日志，检查端口、磁盘空间和镜像构建错误。 |
-| 向量化一直等待 | 查看 `worker`、`postgres`、`chroma` 和 `provider-stub` 日志。 |
+| 向量化一直等待 | 查看 `worker`、`postgres`、`milvus-standalone`、`milvus-health-probe` 和 `provider-stub` 日志。 |
 | 页面回答存在但没有 sources | 查看 browser test 输出、backend streaming 日志和 `MessageSourceList` 对应链路。 |
 | 上次异常退出留下资源 | 使用准确的 Compose project 名执行手动清理，再重新运行。 |
 
 ## 隔离边界
 
 - `--env-file /dev/null` 且 E2E override 清空 backend/worker 的 `env_file`，不会读取根 `.env`。
-- 每次默认使用带进程号的 `firstrag-t089-*` Compose project；PostgreSQL、Chroma 和 uploads 使用该 project 独立 volumes。
+- 每次默认使用带进程号的 `firstrag-t089-*` Compose project；PostgreSQL、Milvus/etcd/MinIO 和 uploads 使用该 project 独立 volumes。
 - provider stub 只在 Compose 内部网络监听，由 seed 脚本写入测试用户设置；占位 API Key 不是外部服务凭据。
 - 清理只使用当前 project 名，不删除默认 `uploads/`、`vector_db/`、数据库或其他 Compose project 的 volumes。
 
