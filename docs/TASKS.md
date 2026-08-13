@@ -278,7 +278,7 @@
 | `T-139` | CI required checks | `P0` | `Done` | 修复 Nano ID 与 cryptography 新增高危依赖漏洞 | `2026-08-09` | `c5b5564` |
 | `T-140` | `PLAN-20260811-01` | `P1` | `Done` | 冻结 PostgreSQL full-text 基线并确定 BGE-M3 sparse ADR | `2026-08-11` | `b0c11b9` |
 | `T-141` | `PLAN-20260811-01` | `P1` | `Done` | 接入单实例 BGE-M3 sparse encoder runtime | `2026-08-11` | `8534823` |
-| `T-142` | `PLAN-20260811-01` | `P1` | `Doing` | 扩展 Milvus dense/sparse schema 与写入生命周期 |  |  |
+| `T-142` | `PLAN-20260811-01` | `P1` | `Done` | 扩展 Milvus dense/sparse schema 与写入生命周期 | `2026-08-13` | `923ba68` |
 | `T-143` | `PLAN-20260811-01` | `P1` | `Todo` | 将混合召回与 RRF 统一迁移到 Milvus |  |  |
 | `T-144` | `PLAN-20260811-01` | `P1` | `Todo` | 移除 PostgreSQL 关键词检索并完成重建与验收 |  |  |
 | `T-145` | `PLAN-20260811-01` | `P1` | `Done` | 固化父子块切分、stable ID 与上下文扩展契约 | `2026-08-11` | `14eeca2` |
@@ -5718,7 +5718,7 @@ git diff --check
 
 - 来源计划：`PLAN-20260811-01`
 - 优先级：`P1`
-- 状态：`Doing`
+- 状态：`Done`
 - 前置任务：`T-145`。
 - 目标：为每个 child chunk 同时写入 dense `FLOAT_VECTOR` 与 BGE-M3 `SPARSE_FLOAT_VECTOR`，保持 parent/child stable ID、用户隔离、重建、删除和写后审计。
 - 技术边界：
@@ -5729,6 +5729,18 @@ git diff --check
 - 验收标准：
   - 新 schema 严格校验 dense/sparse 字段和索引，幂等重建与删除无残留。
   - 真实写后门禁同时验证 dense self-hit、sparse self-hit、parent/child ID/count、无孤儿 child 和跨用户隔离。
+- 完成记录：
+  - 新增由 `MILVUS_DENSE_SPARSE_WRITE_ENABLED` 控制的 Milvus v2 写入路径；默认保持关闭，便于在 `T-143` 完成 hybrid retrieval 前继续使用当前 dense-only collection。v2 collection identity 同时绑定用户、dense provider/model/dimension、schema version 与固定 BGE-M3 model/revision，避免误复用旧 schema。
+  - v2 entity 同时写入 dense `FLOAT_VECTOR`、learned sparse `SPARSE_FLOAT_VECTOR`、`parent_id`、`parent_index` 和 `child_index`；dense 使用 `HNSW + COSINE`，sparse 使用 `SPARSE_INVERTED_INDEX + IP + DAAT_MAXSCORE`，并为用户、文件、版本和 parent filter 建立 scalar index。
+  - dense/sparse 在写入前完整生成并校验；发布后审计覆盖 stable ID、数量、parent/child hierarchy、dense/sparse filtered top-1 self-hit。幂等重建只替换当前 v2 identity，永久删除遍历该用户全部 collection identity；失败补偿只清理本次 v2 写入，保留 dense-only rollback collection。
+  - sparse encoder client 支持受配置约束的 document batch 拆分，production preflight 校验 client batch 不超过服务端上限；vector store boundary 新增当前 collection 精确删除能力，避免失败补偿扩大删除范围。
+  - 完整 Compose rebuild 通过：migration `applied=0 skipped=10`，Milvus authenticated round-trip、BGE-M3 ready、backend、worker 和 frontend 正常；因独立 `attu` 容器占用宿主机 `8000`，本次 backend smoke 临时映射到 `127.0.0.1:18000`，容器内 `backend:8000` 拓扑未改变。
+  - 重建后容器内 backend unittest `438/438`、frontend Vitest `181/181`、lint `0 error`（保留 2 个既有 `<img>` warning）、Next.js production build、compileall、教程文档门禁、14 个 GitHub Actions pin、Compose config 和 `git diff --check` 均通过。
+  - 真实 BGE-M3/Milvus probe 通过：dense/sparse schema 与索引齐全，跨用户结果 `0`，重建后仅保留目标 child，永久删除后残留 `0`；切换前 dense-only rollback collection 保留 `2` 条并可独立删除。
+  - production preflight 的 Compose、端口、资源、Milvus/backend/worker authenticated probes、sparse encoder 和 migration dry-run 均通过；整体仅因本机 `.env` 未配置生产级 `MILVUS_URI` / `MILVUS_TOKEN` 而按预期失败。
+- 验证命令：`docker compose up -d --build`；`docker compose run --rm --no-deps ... backend python -m unittest discover tests`；`docker compose run --rm --no-deps backend python -m app.services.vectors.milvus_dense_sparse_probe`；`cd frontend && npm run lint && npm test && npm run build`；`conda run -n firstrag python -m compileall -q backend/app backend/tests scripts`；`python3 scripts/check_tutorial_docs.py`；`python3 scripts/check_github_actions_pins.py`；`docker compose config --quiet`；`conda run -n firstrag python scripts/production_preflight.py --env-file .env --migration-method compose --check-runtime-health`；`git diff --check`。
+- 完成日期：`2026-08-13`
+- 相关提交：`923ba68`
 
 ## T-143 将混合召回与 RRF 统一迁移到 Milvus
 
