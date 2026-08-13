@@ -7,7 +7,6 @@ from uuid import UUID
 from app.core.config import PDF_OCR_ENABLED
 from app.db.executor import Row
 from app.db.locks import file_index_lock
-from app.repositories.knowledge_chunk_repository import get_user_pdf_page_chunks
 from app.repositories.knowledge_file_repository import (
     get_user_knowledge_file,
     reset_file_index_state,
@@ -24,6 +23,7 @@ from app.services.knowledge_profile_cache import (
 from app.services.vectors.vector_index_queue_service import (
     enqueue_file_vector_index,
 )
+from app.services.vectors.knowledge_text_service import get_pdf_page_rows
 
 
 MAX_PDF_OCR_CORRECTION_CHARACTERS = 50000
@@ -98,7 +98,7 @@ def load_indexed_pdf_ocr_page(
         )
 
     index_version = int(file_record.get("index_version") or 0)
-    page_chunks = get_user_pdf_page_chunks(
+    page_chunks = get_pdf_page_rows(
         user_id=user_id,
         file_id=knowledge_file_id,
         page_number=page_number,

@@ -3,14 +3,14 @@
 - 状态：`Accepted`
 - 决定日期：2026-08-11
 - 对应任务：`T-140` 至 `T-144`
-- 当前运行时：Milvus 3.0.0 + PyMilvus 3.0.1，dense only；本 ADR 不在 T-140 立即切换读写
+- 当前运行时：Milvus 3.0.0 + PyMilvus 3.0.1，v3 dense/sparse/text collection
 - 基线证据：[PostgreSQL full-text 退出基线](../evals/bge_m3_sparse_baseline_20260811.md)
 
 ## 背景
 
-FirstRAG 当前把 chunk dense embedding 写入 Milvus，同时把正文写入 PostgreSQL；查询时并行执行 Milvus dense ANN 与 PostgreSQL full-text，再由应用层 RRF 融合。企业内部场景希望让向量和关键词召回统一由 Milvus 管理，并明确选择 BGE-M3 learned sparse embedding，而不是 Milvus 内置 BM25。
+FirstRAG 曾把 chunk dense embedding 写入 Milvus，同时把正文写入 PostgreSQL；查询时并行执行 Milvus dense ANN 与 PostgreSQL full-text，再由应用层 RRF 融合。企业内部场景决定让向量、检索正文和关键词召回统一由 Milvus 管理，并明确选择 BGE-M3 learned sparse embedding，而不是 Milvus 内置 BM25。
 
-本次变更只替换关键词召回职责。现有用户级 dense embedding provider、Cross-Encoder rerank、SSE sources、retrieval diagnostics、PostgreSQL chunk/source context、权限隔离和异步 indexing 契约继续保留。
+现有用户级 dense embedding provider、Cross-Encoder rerank、SSE sources、retrieval diagnostics、权限隔离和异步 indexing 契约继续保留；parent/child 正文和 source context 改由 Milvus v3 entities 提供。
 
 ## 决策摘要
 
@@ -27,7 +27,7 @@ FirstRAG 当前把 chunk dense embedding 写入 Milvus，同时把正文写入 P
 | Dense index / metric | 保持 `HNSW` + `COSINE` |
 | 融合 | Milvus `hybrid_search()` + `RRFRanker`，随后保留现有 Cross-Encoder rerank |
 | 推理拓扑 | 单独的 Compose 内网 `sparse-encoder` service，backend/worker 不重复加载模型 |
-| PostgreSQL | 保留 chunk/source context 与对账；移除 full-text/trigram 召回和仅为召回存在的 indexes |
+| PostgreSQL | 只保留关系数据、任务和 OCR audit/correction；移除 parent/child 正文表与 full-text/trigram 召回 |
 | Rollout | 新 collection identity + 维护窗口全量重建；不原地修改或混用旧 dense-only collection |
 
 BGE-M3 官方 model card 声明模型支持 dense、sparse 和 ColBERT 三种检索模式、100 多种语言和最长 8192 tokens；本阶段只启用 `lexical_weights`，不引入 ColBERT。固定 revision 的 `pytorch_model.bin` 为 2,271,145,830 bytes，另有 tokenizer 与小型 projection 文件；实际容器镜像、加载内存、冷启动和 CPU/GPU 性能由 T-141/T-144 实测，不能只按权重文件大小估算。
@@ -88,7 +88,7 @@ user_id | dense_provider | dense_model | dense_dimensions
 ```text
 user_id | dense_provider | dense_model | dense_dimensions
 | sparse_provider=bge_m3 | sparse_model=BAAI/bge-m3
-| sparse_revision=5617a9f... | schema=v2
+| sparse_revision=5617a9f... | schema=v3_milvus_text
 ```
 
 新 collection 使用独立 digest，旧 dense-only collection 不原地加字段。每条 entity schema：
@@ -99,11 +99,12 @@ user_id | dense_provider | dense_model | dense_dimensions
 | `embedding` | `FLOAT_VECTOR(dim)` | 当前用户 dense provider 输出 |
 | `sparse_embedding` | `SPARSE_FLOAT_VECTOR` | BGE-M3 lexical weights；至少一个非零、index 为非负整数、weight 为有限非负 float |
 | `content` | `VARCHAR(65535)` | chunk 正文 |
+| `parent_content` | `VARCHAR(65535)` | child 所属 parent 正文，检索后直接用于 LLM context |
 | `user_id` / `file_id` / `chunk_index` / `index_version` | scalar | 权限、范围和生命周期 |
 | `parent_id` / `parent_index` / `child_index` | scalar | parent 聚合、child 去重和上下文扩展 |
 | `metadata` | `JSON` | source/OCR/location metadata |
 
-写入前分别校验 dense 与 sparse；两者均生成成功后才删除旧 entities 和 upsert。写后门禁同时执行同 user/file dense top-1 self-hit 与 sparse top-1 self-hit，随后再写 PostgreSQL chunks 并发布 `indexed`。
+写入前分别校验 dense 与 sparse；两者均生成成功后才删除当前 identity 的旧 entities 和 insert。写后门禁核对 count、stable IDs、hierarchy、child/parent text，并执行同 user/file dense top-1 与 sparse top-1 self-hit；全部通过后才发布 `indexed`。
 
 ## Parent/child chunk 契约
 
@@ -112,8 +113,8 @@ T-145 在 v2 schema 写入前固定以下边界：
 - Markdown 标题、PDF page、DOCX 标题/段落组优先形成 parent；无可靠结构时以 `2000` 字符、`0` overlap 递归切分 parent。
 - 每个 parent 内以 `600` 字符、`100` overlap 切分 child，禁止 overlap 跨 parent；只有 child 生成 dense 与 sparse vector。
 - parent ID 为 `{user_id}:{file_id}:v{index_version}:p{parent_index}`，child ID 为 `{parent_id}:c{child_index}`；全局 `chunk_index` 继续兼容 source feedback 和预览 API。
-- PostgreSQL `knowledge_file_chunk_parents` 保存 parent 正文，`knowledge_file_chunks.parent_id` 外键保存 child 归属；PostgreSQL 可以提供 source/context，但 T-144 后不参与候选召回或关键词排序。
-- T-143 的在线顺序固定为 Milvus child hybrid search、按 parent 限流去重、Cross-Encoder 精排 child、扩展 parent 正文、按 context budget 截断。T-145 只建立数据与 identity 契约，不提前宣称该在线切流已完成。
+- 每个 Milvus child entity 同时保存 child `content` 与所属 `parent_content`；PostgreSQL 不再保存切分正文。
+- 在线顺序固定为 Milvus child hybrid search、按 parent 限流去重、Cross-Encoder 精排 child、读取 entity `parent_content`、按 context budget 截断。
 
 ## Hybrid search 与 diagnostics
 
@@ -125,11 +126,11 @@ T-145 在 v2 schema 写入前固定以下边界：
 - 使用 `RRFRanker` 融合，返回后再次复核 user/file scope；
 - 融合候选继续进入现有 Cross-Encoder rerank。
 
-配置/API 将 `fulltext_top_k` 迁移为 `sparse_top_k`，保留一个受控兼容窗口；diagnostics 同步迁移为 `dense_count`、`sparse_count`、`dense_degraded`、`sparse_degraded` 和对应 timing/error。历史消息和 eval 中的 `vector/fulltext` 字段不改写，新消息只写新口径。
+配置/API 通过数据库 migration 将 `fulltext_top_k` 重命名为 `sparse_top_k`；diagnostics 使用 `dense_count`、`sparse_count`、`dense_degraded`、`sparse_degraded` 和对应 timing/error。历史消息和 eval 中已经持久化的旧字段不改写，新消息只写新口径。
 
 query dense 与 sparse 分别缓存。Sparse cache identity 至少包含 model repo、revision、max_length 和规范化 query hash；不得只使用 dense provider identity。
 
-## PostgreSQL 退出关键词检索
+## PostgreSQL 退出检索文本存储
 
 T-144 删除：
 
@@ -138,22 +139,22 @@ T-144 删除：
 - `idx_knowledge_file_chunks_search` expression GIN index；
 - `idx_knowledge_file_chunks_content_trgm`，前提是全仓静态检查确认无其它业务查询依赖。
 
-`knowledge_file_chunks` 表及其 user/file/version indexes 保留，用于 source context、引用核验、索引 identity 审计、OCR history 衔接和失败补偿。删除索引通过新增 migration 完成，不改写历史 migration。
+`knowledge_file_chunks` 与 `knowledge_file_chunk_parents` 一并删除。切换脚本从 uploads 源文件重建 v3 collection，逐文件核对 count、version（含历史 `v0`）、identity、child/parent text 并写入不含正文的 `milvus_text_cutover_audits`；删除 migration 对所有有效 indexed file 强制检查该证明，缺失时停止而不删表。
 
 ## Rollout 与 rollback
 
-1. T-141 接入 encoder service 与契约测试，不切现有 retrieval。
-2. T-142 已在 `MILVUS_DENSE_SPARSE_WRITE_ENABLED` feature flag 后实现 v2 schema/write、独立 identity 和 dense/sparse 双 self-hit；默认仍使用现有 dense-only collection。
-3. T-143 已实现 Milvus hybrid search、新 diagnostics、child rerank 与 parent context 扩展，仍不对未重建数据切流。
-4. T-144 进入维护窗口：暂停新 indexing、等待 active jobs 为 0、备份 Milvus/PostgreSQL、创建 v2 collections、从源文件重新生成 dense+sparse、逐文件验收。
-5. current IDs/count、dense/sparse self-hit、隔离、真实 RAG/indexing eval 和 restart persistence 全部通过后切换默认。
-6. 观察期内保留旧 dense-only collections；rollback 只切回旧读路径，不把 v2 数据反向覆盖旧 schema。
+1. T-141 接入固定 revision encoder service 与契约测试。
+2. T-142 建立独立 dense/sparse schema、双向量写入和 self-hit。
+3. T-143 实现 Milvus hybrid search、新 diagnostics、child rerank 与 parent context 扩展。
+4. T-144 进入维护窗口：暂停 indexing、等待 active jobs 为 0、备份 PostgreSQL/Milvus/uploads，应用准备 migration，创建 v3 collections，从源文件重新生成 dense+sparse/text 并逐文件写入 audit。
+5. cutover audit 完整后应用删除 migration，再完成隔离、真实 RAG/indexing eval、restart persistence 和引用预览验收。
+6. 观察期内保留旧 Milvus collections 与迁移前 PostgreSQL dump；rollback 通过恢复数据库备份并切回旧版本完成，不将 v3 数据反向改写旧 schema。
 
 由于 sparse vector 无法从旧 dense embedding 推导，迁移必须重新读取源文件并调用当前用户 dense provider，同时调用 BGE-M3。缺少源文件或 dense credential 的文件进入明确失败清单，不能只生成 sparse 后发布半成品。
 
 ## 验收门禁
 
-- PostgreSQL current chunk IDs 与 v2 Milvus entities 完全一致，missing/unexpected 均为 0。
+- 每个有效 indexed file 都有匹配当前 index version 的 v3 cutover audit，count/identity/child text/parent text 缺失均为 0。
 - 每个文件至少一次 dense 与 sparse filtered top-1 self-hit；跨用户和非目标文件返回 0。
 - 真实中文、英文、数字/版本号和代码标识符 query 都能产生非空 sparse vector，并命中预期 fixture。
 - 14-case RAG eval 全部通过；目标文件命中和 sources 不低于冻结基线。

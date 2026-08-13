@@ -640,6 +640,9 @@ export function toSourcePreview(value: unknown): SourcePreview | null {
     retrievalSources: getStringArrayField(source, "retrieval_sources"),
     vectorScore: getNullableNumberField(source, ["vector_score"]),
     fulltextScore: getNullableNumberField(source, ["fulltext_score"]),
+    denseScore: getNullableNumberField(source, ["dense_score"]),
+    sparseScore: getNullableNumberField(source, ["sparse_score"]),
+    hybridScore: getNullableNumberField(source, ["hybrid_score"]),
     rrfScore: getNullableNumberField(source, ["rrf_score"]),
     rerankScore: getNullableNumberField(source, ["rerank_score"]),
   };
@@ -670,8 +673,18 @@ export function getRetrievalDiagnostics(
       ? { vectorDegraded }
       : {}),
     vectorErrors: getStringArrayField(diagnostics, "vector_errors"),
+    denseDegraded: diagnostics.dense_degraded === true,
+    denseErrors: getStringArrayField(diagnostics, "dense_errors"),
+    sparseDegraded: diagnostics.sparse_degraded === true,
+    sparseErrors: getStringArrayField(diagnostics, "sparse_errors"),
+    hybridDegraded: diagnostics.hybrid_degraded === true,
+    hybridErrors: getStringArrayField(diagnostics, "hybrid_errors"),
     vectorCount: getNullableNumberField(diagnostics, ["vector_count"]),
     fulltextCount: getNullableNumberField(diagnostics, ["fulltext_count"]),
+    denseCount: getNullableNumberField(diagnostics, ["dense_count"]),
+    sparseCount: getNullableNumberField(diagnostics, ["sparse_count"]),
+    hybridCount: getNullableNumberField(diagnostics, ["hybrid_count"]),
+    parentCount: getNullableNumberField(diagnostics, ["parent_count"]),
     fusedCount: getNullableNumberField(diagnostics, ["fused_count"]),
     rerankedCount: getNullableNumberField(diagnostics, ["reranked_count"]),
     retrievalSources: getStringArrayField(diagnostics, "retrieval_sources"),
@@ -709,6 +722,16 @@ export function getRetrievalDiagnostics(
       vectorMs: getNullableNumberField(timing, ["vector_ms"]),
       fulltextMs: getNullableNumberField(timing, ["fulltext_ms"]),
       rrfMs: getNullableNumberField(timing, ["rrf_ms"]),
+      denseEmbeddingMs: getNullableNumberField(timing, [
+        "dense_embedding_ms",
+      ]),
+      sparseEmbeddingMs: getNullableNumberField(timing, [
+        "sparse_embedding_ms",
+      ]),
+      hybridMs: getNullableNumberField(timing, ["hybrid_ms"]),
+      parentContextMs: getNullableNumberField(timing, [
+        "parent_context_ms",
+      ]),
       rerankMs: getNullableNumberField(timing, ["rerank_ms"]),
       retrievalTotalMs: getNullableNumberField(timing, [
         "retrieval_total_ms",
@@ -997,6 +1020,9 @@ export function toChatSource(value: unknown, index: number): ChatSource | null {
   const rrfScore = getOptionalNumberField(source, ["rrf_score"]);
   const vectorScore = getOptionalNumberField(source, ["vector_score"]);
   const fulltextScore = getOptionalNumberField(source, ["fulltext_score"]);
+  const denseScore = getOptionalNumberField(source, ["dense_score"]);
+  const sparseScore = getOptionalNumberField(source, ["sparse_score"]);
+  const hybridScore = getOptionalNumberField(source, ["hybrid_score"]);
   const fileId =
     getStringField(source, ["file_id", "knowledge_file_id", "document_id"]) ||
     (metadataRecord
@@ -1136,6 +1162,9 @@ export function toChatSource(value: unknown, index: number): ChatSource | null {
       : {}),
     ...(vectorScore !== undefined ? { vectorScore } : {}),
     ...(fulltextScore !== undefined ? { fulltextScore } : {}),
+    ...(denseScore !== undefined ? { denseScore } : {}),
+    ...(sparseScore !== undefined ? { sparseScore } : {}),
+    ...(hybridScore !== undefined ? { hybridScore } : {}),
     ...(rerankScore !== undefined ? { rerankScore } : {}),
     ...(rrfScore !== undefined ? { rrfScore } : {}),
     ...(retrievalSources.length > 0 ? { retrievalSources } : {}),
@@ -1174,6 +1203,9 @@ export function hasSourceShape(value: Record<string, unknown>) {
     "ocr_correction_revision",
     "vector_score",
     "fulltext_score",
+    "dense_score",
+    "sparse_score",
+    "hybrid_score",
     "rerank_score",
     "rrf_score",
     "retrieval_sources",
@@ -1376,10 +1408,10 @@ export function toRetrievalSettings(
       1,
       100
     ),
-    fulltextTopK: getBoundedNumber(
+    sparseTopK: getBoundedNumber(
       settings,
-      ["fulltext_top_k"],
-      DEFAULT_RETRIEVAL_SETTINGS.fulltextTopK,
+      ["sparse_top_k"],
+      DEFAULT_RETRIEVAL_SETTINGS.sparseTopK,
       1,
       100
     ),
@@ -1410,7 +1442,7 @@ export function serializeRetrievalSettings(
     enable_rerank: settings.enableRerank,
     top_k: settings.topK,
     vector_top_k: settings.vectorTopK,
-    fulltext_top_k: settings.fulltextTopK,
+    sparse_top_k: settings.sparseTopK,
     rrf_k: settings.rrfK,
     rerank_score_threshold: settings.rerankScoreThreshold,
   };

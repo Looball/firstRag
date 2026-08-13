@@ -23,7 +23,7 @@ Next.js proxy
   -> queue service + vector_index_jobs
   -> vector_index_worker
   -> document service + embedding
-  -> Milvus entities + PostgreSQL chunks
+  -> Milvus dense/sparse/text entities
 ```
 
 | 层 | 源码入口 | 职责 |
@@ -49,7 +49,7 @@ POST /chat
   -> 会话/知识库权限
   -> retrieval decision
   -> Milvus dense+sparse hybrid + RRFRanker
-  -> child rerank + PostgreSQL parent context
+  -> child rerank + Milvus parent_content
   -> LCEL streaming
   -> SSE token/sources/diagnostics
   -> messages 持久化
@@ -63,7 +63,7 @@ POST /chat
 | 检索流水线 | [`retrieval_pipeline.py`](../../backend/app/services/rag/retrieval_pipeline.py) | 设置、知识库画像、文件范围、hybrid retrieval 和 diagnostics。 |
 | Hybrid / Vector | [`hybrid_retriever.py`](../../backend/app/services/retrieval/hybrid_retriever.py)、[`milvus_vector_store.py`](../../backend/app/services/vectors/milvus_vector_store.py) | 两路并行、query embedding cache、严格用户/文件过滤、统一 distance 结果与 diagnostics。 |
 | Hybrid / parent context | [`hybrid_retriever.py`](../../backend/app/services/retrieval/hybrid_retriever.py)、[`milvus_vector_store.py`](../../backend/app/services/vectors/milvus_vector_store.py) | dense/sparse cache、Milvus RRF、child 限流/精排与 parent 扩展。 |
-| Compatibility / rerank | [`fulltext_retriever.py`](../../backend/app/services/retrieval/fulltext_retriever.py)、[`reranker.py`](../../backend/app/services/retrieval/reranker.py) | T-144 前的 PostgreSQL full-text 兼容路径与本地/远程精排。 |
+| Text context / rerank | [`knowledge_text_service.py`](../../backend/app/services/vectors/knowledge_text_service.py)、[`reranker.py`](../../backend/app/services/retrieval/reranker.py) | Milvus child/parent 文本读取与本地/远程精排。 |
 | Chain | [`chain_builder.py`](../../backend/app/services/rag/chain_builder.py) | LCEL Router 与问答链构建。 |
 | SSE | [`streaming.py`](../../backend/app/services/rag/streaming.py) | retrieval、sources、usage、answer 事件序列化。 |
 | 引用 | [`reference_serializer.py`](../../backend/app/services/rag/reference_serializer.py) | prompt context 和前端 sources。 |

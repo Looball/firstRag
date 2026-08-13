@@ -7,7 +7,6 @@ from app.core.config import (
     MILVUS_COLLECTION_PREFIX,
     MILVUS_CONSISTENCY_LEVEL,
     MILVUS_DATABASE,
-    MILVUS_DENSE_SPARSE_WRITE_ENABLED,
     MILVUS_TIMEOUT_SECONDS,
     MILVUS_TOKEN,
     MILVUS_URI,
@@ -31,7 +30,7 @@ def _embedding_identity_digest(
     sparse_model: str | None = None,
     sparse_revision: str | None = None,
 ) -> str:
-    """返回 dense identity 及可选 sparse v2 identity 的稳定 SHA-1 前缀。"""
+    """返回 dense identity 及可选 sparse/text v3 identity 的稳定 SHA-1 前缀。"""
     identity_parts = [
         str(user_id),
         settings.provider,
@@ -42,7 +41,7 @@ def _embedding_identity_digest(
         if not sparse_model or not sparse_revision:
             raise ValueError("sparse model 与 revision 必须同时提供")
         identity_parts.extend([
-            "schema=v2",
+            "schema=v3_milvus_text",
             "sparse_provider=bge_m3",
             sparse_model,
             sparse_revision,
@@ -98,25 +97,13 @@ def get_vector_store(
         raise ValueError("Milvus vector store 需要 user_id 和 embedding settings")
     settings = get_effective_embedding_model_settings(user_id)
     embedding_function = create_embedding_model_from_settings(settings)
-    sparse_encoder = (
-        SparseEncoderClient()
-        if MILVUS_DENSE_SPARSE_WRITE_ENABLED
-        else None
-    )
+    sparse_encoder = SparseEncoderClient()
     resolved_collection_name = build_milvus_user_collection_name(
         MILVUS_COLLECTION_PREFIX,
         user_id,
         settings,
-        sparse_model=(
-            SPARSE_ENCODER_MODEL
-            if MILVUS_DENSE_SPARSE_WRITE_ENABLED
-            else None
-        ),
-        sparse_revision=(
-            SPARSE_ENCODER_REVISION
-            if MILVUS_DENSE_SPARSE_WRITE_ENABLED
-            else None
-        ),
+        sparse_model=SPARSE_ENCODER_MODEL,
+        sparse_revision=SPARSE_ENCODER_REVISION,
     )
     return MilvusVectorStore(
         client=_create_milvus_client(),

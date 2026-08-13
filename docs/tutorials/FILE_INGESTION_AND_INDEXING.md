@@ -1,15 +1,15 @@
 # 文件入库与异步索引
 
-本教程沿一份文件的真实生命周期，追踪它如何从 HTTP upload 变成 PostgreSQL full-text chunk 和 Milvus entity。内容对应当前生产代码，不另造简化版 indexing，也不会把解析、OCR 或 embedding 放回 HTTP request。
+本教程沿一份文件的真实生命周期，追踪它如何从 HTTP upload 变成同时保存 dense/sparse vectors、child text 与 parent text 的 Milvus entity。内容对应当前生产代码，不另造简化版 indexing，也不会把解析、OCR 或 embedding 放回 HTTP request。
 
 ## 学习目标与实验边界
 
 完成后，你将能够：
 
-- 从一个 `file_id` 追踪 `vector_index_jobs`、PostgreSQL chunk、Milvus metadata 和最终状态。
+- 从一个 `file_id` 追踪 `vector_index_jobs`、Milvus text/vector metadata 和最终状态。
 - 解释 `user_id`、`deleted_at`、SHA-256 和 `index_version` 分别解决什么问题。
 - 区分 PostgreSQL 持久任务队列与 Redis worker 运行态。
-- 解释扫描 PDF fallback、双存储补偿清理和失败后的安全重试。
+- 解释扫描 PDF fallback、Milvus 写后审计、补偿清理和失败后的安全重试。
 
 建议先完成[无外部密钥入门实验](CREDENTIAL_FREE_QUICKSTART.md)。本页的动手命令专门复用该实验暂停后的隔离 Compose project；它不会读取根目录 `.env`，也不会操作默认 FirstRAG 数据。除非命令另有说明，均从仓库根目录运行。
 
@@ -90,11 +90,9 @@ flowchart LR
     B --> C["vector_index_jobs queued"]
     C --> D["worker claim"]
     D --> E["parse or OCR"]
-    E --> F["chunk and embedding"]
-    F --> G["Milvus entities"]
-    F --> H["PostgreSQL chunks"]
+    E --> F["parent/child split and dense/sparse encoding"]
+    F --> G["Milvus vectors and child/parent text"]
     G --> I["file indexed and job succeeded"]
-    H --> I
 ```
 
 ## 第一章：上传与权限
@@ -199,7 +197,7 @@ sequenceDiagram
 
 去重键是“同一用户 + 相同文件 bytes”，不是文件名。数据库的 partial unique index 只约束 `deleted_at IS NULL` 的活动文件，因此不会跨用户复用，也不会让已软删除记录重新暴露。
 
-知识库软删除只隐藏知识库、原会话和关联视图，不删除可复用的文件与索引。当前 `DELETE /chat/knowledge-files/{file_id}` 是永久删除：它在用户权限、uploads 路径和 advisory lock 边界内清理关系、jobs、PostgreSQL chunks、Milvus entities 与磁盘文件。不要把这两个生命周期混为一谈。
+知识库软删除只隐藏知识库、原会话和关联视图，不删除可复用的文件与索引。当前 `DELETE /chat/knowledge-files/{file_id}` 是永久删除：它在用户权限、uploads 路径和 advisory lock 边界内清理关系、jobs、Milvus entities 与磁盘文件。不要把这两个生命周期混为一谈。
 
 ### 源码入口
 
@@ -456,7 +454,7 @@ conda run -n firstrag python scripts/eval_pdf_ocr.py
 
 超时用例应产生安全 OCR error；混合 PDF 用例应只对扫描页调用 OCR。真实任务失败时，通过 job API 观察 `failure_type=ocr_error`、`failure_hint` 和 `can_retry=true`，详细异常只看 worker 日志，不把内部路径或凭据送到前端。
 
-## 第五章：chunk、embedding 与双存储
+## 第五章：chunk、embedding 与 Milvus 文本/向量存储
 
 ### 时序
 
@@ -466,21 +464,16 @@ sequenceDiagram
     participant Embed as user embedding provider
     participant Sparse as BGE-M3 sparse encoder
     participant Vector as Milvus
-    participant PG as PostgreSQL chunks
     participant File as knowledge_files
 
     Indexer->>Indexer: split parents/children and attach index_version
     Indexer->>Embed: embed child chunks with current user's settings
-    opt MILVUS_DENSE_SPARSE_WRITE_ENABLED=true
-        Indexer->>Sparse: encode all child texts in document mode
-    end
-    Indexer->>Vector: delete old file entities, add stable IDs
-    Indexer->>PG: replace same-user parents and child chunks
-    alt both writes succeed
+    Indexer->>Sparse: encode all child texts in document mode
+    Indexer->>Vector: replace file entities with vectors and child/parent text
+    alt write and audit succeed
         Indexer->>File: status=indexed if version still matches
-    else either write fails
+    else write or audit fails
         Indexer->>Vector: best-effort delete file entities
-        Indexer->>PG: delete same-user file chunks
         Indexer->>File: status=failed if version still matches
     end
 ```
@@ -494,55 +487,36 @@ parent_id = {user_id}:{file_id}:v{index_version}:p{parent_index}
 child_id  = {parent_id}:c{child_index}
 ```
 
-Dense embedding 使用当前用户保存的 provider、model、dimensions 和加密凭据。T-142 的 v2 collection identity 还包含固定 BGE-M3 model/revision；设置 `MILVUS_DENSE_SPARSE_WRITE_ENABLED=true` 后，worker 会先为所有 child 生成 dense 与 learned sparse，两路都成功才开始 Milvus mutation。T-144 全量重建验收前该 flag 默认关闭，避免把旧 dense-only collection 原地升级。每个 child 写入：
+Dense embedding 使用当前用户保存的 provider、model、dimensions 和加密凭据。v3 collection identity 还包含固定 BGE-M3 model/revision 与 `schema=v3_milvus_text`；worker 会先为所有 child 生成 dense 与 learned sparse，两路都成功才开始 Milvus mutation。每个 child entity 写入：
 
-- Milvus v1：dense `embedding`、正文和 metadata JSON，继续服务当前 filtered ANN retrieval。
-- Milvus v2：额外写入 `sparse_embedding`、`parent_id`、`parent_index`、`child_index`，执行 dense/sparse filtered self-hit，并在同一 feature flag 下供在线 `hybrid_search + RRFRanker` 读取；T-144 重建前默认不切流。
-- PostgreSQL `knowledge_file_chunk_parents`：parent 正文和位置 metadata，服务 source context 与后续父块扩展。
-- PostgreSQL `knowledge_file_chunks`：child 正文、`parent_id` 外键和 metadata；v2 path 只用于引用定位与审计，兼容路径在 T-144 前仍可使用已有 full-text indexes。
+- dense `embedding` 与 BGE-M3 `sparse_embedding`。
+- child `content` 与所属 parent 的 `parent_content`。
+- `parent_id`、`parent_index`、`child_index`、全局 `chunk_index`、`index_version` 与 source/OCR/location metadata。
 
-两套存储不能共享事务，所以失败路径会删除当前 collection identity 的半成品和 PostgreSQL chunks，并把文件标记为 `failed`；补偿不会删除独立 dense-only rollback collection。用户永久删除文件时才扫描该用户全部 collection identities。`job.status=succeeded` 证明本次写入流程结束，但不单独证明任意 query 的 ANN 召回质量；检索质量要用当前 indexing/RAG eval 验证。
+Milvus 写入或写后对账失败时，补偿会删除当前 collection identity 的半成品并把文件标记为 `failed`；用户永久删除文件时才扫描该用户全部 collection identities。`job.status=succeeded` 证明 count、stable IDs、child/parent text 与 dense/sparse self-hit 门禁通过，但不单独证明任意 query 的召回质量；检索质量仍要用当前 indexing/RAG eval 验证。
 
 ### 源码入口
 
 | 边界 | 当前入口 | 观察重点 |
 | --- | --- | --- |
-| Index 编排 | [`backend/app/services/vectors/vector_index_service.py`](../../backend/app/services/vectors/vector_index_service.py) | stable IDs、用户 collection、双写与补偿清理。 |
+| Index 编排 | [`backend/app/services/vectors/vector_index_service.py`](../../backend/app/services/vectors/vector_index_service.py) | stable IDs、parent text 附加、用户 collection 与补偿清理。 |
 | Vector store 契约 | [`backend/app/services/vectors/vector_store.py`](../../backend/app/services/vectors/vector_store.py) | `Document`、stable ID、单文件替换/删除、检索、审计、计数和健康检查。 |
-| Milvus adapter | [`backend/app/services/vectors/milvus_vector_store.py`](../../backend/app/services/vectors/milvus_vector_store.py) | v1/v2 schema、双编码原子写入、scalar filter、Strong consistency 和写后审计。 |
+| Milvus adapter | [`backend/app/services/vectors/milvus_vector_store.py`](../../backend/app/services/vectors/milvus_vector_store.py) | v3 schema、双编码原子写入、text fields、scalar filter、Strong consistency 和写后审计。 |
 | Sparse client | [`backend/app/services/sparse_encoder_client.py`](../../backend/app/services/sparse_encoder_client.py) | 固定 BGE-M3 identity、document/query mode 与安全错误边界。 |
 | Embedding 设置 | [`backend/app/services/vectors/embedding_settings_service.py`](../../backend/app/services/vectors/embedding_settings_service.py) | 当前用户 provider/model/dimensions。 |
 | Embedding client | [`backend/app/services/vectors/embedding_model.py`](../../backend/app/services/vectors/embedding_model.py) | OpenAI-compatible/Qwen/ZhipuAI 请求适配。 |
-| Chunk Repository | [`backend/app/repositories/knowledge_chunk_repository.py`](../../backend/app/repositories/knowledge_chunk_repository.py) | 同用户、同文件 replace 和 full-text 查询。 |
+| Text read service | [`backend/app/services/vectors/knowledge_text_service.py`](../../backend/app/services/vectors/knowledge_text_service.py) | source preview 与 OCR 工具按 file/version 读取 Milvus child/parent text。 |
 
 ### 关键字段
 
 | 存储 | 字段 | 约束或用途 |
 | --- | --- | --- |
-| PostgreSQL parent | `parent_id`, `user_id`, `knowledge_file_id`, `parent_index`, `index_version` | 完整上下文与用户隔离。 |
-| PostgreSQL child | `chunk_id`, `parent_id`, `child_index`, `chunk_index`, `index_version` | 精确命中、父块归属与旧 API 兼容。 |
-| PostgreSQL chunk | `content`, `metadata` | full-text retrieval 与引用原文。 |
-| Milvus v2 fields | `embedding`, `sparse_embedding`, `parent_id`, `parent_index`, `child_index`, `user_id`, `file_id`, `chunk_index`, `index_version` | 双路向量、父块归属、scalar filter 和版本审计。 |
+| Milvus vectors | `embedding`, `sparse_embedding` | dense COSINE 与 sparse IP retrieval。 |
+| Milvus text | `content`, `parent_content` | child rerank/source 与 LLM parent context。 |
+| Milvus identity | `chunk_id`, `parent_id`, `parent_index`, `child_index`, `user_id`, `file_id`, `chunk_index`, `index_version` | 父子归属、scalar filter 和版本审计。 |
 | `knowledge_files` | `status`, `error_message`, `index_version` | 当前文件索引状态。 |
 
-### 可运行检查：PostgreSQL chunks
-
-```bash
-firstrag_tutorial_compose exec -T postgres \
-  psql -U firstrag -d first_rag \
-  -v "user_id=${FIRSTRAG_TUTORIAL_USER_ID}" \
-  -v "file_id=${FIRSTRAG_TUTORIAL_FILE_ID}" \
-  -c "SELECT chunk_id, chunk_index, index_version,
-             left(content, 80) AS content_preview
-      FROM knowledge_file_chunks
-      WHERE user_id = :'user_id'::bigint
-        AND knowledge_file_id = :'file_id'::uuid
-      ORDER BY chunk_index;"
-```
-
-预期至少一行，`chunk_id` 包含当前 `index_version`，正文预览包含 `T089 FULL STACK SOURCE`。
-
-### 可运行检查：Milvus metadata
+### 可运行检查：Milvus text 与 metadata
 
 通过 backend 使用项目自己的 collection 命名与用户 embedding 设置，且只打印白名单字段：
 
@@ -560,16 +534,21 @@ rows = get_vector_store(user_id=user_id).list_file_vectors(
     user_id=user_id,
     file_id=file_id,
 )
-safe_keys = ("user_id", "file_id", "file_name", "file_type", "chunk_index", "index_version")
+safe_keys = ("user_id", "file_id", "file_name", "file_type", "chunk_index", "index_version", "parent_id")
 for row in rows:
     metadata = row.document.metadata
-    print(row.id, {key: metadata.get(key) for key in safe_keys})
+    print(
+        row.id,
+        {key: metadata.get(key) for key in safe_keys},
+        "child_chars=", len(row.document.page_content),
+        "parent_chars=", len(str(metadata.get("parent_content") or "")),
+    )
 '
 ```
 
-这里故意不打印 `source`，避免把容器内部路径当成 API 数据。预期 Milvus primary key 与 PostgreSQL `chunk_id` 一致，`user_id`、`file_id`、`chunk_index`、`index_version` 对齐。
+这里故意不打印正文和 `source`，避免教程日志泄露企业文本或容器路径。预期至少一行，child/parent 字符数均大于 0，`user_id`、`file_id`、`chunk_index`、`index_version` 对齐。
 
-最后一次性核对 file、job 与 chunk 计数：
+最后核对 PostgreSQL 中只保留 file/job 状态：
 
 ```bash
 firstrag_tutorial_compose exec -T postgres \
@@ -577,8 +556,7 @@ firstrag_tutorial_compose exec -T postgres \
   -v "user_id=${FIRSTRAG_TUTORIAL_USER_ID}" \
   -v "file_id=${FIRSTRAG_TUTORIAL_FILE_ID}" \
   -c "SELECT f.id AS file_id, f.status AS file_status, f.index_version,
-             j.id AS latest_job_id, j.status AS latest_job_status,
-             count(c.chunk_id) AS chunk_count
+             j.id AS latest_job_id, j.status AS latest_job_status
       FROM knowledge_files AS f
       LEFT JOIN LATERAL (
         SELECT id, status
@@ -589,17 +567,13 @@ firstrag_tutorial_compose exec -T postgres \
         ORDER BY created_at DESC
         LIMIT 1
       ) AS j ON true
-      LEFT JOIN knowledge_file_chunks AS c
-        ON c.user_id = f.user_id
-       AND c.knowledge_file_id = f.id
-       AND c.index_version = f.index_version
       WHERE f.id = :'file_id'::uuid
         AND f.user_id = :'user_id'::bigint
         AND f.deleted_at IS NULL
-      GROUP BY f.id, f.status, f.index_version, j.id, j.status;"
+      ;"
 ```
 
-正常终态是 `file_status=indexed`、`latest_job_status=succeeded` 且 `chunk_count>0`。
+正常终态是 `file_status=indexed`、`latest_job_status=succeeded`；文本计数以刚才的 Milvus 列表结果为准。
 
 ### 故障注入与恢复
 
@@ -621,7 +595,7 @@ firstrag_tutorial_compose exec -T postgres \
 3. `firstrag_tutorial_compose logs --tail=100 worker backend milvus-standalone milvus-health-probe provider-stub` 查看详细原因；不要复制 secret。
 4. 修复 provider、Milvus/etcd/MinIO、数据库或文件问题后，再次 `POST /chat/knowledge-files/{file_id}/vectors`。没有活跃任务时会创建新 job；不要手工把旧 job 改成 `queued`。
 
-Worker 对可重试失败最多执行 `max_attempts` 次并使用指数退避；达到上限才进入 `failed`。索引过程任何一边失败时，补偿逻辑会清除 Milvus 和 PostgreSQL 中该文件的半成品，避免把不完整数据标成 `indexed`。
+Worker 对可重试失败最多执行 `max_attempts` 次并使用指数退避；达到上限才进入 `failed`。Milvus 写入或对账失败时，补偿逻辑会清除当前 identity 中该文件的半成品，避免把不完整数据标成 `indexed`。
 
 ## 状态追踪速查
 
@@ -630,17 +604,16 @@ Worker 对可重试失败最多执行 `max_attempts` 次并使用指数退避；
 | 文件是否属于当前用户且活动 | `knowledge_files` | API 或 SQL 同时带 `user_id`、`deleted_at IS NULL`。 |
 | 哪个任务代表当前索引 | `vector_index_jobs` | `knowledge_file_id + user_id + index_version`。 |
 | worker 是否领取或卡住 | PostgreSQL job + Redis runtime | job endpoint 和 health endpoint 联合判断。 |
-| full-text 数据是否存在 | `knowledge_file_chunks` | 同用户、同文件、同版本查询。 |
-| vector metadata 是否存在 | 用户/embedding identity 隔离的 Milvus collection | scalar filter 同时包含 `user_id` 和 `file_id`。 |
+| child/parent text 与 vector metadata 是否存在 | 用户/embedding identity 隔离的 Milvus collection | scalar filter 同时包含 `user_id` 和 `file_id`，并检查两类文本非空。 |
 | 是否真正可检索 | retrieval/evaluation | 不能只看 job 成功；继续 T-126 或运行当前 eval。 |
 
 ## 分级练习
 
 ### 基础练习
 
-凭据要求：不需要真实 API Key。画出 `POST upload` 与 `POST vectors` 的边界，并解释为什么前者不应等待 embedding 完成。然后用本页 SQL 把 `file_id`、当前 `index_version`、job 和 chunk 串起来。
+凭据要求：不需要真实 API Key。画出 `POST upload` 与 `POST vectors` 的边界，并解释为什么前者不应等待 embedding 完成。然后把 PostgreSQL 的 `file_id/index_version/job` 与 Milvus 的 filtered entities 串起来。
 
-自检方向：upload 的终点是文件、metadata、关联和可选入队；embedding 由 worker 消费持久 job 后执行。有效 chunk 必须与文件当前 `index_version` 一致，不能只按 `file_id` 统计历史残留。
+自检方向：upload 的终点是文件、metadata、关联和可选入队；embedding 由 worker 消费持久 job 后执行。有效 Milvus entity 必须与文件当前 `index_version` 一致，且同时具有 child/parent text，不能只按 `file_id` 统计历史残留。
 
 ### 诊断练习
 

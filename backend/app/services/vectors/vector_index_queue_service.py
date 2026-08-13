@@ -97,19 +97,6 @@ def classify_vector_index_failure(error_message: str | None) -> str | None:
     if any(
         keyword in normalized
         for keyword in [
-            "knowledge_file_chunks",
-            "chunk repository",
-            "chunk insert",
-            "chunk write",
-            "chunk 写入",
-            "分块写入",
-            "全文分块写入",
-        ]
-    ):
-        return "chunk_write_error"
-    if any(
-        keyword in normalized
-        for keyword in [
             "database",
             "postgres",
             "psycopg",
@@ -173,9 +160,9 @@ def build_vector_index_failure_hint(failure_type: str | None) -> str | None:
     if failure_type == "embedding_error":
         return "Embedding 调用失败。请检查向量模型 API Key、网络连通性或稍后重新向量化。"
     if failure_type == "vector_store_error":
-        return "向量库写入失败。请确认 Milvus 可用，可删除向量后重新向量化。"
+        return "向量数据库写入失败。请确认 Milvus 可用，可删除向量后重新向量化。"
     if failure_type == "chunk_write_error":
-        return "全文分块写入失败。请检查 PostgreSQL chunk 表和迁移状态，然后重新向量化。"
+        return "历史版本的 PostgreSQL 文本写入失败。升级数据库后重新向量化到 Milvus。"
     if failure_type == "database_error":
         return "数据库写入失败。请检查数据库连接和迁移状态，然后重新向量化。"
     if failure_type == "task_timeout":
@@ -210,7 +197,7 @@ def build_safe_vector_index_error_message(
     if failure_type == "vector_store_error":
         return "向量库写入失败"
     if failure_type == "chunk_write_error":
-        return "全文分块写入失败"
+        return "历史文本写入失败"
     if failure_type == "database_error":
         return "数据库写入失败"
     if failure_type == "task_timeout":

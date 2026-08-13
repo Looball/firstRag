@@ -31,7 +31,7 @@ INDEXING_EVAL_RETRIEVAL_SETTINGS = {
     "enable_rerank": False,
     "top_k": 20,
     "vector_top_k": 100,
-    "fulltext_top_k": 100,
+    "sparse_top_k": 100,
     "rrf_k": 60,
 }
 MINIMAL_PNG_BYTES = (
@@ -703,8 +703,8 @@ def build_temp_markdown_file(run_id: str) -> tuple[str, str, str, str]:
     content = (
         f"# FirstRAG indexing eval {run_id}\n\n"
         f"唯一验收标识：{keyword}。\n\n"
-        "这份临时文档用于验证 FirstRAG 的上传、向量化、全文检索、"
-        "向量检索和聊天引用链路。若系统被问到本轮索引验收标识，"
+        "这份临时文档用于验证 FirstRAG 的上传、Milvus dense/sparse hybrid "
+        "检索和聊天引用链路。若系统被问到本轮索引验收标识，"
         f"应当引用本文件并回答标识是 {keyword}。\n"
     )
     return filename, content, "text/markdown", keyword
@@ -829,15 +829,10 @@ def compact_diagnostics(retrieval: dict[str, Any]) -> dict[str, Any]:
             retrieval.get("retrieval_sources")
             or diagnostics.get("retrieval_sources")
         ),
-        "vector_degraded": (
-            retrieval.get("vector_degraded")
-            or diagnostics.get("vector_degraded")
-        ),
-        "vector_errors": (
-            retrieval.get("vector_errors")
-            or diagnostics.get("vector_errors")
-            or []
-        ),
+        "dense_degraded": diagnostics.get("dense_degraded"),
+        "dense_errors": diagnostics.get("dense_errors") or [],
+        "sparse_degraded": diagnostics.get("sparse_degraded"),
+        "sparse_errors": diagnostics.get("sparse_errors") or [],
         "timing": diagnostics.get("timing") or {},
         "llm": diagnostics.get("llm") or {},
         "reason": retrieval.get("reason"),
@@ -1081,8 +1076,8 @@ def evaluate_result(
         source.get("retrieval_sources") or []
         for source in uploaded_file_sources
     ]
-    uploaded_file_has_vector_source = any(
-        "vector" in channels
+    uploaded_file_has_dense_sparse_source = any(
+        "dense" in channels and "sparse" in channels
         for channels in uploaded_file_source_channels
     )
     answer = chat_result.answer
@@ -1125,18 +1120,23 @@ def evaluate_result(
             "actual": source_names,
         },
         {
-            "name": "chat_vector_not_degraded",
-            "passed": diagnostics["vector_degraded"] is not True,
-            "expected": False,
+            "name": "chat_dense_sparse_not_degraded",
+            "passed": (
+                diagnostics["dense_degraded"] is not True
+                and diagnostics["sparse_degraded"] is not True
+            ),
+            "expected": {"dense_degraded": False, "sparse_degraded": False},
             "actual": {
-                "vector_degraded": diagnostics["vector_degraded"],
-                "vector_errors": diagnostics["vector_errors"],
+                "dense_degraded": diagnostics["dense_degraded"],
+                "dense_errors": diagnostics["dense_errors"],
+                "sparse_degraded": diagnostics["sparse_degraded"],
+                "sparse_errors": diagnostics["sparse_errors"],
             },
         },
         {
-            "name": "uploaded_file_source_uses_vector",
-            "passed": uploaded_file_has_vector_source,
-            "expected": "vector",
+            "name": "uploaded_file_source_uses_dense_sparse",
+            "passed": uploaded_file_has_dense_sparse_source,
+            "expected": ["dense", "sparse"],
             "actual": uploaded_file_source_channels,
         },
         {
@@ -1304,8 +1304,10 @@ def write_report(
         f"- 召回片段：{diagnostics['retrieved_count']}",
         f"- 展示引用：{len(chat['sources'])}",
         f"- 检索通道：{diagnostics['retrieval_sources'] or '—'}",
-        f"- 向量降级：{diagnostics['vector_degraded']}",
-        f"- 向量错误：{diagnostics['vector_errors'] or '—'}",
+        f"- Dense 降级：{diagnostics['dense_degraded']}",
+        f"- Dense 错误：{diagnostics['dense_errors'] or '—'}",
+        f"- Sparse 降级：{diagnostics['sparse_degraded']}",
+        f"- Sparse 错误：{diagnostics['sparse_errors'] or '—'}",
         "- LLM：provider={provider}，model={model}，tokens={tokens}".format(
             provider=diagnostics["llm"].get("provider", "—"),
             model=diagnostics["llm"].get("model", "—"),
@@ -1590,17 +1592,20 @@ def main() -> int:
                     "actual": initial_count,
                 },
                 {
-                    "name": "initial_vector_retrieval_healthy",
+                    "name": "initial_hybrid_retrieval_healthy",
                     "passed": bool(
-                        initial_diagnostics["vector_degraded"] is not True
+                        initial_diagnostics["dense_degraded"] is not True
+                        and initial_diagnostics["sparse_degraded"] is not True
                         and any(
-                            "vector" in (source.get("retrieval_sources") or [])
+                            "dense" in (source.get("retrieval_sources") or [])
+                            and "sparse" in (source.get("retrieval_sources") or [])
                             for source in initial_sources
                         )
                     ),
-                    "expected": "vector source and vector_degraded=false",
+                    "expected": "dense+sparse source without degradation",
                     "actual": {
-                        "vector_degraded": initial_diagnostics["vector_degraded"],
+                        "dense_degraded": initial_diagnostics["dense_degraded"],
+                        "sparse_degraded": initial_diagnostics["sparse_degraded"],
                         "source_count": len(initial_sources),
                     },
                 },
@@ -1626,17 +1631,20 @@ def main() -> int:
                     },
                 },
                 {
-                    "name": "reindex_vector_retrieval_healthy",
+                    "name": "reindex_hybrid_retrieval_healthy",
                     "passed": bool(
-                        recovered_diagnostics["vector_degraded"] is not True
+                        recovered_diagnostics["dense_degraded"] is not True
+                        and recovered_diagnostics["sparse_degraded"] is not True
                         and any(
-                            "vector" in (source.get("retrieval_sources") or [])
+                            "dense" in (source.get("retrieval_sources") or [])
+                            and "sparse" in (source.get("retrieval_sources") or [])
                             for source in recovered_sources
                         )
                     ),
-                    "expected": "vector source and vector_degraded=false",
+                    "expected": "dense+sparse source without degradation",
                     "actual": {
-                        "vector_degraded": recovered_diagnostics["vector_degraded"],
+                        "dense_degraded": recovered_diagnostics["dense_degraded"],
+                        "sparse_degraded": recovered_diagnostics["sparse_degraded"],
                         "source_count": len(recovered_sources),
                     },
                 },

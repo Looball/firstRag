@@ -131,7 +131,7 @@
 | `PLAN-20260801-01` | 2026-08-01 | `Done` | 拆分聊天工作台通用工具，优先收口 vector indexing 解析、状态和展示 helper。 | `T-121` |
 | `PLAN-20260802-01` | 2026-08-02 | `Done` | 在保留完整可运行实现的前提下，将 `main` 单主线转为分层教程与工程参考实现，并停止非必要功能扩展。 | `T-122` - `T-129` |
 | `PLAN-20260809-01` | 2026-08-09 | `Done` | 在保持 PostgreSQL full-text、RRF、rerank、SSE 和用户隔离行为不变的前提下，将 vector store 从 Chroma 安全迁移到 Milvus，并提供可验证的数据迁移与回滚路径。 | `T-130` - `T-138` |
-| `PLAN-20260811-01` | 2026-08-11 | `Doing` | 使用本地固定版本 BGE-M3 生成 learned sparse embeddings，引入父子块切分与父块上下文扩展，将 dense/sparse 写入、混合召回与融合统一迁移到 Milvus，并让 PostgreSQL 退出关键词检索职责。执行顺序：`T-140`、`T-141`、`T-145`、`T-142`、`T-143`、`T-144`。 | `T-140` - `T-145` |
+| `PLAN-20260811-01` | 2026-08-11 | `Done` | 使用本地固定版本 BGE-M3 生成 learned sparse embeddings，引入父子块切分与父块上下文扩展，将 dense/sparse 写入、混合召回与融合统一迁移到 Milvus，并让 PostgreSQL 退出关键词检索职责。执行顺序：`T-140`、`T-141`、`T-145`、`T-142`、`T-143`、`T-144`。 | `T-140` - `T-145` |
 
 ## 任务总览
 
@@ -280,7 +280,7 @@
 | `T-141` | `PLAN-20260811-01` | `P1` | `Done` | 接入单实例 BGE-M3 sparse encoder runtime | `2026-08-11` | `8534823` |
 | `T-142` | `PLAN-20260811-01` | `P1` | `Done` | 扩展 Milvus dense/sparse schema 与写入生命周期 | `2026-08-13` | `923ba68` |
 | `T-143` | `PLAN-20260811-01` | `P1` | `Done` | 将混合召回与 RRF 统一迁移到 Milvus |  |  |
-| `T-144` | `PLAN-20260811-01` | `P1` | `Todo` | 移除 PostgreSQL 关键词检索并完成重建与验收 |  |  |
+| `T-144` | `PLAN-20260811-01` | `P1` | `Done` | 移除 PostgreSQL 文本存储与关键词检索，并完成 Milvus 重建与验收 | 2026-08-13 | 见任务完成记录 |
 | `T-145` | `PLAN-20260811-01` | `P1` | `Done` | 固化父子块切分、stable ID 与上下文扩展契约 | `2026-08-11` | `14eeca2` |
 
 ## 新计划接入流程
@@ -5773,17 +5773,28 @@ git diff --check
 
 - 来源计划：`PLAN-20260811-01`
 - 优先级：`P1`
-- 状态：`Todo`
-- 目标：删除 PostgreSQL full-text/trigram 检索路径，重建现有 Milvus 数据并完成质量、资源、恢复与教程验收。
+- 状态：`Done`
+- 目标：删除 PostgreSQL parent/child 文本存储及 full-text/trigram 检索路径，让 Milvus 同时保存 dense/sparse vectors、child text 与 parent text，并完成重建、质量、资源、恢复与教程验收。
 - 技术边界：
-  - 通过新增 PostgreSQL migration 删除仅用于关键词召回的 expression/trigram indexes，不删除 `knowledge_file_chunks` 数据。
-  - 配置/API 从 `fulltext_top_k` 迁移为 `sparse_top_k` 时提供受控数据库迁移和前后端兼容窗口。
-  - 从源文件按 T-145 契约重新生成 parent/child chunks、dense/sparse vectors；模型下载、缓存和全量重建必须可恢复，默认不删除旧 collection，切换后再显式归档。
+  - Milvus v3 entity 保存 child `content`、`parent_content`、dense/sparse vectors、stable IDs 与位置 metadata；检索后直接用 Milvus parent text 构建 LLM context。
+  - 配置/API 通过 migration 从 `fulltext_top_k` 重命名为 `sparse_top_k`，不保留在线兼容分支。
+  - 从源文件按 T-145 契约重新生成 parent/child text、dense/sparse vectors；migration 只有在每个有效 indexed file 均留下无正文审计证明后才允许删除 PostgreSQL 文本表，旧 Milvus collection 默认保留以便回滚。
 - 验收标准：
-  - 当前源码、Compose、CI 和文档不再把 PostgreSQL 描述或调用为关键词召回器。
-  - PostgreSQL current parent/child identity 与 Milvus child entities 精确对账，missing、unexpected、orphan child 均为 0。
+  - 当前源码、Compose、CI 和文档不再把 PostgreSQL 描述或调用为文本 chunk store/关键词召回器。
+  - Milvus current child entities 的 count、identity、index version、child text、parent identity 和 parent text 全部通过写后及 cutover 审计。
   - 全量后端、前端、Docker Compose、credential-free E2E、真实 indexing/RAG eval、Milvus restart persistence、备份恢复和 production preflight 通过。
   - 记录 BGE-M3 模型体积、启动时间、CPU/GPU、峰值内存、indexing/query P50/P95 和质量对照。
+- 完成记录：
+  - Milvus collection identity 升级到 `v3_milvus_text`；entity 在 dense/sparse vectors 与 parent/child stable identity 之外显式保存 child `content` 和 `parent_content`。写后审计同时核对 count、ID、层级、两层正文、dense self-hit 与 sparse self-hit。
+  - indexing 不再写 PostgreSQL parent/child chunks；Milvus 写入成功并通过审计后才发布文件 `indexed`。删除、重建、source preview、chunk context 和 OCR 页面读取统一改为 Milvus，检索直接用返回 entity 的 parent text 构建 LLM context。
+  - 移除 PostgreSQL full-text retriever、chunk repository 和在线兼容 feature flag；migration 将 `fulltext_top_k` 重命名为 `sparse_top_k`，诊断、SSE、前端和 eval 使用 dense/sparse/hybrid 新口径，历史已持久化消息仍可只读展示 legacy fields。
+  - 新增可恢复 cutover 工具与三段 migration。migration 012 在审计不完整时已验证拒绝删表；19 个 active indexed files、163 个 entities 全部通过同版本 child/parent 文本审计后，才删除 `knowledge_file_chunks` 与 `knowledge_file_chunk_parents`。切换前 PostgreSQL backup 权限为 `600`，SHA-256 已记录在验收报告。
+  - Milvus 重启后的 authenticated health 与 19/19 文本审计通过；真实 v3 probe 覆盖 hybrid、dense-only、sparse-only、跨用户隔离、版本重建和删除。20 次预计算 hybrid query 为 P50 `6.20ms` / P95 `7.63ms`；3 次两-child 完整写入为 P50 `18.79s` / P95 `19.34s`。
+  - credential-free full-stack E2E 通过：Playwright 浏览器用例 `1/1`，16/32 维两个隔离用户的真实 upload/indexing/chat eval 均通过，Milvus 重启首次 collection query 经有界重试恢复，版本替换、永久删除和 volumes 清理通过。
+  - backend unittest `442/442`、frontend Vitest `181/181`、ESLint `0 error`（保留 2 个既有 `<img>` warning）、Next.js production build、Compose build、BGE-M3 probe、教程与 Actions pin 门禁、compileall 和 diff check 通过。backend 使用 `127.0.0.1:18000` 后 production preflight 全部通过；真实外部 provider 的 14-case 质量基线不在本轮伪造，生产发布前按目标企业语料另行建立。
+- 验收报告：[`evals/latest_milvus_text_cutover.md`](evals/latest_milvus_text_cutover.md)。
+- 验证命令：`BACKEND_PORT=18000 docker compose up -d --build`；`docker compose run --rm --no-deps -v <repo>:/workspace:ro -w /workspace/backend backend python -m unittest discover tests`；`cd frontend && npm test && npm run lint`；`docker compose exec -T sparse-encoder python -m sparse_encoder.probe`；`docker compose run --rm --no-deps backend python -m app.services.vectors.milvus_dense_sparse_probe`；`bash scripts/run_full_stack_e2e.sh`；`docker compose restart milvus-standalone`；`docker compose run --rm milvus-health-probe`；`python3 scripts/check_tutorial_docs.py`；`python3 scripts/check_github_actions_pins.py`；`conda run -n firstrag python -m compileall -q backend/app backend/tests scripts`；`docker compose config --quiet`；`BACKEND_PORT=18000 conda run -n firstrag python scripts/production_preflight.py --env-file .env --migration-method compose --check-runtime-health`；`git diff --check`。
+- 完成日期：`2026-08-13`
 
 ## T-145 固化父子块切分、stable ID 与上下文扩展契约
 

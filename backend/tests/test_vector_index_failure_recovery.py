@@ -30,7 +30,6 @@ class VectorIndexFailureRecoveryTests(unittest.TestCase):
             "PDF loader 解析失败": "parse_error",
             "Embedding request returned 429": "embedding_error",
             "Milvus collection write failed": "vector_store_error",
-            "knowledge_file_chunks chunk insert failed": "chunk_write_error",
             "psycopg database connection closed": "database_error",
             "vector index task timeout after 600 seconds": "task_timeout",
             "索引任务版本已过期": "stale_job",
@@ -53,7 +52,6 @@ class VectorIndexFailureRecoveryTests(unittest.TestCase):
             "ocr_error",
             "embedding_error",
             "vector_store_error",
-            "chunk_write_error",
             "database_error",
             "task_timeout",
             "stale_job",
@@ -75,15 +73,15 @@ class VectorIndexFailureRecoveryTests(unittest.TestCase):
             "status": "failed",
             "attempts": 3,
             "max_attempts": 3,
-            "error_message": "knowledge_file_chunks chunk insert failed",
+            "error_message": "Milvus parent content write failed",
             "result": None,
             "created_at": "2026-06-28T08:00:00",
             "updated_at": "2026-06-28T08:01:00",
         })
 
-        self.assertEqual(serialized["failure_type"], "chunk_write_error")
-        self.assertEqual(serialized["error_message"], "全文分块写入失败")
-        self.assertIn("全文分块写入失败", serialized["failure_hint"])
+        self.assertEqual(serialized["failure_type"], "vector_store_error")
+        self.assertEqual(serialized["error_message"], "向量库写入失败")
+        self.assertIn("向量数据库", serialized["failure_hint"])
         self.assertTrue(serialized["can_retry"])
 
     def test_safe_error_message_does_not_expose_sensitive_detail(self) -> None:

@@ -88,6 +88,9 @@ def serialize_source_preview(source: dict) -> dict:
         "retrieval_sources": source.get("retrieval_sources") or [],
         "vector_score": source.get("vector_score"),
         "fulltext_score": source.get("fulltext_score"),
+        "dense_score": source.get("dense_score"),
+        "sparse_score": source.get("sparse_score"),
+        "hybrid_score": source.get("hybrid_score"),
         "rrf_score": source.get("rrf_score"),
         "rerank_score": source.get("rerank_score"),
     }

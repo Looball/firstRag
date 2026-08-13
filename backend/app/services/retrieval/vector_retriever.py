@@ -5,8 +5,9 @@
 
 这种方式适合做第一阶段粗召回，因为它可以在较大的向量库中快速查找
 语义相近的片段。但 bi-encoder 的 query 和 document 是分开编码的，
-交互不充分，所以召回结果不应该直接作为最终排序。当前项目会将向量
-召回结果与全文检索结果通过 RRF 融合，再交给 Cross-Encoder 精排序。
+交互不充分，所以召回结果不应该直接作为最终排序。当前在线链路使用
+Milvus dense/sparse RRF，再交给 Cross-Encoder 精排序；本模块只保留
+dense-only Runnable 能力供专项调用。
 """
 
 from typing import Any

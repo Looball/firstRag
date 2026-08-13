@@ -1,8 +1,9 @@
 # FirstRAG 后端说明
 
 FirstRAG 后端基于 FastAPI，主入口为 `backend/app/main.py`，兼容入口为
-`backend/main.py`。生产链路使用 PostgreSQL 保存关系数据和全文检索 chunk，使用
-Milvus 保存向量；文件向量化由 PostgreSQL 持久任务队列和独立 worker 异步完成。
+`backend/main.py`。生产链路使用 PostgreSQL 保存关系数据和任务状态，使用 Milvus
+统一保存 dense/sparse vectors、child text 与 parent text；文件向量化由 PostgreSQL
+持久任务队列和独立 worker 异步完成。
 
 ## 默认启动
 
@@ -57,12 +58,12 @@ python -m app.workers.vector_index_worker
 上传文件
   -> metadata + vector_index_jobs
   -> vector_index_worker
-  -> 文档解析 / chunk / 用户 embedding
-  -> Milvus entities + PostgreSQL full-text chunks
+  -> 文档解析 / parent-child chunk / 用户 dense embedding + BGE-M3 sparse embedding
+  -> Milvus v3 entities（vectors + child text + parent text）
 
 用户提问
-  -> Milvus filtered ANN + PostgreSQL full-text
-  -> RRF + optional rerank
+  -> Milvus filtered dense/sparse hybrid search + RRF
+  -> optional rerank + Milvus parent context
   -> OpenAI-compatible LLM streaming
   -> SSE token / sources / diagnostics
 ```

@@ -23,7 +23,7 @@ def file_index_lock(user_id: int, file_id: UUID | str) -> Iterator[None]:
     """在索引或删除同一文件时持有事务级咨询锁。
 
     Milvus 和 PostgreSQL 无法共用一个事务。该锁将同一文件的索引、删除
-    操作串行化，避免旧 worker 在删除完成后再次写回向量或全文分块。
+    操作串行化，避免旧 worker 在删除完成后再次写回 Milvus entities。
     """
     lock_key = build_file_index_lock_key(user_id, file_id)
     with get_connection() as connection:

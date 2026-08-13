@@ -14,7 +14,7 @@ import type {
 type NumericRetrievalSetting =
   | "topK"
   | "vectorTopK"
-  | "fulltextTopK"
+  | "sparseTopK"
   | "rrfK";
 
 const RETRIEVAL_NUMBER_FIELDS: ReadonlyArray<{
@@ -25,7 +25,7 @@ const RETRIEVAL_NUMBER_FIELDS: ReadonlyArray<{
 }> = [
   { field: "topK", label: "最终引用", min: 1, max: 20 },
   { field: "vectorTopK", label: "Vector 召回", min: 1, max: 100 },
-  { field: "fulltextTopK", label: "Fulltext 召回", min: 1, max: 100 },
+  { field: "sparseTopK", label: "Sparse 召回", min: 1, max: 100 },
   { field: "rrfK", label: "RRF 候选", min: 1, max: 100 },
 ];
 

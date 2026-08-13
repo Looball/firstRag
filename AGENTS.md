@@ -14,12 +14,12 @@ FirstRAG 是一个全栈 RAG（Retrieval-Augmented Generation）应用，采用 
 - 知识库、知识文件、会话和消息管理。
 - 文件上传、SHA-256 去重、异步 vector index job。
 - 文档解析、chunk 切分、embedding、Milvus 向量入库。
-- Milvus dense/sparse filtered hybrid search、RRFRanker、child CrossEncoder rerank 与 PostgreSQL parent context；T-144 切流前保留 PostgreSQL full-text 兼容路径。
+- Milvus dense/sparse filtered hybrid search、RRFRanker、child CrossEncoder rerank 与 Milvus parent context。
 - OpenAI-compatible LLM 流式回答，并通过 SSE 返回 token、sources 和 retrieval diagnostics。
 - 用户可配置自己的 LLM provider、model 和 API Key。
 - 用户可配置自己的 embedding provider（千问/Qwen 或智谱/ZhipuAI）、model 和 API Key。
 - rerank 支持本地 BGE Cross-Encoder 和远程 Qwen rerank API 两种 provider。
-- Compose 内置单实例固定 revision BGE-M3 sparse encoder；v2 feature flag 已接入 dense/sparse 写入、query cache、Milvus hybrid retrieval 和单路降级，T-144 全量重建前默认关闭。
+- Compose 内置单实例固定 revision BGE-M3 sparse encoder；Milvus v3 entity 同时保存 dense/sparse vectors、child text 和 parent text。
 
 核心数据流：
 
@@ -31,15 +31,14 @@ FirstRAG 是一个全栈 RAG（Retrieval-Augmented Generation）应用，采用 
   -> vector_index_jobs
   -> vector_index_worker
   -> document_service 解析/切分
-  -> Milvus child dense/sparse vectors + PostgreSQL parent/child context
+  -> Milvus child dense/sparse vectors + child/parent text
   -> dense 使用用户配置的 provider，sparse 使用内网 BGE-M3
 
 用户提问
   -> frontend API proxy
   -> FastAPI /chat
   -> rag_service 构建 LCEL chain
-  -> v2 Milvus dense+sparse hybrid/RRF + child rerank + parent context
-     （T-144 前可回滚到 dense + PostgreSQL full-text 兼容路径）
+  -> Milvus dense+sparse hybrid/RRF + child rerank + entity parent context
   -> LLM streaming
   -> SSE 返回回答、sources、retrieval diagnostics
 ```
@@ -127,14 +126,14 @@ FirstRAG/
 - vector indexing 必须通过 `vector_index_jobs` 和 `vector_index_worker` 异步执行。
 - indexing 使用的 embedding 来自用户保存的 provider（千问/ZhipuAI），而非系统级环境变量。
 - 同一文件 indexing 需要使用 PostgreSQL advisory lock 或版本号保护，避免旧任务覆盖新结果。
-- 删除向量化结果时必须同时处理 Milvus entities、PostgreSQL chunks 和 active jobs。
+- 删除向量化结果时必须同时处理 Milvus entities 和 active jobs。
 - RAG retrieval 需要尽量保留 diagnostics，便于前端展示和后续评估。
 - hybrid retrieval 的顺序和职责：
   - dense query 使用用户配置的 embedding provider，sparse query 使用固定 BGE-M3；两者分别缓存。
   - Milvus 两个 `AnnSearchRequest` 使用相同 user/file filter，并由 `RRFRanker` 融合 child。
   - 每个 parent 限制 child 候选数，reranker 精排 child 后再从 PostgreSQL 批量加载 parent 正文。
   - sparse 失败降级为 dense-only，dense 失败降级为 sparse-only；不得扩大 filter 或回退到 PostgreSQL keyword。
-  - `MILVUS_DENSE_SPARSE_WRITE_ENABLED=false` 时保留旧 dense + PostgreSQL full-text + 应用层 RRF，直到 T-144 重建切流。
+  - PostgreSQL 不保存或检索 parent/child 正文；source preview、OCR 页定位与 LLM context 均读取 Milvus entity。
 - dense query embedding 按用户、provider、model 和 dimensions 缓存；sparse cache identity 包含 BGE-M3 model、revision、max length 和 query hash。
 - LLM streaming 过程中要持久化 assistant message 状态，失败时写入 `failed` 和 `error_message`。
 - 回答 sources 和 retrieval diagnostics 应保存到 `messages.sources` 与 `messages.retrieval`。
@@ -161,7 +160,6 @@ FirstRAG/
 | `knowledge_bases` | 知识库。 |
 | `knowledge_files` | 知识文件 metadata。 |
 | `knowledge_base_files` | 知识库与文件关联。 |
-| `knowledge_file_chunks` | 文本 chunk 和 full-text search 数据。 |
 | `conversations` | 会话。 |
 | `messages` | 消息、sources、retrieval diagnostics。 |
 | `vector_index_jobs` | 向量化任务队列。 |

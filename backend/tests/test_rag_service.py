@@ -66,8 +66,9 @@ class RagReferenceFilteringTests(unittest.TestCase):
                 metadata={
                     "file_id": str(uuid4()),
                     "file_name": "relevant.pdf",
-                    "vector_score": 0.12,
-                    "fulltext_score": 3.45,
+                    "dense_score": 0.88,
+                    "sparse_score": 3.45,
+                    "hybrid_score": 0.031,
                     "rerank_score": 1.25,
                     "index_version": 4,
                     "page_index": 1,
@@ -96,8 +97,9 @@ class RagReferenceFilteringTests(unittest.TestCase):
         self.assertEqual(len(references), 1)
         self.assertEqual(references[0]["content"], "强相关内容")
         self.assertEqual(references[0]["file_name"], "relevant.pdf")
-        self.assertEqual(references[0]["vector_score"], 0.12)
-        self.assertEqual(references[0]["fulltext_score"], 3.45)
+        self.assertEqual(references[0]["dense_score"], 0.88)
+        self.assertEqual(references[0]["sparse_score"], 3.45)
+        self.assertEqual(references[0]["hybrid_score"], 0.031)
         self.assertEqual(references[0]["index_version"], 4)
         self.assertEqual(references[0]["page_index"], 1)
         self.assertEqual(references[0]["page_number"], 2)
@@ -286,13 +288,16 @@ class RagReferenceFilteringTests(unittest.TestCase):
             {"answer": "根据资料回答。"},
         ])
         diagnostics = {
-            "vector_degraded": True,
-            "vector_errors": ["Milvus 单文件向量检索失败：file-1"],
-            "vector_count": 0,
-            "fulltext_count": 5,
+            "dense_degraded": True,
+            "dense_errors": ["dense embedding provider unavailable"],
+            "sparse_degraded": False,
+            "sparse_errors": [],
+            "dense_count": 0,
+            "sparse_count": 5,
+            "hybrid_count": 5,
             "fused_count": 5,
             "reranked_count": 5,
-            "retrieval_sources": ["fulltext"],
+            "retrieval_sources": ["sparse"],
         }
 
         with unittest.mock.patch(
@@ -311,11 +316,12 @@ class RagReferenceFilteringTests(unittest.TestCase):
             ))
 
         self.assertEqual(events[0]["type"], "retrieval")
-        self.assertTrue(events[0]["vector_degraded"])
-        self.assertEqual(events[0]["retrieval_sources"], ["fulltext"])
+        self.assertTrue(events[0]["dense_degraded"])
+        self.assertFalse(events[0]["sparse_degraded"])
+        self.assertEqual(events[0]["retrieval_sources"], ["sparse"])
         self.assertEqual(
-            events[0]["diagnostics"]["vector_errors"],
-            ["Milvus 单文件向量检索失败：file-1"],
+            events[0]["diagnostics"]["dense_errors"],
+            ["dense embedding provider unavailable"],
         )
         self.assertTrue(events[0]["diagnostics"]["knowledge_profile_cache_hit"])
         timing = events[0]["diagnostics"]["timing"]
@@ -329,13 +335,16 @@ class RagReferenceFilteringTests(unittest.TestCase):
     ) -> None:
         """ContextVar 丢失时，应从文档 metadata 中读取检索诊断。"""
         diagnostics = {
-            "vector_degraded": False,
-            "vector_errors": [],
-            "vector_count": 5,
-            "fulltext_count": 5,
+            "dense_degraded": False,
+            "dense_errors": [],
+            "sparse_degraded": False,
+            "sparse_errors": [],
+            "dense_count": 5,
+            "sparse_count": 5,
+            "hybrid_count": 5,
             "fused_count": 5,
             "reranked_count": 5,
-            "retrieval_sources": ["fulltext", "vector"],
+            "retrieval_sources": ["dense", "sparse"],
         }
         chain = FakeStreamingChain([
             {
@@ -372,9 +381,10 @@ class RagReferenceFilteringTests(unittest.TestCase):
                 knowledge_base_id=uuid4(),
             ))
 
-        self.assertEqual(events[0]["diagnostics"]["vector_count"], 5)
-        self.assertEqual(events[0]["retrieval_sources"], ["fulltext", "vector"])
-        self.assertFalse(events[0]["vector_degraded"])
+        self.assertEqual(events[0]["diagnostics"]["dense_count"], 5)
+        self.assertEqual(events[0]["retrieval_sources"], ["dense", "sparse"])
+        self.assertFalse(events[0]["dense_degraded"])
+        self.assertFalse(events[0]["sparse_degraded"])
         self.assertIn("timing", events[0]["diagnostics"])
 
     def test_stream_rag_response_includes_timing_without_retrieval_diagnostics(
@@ -690,7 +700,7 @@ class RagQueryRouterTests(unittest.TestCase):
             "enable_rerank": False,
             "top_k": 3,
             "vector_top_k": 8,
-            "fulltext_top_k": 9,
+            "sparse_top_k": 9,
             "rrf_k": 8,
             "rerank_score_threshold": 0.5,
         }
@@ -722,7 +732,7 @@ class RagQueryRouterTests(unittest.TestCase):
         _, kwargs = hybrid_mock.call_args
         self.assertEqual(kwargs["k"], 3)
         self.assertEqual(kwargs["vector_k"], 8)
-        self.assertEqual(kwargs["fulltext_k"], 9)
+        self.assertEqual(kwargs["sparse_k"], 9)
         self.assertEqual(kwargs["rrf_k"], 8)
         self.assertFalse(kwargs["rerank"])
         self.assertEqual(doc.metadata["rerank_score_threshold"], 0.5)

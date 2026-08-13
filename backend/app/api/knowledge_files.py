@@ -34,9 +34,6 @@ from app.repositories.knowledge_file_repository import (
     get_user_knowledge_files,
     get_user_knowledge_file,
 )
-from app.repositories.knowledge_chunk_repository import (
-    get_user_knowledge_file_chunk_context,
-)
 from app.repositories.vector_index_job_repository import (
     get_latest_vector_index_jobs_by_file_ids,
 )
@@ -61,6 +58,7 @@ from app.services.vectors.vector_index_queue_service import (
     enqueue_file_vector_index,
     serialize_current_vector_index_job,
 )
+from app.services.vectors.knowledge_text_service import get_file_chunk_context
 from app.services.knowledge_profile_cache import (
     invalidate_knowledge_base_context,
 )
@@ -429,7 +427,10 @@ def get_knowledge_file_chunk_context(
     user_id: int = Depends(get_current_user_id),
 ):
     """读取当前用户文件中目标 chunk 的完整正文和相邻上下文。"""
-    rows = get_user_knowledge_file_chunk_context(
+    file_record = get_user_knowledge_file(user_id, knowledge_file_id)
+    if file_record is None:
+        raise HTTPException(status_code=404, detail="文件不存在")
+    rows = get_file_chunk_context(
         user_id=user_id,
         file_id=knowledge_file_id,
         chunk_index=chunk_index,
@@ -444,9 +445,9 @@ def get_knowledge_file_chunk_context(
         "success": True,
         "file": {
             "id": str(knowledge_file_id),
-            "original_name": first_row["original_name"],
+            "original_name": file_record["original_name"],
             "mime_type": get_safe_knowledge_file_media_type(
-                str(first_row["original_name"]),
+                str(file_record["original_name"]),
             ),
             "index_version": first_row["index_version"],
         },

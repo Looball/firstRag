@@ -169,9 +169,10 @@ def stream_rag_response(
                 retrieval_event["retrieval_sources"] = (
                     diagnostics_with_timing.get("retrieval_sources") or []
                 )
-                retrieval_event["vector_degraded"] = bool(
-                    diagnostics_with_timing.get("vector_degraded"),
-                )
+                for route in ("dense", "sparse", "hybrid"):
+                    retrieval_event[f"{route}_degraded"] = bool(
+                        diagnostics_with_timing.get(f"{route}_degraded"),
+                    )
                 yield retrieval_event
                 retrieval_sent = True
 

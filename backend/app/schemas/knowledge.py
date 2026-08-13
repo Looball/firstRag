@@ -36,6 +36,6 @@ class UpdateRetrievalSettingsRequest(BaseModel):
     enable_rerank: bool | None = None
     top_k: int | None = Field(default=None, ge=1, le=20)
     vector_top_k: int | None = Field(default=None, ge=1, le=100)
-    fulltext_top_k: int | None = Field(default=None, ge=1, le=100)
+    sparse_top_k: int | None = Field(default=None, ge=1, le=100)
     rrf_k: int | None = Field(default=None, ge=1, le=100)
     rerank_score_threshold: float | None = Field(default=None, ge=-20, le=20)

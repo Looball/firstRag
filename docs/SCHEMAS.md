@@ -11,8 +11,6 @@
 | `knowledge_base_retrieval_settings` | 知识库级 RAG 检索策略设置。 |
 | `knowledge_files` | 知识文件元数据，包含软删除兼容字段、SHA-256 去重和索引状态；用户永久删除时会同步清理关联存储。 |
 | `knowledge_base_files` | 知识库与文件多对多关联。 |
-| `knowledge_file_chunk_parents` | 结构化父块正文、位置 metadata 和索引版本，用于上下文扩展与引用核验。 |
-| `knowledge_file_chunks` | 可检索 child chunk 正文、parent identity、metadata、全文检索索引和索引版本。 |
 | `knowledge_file_ocr_corrections` | 扫描 PDF 页级人工 OCR 修订、原始 OCR 文本和修订版本。 |
 | `knowledge_file_ocr_history` | 扫描 PDF 页级原始识别历史、质量指标和相邻趋势基线。 |
 | `conversations` | 会话，属于某个知识库。 |
@@ -21,6 +19,7 @@
 | `message_feedback` | 用户对 assistant message 的回答质量反馈，使用 `user_id + message_id` 唯一约束，不使用外键。 |
 | `message_source_feedback` | 用户对 assistant message 单个引用来源的有用性反馈，使用 `user_id + message_id + source_index` 唯一约束，不使用外键。 |
 | `vector_index_jobs` | 向量化任务队列，支持租约、重试、取消和并发 worker。 |
+| `milvus_text_cutover_audits` | T-144 切换门禁；只保存文件/version/collection/count/文本摘要，不保存正文。 |
 | `user_llm_settings` | 当前用户生效模型设置。 |
 | `user_llm_provider_credentials` | 按厂商保存的加密 API Key。 |
 | `user_embedding_settings` | 当前用户生效 embedding/向量模型设置，保存 provider、model、维度和兼容旧数据的活动密文。 |
@@ -48,18 +47,17 @@
 | `conversations` | `id`, `user_id`, `title`, `created_at`, `updated_at`, `deleted_at`, `knowledge_base_id` |
 | `messages` | `id`, `conversation_id`, `role`, `content`, `created_at`, `status`, `error_message`, `completed_at`, `sources`, `retrieval` |
 | `message_attachments` | `id`, `user_id`, `conversation_id`, `message_id`, `original_name`, `storage_path`, `mime_type`, `size_bytes`, `file_hash`, `status`, `created_at`, `updated_at` |
-| `knowledge_file_chunk_parents` | `parent_id`, `user_id`, `knowledge_file_id`, `index_version`, `parent_index`, `content`, `metadata`, `created_at`, `updated_at` |
-| `knowledge_file_chunks` | `chunk_id`, `user_id`, `knowledge_file_id`, `chunk_index`, `parent_id`, `child_index`, `content`, `metadata`, `created_at`, `updated_at`, `index_version` |
 | `knowledge_file_ocr_corrections` | `user_id`, `knowledge_file_id`, `page_number`, `original_ocr_text`, `corrected_text`, `revision`, `created_at`, `updated_at` |
 | `knowledge_file_ocr_history` | `id`, `user_id`, `knowledge_file_id`, `page_number`, `index_version`, `ocr_attempt`, `source_job_id`, `trigger`, `ocr_engine`, `ocr_confidence`, `ocr_quality`, `ocr_word_count`, `ocr_text`, `ocr_text_sha256`, `ocr_text_source`, `correction_revision`, `created_at` |
 | `vector_index_jobs` | `id`, `user_id`, `knowledge_file_id`, `knowledge_base_id`, `status`, `priority`, `attempts`, `max_attempts`, `locked_by`, `locked_at`, `started_at`, `finished_at`, `error_message`, `result`, `options`, `created_at`, `updated_at`, `available_at`, `heartbeat_at`, `index_version` |
+| `milvus_text_cutover_audits` | `knowledge_file_id`, `user_id`, `index_version`, `collection_name`, `chunk_count`, `content_sha256`, `audited_at` |
 | `user_llm_settings` | `user_id`, `credential_mode`, `provider`, `model`, `base_url`, `api_key_ciphertext`, `encryption_key_version`, `temperature`, `max_tokens`, `timeout_seconds`, `max_retries`, `created_at`, `updated_at`, `api_key_hint` |
 | `user_llm_provider_credentials` | `user_id`, `provider`, `api_key_ciphertext`, `api_key_hint`, `encryption_key_version`, `created_at`, `updated_at` |
 | `user_embedding_settings` | `user_id`, `provider`, `model`, `base_url`, `dimensions`, `api_key_ciphertext`, `api_key_hint`, `encryption_key_version`, `timeout_seconds`, `max_retries`, `created_at`, `updated_at` |
 | `user_embedding_provider_credentials` | `user_id`, `provider`, `api_key_ciphertext`, `api_key_hint`, `encryption_key_version`, `created_at`, `updated_at` |
 | `user_rerank_settings` | `user_id`, `provider`, `model`, `base_url`, `instruct`, `timeout_seconds`, `max_retries`, `created_at`, `updated_at` |
 | `user_rerank_provider_credentials` | `user_id`, `provider`, `api_key_ciphertext`, `api_key_hint`, `encryption_key_version`, `created_at`, `updated_at` |
-| `knowledge_base_retrieval_settings` | `knowledge_base_id`, `user_id`, `retrieval_mode`, `enable_query_router`, `enable_rerank`, `top_k`, `vector_top_k`, `fulltext_top_k`, `rrf_k`, `rerank_score_threshold`, `created_at`, `updated_at` |
+| `knowledge_base_retrieval_settings` | `knowledge_base_id`, `user_id`, `retrieval_mode`, `enable_query_router`, `enable_rerank`, `top_k`, `vector_top_k`, `sparse_top_k`, `rrf_k`, `rerank_score_threshold`, `created_at`, `updated_at` |
 | `message_feedback` | `id`, `user_id`, `message_id`, `rating`, `reason`, `note`, `metadata`, `created_at`, `updated_at` |
 | `message_source_feedback` | `id`, `user_id`, `message_id`, `source_index`, `knowledge_file_id`, `chunk_index`, `rating`, `note`, `metadata`, `created_at`, `updated_at` |
 
@@ -76,12 +74,12 @@
 | `MessageSourceFeedbackRequest` | `rating`, `note` | 创建或更新助手消息引用来源反馈。 |
 | `CreateKnowledgeBaseRequest` | `name` | 新建知识库，1 到 50 字符。 |
 | `RenameKnowledgeBaseRequest` | `name` | 重命名知识库，1 到 50 字符。 |
-| `UpdateRetrievalSettingsRequest` | `retrieval_mode`, `enable_query_router`, `enable_rerank`, `top_k`, `vector_top_k`, `fulltext_top_k`, `rrf_k`, `rerank_score_threshold` | 更新知识库检索策略。 |
+| `UpdateRetrievalSettingsRequest` | `retrieval_mode`, `enable_query_router`, `enable_rerank`, `top_k`, `vector_top_k`, `sparse_top_k`, `rrf_k`, `rerank_score_threshold` | 更新知识库检索策略。 |
 | `UpdateUserLLMSettingsRequest` | `credential_mode`, `provider`, `model`, `base_url`, `api_key`, `temperature`, `max_tokens`, `timeout_seconds`, `max_retries` | 更新或测试用户模型设置。 |
 | `UpdateUserEmbeddingSettingsRequest` | `provider`, `model`, `base_url`, `dimensions`, `api_key`, `timeout_seconds`, `max_retries` | 更新或测试用户 embedding/向量模型设置。 |
 | `UpdateUserRerankSettingsRequest` | `provider`, `model`, `base_url`, `instruct`, `api_key`, `timeout_seconds`, `max_retries` | 更新或测试用户 rerank 模型设置。 |
 
-知识库删除只设置 `knowledge_bases.deleted_at`，不会删除 `knowledge_base_files`、文件记录或会话；恢复时清空 `deleted_at`，因此原关联重新可见。知识文件永久删除会删除 `knowledge_files` 记录及对应关联、chunks、jobs 和 source feedback，并从历史 `messages.sources` 数组中移除引用该文件的条目。
+知识库删除只设置 `knowledge_bases.deleted_at`，不会删除 `knowledge_base_files`、文件记录或会话；恢复时清空 `deleted_at`，因此原关联重新可见。知识文件永久删除会删除 `knowledge_files` 记录及对应关联、jobs、OCR 数据和 source feedback，删除 Milvus entities 与磁盘原文，并从历史 `messages.sources` 数组中移除引用该文件的条目。
 
 ## 消息结构
 
@@ -111,8 +109,8 @@
 - `page_index` / `page_number` / `page_count`（PDF）
 - `paragraph_start` / `paragraph_end`（DOCX）
 - `retrieval_sources`
-- `vector_score`
-- `fulltext_score`
+- `dense_score`
+- `sparse_score`
 - `rrf_score`
 - `rerank_score`
 
@@ -129,7 +127,8 @@
 - `retrieved_count`
 - `source_count`
 - `retrieval_sources`
-- `vector_degraded`
+- `dense_degraded`
+- `sparse_degraded`
 - `diagnostics`
 
 其中 `need_retrieval` 继续表示最终是否检索，保留给旧前端兼容；
@@ -137,10 +136,9 @@
 `override_applied` 与 `override_reason` 表示后端规则是否覆盖了 LLM 判断，
 例如问题关键词命中当前知识库文件画像时强制检索。
 
-`knowledge_file_chunk_parents` 保存结构优先的父块：Markdown 使用标题层级，PDF
+worker 生成结构优先的父块：Markdown 使用标题层级，PDF
 至少保持页边界，DOCX 使用标题与段落组，无可靠结构的纯文本才使用无 overlap 的
-递归 fallback。`knowledge_file_chunks` 只保存 parent 内继续切分出的可检索 child；
-`parent_id` 外键和 `(parent_id, child_index)` 唯一索引阻止新数据产生孤儿或重复 child。
+递归 fallback。parent 内继续切分出可检索 child；stable ID 与写后 hierarchy 审计阻止孤儿或重复 child。
 当前默认 parent 上限为 `2000` 字符，child 为 `600` 字符且 overlap 为 `100` 字符，
 overlap 不得跨 parent。
 
@@ -148,22 +146,21 @@ parent stable ID 为 `{user_id}:{file_id}:v{index_version}:p{parent_index}`，ch
 stable ID 为 `{parent_id}:c{child_index}`。为兼容既有 source API，同一文件的全局
 `chunk_index` 仍跨 PDF page 或 DOCX block 连续分配。
 
-Milvus v2 collection 由 `MILVUS_DENSE_SPARSE_WRITE_ENABLED=true` 显式启用，
-collection digest 同时包含当前用户 dense provider/model/dimensions 与固定 BGE-M3
+Milvus v3 collection digest 同时包含当前用户 dense provider/model/dimensions 与固定 BGE-M3
 model/revision，禁止原地复用旧 dense-only schema。每个 child entity 显式保存：
 
 - `embedding FLOAT_VECTOR(dim)`：当前用户 dense provider 输出，HNSW + COSINE。
 - `sparse_embedding SPARSE_FLOAT_VECTOR`：BGE-M3 learned sparse 输出，
   `SPARSE_INVERTED_INDEX + IP + DAAT_MAXSCORE`。
+- `content`、`parent_content`：命中 child 与直接交给 LLM 的完整 parent 正文。
 - `parent_id`、`parent_index`、`child_index`：父块归属和无孤儿审计。
 - `user_id`、`file_id`、`chunk_index`、`index_version`：隔离、版本和生命周期。
 
 两种向量都生成并完成值域校验后才允许删除旧 entities；写后同时执行 dense/sparse
-filtered top-1 self-hit 和 parent/child ID/count 对账。T-144 重建完成前 feature flag
-默认关闭，因此该 schema 已可验收但尚未替换当前生产 collection。失败补偿只删除当前
-v2 identity，保留 dense-only rollback；永久文件删除才清理该用户的全部 identities。
+filtered top-1 self-hit 和 parent/child ID/count 对账。失败补偿只删除当前
+v3 identity；永久文件删除才清理该用户的全部 identities。
 
-`knowledge_file_chunks.metadata` 会随文件类型保存解析上下文。文本文件常见字段包括
+Milvus entity `metadata` 会随文件类型保存解析上下文。文本文件常见字段包括
 `source`、`file_id`、`file_name`、`user_id`、`parent_id`、`parent_index`、
 `child_id`、`child_index` 和 `chunk_index`。PDF 额外保存
 `location_type=pdf_page`、0-based `page_index`、1-based `page_number` 和

@@ -5,13 +5,11 @@ from typing import Any
 from uuid import UUID
 
 from app.core.config import PDF_OCR_HISTORY_MAX_RUNS_PER_PAGE
-from app.repositories.knowledge_chunk_repository import (
-    get_user_pdf_page_ocr_metadata,
-)
 from app.repositories.knowledge_file_repository import get_user_knowledge_file
 from app.repositories.pdf_ocr_history_repository import (
     list_pdf_ocr_page_history,
 )
+from app.services.vectors.knowledge_text_service import get_pdf_page_ocr_metadata
 
 
 class PdfOcrHistoryValidationError(ValueError):
@@ -86,7 +84,7 @@ def get_pdf_ocr_page_history_report(
         )
 
     index_version = int(file_record.get("index_version") or 0)
-    current_page = get_user_pdf_page_ocr_metadata(
+    current_page = get_pdf_page_ocr_metadata(
         user_id=user_id,
         file_id=knowledge_file_id,
         page_number=page_number,

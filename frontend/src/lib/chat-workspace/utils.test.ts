@@ -68,8 +68,11 @@ describe("chat workspace source parsing", () => {
           ocr_attempt: 2,
           ocr_correction_applied: true,
           ocr_correction_revision: 3,
+          dense_score: "0.82",
+          sparse_score: "0.71",
+          hybrid_score: "0.21",
           rerank_score: "1.25",
-          retrieval_sources: ["fulltext", "vector"],
+          retrieval_sources: ["dense", "sparse"],
           content: "matched chunk",
         },
       ],
@@ -93,8 +96,11 @@ describe("chat workspace source parsing", () => {
         ocrAttempt: 2,
         ocrCorrectionApplied: true,
         ocrCorrectionRevision: 3,
+        denseScore: 0.82,
+        sparseScore: 0.71,
+        hybridScore: 0.21,
         rerankScore: 1.25,
-        retrievalSources: ["fulltext", "vector"],
+        retrievalSources: ["dense", "sparse"],
       },
     ]);
   });
@@ -155,7 +161,7 @@ describe("chat workspace settings and formatting helpers", () => {
       enable_rerank: true,
       top_k: 50,
       vector_top_k: 0,
-      fulltext_top_k: "10",
+      sparse_top_k: "10",
       rrf_k: "200",
       rerank_score_threshold: "-30",
     });
@@ -166,7 +172,7 @@ describe("chat workspace settings and formatting helpers", () => {
       enableRerank: true,
       topK: 20,
       vectorTopK: 1,
-      fulltextTopK: 10,
+      sparseTopK: 10,
       rrfK: 100,
       rerankScoreThreshold: -20,
     });
@@ -176,7 +182,7 @@ describe("chat workspace settings and formatting helpers", () => {
       enable_rerank: true,
       top_k: 20,
       vector_top_k: 1,
-      fulltext_top_k: 10,
+      sparse_top_k: 10,
       rrf_k: 100,
       rerank_score_threshold: -20,
     });

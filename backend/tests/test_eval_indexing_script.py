@@ -36,14 +36,15 @@ class EvalIndexingScriptTests(unittest.TestCase):
     def build_chat_result(
         self,
         *,
-        vector_degraded: bool = False,
+        dense_degraded: bool = False,
+        sparse_degraded: bool = False,
         retrieval_sources: list[str] | None = None,
         filename: str = "eval.md",
         page_number: int | None = None,
         pdf_parse_method: str | None = None,
     ) -> eval_indexing.ChatResult:
         """构建最小聊天结果。"""
-        retrieval_sources = retrieval_sources or ["fulltext", "vector"]
+        retrieval_sources = retrieval_sources or ["dense", "sparse"]
         return eval_indexing.ChatResult(
             answer="本轮索引验收标识是 FirstRAGIndexingEval-test。",
             sources=[
@@ -60,10 +61,16 @@ class EvalIndexingScriptTests(unittest.TestCase):
                 "retrieved_count": 1,
                 "source_count": 1,
                 "diagnostics": {
-                    "vector_degraded": vector_degraded,
-                    "vector_errors": (
-                        ["Milvus 单文件向量检索失败：file-id"]
-                        if vector_degraded
+                    "dense_degraded": dense_degraded,
+                    "dense_errors": (
+                        ["Milvus dense 检索失败：file-id"]
+                        if dense_degraded
+                        else []
+                    ),
+                    "sparse_degraded": sparse_degraded,
+                    "sparse_errors": (
+                        ["Milvus sparse 检索失败：file-id"]
+                        if sparse_degraded
                         else []
                     ),
                     "retrieval_sources": retrieval_sources,
@@ -104,31 +111,36 @@ class EvalIndexingScriptTests(unittest.TestCase):
             pdf_content=pdf_content,
         )
 
-    def test_evaluate_result_requires_healthy_vector_source(self) -> None:
-        """indexing eval 应在向量降级或 source 未走 vector 时失败。"""
+    def test_evaluate_result_requires_healthy_dense_sparse_source(self) -> None:
+        """任一路降级或 source 未走 hybrid 时 indexing eval 应失败。"""
         checks = eval_indexing.evaluate_result(
             upload_response={"success": True},
             file_record={"original_name": "eval.md", "status": "indexed"},
             job={"status": "succeeded"},
             chat_result=self.build_chat_result(
-                vector_degraded=True,
-                retrieval_sources=["fulltext"],
+                dense_degraded=True,
+                retrieval_sources=["sparse"],
             ),
             expected_filename="eval.md",
             expected_keyword="FirstRAGIndexingEval-test",
         )
         results = {check["name"]: check for check in checks}
 
-        self.assertFalse(results["chat_vector_not_degraded"]["passed"])
-        self.assertFalse(results["uploaded_file_source_uses_vector"]["passed"])
+        self.assertFalse(results["chat_dense_sparse_not_degraded"]["passed"])
+        self.assertFalse(
+            results["uploaded_file_source_uses_dense_sparse"]["passed"],
+        )
         self.assertIn(
-            "Milvus 单文件向量检索失败：file-id",
-            results["chat_vector_not_degraded"]["actual"]["vector_errors"],
+            "Milvus dense 检索失败：file-id",
+            results["chat_dense_sparse_not_degraded"]["actual"]["dense_errors"],
         )
 
-    def test_write_report_includes_vector_errors(self) -> None:
-        """Markdown 报告应展示向量降级错误摘要。"""
-        chat_result = self.build_chat_result(vector_degraded=True)
+    def test_write_report_includes_dense_sparse_errors(self) -> None:
+        """Markdown 报告应展示 dense/sparse 降级错误摘要。"""
+        chat_result = self.build_chat_result(
+            dense_degraded=True,
+            sparse_degraded=True,
+        )
         checks = eval_indexing.evaluate_result(
             upload_response={"success": True},
             file_record={"original_name": "eval.md", "status": "indexed"},
@@ -158,9 +170,14 @@ class EvalIndexingScriptTests(unittest.TestCase):
             eval_indexing.write_report(report_path, run_record, None)
             report = report_path.read_text(encoding="utf-8")
 
-        self.assertIn("- 向量降级：True", report)
+        self.assertIn("- Dense 降级：True", report)
         self.assertIn(
-            "- 向量错误：['Milvus 单文件向量检索失败：file-id']",
+            "- Dense 错误：['Milvus dense 检索失败：file-id']",
+            report,
+        )
+        self.assertIn("- Sparse 降级：True", report)
+        self.assertIn(
+            "- Sparse 错误：['Milvus sparse 检索失败：file-id']",
             report,
         )
 

@@ -28,7 +28,7 @@ class PdfOcrHistoryServiceTests(unittest.TestCase):
                 "index_version": 3,
             },
         ), patch(
-            "app.services.documents.pdf_ocr_history_service.get_user_pdf_page_ocr_metadata",
+            "app.services.documents.pdf_ocr_history_service.get_pdf_page_ocr_metadata",
             return_value={"chunk_index": 0, "metadata": {"page_number": 2}},
         ), patch(
             "app.services.documents.pdf_ocr_history_service.list_pdf_ocr_page_history",
@@ -111,7 +111,7 @@ class PdfOcrHistoryServiceTests(unittest.TestCase):
                 "index_version": 1,
             },
         ), patch(
-            "app.services.documents.pdf_ocr_history_service.get_user_pdf_page_ocr_metadata",
+            "app.services.documents.pdf_ocr_history_service.get_pdf_page_ocr_metadata",
             return_value={"chunk_index": 0, "metadata": {"page_number": 1}},
         ), patch(
             "app.services.documents.pdf_ocr_history_service.list_pdf_ocr_page_history",
@@ -135,7 +135,7 @@ class PdfOcrHistoryServiceTests(unittest.TestCase):
                 "index_version": 1,
             },
         ), patch(
-            "app.services.documents.pdf_ocr_history_service.get_user_pdf_page_ocr_metadata",
+            "app.services.documents.pdf_ocr_history_service.get_pdf_page_ocr_metadata",
             return_value=None,
         ):
             with self.assertRaisesRegex(

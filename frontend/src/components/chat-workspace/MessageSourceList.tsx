@@ -116,10 +116,19 @@ export function MessageSourceList({
                         <span>{source.retrievalSources.join(" / ")}</span>
                       )}
                     {source.vectorScore !== undefined && (
-                      <span>Vector {source.vectorScore.toFixed(4)}</span>
+                      <span>Legacy Vector {source.vectorScore.toFixed(4)}</span>
                     )}
                     {source.fulltextScore !== undefined && (
-                      <span>Fulltext {source.fulltextScore.toFixed(4)}</span>
+                      <span>Legacy Fulltext {source.fulltextScore.toFixed(4)}</span>
+                    )}
+                    {source.denseScore !== undefined && (
+                      <span>Dense {source.denseScore.toFixed(4)}</span>
+                    )}
+                    {source.sparseScore !== undefined && (
+                      <span>Sparse {source.sparseScore.toFixed(4)}</span>
+                    )}
+                    {source.hybridScore !== undefined && (
+                      <span>Hybrid {source.hybridScore.toFixed(4)}</span>
                     )}
                     {source.rerankScore !== undefined && (
                       <span>Rerank {source.rerankScore.toFixed(4)}</span>

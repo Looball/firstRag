@@ -150,7 +150,7 @@ async function installOcrSourceFixtures(
                 pdf_parse_method: "ocr",
                 ocr_confidence: 93.15,
                 ocr_quality: "good",
-                retrieval_sources: ["fulltext", "vector"],
+                retrieval_sources: ["dense", "sparse"],
               },
             ],
           },

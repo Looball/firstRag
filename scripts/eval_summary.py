@@ -362,17 +362,24 @@ def indexing_recent_rows(records: list[dict[str, Any]], limit: int) -> list[str]
         job = record.get("job") if isinstance(record.get("job"), dict) else {}
         rows.append(
             "| {time} | {passed} | {job_status} | {elapsed} | {sources} | "
-            "{vector_degraded} | {cleanup} |".format(
+            "{dense_degraded} | {sparse_degraded} | {cleanup} |".format(
                 time=record.get("generated_at", "-"),
                 passed=format_bool(record.get("passed")),
                 job_status=job.get("status", "-"),
                 elapsed=format_number(chat.get("elapsed_seconds"), 2, "s"),
                 sources=format_number(diagnostics.get("source_count"), 0),
-                vector_degraded=(
+                dense_degraded=(
                     "是"
-                    if diagnostics.get("vector_degraded") is True
+                    if diagnostics.get("dense_degraded") is True
                     else "否"
-                    if diagnostics.get("vector_degraded") is False
+                    if diagnostics.get("dense_degraded") is False
+                    else "-"
+                ),
+                sparse_degraded=(
+                    "是"
+                    if diagnostics.get("sparse_degraded") is True
+                    else "否"
+                    if diagnostics.get("sparse_degraded") is False
                     else "-"
                 ),
                 cleanup="是" if record.get("cleanup_done") is True else "否",
@@ -439,12 +446,12 @@ def build_report(
         "",
         "## 最近 Indexing 运行",
         "",
-        "| 时间 | 结果 | Job 状态 | 聊天耗时 | 引用数 | 向量降级 | 清理关联 |",
-        "| --- | --- | --- | ---: | ---: | --- | --- |",
+        "| 时间 | 结果 | Job 状态 | 聊天耗时 | 引用数 | Dense 降级 | Sparse 降级 | 清理关联 |",
+        "| --- | --- | --- | ---: | ---: | --- | --- | --- |",
     ])
     lines.extend(
         indexing_recent_rows(indexing_records, limit)
-        or ["| - | - | - | - | - | - | - |"]
+        or ["| - | - | - | - | - | - | - | - |"]
     )
 
     lines.extend([
