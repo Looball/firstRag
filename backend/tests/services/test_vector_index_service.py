@@ -10,7 +10,6 @@ from uuid import uuid4
 from langchain_core.documents import Document
 
 from app.services.vectors.vector_index_service import (
-    audit_postgres_chunk_identity,
     build_pdf_ocr_history_entries,
     compensate_failed_file_index,
     index_file_vectors,
@@ -27,17 +26,13 @@ class VectorIndexServiceTests(unittest.TestCase):
     def test_compensation_deletes_only_current_vector_identity(self) -> None:
         """失败补偿应保留独立 dense-only rollback collection。"""
         vector_store = Mock()
-        with patch(
-            "app.services.vectors.vector_index_service.delete_file_chunks",
-        ) as delete_chunks:
-            compensate_failed_file_index(7, "file-a", vector_store)
+        compensate_failed_file_index(7, "file-a", vector_store)
 
         vector_store.delete_current_file_vectors.assert_called_once_with(
             user_id=7,
             file_id="file-a",
         )
         vector_store.delete_file_vectors.assert_not_called()
-        delete_chunks.assert_called_once_with(7, "file-a")
 
     def test_compensation_cleanup_adapter_scans_all_identities(self) -> None:
         """无法恢复当前 identity 时，credential-free cleanup 应避免残留。"""
@@ -49,8 +44,6 @@ class VectorIndexServiceTests(unittest.TestCase):
         ), patch(
             "app.services.vectors.vector_index_service.get_vector_store_for_cleanup",
             return_value=cleanup_store,
-        ), patch(
-            "app.services.vectors.vector_index_service.delete_file_chunks",
         ):
             compensate_failed_file_index(7, "file-a")
 
@@ -143,75 +136,6 @@ class VectorIndexServiceTests(unittest.TestCase):
         self.assertNotIn("_ocr_history_text", document.metadata)
         self.assertNotIn("_ocr_history_candidates", document.metadata)
 
-    def test_postgres_chunk_audit_rejects_id_or_version_drift(self) -> None:
-        """双存储审计应拒绝 chunk ID 集合或 index_version 漂移。"""
-        file_id = uuid4()
-        with patch(
-            "app.services.vectors.vector_index_service.list_file_chunk_identity_rows",
-            return_value=[
-                {
-                    "chunk_id": "chunk-a",
-                    "parent_id": "parent-a",
-                    "child_index": 0,
-                    "index_version": 4,
-                },
-                {
-                    "chunk_id": "chunk-b",
-                    "parent_id": "parent-a",
-                    "child_index": 1,
-                    "index_version": 4,
-                },
-            ],
-        ), patch(
-            "app.services.vectors.vector_index_service.list_file_parent_identity_rows",
-            return_value=[{"parent_id": "parent-a", "index_version": 4}],
-        ):
-            audit_postgres_chunk_identity(
-                user_id=1,
-                file_id=file_id,
-                expected_chunk_ids=["chunk-b", "chunk-a"],
-                expected_parent_ids=["parent-a"],
-                expected_index_version=4,
-            )
-
-        for rows in (
-            [{
-                "chunk_id": "chunk-a",
-                "parent_id": "parent-a",
-                "child_index": 0,
-                "index_version": 4,
-            }],
-            [
-                {
-                    "chunk_id": "chunk-a",
-                    "parent_id": "parent-a",
-                    "child_index": 0,
-                    "index_version": 3,
-                },
-                {
-                    "chunk_id": "chunk-b",
-                    "parent_id": "parent-a",
-                    "child_index": 1,
-                    "index_version": 3,
-                },
-            ],
-        ):
-            with self.subTest(rows=rows), patch(
-                "app.services.vectors.vector_index_service.list_file_chunk_identity_rows",
-                return_value=rows,
-            ), patch(
-                "app.services.vectors.vector_index_service.list_file_parent_identity_rows",
-                return_value=[{"parent_id": "parent-a", "index_version": 4}],
-            ):
-                with self.assertRaisesRegex(RuntimeError, "parent/child 审计失败"):
-                    audit_postgres_chunk_identity(
-                        user_id=1,
-                        file_id=file_id,
-                        expected_chunk_ids=["chunk-a", "chunk-b"],
-                        expected_parent_ids=["parent-a"],
-                        expected_index_version=4,
-                    )
-
     def test_index_file_vectors_persists_parent_child_hierarchy(self) -> None:
         """索引应同时写入 parent 正文与带稳定 identity 的 child。"""
         file_id = uuid4()
@@ -237,10 +161,6 @@ class VectorIndexServiceTests(unittest.TestCase):
                 "app.services.vectors.vector_index_service.get_vector_store",
                 return_value=vector_store,
             ), patch(
-                "app.services.vectors.vector_index_service.replace_file_chunks",
-            ) as replace_chunks, patch(
-                "app.services.vectors.vector_index_service.audit_postgres_chunk_identity",
-            ) as audit_identity, patch(
                 "app.services.vectors.vector_index_service.record_pdf_ocr_history_entries",
             ):
                 result = index_file_vectors(
@@ -253,29 +173,21 @@ class VectorIndexServiceTests(unittest.TestCase):
 
         self.assertEqual(result["parent_count"], 1)
         self.assertGreater(result["chunk_count"], 1)
-        replace_kwargs = replace_chunks.call_args.kwargs
-        self.assertEqual(len(replace_kwargs["parents"]), 1)
-        self.assertEqual(
-            replace_kwargs["parent_ids"],
-            [f"1:{file_id}:v4:p0"],
-        )
+        replace_kwargs = vector_store.replace_file_vectors.call_args.kwargs
         self.assertTrue(all(
             chunk.metadata["parent_id"] == f"1:{file_id}:v4:p0"
-            for chunk in replace_kwargs["chunks"]
+            for chunk in replace_kwargs["documents"]
+        ))
+        self.assertTrue(all(
+            chunk.metadata["parent_content"].startswith("# 第一章")
+            for chunk in replace_kwargs["documents"]
         ))
         self.assertEqual(
-            replace_kwargs["chunk_ids"],
+            replace_kwargs["ids"],
             [
                 f"1:{file_id}:v4:p0:c{child_index}"
                 for child_index in range(result["chunk_count"])
             ],
-        )
-        audit_identity.assert_called_once_with(
-            user_id=1,
-            file_id=file_id,
-            expected_chunk_ids=replace_kwargs["chunk_ids"],
-            expected_parent_ids=replace_kwargs["parent_ids"],
-            expected_index_version=4,
         )
 
     def test_index_record_loads_persistent_pdf_ocr_corrections(self) -> None:
@@ -304,9 +216,6 @@ class VectorIndexServiceTests(unittest.TestCase):
             }],
         ), patch(
             "app.services.vectors.vector_index_service.get_latest_pdf_ocr_attempts",
-            return_value={2: 3},
-        ), patch(
-            "app.services.vectors.vector_index_service._backfill_legacy_pdf_ocr_history",
             return_value={2: 3},
         ), patch(
             "app.services.vectors.vector_index_service.index_file_vectors",
@@ -371,10 +280,10 @@ class VectorIndexServiceTests(unittest.TestCase):
         self.assertNotIn("-", store.collection_name)
         self.assertIs(store._client, client)
         self.assertIs(store._embedding_model, embedding_model)
-        self.assertIsNone(store._sparse_encoder)
+        self.assertIsNotNone(store._sparse_encoder)
 
-    def test_factory_v2_identity_includes_sparse_model_and_revision(self) -> None:
-        """启用 T-142 flag 后应创建独立 v2 identity 并绑定 sparse client。"""
+    def test_factory_v3_identity_includes_sparse_model_and_revision(self) -> None:
+        """默认 identity 应绑定 v3 schema 和固定 sparse runtime。"""
         settings = EmbeddingModelSettings(
             provider="qwen",
             model="text-embedding-v4",
@@ -390,10 +299,6 @@ class VectorIndexServiceTests(unittest.TestCase):
             settings,
         )
         with patch.object(
-            vector_store_factory,
-            "MILVUS_DENSE_SPARSE_WRITE_ENABLED",
-            True,
-        ), patch.object(
             vector_store_factory,
             "get_effective_embedding_model_settings",
             return_value=settings,
@@ -436,8 +341,8 @@ class VectorIndexServiceTests(unittest.TestCase):
         self.assertIsInstance(store, MilvusVectorStore)
         self.assertEqual(store._user_collection_prefix, "firstrag_u7_")
 
-    def test_failed_indexed_publish_runs_cross_store_compensation(self) -> None:
-        """最终状态发布失败时不得保留向量和 PostgreSQL chunks。"""
+    def test_failed_indexed_publish_runs_milvus_compensation(self) -> None:
+        """最终状态发布失败时不得保留本轮 Milvus entities。"""
         file_id = uuid4()
         file_record = {
             "id": file_id,
@@ -457,9 +362,6 @@ class VectorIndexServiceTests(unittest.TestCase):
             return_value=[],
         ), patch(
             "app.services.vectors.vector_index_service.get_latest_pdf_ocr_attempts",
-            return_value={},
-        ), patch(
-            "app.services.vectors.vector_index_service._backfill_legacy_pdf_ocr_history",
             return_value={},
         ), patch(
             "app.services.vectors.vector_index_service.index_file_vectors",

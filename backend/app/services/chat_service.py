@@ -155,7 +155,9 @@ def stream_answer_and_save(
                     "override_applied",
                     "override_reason",
                     "retrieval_sources",
-                    "vector_degraded",
+                    "dense_degraded",
+                    "sparse_degraded",
+                    "hybrid_degraded",
                     "diagnostics",
                 ):
                     if optional_key in event:

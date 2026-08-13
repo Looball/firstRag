@@ -353,7 +353,7 @@ def _child_document(
     index_version: int = 1,
     content: str = "child",
 ) -> Document:
-    """创建满足 T-145 parent/child stable identity 的 child 文档。"""
+    """创建满足 Milvus v3 文本与 parent/child identity 的 child 文档。"""
     parent_id = f"{user_id}:{file_id}:v{index_version}:p{parent_index}"
     return Document(
         page_content=content,
@@ -361,6 +361,7 @@ def _child_document(
             "user_id": user_id,
             "file_id": file_id,
             "parent_id": parent_id,
+            "parent_content": f"parent context for {content}",
             "parent_index": parent_index,
             "child_index": child_index,
             "chunk_index": chunk_index,
@@ -668,10 +669,10 @@ class MilvusVectorStoreTests(unittest.TestCase):
         self.assertEqual(records[0].document.page_content, "new")
         self.assertEqual(records[0].document.metadata["page_number"], 1)
 
-    def test_dense_sparse_replace_creates_v2_schema_and_audits_both_vectors(
+    def test_dense_sparse_replace_creates_v3_schema_and_audits_text_and_vectors(
         self,
     ) -> None:
-        """v2 写入应保存层级字段并完成 dense/sparse 双 self-hit。"""
+        """v3 写入应保存两层文本并完成 dense/sparse 双 self-hit。"""
         client = FakeMilvusClient()
         sparse_encoder = FakeSparseEncoder()
         store = _store(
@@ -707,6 +708,7 @@ class MilvusVectorStoreTests(unittest.TestCase):
             "chunk_index",
             "index_version",
             "parent_id",
+            "parent_content",
             "parent_index",
             "child_index",
             "metadata",
@@ -720,6 +722,7 @@ class MilvusVectorStoreTests(unittest.TestCase):
         self.assertEqual(sparse_index["inverted_index_algo"], "DAAT_MAXSCORE")
         rows = client.collections[store.collection_name]["rows"]
         self.assertEqual(rows[ids[0]]["parent_id"], "1:file-a:v1:p0")
+        self.assertEqual(rows[ids[0]]["parent_content"], "parent context for first")
         self.assertEqual(rows[ids[1]]["child_index"], 1)
         self.assertEqual(rows[ids[0]]["sparse_embedding"], {7: 0.5, 100: 1.0})
         self.assertEqual(sparse_encoder.calls, 1)

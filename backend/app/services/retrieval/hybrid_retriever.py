@@ -1,19 +1,8 @@
-"""混合检索流水线。
-
-本模块同时维护 v2 和重建切流前的兼容检索策略。
-
-v2 path 由 Milvus 在一次 hybrid search 中执行 dense COSINE 与 BGE-M3
-sparse IP 召回和 RRFRanker 融合，再限制同 parent 的 child、精排 child，
-最后从 PostgreSQL 扩展 parent context。
-
-兼容 path 继续并行执行 Milvus dense 与 PostgreSQL full-text，并在应用层
-RRF 和可选 Cross-Encoder rerank。T-144 重建验收前由 feature flag 选择。
-"""
+"""Milvus dense/sparse 混合检索流水线。"""
 
 import logging
 import math
 from collections.abc import Sequence
-from concurrent.futures import ThreadPoolExecutor
 from contextvars import ContextVar
 from hashlib import sha256
 from threading import RLock
@@ -25,21 +14,17 @@ from uuid import UUID
 from langchain_core.documents import Document
 
 from app.core.config import (
-    MILVUS_DENSE_SPARSE_WRITE_ENABLED,
     SPARSE_ENCODER_MAX_LENGTH,
     SPARSE_ENCODER_MODEL,
     SPARSE_ENCODER_REVISION,
 )
 from app.core.observability import log_exception_event
-from app.repositories.knowledge_chunk_repository import get_user_parent_chunks
 from app.services import cache_service
-from app.services.retrieval.fulltext_retriever import get_fulltext_documents
 from app.services.retrieval.reranker import (
     DEFAULT_RERANKER_MAX_LENGTH,
     DEFAULT_RERANKER_MODEL,
     get_reranker,
 )
-from app.services.retrieval.rrf import reciprocal_rank_fusion
 from app.services.sparse_encoder_client import SparseEncoderClient
 from app.services.vectors.embedding_model import (
     create_embedding_model,
@@ -72,11 +57,7 @@ _RETRIEVAL_DIAGNOSTICS: ContextVar[dict[str, Any] | None] = ContextVar(
 def reset_retrieval_diagnostics() -> None:
     """初始化当前请求的检索诊断信息。"""
     _RETRIEVAL_DIAGNOSTICS.set({
-        "retrieval_mode": "legacy_dense_fulltext",
-        "vector_degraded": False,
-        "vector_errors": [],
-        "fulltext_degraded": False,
-        "fulltext_errors": [],
+        "retrieval_mode": "milvus_dense_sparse",
         "dense_degraded": False,
         "dense_errors": [],
         "sparse_degraded": False,
@@ -95,8 +76,6 @@ def reset_retrieval_diagnostics() -> None:
         "query_sparse_embedding_cache_ttl_seconds": (
             QUERY_SPARSE_EMBEDDING_CACHE_TTL_SECONDS
         ),
-        "vector_count": 0,
-        "fulltext_count": 0,
         "dense_count": 0,
         "sparse_count": 0,
         "hybrid_count": 0,
@@ -124,28 +103,6 @@ def update_retrieval_diagnostics(**values: Any) -> None:
     if diagnostics is None:
         return
     diagnostics.update(values)
-
-
-def add_vector_diagnostic_error(message: str) -> None:
-    """记录一次向量检索降级原因。"""
-    diagnostics = _RETRIEVAL_DIAGNOSTICS.get()
-    if diagnostics is None:
-        return
-
-    diagnostics["vector_degraded"] = True
-    errors = diagnostics.setdefault("vector_errors", [])
-    errors.append(message)
-
-
-def add_fulltext_diagnostic_error(message: str) -> None:
-    """记录一次全文检索降级原因。"""
-    diagnostics = _RETRIEVAL_DIAGNOSTICS.get()
-    if diagnostics is None:
-        return
-
-    diagnostics["fulltext_degraded"] = True
-    errors = diagnostics.setdefault("fulltext_errors", [])
-    errors.append(message)
 
 
 def add_dense_diagnostic_error(message: str) -> None:
@@ -478,183 +435,6 @@ def get_query_sparse_embedding(query: str, user_id: int) -> dict[int, float]:
     return normalized_embedding
 
 
-def get_vector_documents(
-    query: str,
-    user_id: int,
-    file_ids: Sequence[UUID | str] | None = None,
-    k: int = 5,
-) -> list[Document]:
-    """通过 provider-neutral boundary 按用户和文件范围做向量检索。"""
-    embedding_started_at = perf_counter()
-    try:
-        # 外部预计算 embedding，避免 vector store 再次调用 provider。
-        query_embedding = get_query_embedding(query, user_id)
-    except Exception as exc:
-        log_exception_event(
-            logger,
-            "retrieval_embedding_failed",
-            exc,
-            default_source="embedding",
-            user_id=user_id,
-            file_count=len(file_ids or []),
-            stage="embedding",
-            message="查询向量生成失败，降级为空向量结果",
-        )
-        add_vector_diagnostic_error("查询向量生成失败")
-        record_retrieval_timing("embedding", embedding_started_at)
-        return []
-    record_retrieval_timing("embedding", embedding_started_at)
-
-    vector_store = get_vector_store(user_id=user_id)
-    provider_name = vector_store.provider.capitalize()
-    vector_started_at = perf_counter()
-    try:
-        response = vector_store.search_vectors(
-            query_embedding=query_embedding,
-            user_id=user_id,
-            file_ids=list(file_ids) if file_ids else None,
-            k=k,
-        )
-    except Exception as exc:
-        log_exception_event(
-            logger,
-            "retrieval_vector_failed",
-            exc,
-            default_source="vector_store",
-            user_id=user_id,
-            file_count=len(file_ids or []),
-            stage="vector",
-            message=f"{provider_name} 向量检索失败，降级为空向量结果",
-        )
-        add_vector_diagnostic_error(f"{provider_name} 向量检索失败")
-        record_retrieval_timing("vector", vector_started_at)
-        return []
-    for issue in response.issues:
-        provider_name = issue.provider.capitalize()
-        log_exception_event(
-            logger,
-            "retrieval_vector_file_failed",
-            RuntimeError(issue.message),
-            default_source="vector_store",
-            user_id=user_id,
-            file_id=issue.file_id,
-            stage="vector",
-            message=f"{provider_name} 单文件向量检索失败，跳过该文件",
-        )
-        add_vector_diagnostic_error(
-            f"{provider_name} 单文件向量检索失败：{issue.file_id}",
-        )
-    record_retrieval_timing("vector", vector_started_at)
-
-    documents = []
-    for result in response.results:
-        document = result.document
-        document.metadata["retrieval_source"] = "vector"
-        document.metadata["vector_score"] = result.distance
-        documents.append(document)
-
-    update_retrieval_diagnostics(vector_count=len(documents))
-    return documents
-
-
-def get_vector_documents_with_diagnostics(
-    *,
-    query: str,
-    user_id: int,
-    file_ids: Sequence[UUID | str] | None,
-    k: int,
-) -> tuple[list[Document], dict[str, Any]]:
-    """在线程内执行向量召回，并返回该线程产生的诊断信息。"""
-    reset_retrieval_diagnostics()
-    try:
-        documents = get_vector_documents(
-            query=query,
-            user_id=user_id,
-            file_ids=file_ids,
-            k=k,
-        )
-    except Exception as exc:
-        log_exception_event(
-            logger,
-            "retrieval_vector_coarse_failed",
-            exc,
-            default_source="vector_store",
-            user_id=user_id,
-            file_count=len(file_ids or []),
-            stage="vector_coarse",
-            message="向量粗召回失败，降级为空向量结果",
-        )
-        add_vector_diagnostic_error("向量粗召回失败")
-        documents = []
-
-    diagnostics = get_retrieval_diagnostics() or {}
-    return documents, diagnostics
-
-
-def get_fulltext_documents_with_timing(
-    *,
-    query: str,
-    user_id: int,
-    file_ids: Sequence[UUID | str] | None,
-    k: int,
-) -> tuple[list[Document], float, str | None]:
-    """执行全文召回并返回耗时；失败时返回空结果和错误信息。"""
-    started_at = perf_counter()
-    try:
-        documents = get_fulltext_documents(
-            query=query,
-            user_id=user_id,
-            file_ids=file_ids,
-            k=k,
-        )
-        error_message = None
-    except Exception as exc:
-        log_exception_event(
-            logger,
-            "retrieval_fulltext_failed",
-            exc,
-            default_source="postgres",
-            user_id=user_id,
-            file_count=len(file_ids or []),
-            stage="fulltext",
-            message="全文粗召回失败，降级为空全文结果",
-        )
-        documents = []
-        error_message = "全文粗召回失败"
-
-    elapsed_ms = round((perf_counter() - started_at) * 1000, 2)
-    return documents, elapsed_ms, error_message
-
-
-def merge_vector_diagnostics(diagnostics: dict[str, Any]) -> None:
-    """将线程内向量召回诊断合并回当前请求诊断。"""
-    timing = diagnostics.get("timing")
-    if isinstance(timing, dict):
-        current = _RETRIEVAL_DIAGNOSTICS.get()
-        if current is not None:
-            current_timing = current.setdefault("timing", {})
-            for key in ("embedding_ms", "vector_ms"):
-                if key in timing:
-                    current_timing[key] = timing[key]
-
-    update_retrieval_diagnostics(
-        vector_degraded=bool(diagnostics.get("vector_degraded")),
-        vector_errors=list(diagnostics.get("vector_errors") or []),
-        query_embedding_cache_hit=bool(
-            diagnostics.get("query_embedding_cache_hit"),
-        ),
-        query_embedding_cache_key=str(
-            diagnostics.get("query_embedding_cache_key") or "",
-        ),
-        query_embedding_cache_source=str(
-            diagnostics.get("query_embedding_cache_source") or "provider",
-        ),
-        query_embedding_cache_fallback_reason=diagnostics.get(
-            "query_embedding_cache_fallback_reason",
-        ),
-    )
-
-
 def limit_child_candidates_by_parent(
     documents: Sequence[Document],
     max_children_per_parent: int = MAX_CHILD_CANDIDATES_PER_PARENT,
@@ -700,52 +480,32 @@ def expand_parent_contexts(
     user_id: int,
     context_budget_characters: int = 12_000,
 ) -> list[Document]:
-    """批量读取 parent 正文，同时保留实际命中 child 的 source identity。"""
+    """直接使用 Milvus entity 的 parent 正文扩展 LLM context。"""
     if context_budget_characters < 1:
         raise ValueError("context_budget_characters 必须大于 0")
-    rows = get_user_parent_chunks(
-        user_id,
-        [str(document.metadata.get("parent_id") or "") for document in documents],
-    )
-    rows_by_parent = {
-        str(row["parent_id"]): row
-        for row in rows
-    }
     expanded: list[Document] = []
     remaining = context_budget_characters
     errors: list[str] = []
     for document in documents:
         child_metadata = dict(document.metadata)
         parent_id = str(child_metadata.get("parent_id") or "")
-        row = rows_by_parent.get(parent_id)
-        if row is None:
+        parent_content = str(child_metadata.get("parent_content") or "")
+        if not parent_id or not parent_content:
             errors.append(f"parent context 缺失：{parent_id}")
             continue
-        else:
-            row_file_id = str(row["file_id"])
-            if row_file_id != str(child_metadata.get("file_id") or ""):
-                raise RuntimeError("PostgreSQL parent context 返回了文件范围外的数据")
-            if int(row["index_version"]) != int(
-                child_metadata.get("index_version"),
-            ):
-                raise RuntimeError("PostgreSQL parent context 与 child 版本不一致")
-            parent_content = str(row["content"] or "")
-            parent_metadata = dict(row["metadata"] or {})
-            expanded_from_parent = True
 
         if remaining <= 0:
             break
         context_content = parent_content[:remaining]
         remaining -= len(context_content)
-        # parent metadata 提供上下文范围，child metadata 最后覆盖以保留命中位置。
-        metadata = dict(parent_metadata)
-        metadata.update(child_metadata)
+        metadata = dict(child_metadata)
+        metadata.pop("parent_content", None)
         metadata.update({
             "user_id": user_id,
             "parent_id": parent_id,
             "child_id": metadata.get("child_id") or metadata.get("chunk_id"),
             "child_content": document.page_content,
-            "parent_context_expanded": expanded_from_parent,
+            "parent_context_expanded": True,
             "parent_context_truncated": len(context_content) < len(parent_content),
         })
         expanded.append(Document(
@@ -777,7 +537,7 @@ def get_milvus_hybrid_documents(
     rerank: bool,
     reranker_model: str,
 ) -> list[Document]:
-    """执行 v2 Milvus dense/sparse 检索、child rerank 与 parent 扩展。"""
+    """执行 Milvus v3 dense/sparse 检索、child rerank 与 parent 扩展。"""
     reset_retrieval_diagnostics()
     update_retrieval_diagnostics(retrieval_mode="milvus_dense_sparse")
     total_started_at = perf_counter()
@@ -981,10 +741,10 @@ def get_milvus_hybrid_documents(
             logger,
             "retrieval_parent_context_failed",
             exc,
-            default_source="postgres",
+            default_source="milvus",
             user_id=user_id,
             stage="parent_context",
-            message="parent context 扩展失败，拒绝返回未核验 child",
+            message="Milvus parent context 扩展失败，拒绝返回缺失正文的 child",
         )
         update_retrieval_diagnostics(
             parent_context_degraded=True,
@@ -1002,141 +762,20 @@ def get_hybrid_documents(
     file_ids: Sequence[UUID | str] | None = None,
     k: int = 5,
     vector_k: int = 20,
-    fulltext_k: int = 20,
+    sparse_k: int = 20,
     rrf_k: int = 10,
-    vector_weight: float = 1.0,
-    fulltext_weight: float = 1.0,
     rerank: bool = True,
     reranker_model: str = DEFAULT_RERANKER_MODEL,
 ) -> list[Document]:
-    """执行当前 feature flag 对应的混合召回与 Cross-Encoder 精排序。
-
-    v2 collection 启用后由 Milvus 对 dense/sparse 两路做 RRF；关闭时
-    保留原有 dense + PostgreSQL full-text 路径，供 T-144 重建切换前使用。
-    """
-    if MILVUS_DENSE_SPARSE_WRITE_ENABLED:
-        # T-144 才迁移公开 settings 名称；当前复用 fulltext_k 作为 sparse_k。
-        return get_milvus_hybrid_documents(
-            query=query,
-            user_id=user_id,
-            file_ids=file_ids,
-            k=k,
-            dense_k=vector_k,
-            sparse_k=fulltext_k,
-            rrf_k=rrf_k,
-            rerank=rerank,
-            reranker_model=reranker_model,
-        )
-
-    reset_retrieval_diagnostics()
-    total_started_at = perf_counter()
-
-    with ThreadPoolExecutor(max_workers=2) as executor:
-        vector_future = executor.submit(
-            get_vector_documents_with_diagnostics,
-            query=query,
-            user_id=user_id,
-            file_ids=file_ids,
-            k=vector_k,
-        )
-        fulltext_future = executor.submit(
-            get_fulltext_documents_with_timing,
-            query=query,
-            user_id=user_id,
-            file_ids=file_ids,
-            k=fulltext_k,
-        )
-
-        vector_documents, vector_diagnostics = vector_future.result()
-        fulltext_documents, fulltext_ms, fulltext_error = (
-            fulltext_future.result()
-        )
-
-    merge_vector_diagnostics(vector_diagnostics)
-    if fulltext_error:
-        add_fulltext_diagnostic_error(fulltext_error)
-    current_diagnostics = _RETRIEVAL_DIAGNOSTICS.get()
-    if current_diagnostics is not None:
-        current_diagnostics.setdefault("timing", {})["fulltext_ms"] = (
-            fulltext_ms
-        )
-    update_retrieval_diagnostics(
-        vector_count=len(vector_documents),
-        fulltext_count=len(fulltext_documents),
+    """执行 Milvus dense/sparse RRF、child rerank 和 parent context 扩展。"""
+    return get_milvus_hybrid_documents(
+        query=query,
+        user_id=user_id,
+        file_ids=file_ids,
+        k=k,
+        dense_k=vector_k,
+        sparse_k=sparse_k,
+        rrf_k=rrf_k,
+        rerank=rerank,
+        reranker_model=reranker_model,
     )
-
-    rrf_started_at = perf_counter()
-    fused_documents = reciprocal_rank_fusion(
-        ranked_results=[
-            vector_documents,
-            fulltext_documents,
-        ],
-        k=rrf_k if rerank else k,
-        weights=[
-            vector_weight,
-            fulltext_weight,
-        ],
-    )
-    record_retrieval_timing("rrf", rrf_started_at)
-    update_retrieval_diagnostics(
-        fused_count=len(fused_documents),
-        retrieval_sources=sorted({
-            source
-            for document in fused_documents
-            for source in (
-                document.metadata.get("retrieval_sources")
-                or [document.metadata.get("retrieval_source")]
-            )
-            if source
-        }),
-    )
-
-    if not rerank:
-        record_retrieval_timing("retrieval_total", total_started_at)
-        return fused_documents
-
-    if len(fused_documents) <= k:
-        update_retrieval_diagnostics(
-            reranked_count=0,
-            rerank_skipped=True,
-            rerank_skip_reason="candidate_count_not_above_top_k",
-        )
-        record_retrieval_timing("retrieval_total", total_started_at)
-        return fused_documents
-
-    rerank_started_at = perf_counter()
-    try:
-        reranked_documents = get_reranker(
-            reranker_model,
-            user_id=user_id,
-        ).rerank(
-            query=query,
-            documents=fused_documents,
-            top_k=k,
-            max_length=DEFAULT_RERANKER_MAX_LENGTH,
-        )
-    except Exception as exc:
-        log_exception_event(
-            logger,
-            "retrieval_rerank_failed",
-            exc,
-            default_source="rerank",
-            user_id=user_id,
-            file_count=len(file_ids or []),
-            stage="rerank",
-            fused_count=len(fused_documents),
-            message="rerank 精排失败，降级为 RRF 融合结果",
-        )
-        record_retrieval_timing("rerank", rerank_started_at)
-        record_retrieval_timing("retrieval_total", total_started_at)
-        update_retrieval_diagnostics(
-            reranked_count=0,
-            rerank_degraded=True,
-            rerank_errors=["rerank 精排失败"],
-        )
-        return fused_documents[:k]
-
-    record_retrieval_timing("rerank", rerank_started_at)
-    record_retrieval_timing("retrieval_total", total_started_at)
-    update_retrieval_diagnostics(reranked_count=len(reranked_documents))
-    return reranked_documents

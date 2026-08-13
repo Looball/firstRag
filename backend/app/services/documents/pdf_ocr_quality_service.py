@@ -6,9 +6,6 @@ from typing import Any
 from uuid import UUID
 
 from app.core.config import PDF_OCR_REINDEX_MAX_BATCH_PAGES
-from app.repositories.knowledge_chunk_repository import (
-    list_user_pdf_ocr_page_rows,
-)
 from app.repositories.knowledge_file_repository import get_user_knowledge_file
 from app.repositories.pdf_ocr_correction_repository import (
     list_pdf_ocr_corrections,
@@ -16,6 +13,7 @@ from app.repositories.pdf_ocr_correction_repository import (
 from app.repositories.pdf_ocr_history_repository import (
     get_pdf_ocr_history_summaries,
 )
+from app.services.vectors.knowledge_text_service import list_pdf_ocr_page_rows
 
 
 OCR_PAGE_EXCERPT_MAX_CHARACTERS = 220
@@ -88,7 +86,7 @@ def get_pdf_ocr_quality_report(
         )
 
     index_version = int(file_record.get("index_version") or 0)
-    page_rows = list_user_pdf_ocr_page_rows(
+    page_rows = list_pdf_ocr_page_rows(
         user_id=user_id,
         file_id=knowledge_file_id,
         index_version=index_version,

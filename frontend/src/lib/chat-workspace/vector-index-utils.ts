@@ -202,8 +202,8 @@ export function getVectorFailureRecoveryActions(
 
   if (failureType === "chunk_write_error") {
     return [
-      "检查 PostgreSQL chunk 表和迁移状态",
-      "修复数据库后重新向量化",
+      "这是旧版本 PostgreSQL 文本写入错误",
+      "升级数据库后重新向量化到 Milvus",
     ];
   }
 

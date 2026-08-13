@@ -14,7 +14,6 @@ from app.core.rate_limit import build_rate_limit_identifier, enforce_rate_limit
 from app.core.security import get_current_user_id
 from app.db.locks import file_index_lock
 from app.repositories.knowledge_base_repository import knowledge_base_exists
-from app.repositories.knowledge_chunk_repository import delete_file_chunks
 from app.repositories.knowledge_file_repository import (
     get_knowledge_base_files_for_indexing,
     get_user_knowledge_file,
@@ -566,8 +565,7 @@ def delete_knowledge_file_vectors(
 ):
     """删除单个知识文件的向量化存储。
 
-    同时清理 Milvus entities 和 PostgreSQL 全文检索分块，
-    并将文件状态重置为 pending，允许重新向量化。
+    清理 Milvus entities，并将文件状态重置为 pending，允许重新索引。
     """
     file_record = get_user_knowledge_file(user_id, knowledge_file_id)
     if file_record is None:
@@ -583,14 +581,13 @@ def delete_knowledge_file_vectors(
             "用户删除了该文件的向量化结果",
         )
 
-        # 2. 依次删除 Milvus 和 PostgreSQL 数据；任一失败都不发布 pending。
+        # 2. 删除 Milvus 文本与向量；失败时不发布 pending。
         try:
             delete_file_vector_entries(user_id, knowledge_file_id)
-            chunks_deleted = delete_file_chunks(user_id, knowledge_file_id)
+            chunks_deleted = 0
             reset_file_index_state(user_id, knowledge_file_id)
             invalidate_file_knowledge_base_contexts(user_id, knowledge_file_id)
         except Exception as exc:
-            # Milvus 已删除但 PG 清理失败时，标记 failed，避免读取半完成索引。
             update_knowledge_file_status(
                 user_id,
                 knowledge_file_id,
@@ -605,7 +602,7 @@ def delete_knowledge_file_vectors(
             )
             raise HTTPException(
                 status_code=500,
-                detail="删除向量化存储失败，请稍后重试或检查向量库和数据库状态。",
+                detail="删除向量化存储失败，请稍后重试或检查 Milvus 状态。",
             ) from exc
 
     return {

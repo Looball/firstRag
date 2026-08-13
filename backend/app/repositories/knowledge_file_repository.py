@@ -239,15 +239,7 @@ def purge_user_knowledge_file_records(
             )
             relations_deleted = cursor.rowcount
 
-            cursor.execute(
-                """
-                DELETE FROM knowledge_file_chunks
-                WHERE knowledge_file_id = %s
-                  AND user_id = %s;
-                """,
-                (knowledge_file_id, user_id),
-            )
-            chunks_deleted = cursor.rowcount
+            chunks_deleted = 0
 
             cursor.execute(
                 """

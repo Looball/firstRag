@@ -83,6 +83,14 @@ def build_arg_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="List local migration files and checksums without connecting.",
     )
+    parser.add_argument(
+        "--target-version",
+        type=int,
+        help=(
+            "Apply or inspect migrations only through this numeric version. "
+            "Used by gated multi-phase cutovers."
+        ),
+    )
     return parser
 
 
@@ -132,6 +140,25 @@ def discover_migrations(sql_dir: Path) -> list[Migration]:
             )
         )
     return migrations
+
+
+def select_migrations_through_version(
+    migrations: list[Migration],
+    target_version: int | None,
+) -> list[Migration]:
+    """按可选目标版本截断 migration 列表，并拒绝不存在的版本。"""
+    if target_version is None:
+        return migrations
+    if target_version < 0:
+        raise MigrationError("target version 必须是非负整数")
+    selected = [
+        migration
+        for migration in migrations
+        if int(migration.filename.split("_", 1)[0]) <= target_version
+    ]
+    if not selected or int(selected[-1].filename.split("_", 1)[0]) != target_version:
+        raise MigrationError(f"target version 不存在：{target_version:03d}")
+    return selected
 
 
 def load_database_url(
@@ -344,7 +371,10 @@ def print_plan(plan: list[MigrationPlanItem]) -> None:
 
 def run(args: argparse.Namespace) -> int:
     """执行命令行请求。"""
-    migrations = discover_migrations(args.sql_dir)
+    migrations = select_migrations_through_version(
+        discover_migrations(args.sql_dir),
+        args.target_version,
+    )
 
     if args.list:
         print_local_migrations(migrations)

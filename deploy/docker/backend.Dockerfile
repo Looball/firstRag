@@ -48,6 +48,7 @@ COPY --from=builder /opt/venv /opt/venv
 
 COPY backend /app/backend
 COPY scripts/migrate_db.py /app/scripts/migrate_db.py
+COPY scripts/rebuild_milvus_text_collections.py /app/scripts/rebuild_milvus_text_collections.py
 
 WORKDIR /app/backend
 

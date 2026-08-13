@@ -152,6 +152,40 @@ class MigrateDbScriptTests(unittest.TestCase):
 
         self.assertEqual([item.action for item in plan], ["skipped", "pending"])
 
+    def test_select_migrations_through_version_stops_at_target(self) -> None:
+        """分阶段 cutover 只能执行到显式目标版本。"""
+        migrations = [
+            migrate_db.Migration(
+                filename=f"{version:03d}_step.sql",
+                path=Path(f"{version:03d}_step.sql"),
+                checksum=str(version),
+                sql="SELECT 1;",
+            )
+            for version in (9, 10, 11)
+        ]
+
+        selected = migrate_db.select_migrations_through_version(
+            migrations,
+            10,
+        )
+
+        self.assertEqual(
+            [migration.filename for migration in selected],
+            ["009_step.sql", "010_step.sql"],
+        )
+
+    def test_select_migrations_rejects_missing_target(self) -> None:
+        """目标版本不存在时不得静默少跑或多跑 migration。"""
+        migration = migrate_db.Migration(
+            filename="009_step.sql",
+            path=Path("009_step.sql"),
+            checksum="9",
+            sql="SELECT 1;",
+        )
+
+        with self.assertRaisesRegex(migrate_db.MigrationError, "不存在"):
+            migrate_db.select_migrations_through_version([migration], 10)
+
     def test_plan_migrations_rejects_checksum_mismatch(self) -> None:
         """已执行 migration 的 checksum 变化时应停止。"""
         migration = migrate_db.Migration(

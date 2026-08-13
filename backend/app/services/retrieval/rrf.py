@@ -1,6 +1,6 @@
 """Reciprocal Rank Fusion 排名融合。
 
-RRF 用于融合多个召回器返回的有序结果列表，例如向量检索和全文检索。
+RRF 用于融合多个召回器返回的有序结果列表，例如 dense 与 sparse 检索。
 它的核心思想是：一个文档在某个召回器中排名越靠前，贡献越高；
 如果同一个文档被多个召回器同时召回，它的贡献会累加。
 
@@ -13,7 +13,8 @@ RRF 用于融合多个召回器返回的有序结果列表，例如向量检索�
 过度压制其他结果。
 
 RRF 不直接使用原始检索分数，因此适合融合分数尺度不同的结果：
-向量相似度、全文检索 rank、BM25 分数或其他召回器的输出。
+dense distance、sparse IP score 或其他召回器的输出。当前在线链路由
+Milvus `RRFRanker` 执行融合，本模块保留纯 Python 算法参考。
 """
 
 from collections import defaultdict

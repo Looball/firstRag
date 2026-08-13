@@ -65,7 +65,8 @@ class EvalSummaryScriptTests(unittest.TestCase):
                     "elapsed_seconds": 2.5,
                     "diagnostics": {
                         "source_count": 1,
-                        "vector_degraded": False,
+                        "dense_degraded": False,
+                        "sparse_degraded": False,
                     },
                 },
                 "cleanup_done": True,

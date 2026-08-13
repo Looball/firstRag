@@ -261,7 +261,7 @@ class KnowledgeFileLifecycleRepositoryTests(unittest.TestCase):
         connection.cursor.return_value.__enter__.return_value = cursor
         cursor.fetchone.side_effect = [{"id": file_id}, {"id": file_id}]
         type(cursor).rowcount = PropertyMock(
-            side_effect=[0, 0, 1, 2, 3, 1],
+            side_effect=[0, 0, 1, 3, 1],
         )
 
         with patch(
@@ -273,7 +273,7 @@ class KnowledgeFileLifecycleRepositoryTests(unittest.TestCase):
         self.assertIsNotNone(result)
         self.assertEqual(result["files_deleted"], 1)
         self.assertEqual(result["relations_deleted"], 1)
-        self.assertEqual(result["chunks_deleted"], 2)
+        self.assertEqual(result["chunks_deleted"], 0)
         self.assertEqual(result["jobs_deleted"], 3)
 
 

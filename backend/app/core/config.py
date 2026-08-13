@@ -175,10 +175,6 @@ MILVUS_CONSISTENCY_LEVEL = os.environ.get(
     "MILVUS_CONSISTENCY_LEVEL",
     "Strong",
 ).strip()
-MILVUS_DENSE_SPARSE_WRITE_ENABLED = read_bool_env(
-    "MILVUS_DENSE_SPARSE_WRITE_ENABLED",
-    False,
-)
 
 # 内网 BGE-M3 sparse encoder。backend/query 与 worker/document 共用同一实例。
 SPARSE_ENCODER_URL = os.environ.get(

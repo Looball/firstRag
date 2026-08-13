@@ -615,10 +615,11 @@ def compact_diagnostics(retrieval: dict[str, Any]) -> dict[str, Any]:
         "source_count": retrieval.get("source_count"),
         "retrieval_sources": retrieval.get("retrieval_sources")
         or diagnostics.get("retrieval_sources"),
-        "vector_degraded": retrieval.get("vector_degraded")
-        or diagnostics.get("vector_degraded"),
-        "vector_count": diagnostics.get("vector_count"),
-        "fulltext_count": diagnostics.get("fulltext_count"),
+        "dense_degraded": diagnostics.get("dense_degraded"),
+        "sparse_degraded": diagnostics.get("sparse_degraded"),
+        "dense_count": diagnostics.get("dense_count"),
+        "sparse_count": diagnostics.get("sparse_count"),
+        "hybrid_count": diagnostics.get("hybrid_count"),
         "fused_count": diagnostics.get("fused_count"),
         "reranked_count": diagnostics.get("reranked_count"),
         "knowledge_profile_cache_hit": diagnostics.get(
@@ -883,8 +884,9 @@ def serialize_source_summary(source: dict[str, Any]) -> dict[str, Any]:
         "file_name": source.get("file_name"),
         "chunk_index": source.get("chunk_index"),
         "retrieval_sources": source.get("retrieval_sources") or [],
-        "vector_score": source.get("vector_score"),
-        "fulltext_score": source.get("fulltext_score"),
+        "dense_score": source.get("dense_score"),
+        "sparse_score": source.get("sparse_score"),
+        "hybrid_score": source.get("hybrid_score"),
         "rrf_score": source.get("rrf_score"),
         "rerank_score": source.get("rerank_score"),
     }
@@ -1295,8 +1297,9 @@ def write_report(
             f"- 召回片段：{diagnostics['retrieved_count']}",
             f"- 展示引用：{len(chat_result.sources)}",
             f"- 检索通道：{diagnostics['retrieval_sources'] or '—'}",
-            f"- 向量降级：{format_bool(diagnostics['vector_degraded'])}",
-            f"- 诊断计数：vector={diagnostics['vector_count']}，fulltext={diagnostics['fulltext_count']}，fused={diagnostics['fused_count']}，reranked={diagnostics['reranked_count']}",
+            f"- Dense 降级：{format_bool(diagnostics['dense_degraded'])}",
+            f"- Sparse 降级：{format_bool(diagnostics['sparse_degraded'])}",
+            f"- 诊断计数：dense={diagnostics['dense_count']}，sparse={diagnostics['sparse_count']}，hybrid={diagnostics['hybrid_count']}，fused={diagnostics['fused_count']}，reranked={diagnostics['reranked_count']}",
             "- 知识库画像缓存：hit={hit}，indexed_files={indexed}，total_files={total}".format(
                 hit=format_bool(diagnostics["knowledge_profile_cache_hit"]),
                 indexed=diagnostics["knowledge_profile_indexed_file_count"] or "—",

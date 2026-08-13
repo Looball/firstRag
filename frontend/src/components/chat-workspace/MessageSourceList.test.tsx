@@ -22,9 +22,10 @@ const sources: ChatSource[] = [
     ocrConfidence: 0.91,
     ocrCorrectionApplied: true,
     ocrCorrectionRevision: 2,
-    retrievalSources: ["vector", "fulltext"],
-    vectorScore: 0.81234,
-    fulltextScore: 0.71234,
+    retrievalSources: ["dense", "sparse"],
+    denseScore: 0.81234,
+    sparseScore: 0.71234,
+    hybridScore: 0.21234,
     rerankScore: 0.91234,
     rrfScore: 0.11234,
   },
@@ -68,9 +69,10 @@ describe("MessageSourceList", () => {
 
     expect(markup).toContain("召回 8 段");
     expect(markup).toContain("Chunk #12");
-    expect(markup).toContain("vector / fulltext");
-    expect(markup).toContain("Vector 0.8123");
-    expect(markup).toContain("Fulltext 0.7123");
+    expect(markup).toContain("dense / sparse");
+    expect(markup).toContain("Dense 0.8123");
+    expect(markup).toContain("Sparse 0.7123");
+    expect(markup).toContain("Hybrid 0.2123");
     expect(markup).toContain("Rerank 0.9123");
     expect(markup).toContain("RRF 0.1123");
     expect(markup).toContain("section: results");

@@ -61,6 +61,9 @@ export type ChatSource = {
   ocrCorrectionRevision?: number;
   vectorScore?: number;
   fulltextScore?: number;
+  denseScore?: number;
+  sparseScore?: number;
+  hybridScore?: number;
   rerankScore?: number;
   rrfScore?: number;
   retrievalSources?: string[];
@@ -246,8 +249,18 @@ export type MessageDiagnostic = {
 export type RetrievalDiagnostics = {
   vectorDegraded?: boolean;
   vectorErrors: string[];
+  denseDegraded: boolean;
+  denseErrors: string[];
+  sparseDegraded: boolean;
+  sparseErrors: string[];
+  hybridDegraded: boolean;
+  hybridErrors: string[];
   vectorCount: number | null;
   fulltextCount: number | null;
+  denseCount: number | null;
+  sparseCount: number | null;
+  hybridCount: number | null;
+  parentCount: number | null;
   fusedCount: number | null;
   rerankedCount: number | null;
   retrievalSources: string[];
@@ -280,6 +293,10 @@ export type RetrievalTiming = {
   vectorMs: number | null;
   fulltextMs: number | null;
   rrfMs: number | null;
+  denseEmbeddingMs: number | null;
+  sparseEmbeddingMs: number | null;
+  hybridMs: number | null;
+  parentContextMs: number | null;
   rerankMs: number | null;
   retrievalTotalMs: number | null;
   preAnswerTotalMs: number | null;
@@ -296,6 +313,9 @@ export type SourcePreview = {
   retrievalSources: string[];
   vectorScore: number | null;
   fulltextScore: number | null;
+  denseScore: number | null;
+  sparseScore: number | null;
+  hybridScore: number | null;
   rrfScore: number | null;
   rerankScore: number | null;
 };
@@ -328,7 +348,7 @@ export type KnowledgeBaseRetrievalSettings = {
   enableRerank: boolean;
   topK: number;
   vectorTopK: number;
-  fulltextTopK: number;
+  sparseTopK: number;
   rrfK: number;
   rerankScoreThreshold: number;
 };

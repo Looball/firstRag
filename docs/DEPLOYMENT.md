@@ -28,7 +28,6 @@ cp .env.example .env
 | `RERANK_PROVIDER` / `RERANK_MODEL` / `RERANK_BASE_URL` / `RERANK_API_KEY` | 历史环境变量兼容；新版本远程 rerank 推荐在登录后的“模型设置”页按用户配置。 |
 | `MILVUS_URI` / `MILVUS_TOKEN` / `MILVUS_DATABASE` | Milvus 内网连接、认证 token 和 database；Compose 默认 URI 为 `http://milvus-standalone:19530`，真实 token 只放 `.env`。 |
 | `MILVUS_COLLECTION_PREFIX` / `MILVUS_TIMEOUT_SECONDS` / `MILVUS_CONSISTENCY_LEVEL` | Milvus collection 前缀、client timeout 与一致性；当前 ADR 固定 `Strong`。 |
-| `MILVUS_DENSE_SPARSE_WRITE_ENABLED` | v2 write/read feature flag；启用后每个 child 双写并使用 Milvus dense+sparse hybrid retrieval。T-144 全量重建与切流前默认 `false`，禁止对未重建数据直接开启。 |
 | `SPARSE_ENCODER_CLIENT_BATCH_SIZE` | backend/worker 调用 encoder 的 document batch 大小，默认 `16`，必须不大于 encoder service 的 `SPARSE_ENCODER_MAX_BATCH_SIZE`。 |
 | `MILVUS_MINIO_ACCESS_KEY` / `MILVUS_MINIO_SECRET_KEY` | Milvus 内置 MinIO 的本地凭据；非本机隔离环境必须覆盖模板值。 |
 | `MILVUS_MEMORY_LIMIT` / `MILVUS_CPU_LIMIT` | Milvus Standalone 容器资源上限，默认 `8g` / `4.0`。 |
@@ -75,11 +74,24 @@ docker compose logs --tail=100 \
 
 默认 Compose stack 固定 Milvus `v3.0.0`、etcd `v3.5.25` 和 MinIO `RELEASE.2024-05-28T17-19-04Z`，使用 named volumes 持久化 metadata、object/WAL 和本地数据，显式启用 Woodpecker 与 authentication。Milvus、etcd 和 MinIO 均不映射 host port；backend 和 worker 必须等待 authenticated probe 成功。首次启动前在 `.env` 中覆盖 `MILVUS_TOKEN` 与 MinIO 凭据，禁止把真实值提交到仓库。
 
+### PostgreSQL 文本退出与 Milvus v3 cutover
+
+已有 indexed files 的环境不能直接运行删除文本表的 migration。维护窗口必须按以下顺序执行：
+
+1. 暂停 frontend/backend/worker，确认 `vector_index_jobs` 没有 `queued/processing`。
+2. 备份 PostgreSQL、uploads 和 Milvus volumes；至少单独导出旧 `knowledge_file_chunks` 与 `knowledge_file_chunk_parents`，备份文件权限设为 `600`，不要提交。
+3. 构建新 backend image，仅执行准备阶段：`docker compose run --rm migrate python /app/scripts/migrate_db.py --target-version 11`。
+4. 运行 `docker compose run --rm --no-deps backend python /app/scripts/rebuild_milvus_text_collections.py --execute --report /tmp/milvus-text-cutover.json`。脚本可恢复：已存在且通过 user/file/version/identity/child text/parent text 审计的 v3 entities 会直接复用；瞬时 provider/Milvus 错误按文件重试。
+5. 确认每个有效 `status=indexed` 文件都有匹配当前 version 的 `milvus_text_cutover_audits` 后，正常执行 migration；`012_drop_postgresql_knowledge_text.sql` 在证明不完整时会主动失败并保留旧表。
+6. 完成 source preview、OCR 巡检、dense/sparse hybrid、LLM parent context、restart persistence 和删除生命周期验收后恢复流量。观察期保留旧 Milvus collections 与迁移前备份。
+
+新空库没有 indexed files，migration 012 可直接通过。历史文件可能仍为 `index_version=0`，migration 011 显式允许它们参与审计；这不改变后续新任务的版本递增契约。
+
 ### BGE-M3 sparse encoder runtime
 
 `sparse-encoder` 使用独立 CPU-only 镜像与 named volume `bge_m3_cache`，固定 `BAAI/bge-m3@5617a9f61b028005a4858fdac845db406aefb181`、`FlagEmbedding==1.4.0`、`huggingface-hub==1.27.0`、`torch==2.13.0+cpu` 和 `transformers==5.15.0`。安全审计使用等价的 PyPI base version `torch==2.13.0`，并由测试保证除 `+cpu` local label 外不得与 runtime pins 漂移。模型权重约 2.3 GB；Hugging Face snapshot 与 Xet cache 会产生额外占用，建议为 named volume 预留至少 5 GB。下载、加载和最小 inference 完成前 `/health/ready` 返回 503，backend/worker 保持等待。预热 cache 后可设置 `SPARSE_ENCODER_OFFLINE=true`，此时缺失固定 snapshot 会明确启动失败。
 
-backend 和 worker 同时接收 `SPARSE_ENCODER_MAX_LENGTH`，使 query cache identity 与 encoder document/query 截断参数一致。v2 在线检索的 sparse query 失败会降级到 dense-only；dense provider 失败会降级到 sparse-only，并在 diagnostics 中标记 route。该在线降级不适用于 indexing：写入仍要求 dense/sparse 两路完整成功。
+backend 和 worker 同时接收 `SPARSE_ENCODER_MAX_LENGTH`，使 query cache identity 与 encoder document/query 截断参数一致。在线检索的 sparse query 失败会降级到 dense-only；dense provider 失败会降级到 sparse-only，并在 diagnostics 中标记 route。该在线降级不适用于 indexing：写入仍要求 dense/sparse 两路完整成功。
 
 ```bash
 docker compose logs -f sparse-encoder
@@ -371,7 +383,7 @@ compose 已为所有服务配置 Docker `json-file` 日志轮转，默认 `10m *
 | `chat_stream_completed` / `chat_stream_failed` / `chat_stream_cancelled` | chat streaming | 区分完成、模型失败、客户端中断和回答总耗时。 |
 | `retrieval_embedding_failed` | hybrid retrieval | 定位 embedding provider 或网络异常。 |
 | `retrieval_vector_failed` / `retrieval_vector_file_failed` | Milvus vector retrieval | 定位 Milvus ANN、scalar filter 或单文件向量残留问题。 |
-| `retrieval_fulltext_failed` | PostgreSQL full-text retrieval | 定位 PostgreSQL 或全文检索异常。 |
+| `retrieval_sparse_failed` | BGE-M3 / Milvus sparse retrieval | 定位 sparse query encoding 或 Milvus sparse ANN 异常。 |
 | `retrieval_rerank_failed` | rerank provider | 定位本地 reranker 模型、远程 rerank API 或运行时异常；当前会降级为 RRF 结果。 |
 | `vector_index_job_claimed` / `vector_index_job_succeeded` / `vector_index_job_failed` | vector worker | 统计任务吞吐、失败率、处理耗时和失败来源。 |
 | `rate_limit_exceeded` | backend rate limiter | 统计实际阻断次数，并按 `scope`、`backend`、`reason` 和 `failure_mode` 区分额度耗尽、memory fallback 耗尽或 Redis fail-closed 阻断。 |
@@ -389,7 +401,7 @@ compose 已为所有服务配置 Docker `json-file` 日志轮转，默认 `10m *
 | 模型调用失败率 | `chat_stream_failed.error_source == "llm_provider"` / chat 请求数 | 连续窗口超过 10%。 |
 | 向量化队列长度和 worker 活动 | `GET /chat/vector-index-jobs/health` 的 `queue.active`、`worker.online_count`、`worker.last_heartbeat_at`、`worker.has_recent_activity` | 有 active 任务但没有在线 worker，或 worker 心跳长时间无更新。 |
 | 向量化任务失败率 | `vector_index_job_failed` / `vector_index_job_claimed` | 连续窗口超过 10%。 |
-| 检索降级次数 | `retrieval_embedding_failed`、`retrieval_vector_failed`、`retrieval_fulltext_failed`、`retrieval_rerank_failed` | 突然高于平时基线。 |
+| 检索降级次数 | `retrieval_dense_embedding_failed`、`retrieval_sparse_embedding_failed`、`retrieval_milvus_hybrid_failed`、`retrieval_rerank_failed` | 突然高于平时基线。 |
 | 限流阻断次数 | `rate_limit_exceeded` 按 `scope`、`reason` 聚合 | 5 分钟内显著高于同时间段基线；`reason=redis_unavailable` 出现时立即检查 Redis。 |
 | Redis 限流故障 | `rate_limit_redis_failed` 按 `failure_mode`、`outcome` 聚合 | 任何连续窗口出现即告警；公开环境 `outcome=request_blocked` 应按基础设施故障处理。 |
 
@@ -660,7 +672,7 @@ docker run --rm -v "$PWD/deploy/nginx:/etc/nginx/conf.d:ro" nginx:alpine nginx -
 
 ### 数据清理策略
 
-公开 demo 应使用 `scripts/demo_cleanup.py` 定期清理临时数据。脚本默认 `dry-run`，执行模式必须显式传入 `--execute --confirm cleanup-demo-data`，并同时处理 PostgreSQL metadata、knowledge chunks、vector index jobs、Milvus entities 和 uploads 文件。
+公开 demo 应使用 `scripts/demo_cleanup.py` 定期清理临时数据。脚本默认 `dry-run`，执行模式必须显式传入 `--execute --confirm cleanup-demo-data`，并同时处理 PostgreSQL metadata、vector index jobs、Milvus entities 和 uploads 文件。
 
 推荐频率：
 

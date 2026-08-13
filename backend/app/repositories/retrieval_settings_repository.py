@@ -10,7 +10,7 @@ DEFAULT_RETRIEVAL_SETTINGS = {
     "enable_rerank": True,
     "top_k": 4,
     "vector_top_k": 16,
-    "fulltext_top_k": 16,
+    "sparse_top_k": 16,
     "rrf_k": 8,
     "rerank_score_threshold": 0.0,
 }
@@ -47,7 +47,7 @@ def get_knowledge_base_retrieval_settings(
             COALESCE(s.enable_rerank, TRUE) AS enable_rerank,
             COALESCE(s.top_k, 4) AS top_k,
             COALESCE(s.vector_top_k, 16) AS vector_top_k,
-            COALESCE(s.fulltext_top_k, 16) AS fulltext_top_k,
+            COALESCE(s.sparse_top_k, 16) AS sparse_top_k,
             COALESCE(s.rrf_k, 8) AS rrf_k,
             COALESCE(s.rerank_score_threshold, 0.000)
                 AS rerank_score_threshold
@@ -82,7 +82,7 @@ def upsert_knowledge_base_retrieval_settings(
             enable_rerank,
             top_k,
             vector_top_k,
-            fulltext_top_k,
+            sparse_top_k,
             rrf_k,
             rerank_score_threshold
         )
@@ -108,7 +108,7 @@ def upsert_knowledge_base_retrieval_settings(
             enable_rerank = EXCLUDED.enable_rerank,
             top_k = EXCLUDED.top_k,
             vector_top_k = EXCLUDED.vector_top_k,
-            fulltext_top_k = EXCLUDED.fulltext_top_k,
+            sparse_top_k = EXCLUDED.sparse_top_k,
             rrf_k = EXCLUDED.rrf_k,
             rerank_score_threshold = EXCLUDED.rerank_score_threshold,
             updated_at = now()
@@ -119,7 +119,7 @@ def upsert_knowledge_base_retrieval_settings(
             enable_rerank,
             top_k,
             vector_top_k,
-            fulltext_top_k,
+            sparse_top_k,
             rrf_k,
             rerank_score_threshold;
         """,
@@ -129,7 +129,7 @@ def upsert_knowledge_base_retrieval_settings(
             settings["enable_rerank"],
             settings["top_k"],
             settings["vector_top_k"],
-            settings["fulltext_top_k"],
+            settings["sparse_top_k"],
             settings["rrf_k"],
             settings["rerank_score_threshold"],
             knowledge_base_id,

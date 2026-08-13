@@ -10,13 +10,6 @@ from langchain_core.documents import Document
 from app.core.config import PDF_OCR_HISTORY_MAX_RUNS_PER_PAGE
 from app.db.locks import file_index_lock
 from app.db.executor import Row
-from app.repositories.knowledge_chunk_repository import (
-    delete_file_chunks,
-    list_file_chunk_identity_rows,
-    list_file_parent_identity_rows,
-    list_user_pdf_ocr_page_history_rows,
-    replace_file_chunks,
-)
 from app.repositories.knowledge_file_repository import update_knowledge_file_status
 from app.repositories.pdf_ocr_correction_repository import (
     list_pdf_ocr_corrections,
@@ -282,62 +275,6 @@ def build_pdf_ocr_history_entries(
     return entries
 
 
-def _backfill_legacy_pdf_ocr_history(
-    user_id: int,
-    file_id: UUID | str,
-    index_version: int,
-    existing_attempts: dict[int, int],
-) -> dict[int, int]:
-    """从上一版 chunks 衔接迁移前的 OCR baseline 和 attempt。"""
-    if index_version <= 0:
-        return existing_attempts
-
-    previous_rows = list_user_pdf_ocr_page_history_rows(
-        user_id=user_id,
-        file_id=file_id,
-        index_version=index_version - 1,
-    )
-    baseline_entries: list[dict[str, Any]] = []
-    merged_attempts = dict(existing_attempts)
-    for row in previous_rows:
-        metadata = row.get("metadata")
-        page_number = row.get("page_number")
-        if (
-            not isinstance(metadata, dict)
-            or isinstance(page_number, bool)
-            or not isinstance(page_number, int)
-            or page_number < 1
-        ):
-            continue
-        attempt = _normalize_ocr_history_positive_int(
-            metadata.get("ocr_attempt"),
-            1,
-        )
-        merged_attempts[page_number] = max(
-            merged_attempts.get(page_number, 0),
-            attempt,
-        )
-        if page_number in existing_attempts:
-            continue
-        baseline_entries.append(_build_pdf_ocr_history_entry(
-            page_number=page_number,
-            index_version=int(row["index_version"]),
-            metadata=metadata,
-            ocr_text=str(row.get("content") or ""),
-            source_job_id=None,
-            trigger="legacy_snapshot",
-            text_source=str(metadata.get("ocr_text_source") or "legacy_chunk"),
-        ))
-
-    record_pdf_ocr_history_entries(
-        user_id=user_id,
-        knowledge_file_id=file_id,
-        entries=baseline_entries,
-        max_runs_per_page=PDF_OCR_HISTORY_MAX_RUNS_PER_PAGE,
-    )
-    return merged_attempts
-
-
 def delete_file_vector_entries(
     user_id: int,
     file_id: UUID | str,
@@ -360,7 +297,7 @@ def compensate_failed_file_index(
     file_id: UUID | str,
     vectordb: VectorStoreBoundary | Any | None = None,
 ) -> None:
-    """尽力清除当前失败 identity 与 PostgreSQL chunks，保留 rollback 向量。"""
+    """尽力清除当前失败的 Milvus identity，保留其它 rollback collection。"""
     try:
         resolved_vectordb = vectordb
         if resolved_vectordb is None:
@@ -385,57 +322,6 @@ def compensate_failed_file_index(
     except Exception:
         logger.exception("补偿清理向量失败 file_id=%s", file_id)
 
-    try:
-        delete_file_chunks(user_id, file_id)
-    except Exception:
-        logger.exception("补偿清理全文分块失败 file_id=%s", file_id)
-
-
-def audit_postgres_chunk_identity(
-    *,
-    user_id: int,
-    file_id: UUID | str,
-    expected_chunk_ids: list[str],
-    expected_parent_ids: list[str],
-    expected_index_version: int,
-) -> None:
-    """确认 PostgreSQL parent/child identity 与本次向量写入完全一致。"""
-    child_rows = list_file_chunk_identity_rows(user_id, file_id)
-    parent_rows = list_file_parent_identity_rows(user_id, file_id)
-    actual_ids = {str(row["chunk_id"]) for row in child_rows}
-    expected_ids = set(expected_chunk_ids)
-    actual_parent_ids = {str(row["parent_id"]) for row in parent_rows}
-    expected_parent_id_set = set(expected_parent_ids)
-    actual_child_parent_ids = {
-        str(row["parent_id"])
-        for row in child_rows
-        if row.get("parent_id") is not None
-    }
-    child_identity_pairs = {
-        (str(row.get("parent_id")), int(row["child_index"]))
-        for row in child_rows
-        if row.get("parent_id") is not None
-        and row.get("child_index") is not None
-    }
-    actual_versions = {
-        int(row["index_version"])
-        for row in [*child_rows, *parent_rows]
-    }
-    if (
-        len(child_rows) != len(expected_chunk_ids)
-        or actual_ids != expected_ids
-        or len(parent_rows) != len(expected_parent_ids)
-        or actual_parent_ids != expected_parent_id_set
-        or actual_child_parent_ids != expected_parent_id_set
-        or len(child_identity_pairs) != len(expected_chunk_ids)
-        or actual_versions != {expected_index_version}
-    ):
-        raise RuntimeError(
-            "PostgreSQL parent/child 审计失败："
-            "ID 或 index_version 与向量写入不一致",
-        )
-
-
 def index_file_vectors(
     user_id: int,
     file_id: UUID | str,
@@ -447,6 +333,7 @@ def index_file_vectors(
     previous_ocr_attempts: dict[int, int] | None = None,
     source_job_id: UUID | str | None = None,
     job_trigger: str = "file_index",
+    record_ocr_history: bool = True,
 ) -> dict[str, Any]:
     """将单个知识文件解析、切分并写入当前 vector store。"""
     file_path = Path(storage_path)
@@ -482,37 +369,30 @@ def index_file_vectors(
     try:
         vectordb = get_vector_store(user_id=user_id)
         parent_ids = build_parent_ids(parents)
+        parent_content_by_id = {
+            parent_id: parent.page_content
+            for parent_id, parent in zip(parent_ids, parents, strict=True)
+        }
         chunk_ids = build_chunk_ids(chunks)
+        for chunk in chunks:
+            chunk.metadata["parent_content"] = parent_content_by_id[
+                str(chunk.metadata["parent_id"])
+            ]
         vectordb.replace_file_vectors(
             user_id=user_id,
             file_id=file_id,
             documents=chunks,
             ids=chunk_ids,
         )
-        replace_file_chunks(
-            user_id=user_id,
-            file_id=file_id,
-            index_version=index_version,
-            chunks=chunks,
-            chunk_ids=chunk_ids,
-            parents=parents,
-            parent_ids=parent_ids,
-        )
-        audit_postgres_chunk_identity(
-            user_id=user_id,
-            file_id=file_id,
-            expected_chunk_ids=chunk_ids,
-            expected_parent_ids=parent_ids,
-            expected_index_version=index_version,
-        )
-        record_pdf_ocr_history_entries(
-            user_id=user_id,
-            knowledge_file_id=file_id,
-            entries=ocr_history_entries,
-            max_runs_per_page=PDF_OCR_HISTORY_MAX_RUNS_PER_PAGE,
-        )
+        if record_ocr_history:
+            record_pdf_ocr_history_entries(
+                user_id=user_id,
+                knowledge_file_id=file_id,
+                entries=ocr_history_entries,
+                max_runs_per_page=PDF_OCR_HISTORY_MAX_RUNS_PER_PAGE,
+            )
     except Exception:
-        # 两套存储不能参与同一事务；失败时清空半成品并保持 failed 状态。
+        # Milvus 写入失败时清空当前 identity 的半成品，避免错误结果可见。
         compensate_failed_file_index(
             user_id,
             file_id,
@@ -547,8 +427,8 @@ def index_knowledge_file_record(
 ) -> dict[str, Any]:
     """索引单条知识文件记录，并同步文件处理状态。
 
-    API 层只负责权限校验和 HTTP 错误转换；文件解析、切分、向量入库、
-    全文 chunk 入库和文件状态流转统一放在这里。
+    API 层只负责权限校验和 HTTP 错误转换；文件解析、切分、Milvus
+    文本/向量入库和文件状态流转统一放在这里。
     """
     file_id = file_record["id"]
     with file_index_lock(user_id, file_id):
@@ -566,12 +446,6 @@ def index_knowledge_file_record(
             previous_ocr_attempts = get_latest_pdf_ocr_attempts(
                 user_id,
                 file_id,
-            )
-            previous_ocr_attempts = _backfill_legacy_pdf_ocr_history(
-                user_id=user_id,
-                file_id=file_id,
-                index_version=index_version,
-                existing_attempts=previous_ocr_attempts,
             )
             correction_rows = list_pdf_ocr_corrections(user_id, file_id)
             pdf_ocr_corrections = {

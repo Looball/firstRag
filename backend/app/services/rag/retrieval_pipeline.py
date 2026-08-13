@@ -137,7 +137,7 @@ def retrieve_documents(inputs: ChainInput) -> RetrievedDocs:
         file_ids=file_ids,
         k=int(settings["top_k"]),
         vector_k=int(settings["vector_top_k"]),
-        fulltext_k=int(settings["fulltext_top_k"]),
+        sparse_k=int(settings["sparse_top_k"]),
         rrf_k=int(settings["rrf_k"]),
         rerank=bool(settings["enable_rerank"]),
     )

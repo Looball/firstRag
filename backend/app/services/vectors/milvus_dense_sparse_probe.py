@@ -1,8 +1,9 @@
-"""T-142/T-143 真实 Milvus dense+sparse 生命周期与 hybrid search probe。"""
+"""真实 Milvus v3 文本、dense+sparse 与 hybrid search probe。"""
 
 from __future__ import annotations
 
 import json
+from time import perf_counter
 from typing import Any
 
 from langchain_core.documents import Document
@@ -25,10 +26,26 @@ OTHER_USER_ID = 900_143
 PROBE_FILE_ID = "00000000-0000-0000-0000-000000000142"
 PROBE_PREFIX = "firstrag_t142_probe_u900142_"
 OTHER_PREFIX = "firstrag_t142_probe_u900143_"
-PROBE_COLLECTION = f"{PROBE_PREFIX}v2"
+PROBE_COLLECTION = f"{PROBE_PREFIX}v3"
 ROLLBACK_COLLECTION = f"{PROBE_PREFIX}dense"
-OTHER_COLLECTION = f"{OTHER_PREFIX}v2"
+OTHER_COLLECTION = f"{OTHER_PREFIX}v3"
 PROBE_DIMENSIONS = 3
+QUERY_BENCHMARK_RUNS = 20
+
+
+def _percentile(values: list[float], percentile: float) -> float:
+    """用线性插值计算小样本 probe 的 percentile。"""
+    ordered = sorted(values)
+    if not ordered:
+        return 0.0
+    position = (len(ordered) - 1) * percentile
+    lower = int(position)
+    upper = min(lower + 1, len(ordered) - 1)
+    fraction = position - lower
+    return round(
+        ordered[lower] + (ordered[upper] - ordered[lower]) * fraction,
+        2,
+    )
 
 
 class ProbeEmbeddings(Embeddings):
@@ -67,7 +84,7 @@ def _store(
     writable: bool,
     dense_sparse: bool = True,
 ) -> MilvusVectorStore:
-    """构造绑定真实 BGE-M3 sparse encoder 的 v2 probe adapter。"""
+    """构造绑定真实 BGE-M3 sparse encoder 的 v3 probe adapter。"""
     return MilvusVectorStore(
         client=client,
         collection_name=collection_name,
@@ -89,6 +106,7 @@ def _documents(
 ) -> list[Document]:
     """构造包含稳定 parent/child identity 的非敏感 probe documents。"""
     parent_id = f"{user_id}:{file_id}:v{version}:p0"
+    parent_content = f"T-144 Milvus parent text for version {version}"
     return [
         Document(
             page_content=(
@@ -99,6 +117,7 @@ def _documents(
                 "file_id": file_id,
                 "index_version": version,
                 "parent_id": parent_id,
+                "parent_content": parent_content,
                 "parent_index": 0,
                 "child_index": child_index,
                 "chunk_index": child_index,
@@ -135,8 +154,9 @@ def _write(
 
 
 def run_probe() -> dict[str, object]:
-    """执行 v2 schema、双 self-hit、重建、删除和跨用户隔离门禁。"""
+    """执行 v3 文本、双 self-hit、重建、删除和跨用户隔离门禁。"""
     client = _client()
+    indexing_samples_ms: list[float] = []
     try:
         for collection_name in (
             PROBE_COLLECTION,
@@ -172,6 +192,7 @@ def run_probe() -> dict[str, object]:
             version=1,
             count=2,
         )
+        started_at = perf_counter()
         first_ids = _write(
             primary,
             user_id=PROBE_USER_ID,
@@ -179,6 +200,8 @@ def run_probe() -> dict[str, object]:
             version=1,
             count=2,
         )
+        indexing_samples_ms.append((perf_counter() - started_at) * 1000)
+        started_at = perf_counter()
         other_ids = _write(
             other,
             user_id=OTHER_USER_ID,
@@ -186,7 +209,9 @@ def run_probe() -> dict[str, object]:
             version=1,
             count=2,
         )
+        indexing_samples_ms.append((perf_counter() - started_at) * 1000)
 
+        started_at = perf_counter()
         rebuilt_ids = _write(
             primary,
             user_id=PROBE_USER_ID,
@@ -194,6 +219,7 @@ def run_probe() -> dict[str, object]:
             version=2,
             count=2,
         )
+        indexing_samples_ms.append((perf_counter() - started_at) * 1000)
         query_sparse = SparseEncoderClient().encode_query(
             "T-142 learned sparse probe version 2 child 0",
         )
@@ -227,6 +253,22 @@ def run_probe() -> dict[str, object]:
             k=2,
             rrf_rank_constant=60,
         )
+        query_samples_ms: list[float] = []
+        for _ in range(QUERY_BENCHMARK_RUNS):
+            started_at = perf_counter()
+            benchmark_response = primary.hybrid_search_vectors(
+                query_embedding=[1.0, 0.1, 0.25],
+                query_sparse_embedding=query_sparse,
+                user_id=PROBE_USER_ID,
+                file_ids=[PROBE_FILE_ID],
+                dense_k=4,
+                sparse_k=4,
+                k=2,
+                rrf_rank_constant=60,
+            )
+            if len(benchmark_response.results) != 2:
+                raise RuntimeError("Milvus hybrid benchmark 结果数量不稳定")
+            query_samples_ms.append((perf_counter() - started_at) * 1000)
 
         description = client.describe_collection(
             collection_name=PROBE_COLLECTION,
@@ -273,7 +315,9 @@ def run_probe() -> dict[str, object]:
             fields.issuperset({
                 "embedding",
                 "sparse_embedding",
+                "content",
                 "parent_id",
+                "parent_content",
                 "parent_index",
                 "child_index",
             })
@@ -303,6 +347,8 @@ def run_probe() -> dict[str, object]:
             ] == [["sparse"], ["sparse"]]
             and all(
                 record.document.metadata.get("parent_id")
+                and record.document.page_content
+                and record.document.metadata.get("parent_content")
                 for record in records
             )
             and cross_user_count == 0
@@ -324,6 +370,14 @@ def run_probe() -> dict[str, object]:
             ],
             "dense_result_count": len(dense_response.results),
             "sparse_result_count": len(sparse_response.results),
+            "benchmark": {
+                "indexing_samples": len(indexing_samples_ms),
+                "indexing_p50_ms": _percentile(indexing_samples_ms, 0.5),
+                "indexing_p95_ms": _percentile(indexing_samples_ms, 0.95),
+                "hybrid_query_samples": len(query_samples_ms),
+                "hybrid_query_p50_ms": _percentile(query_samples_ms, 0.5),
+                "hybrid_query_p95_ms": _percentile(query_samples_ms, 0.95),
+            },
             "cross_user_count": cross_user_count,
             "rollback_count_before_delete": rollback_count_before_delete,
             "deleted_count": deleted_count,

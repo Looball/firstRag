@@ -708,16 +708,6 @@ def count_database_targets(connection, selection: CleanupSelection) -> dict[str,
         """,
         (kb_ids, file_ids),
     )
-    counts["knowledge_file_chunks"] = fetch_count(
-        connection,
-        """
-        SELECT COUNT(*) AS count
-        FROM knowledge_file_chunks
-        WHERE user_id = ANY(%s::bigint[])
-           OR knowledge_file_id = ANY(%s::uuid[]);
-        """,
-        (user_ids, file_ids),
-    )
     counts["vector_index_jobs"] = fetch_count(
         connection,
         """
@@ -1000,15 +990,6 @@ def delete_database_targets(connection, selection: CleanupSelection) -> dict[str
                OR knowledge_file_id = ANY(%s::uuid[]);
             """,
             (user_ids, kb_ids, file_ids),
-        ),
-        (
-            "knowledge_file_chunks",
-            """
-            DELETE FROM knowledge_file_chunks
-            WHERE user_id = ANY(%s::bigint[])
-               OR knowledge_file_id = ANY(%s::uuid[]);
-            """,
-            (user_ids, file_ids),
         ),
         (
             "knowledge_base_files",

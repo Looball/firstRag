@@ -9,7 +9,7 @@ export const DEFAULT_RETRIEVAL_SETTINGS: KnowledgeBaseRetrievalSettings = {
   enableRerank: true,
   topK: 4,
   vectorTopK: 16,
-  fulltextTopK: 16,
+  sparseTopK: 16,
   rrfK: 8,
   rerankScoreThreshold: 0,
 };

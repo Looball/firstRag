@@ -370,7 +370,7 @@ class CreateConversationTests(unittest.TestCase):
                         "file_id": str(uuid4()),
                         "file_name": "民事诉讼法.pdf",
                         "chunk_index": 2,
-                        "retrieval_sources": ["vector", "fulltext"],
+                        "retrieval_sources": ["dense", "sparse"],
                     }
                 ],
             },
@@ -617,9 +617,10 @@ class CreateConversationTests(unittest.TestCase):
                 "file_id": "file-1",
                 "file_name": "民事诉讼法.pdf",
                 "chunk_index": 2,
-                "retrieval_sources": ["fulltext", "vector"],
-                "vector_score": 0.12,
-                "fulltext_score": 3.45,
+                "retrieval_sources": ["dense", "sparse"],
+                "dense_score": 0.88,
+                "sparse_score": 3.45,
+                "hybrid_score": 0.03,
                 "rrf_score": 0.03,
                 "rerank_score": 5.4,
                 "content": "较长正文不需要在诊断摘要中重复返回",
@@ -636,16 +637,19 @@ class CreateConversationTests(unittest.TestCase):
             "override_reason": "问题关键词命中当前知识库文件画像，已强制检索",
             "retrieved_count": 5,
             "source_count": 1,
-            "retrieval_sources": ["fulltext", "vector"],
-            "vector_degraded": False,
+            "retrieval_sources": ["dense", "sparse"],
+            "dense_degraded": False,
+            "sparse_degraded": False,
             "diagnostics": {
-                "vector_count": 5,
-                "fulltext_count": 5,
+                "dense_count": 5,
+                "sparse_count": 5,
                 "fused_count": 5,
                 "reranked_count": 5,
-                "vector_degraded": False,
-                "vector_errors": [],
-                "retrieval_sources": ["fulltext", "vector"],
+                "dense_degraded": False,
+                "sparse_degraded": False,
+                "dense_errors": [],
+                "sparse_errors": [],
+                "retrieval_sources": ["dense", "sparse"],
             },
         }
         with patch(
@@ -689,16 +693,18 @@ class CreateConversationTests(unittest.TestCase):
         self.assertFalse(diagnostic["llm_need_retrieval"])
         self.assertTrue(diagnostic["override_applied"])
         self.assertIn("知识库文件画像", diagnostic["override_reason"])
-        self.assertEqual(diagnostic["retrieval_sources"], ["fulltext", "vector"])
-        self.assertFalse(diagnostic["vector_degraded"])
-        self.assertEqual(diagnostic["diagnostics"]["vector_count"], 5)
+        self.assertEqual(diagnostic["retrieval_sources"], ["dense", "sparse"])
+        self.assertEqual(diagnostic["diagnostics"]["dense_count"], 5)
+        self.assertFalse(diagnostic["diagnostics"]["dense_degraded"])
+        self.assertFalse(diagnostic["diagnostics"]["sparse_degraded"])
         self.assertNotIn("content", diagnostic["sources_preview"][0])
         self.assertEqual(diagnostic["sources_preview"][0]["chunk_index"], 2)
-        self.assertEqual(diagnostic["sources_preview"][0]["vector_score"], 0.12)
+        self.assertEqual(diagnostic["sources_preview"][0]["dense_score"], 0.88)
         self.assertEqual(
-            diagnostic["sources_preview"][0]["fulltext_score"],
+            diagnostic["sources_preview"][0]["sparse_score"],
             3.45,
         )
+        self.assertEqual(diagnostic["sources_preview"][0]["hybrid_score"], 0.03)
 
     def test_get_diagnostics_returns_404_for_inaccessible_conversation(
         self,

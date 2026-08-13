@@ -136,7 +136,7 @@ class ChatSettingsTests(unittest.TestCase):
                 "enable_rerank": True,
                 "top_k": 4,
                 "vector_top_k": 16,
-                "fulltext_top_k": 16,
+                "sparse_top_k": 16,
                 "rrf_k": 8,
                 "rerank_score_threshold": 0.0,
             },

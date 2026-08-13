@@ -9,7 +9,7 @@
 3. 后端计算 SHA-256 和文件大小。
 4. 若同一用户已上传过相同内容，则复用 `knowledge_files` 记录，只补充知识库关联。
 
-知识库移入回收站只隐藏知识库及其会话，不删除可复用文件或索引；恢复后原关联重新生效。永久删除知识文件会使用与 indexing 相同的单文件 advisory lock，取消 active jobs，并清理当前 vector store、PostgreSQL 和磁盘内容，避免旧 worker 在删除后写回数据。
+知识库移入回收站只隐藏知识库及其会话，不删除可复用文件或索引；恢复后原关联重新生效。永久删除知识文件会使用与 indexing 相同的单文件 advisory lock，取消 active jobs，并清理 Milvus entities、PostgreSQL metadata 和磁盘原文，避免旧 worker 在删除后写回数据。
 5. 新文件保存到根目录 `uploads/users/{user_id}/{hash_prefix}/{file_id}/source.ext`。
 6. `auto_index=true` 时创建 `vector_index_jobs` 任务。
 
@@ -20,23 +20,23 @@
 3. `document_service` 加载 PDF、DOCX、Markdown、TXT 或图片知识文件。PDF 先按页解析原生文本，并剔除 `pymupdf4llm` 为纯图片生成的 `picture ... intentionally omitted` 占位提示；无有效文本层的页面渲染为 PNG 并通过本地 Tesseract OCR。同一次识别同时生成正文和 TSV word confidence，写入真实页码、解析方式、字符加权置信度、质量等级和识别次数 metadata。DOCX 从 OOXML 主文档按标题和段落边界加载，保留原始段落范围。图片文件会使用当前用户配置的 vision 聊天模型解析为可检索 Markdown；聊天图片附件不走这条入库链路。
 4. 文本或图片解析结果先按标题、PDF page、DOCX 段落组等结构边界形成 parent，再在单个 parent 内切成有 overlap 的 child；只有 child 进入向量/关键词召回。无结构文本使用 parent `2000/0`、child `600/100` 的递归 fallback，overlap 不跨 parent。全局 `chunk_index` 继续跨 PDF page 或 DOCX block 连续，parent/child stable ID 同时包含文件版本与层级序号。
 5. 当前登录用户保存的 embedding provider 生成向量，支持 Qwen、智谱、OpenAI、Voyage、Cohere、Jina 和自定义 OpenAI-compatible embedding API。用户可按厂商保存多份 API Key，当前生效配置决定实际调用的 provider/model/base_url。
-6. Milvus 保存向量；Compose 中 worker 与 backend 通过各自的 authenticated PyMilvus client 访问同一 Standalone，Strong consistency 和写后 self-hit 保证跨进程可见。
-7. PostgreSQL `knowledge_file_chunk_parents` 保存父块正文，`knowledge_file_chunks` 保存带 `parent_id` 外键的 child 正文和 metadata；v2 hybrid path 只从 PostgreSQL 批量加载已命中 child 的 parent context，不使用这些表产生或排序候选。
+6. Milvus v3 entity 同时保存 dense/sparse vectors、child `content`、`parent_content`、stable IDs 和位置 metadata；Compose 中 worker 与 backend 通过各自的 authenticated PyMilvus client 访问同一 Standalone，Strong consistency、count/identity/text 对账和 dense/sparse self-hit 保证跨进程可见。
+7. PostgreSQL 只保存文件 metadata、任务、用户设置、OCR correction/history 等关系数据，不保存 parent/child 切分文本，也不参与候选召回。
 8. 更新文件状态和任务状态。
 
-T-141 已在 Compose 中加入固定 revision BGE-M3 sparse encoder 和 backend/worker 共享 client；T-145 已建立 parent/child 切分、持久化和 identity 契约。T-142/T-143 已在 `MILVUS_DENSE_SPARSE_WRITE_ENABLED` feature flag 后实现独立 v2 collection、dense+sparse 双写、Milvus `hybrid_search + RRFRanker`、child rerank 和 parent context 扩展。T-144 全量重建验收前该 flag 默认关闭，未重建环境仍使用旧 dense-only collection + PostgreSQL full-text，不能只开 flag 读取历史数据。
+T-141 固定了 BGE-M3 sparse encoder revision；T-145 固化 parent/child 切分与 stable ID；T-142/T-143 接通 dense+sparse 写入、Milvus `hybrid_search + RRFRanker`、child rerank 和 parent context 扩展。T-144 使用新的 v3 collection identity 保存正文并移除旧兼容路径；旧 collection 不会被原地升级，必须从源文件重建并通过 cutover audit。
 
 用户可从低质量 OCR 引用的原文预览中提交指定页重新识别。后端只允许当前用户、已完成索引且确由 OCR 生成的 PDF 页面；请求递增文件 `index_version`，把经过校验的强制页写入内部 job options，再由原有 worker 异步重建整个文件索引。主动重识别在共享总超时内比较原图自动布局、灰度/二值化单块文本和 90°/180°/270° 旋转候选，按有效文本与 confidence 确定性选优；首次 OCR 仍只运行一次基线候选。重建期间该文件暂不可检索，旧回答继续绑定旧 index version，不会被后台静默替换；任务成功后需要重新提问才能获得采用新文本的引用。
 
-用户也可读取指定 OCR 页的完整正文并保存人工修订。修订独立存放在 PostgreSQL，不直接覆盖当前 chunks；worker 每次重建仍运行 Tesseract 获取文本和质量分数，再在 chunk 切分前用当前 revision 的人工文本替换页面正文。撤销修订会删除 correction 并再建一个新 index version，从原 PDF 恢复 Tesseract 文本。保存、更新和撤销均沿用 file advisory lock、vector job、版本隔离和历史 source 语义。
+用户也可读取指定 OCR 页的完整正文并保存人工修订。修订独立存放在 PostgreSQL，不直接覆盖当前 Milvus entities；worker 每次重建仍运行 Tesseract 获取文本和质量分数，再在切分前用当前 revision 的人工文本替换页面正文。撤销修订会删除 correction 并再建一个新 index version，从原 PDF 恢复 Tesseract 文本。保存、更新和撤销均沿用 file advisory lock、vector job、版本隔离和历史 source 语义。
 
 文件级巡检可以把多个 OCR 页码合并为一次重新识别批次。后端校验页码属于当前 index version 后，只递增一次版本，并把规范化页码写入一个 job 的 `force_ocr_page_numbers`；worker 在一次整文件解析中强制 OCR 所选页，避免逐页 job 造成重复 embedding 和版本竞争。失败重试不接受新的页码，而是从原失败 job 恢复受控 options，在同一 index version 下重新排队。
 
 OCR 参数回归默认由 `pdf_ocr_eval_v2.json` 定义的合成评测集约束。门禁生成没有原生文本层的正常、90° 旋转、低对比度、模糊、中英文混排、轻度倾斜、盐椒噪点、侧边阴影、小字号和表格 PDF，并直接复用生产 OCR engine 比较基线与自适应结果；质量、策略和耗时不满足阈值时 CI 失败。报告的 suite fingerprint 随 case、阈值或退化参数变化，历史趋势只比较相同 suite。该评测不进入上传、数据库、chunk 或 embedding 链路。
 
-真实混合 PDF 回归由 `scripts/eval_indexing.py --file-kind mixed-pdf` 执行。fixture 固定为三页 `native_text -> scanned image -> native_text`，上传后等待 Compose worker 完成真实 OCR、chunk、embedding、Milvus 和 PostgreSQL 写入，再查询只存在于第 2 页扫描图中的唯一标识。门禁要求 source 指向第 2 页且 `pdf_parse_method=ocr`，同时通过 source chunk context 验证第 1、3 页仍为 `native_text`、全局 chunk index 按页递增；随后读取第 2 页 PNG preview，并与原 PDF 三页渲染图进行内容比较，防止只验证响应格式却返回错误页。该模式需要登录账号及已保存的 LLM/embedding 配置，结束时恢复 retrieval settings 并默认解除临时文件关联。
+真实混合 PDF 回归由 `scripts/eval_indexing.py --file-kind mixed-pdf` 执行。fixture 固定为三页 `native_text -> scanned image -> native_text`，上传后等待 Compose worker 完成真实 OCR、切分、dense/sparse encoding 与 Milvus text/vector 写入，再查询只存在于第 2 页扫描图中的唯一标识。门禁要求 source 指向第 2 页且 `pdf_parse_method=ocr`，同时通过 source context 验证第 1、3 页仍为 `native_text`、全局 chunk index 按页递增；随后读取第 2 页 PNG preview，并与原 PDF 三页渲染图进行内容比较，防止只验证响应格式却返回错误页。该模式需要登录账号及已保存的 LLM/embedding 配置，结束时恢复 retrieval settings 并默认解除临时文件关联。
 
-索引成功时，扫描页的本次 Tesseract 原始结果独立写入 `knowledge_file_ocr_history`，不随 `knowledge_file_chunks` 替换而丢失。页级 attempt 从最近历史递增；迁移前旧文件在下一次重建前从上一版 chunks 写入 baseline。历史保留 confidence、quality、word count、文本 SHA、trigger、source job 和 correction revision，前端据此判断重识别是改善、下降、持平还是仅文字发生变化。
+索引成功时，扫描页的本次 Tesseract 原始结果独立写入 `knowledge_file_ocr_history`，不随 Milvus file entities 替换而丢失。页级 attempt 从最近历史递增。历史保留 confidence、quality、word count、文本 SHA、trigger、source job 和 correction revision，前端据此判断重识别是改善、下降、持平还是仅文字发生变化。
 
 ## 聊天生成
 
@@ -47,15 +47,14 @@ OCR 参数回归默认由 `pdf_ocr_eval_v2.json` 定义的合成评测集约束�
 5. 普通问题加载历史消息，构建 RAG 链。
 6. `rag_service` 兼容入口委托 `app/services/rag/` 内部模块读取 retrieval settings、判断是否需要检索，并可改写多轮问题。
 7. 召回候选片段：
-   - v2 flag 开启时，应用层分别生成用户 provider 的 dense query vector 与固定 BGE-M3 的 sparse query vector；Milvus 在同一次 `hybrid_search()` 中执行 COSINE/IP 两个 `AnnSearchRequest`，二者使用完全相同的 `user_id` 与可选 `file_id` filter，并由 `RRFRanker` 融合。
-   - 应用层限制每个 parent 进入 rerank 的 child 数量，Cross-Encoder 精排 child 后为每个 parent 保留最高分 child，再从 PostgreSQL 批量加载 parent 正文；prompt 使用 parent context，source 仍保留命中 child 的正文、ID 和位置。
+   - 应用层分别生成用户 provider 的 dense query vector 与固定 BGE-M3 的 sparse query vector；Milvus 在同一次 `hybrid_search()` 中执行 COSINE/IP 两个 `AnnSearchRequest`，二者使用完全相同的 `user_id` 与可选 `file_id` filter，并由 `RRFRanker` 融合。
+   - 应用层限制每个 parent 进入 rerank 的 child 数量，Cross-Encoder 精排 child 后为每个 parent 保留最高分 child；prompt 直接使用 Milvus entity 的 `parent_content`，source 保留命中 child 的正文、ID 和位置。
    - sparse query/route 失败时降级为 dense-only，dense 失败时降级为 sparse-only；任何降级都复用原 scalar scope，返回后再次校验 user/file，绝不扩大范围。
-   - flag 关闭时继续使用 Milvus dense + PostgreSQL full-text + 应用层 RRF 的兼容路径，直到 T-144 重建和切流。
 8. 用户配置的 OpenAI 兼容聊天模型流式生成回答；带图片时，最终用户消息按 OpenAI-compatible 多模态 payload 发送。
 9. SSE 返回 token、sources、retrieval 诊断。
 10. 回答完成后持久化到 `messages`，用户图片 metadata 通过 `message_attachments` 与用户消息关联。
 
-聊天图片附件通过 `POST /chat/attachments` 先上传到本地文件系统，后端只向前端返回安全 metadata 和读取 URL。附件用于当前会话消息的视觉问答，不会自动进入 `knowledge_files`、`knowledge_file_chunks` 或 Milvus。需要长期检索的图片应作为知识文件上传，worker 会用当前用户的 vision 模型解析图片内容并写入既有 chunk 与向量链路。
+聊天图片附件通过 `POST /chat/attachments` 先上传到本地文件系统，后端只向前端返回安全 metadata 和读取 URL。附件用于当前会话消息的视觉问答，不会自动进入 `knowledge_files` 或 Milvus。需要长期检索的图片应作为知识文件上传，worker 会用当前用户的 vision 模型解析图片内容并写入 Milvus 文本与向量链路。
 
 知识库级 retrieval settings 可通过
 `GET/PATCH /chat/knowledge-base/{knowledge_base_id}/retrieval-settings`
@@ -64,7 +63,7 @@ OCR 参数回归默认由 `pdf_ocr_eval_v2.json` 定义的合成评测集约束�
 - `retrieval_mode`：`auto`、`always`、`never`。
 - `enable_query_router`：是否调用 Router LLM 判断本轮是否检索。
 - `enable_rerank`：是否启用 rerank 精排。
-- `top_k`、`vector_top_k`、`fulltext_top_k`、`rrf_k`：控制最终引用数、两路召回数和 RRF 候选池；默认分别为 `4`、`16`、`16`、`8`，用于减少 rerank 候选数和首 token 前等待时间。
+- `top_k`、`vector_top_k`、`sparse_top_k`、`rrf_k`：控制最终引用数、dense/sparse 两路召回数和 RRF 候选池；默认分别为 `4`、`16`、`16`、`8`，用于减少 rerank 候选数和首 token 前等待时间。
 - `rerank_score_threshold`：控制低相关片段是否进入上下文和 Sources。
 
 ## 检索诊断
@@ -90,7 +89,7 @@ OCR 参数回归默认由 `pdf_ocr_eval_v2.json` 定义的合成评测集约束�
 - `sources`：回答引用的文件、chunk、分数和检索来源。
 - `retrieval`：最终是否检索、Router LLM 原始判断、规则覆盖原因、改写问题、召回数量、降级状态和诊断信息。
 
-前端可使用 source 中持久化的 `file_id + chunk_index + index_version` 调用 chunk 上下文 API，从 PostgreSQL 精确读取目标 child、同一 parent 内的相邻 child 和完整 parent 正文；source 同时携带 `parent_id`、`child_id`、PDF 页码或 DOCX 段落范围。旧 source/旧 chunk 缺少层级 identity 时继续按全局相邻 chunk 回退，缺少 `index_version` 时回退到最新可用版本。该能力用于引用核验，不重新执行 embedding、全文检索或 rerank；文件已永久删除或重新索引后指定版本不再存在时安全返回不可用状态。
+前端可使用 source 中持久化的 `file_id + chunk_index + index_version` 调用 chunk 上下文 API，从当前用户的 Milvus collection 精确读取目标 child、同一 parent 内的相邻 child 和完整 parent 正文；source 同时携带 `parent_id`、`child_id`、PDF 页码或 DOCX 段落范围。该能力用于引用核验，不重新执行 embedding、sparse retrieval 或 rerank；文件已永久删除、embedding identity 已切换或重新索引后指定版本不再存在时安全返回不可用状态。
 
 诊断展示应区分三类信息：
 
@@ -99,8 +98,8 @@ OCR 参数回归默认由 `pdf_ocr_eval_v2.json` 定义的合成评测集约束�
 | 决策 | `final_need_retrieval` / `need_retrieval` | 后端最终是否执行知识库检索。 |
 | Router 判断 | `llm_need_retrieval`、`llm_reason` | LLM Router 对本轮问题是否需要检索的原始判断与原因。 |
 | 规则覆盖 | `override_applied`、`override_reason` | 后端确定性规则是否覆盖 Router 判断，例如命中知识库文件画像。 |
-| 召回排序 | `retrieval_mode`、`dense_count`、`sparse_count`、`hybrid_count`、`fused_count`、`reranked_count` | v2 dense/sparse、Milvus RRF 和 child rerank 数量；兼容路径继续提供 `vector_count/fulltext_count`。 |
-| 召回降级 | `dense_degraded`、`sparse_degraded`、`hybrid_degraded` 与对应 `*_errors` | v2 query/vector route 的单路降级；兼容路径继续提供 `vector/fulltext` 字段。 |
+| 召回排序 | `retrieval_mode`、`dense_count`、`sparse_count`、`hybrid_count`、`fused_count`、`reranked_count` | Milvus dense/sparse、RRF 和 child rerank 数量。 |
+| 召回降级 | `dense_degraded`、`sparse_degraded`、`hybrid_degraded` 与对应 `*_errors` | query/vector route 的单路降级。 |
 | 阶段耗时 | `diagnostics.timing.*_ms` | 问题改写、Router、检索、RRF、rerank、首 token 和整体流式回答耗时，单位毫秒。 |
 | 画像缓存 | `knowledge_profile_cache_hit`、`knowledge_profile_cache_source`、`knowledge_profile_indexed_file_count` | 本轮知识库画像是否命中 Redis 或进程内 fallback 短 TTL 缓存，以及画像中的已索引文件数量。 |
 | 设置缓存 | `retrieval_settings_cache_hit`、`retrieval_settings_source`、`retrieval_settings_cache_backend` | 本轮知识库检索设置是否命中缓存、设置来源，以及缓存后端是 Redis 还是进程内 fallback。 |
@@ -119,15 +118,14 @@ OCR 参数回归默认由 `pdf_ocr_eval_v2.json` 定义的合成评测集约束�
 - `query_router_ms`：Query Router 判断耗时。
 - `finalize_decision_ms`：规则覆盖和最终检索决策耗时。
 - `retrieve_documents_ms`：执行检索阶段耗时。
-- `dense_embedding_ms`、`sparse_embedding_ms`、`hybrid_ms`、`rerank_ms`、`parent_context_ms`：v2 hybrid path 阶段耗时；兼容路径保留 `embedding_ms/vector_ms/fulltext_ms/rrf_ms`。
+- `dense_embedding_ms`、`sparse_embedding_ms`、`hybrid_ms`、`rerank_ms`、`parent_context_ms`：Milvus hybrid path 各阶段耗时。
 - `pre_answer_total_ms`：开始生成回答前的总耗时。
 - `first_answer_token_ms`：从后端开始处理到首个回答 token 的耗时。
 
-v2 path 在有候选且开启 rerank 时始终精排 child，以便按相关性选择每个 parent 的代表 child；只有候选为空时才写入 `rerank_skipped`。兼容路径继续在候选数不超过最终 `top_k` 时跳过 rerank。
+在有候选且开启 rerank 时始终精排 child，以便按相关性选择每个 parent 的代表 child；只有候选为空时才写入 `rerank_skipped`。
 
-向量检索和全文检索在 hybrid retrieval 中并行执行。任一路粗召回失败时，失败通道会
-降级为空候选并写入对应 degraded/error diagnostics，另一通道的候选仍会进入 RRF 和后续
-rerank 流程。
+Milvus dense 与 sparse retrieval 使用相同 scalar filter。任一路 query vector 生成失败时，
+另一通道仍可在不扩大用户/文件范围的前提下独立召回，并写入对应 degraded/error diagnostics。
 
 知识库文件画像和已索引文件 ID 使用 Redis 优先短 TTL 缓存，默认用于减少同一知识库在
 连续对话中的重复数据库查询；Redis 不可用时回退到进程内缓存。文件上传、知识库文件关联

@@ -1,6 +1,6 @@
 # 混合检索与流式回答
 
-本教程沿一次真实提问，追踪它如何经过检索决策、dense/sparse query embedding、Milvus filtered hybrid search 与 RRF、child rerank、parent context 扩展和 LCEL，最后以 SSE 持续返回回答，并把答案、sources 与 retrieval diagnostics 写回 PostgreSQL。T-144 全量重建前 v2 flag 默认关闭，因此隔离实验仍可观察旧 dense + PostgreSQL full-text 兼容路径；两条路径的边界会明确标出。
+本教程沿一次真实提问，追踪它如何经过检索决策、dense/sparse query embedding、Milvus filtered hybrid search 与 RRF、child rerank、Milvus parent context 扩展和 LCEL，最后以 SSE 持续返回回答，并把答案、sources 与 retrieval diagnostics 写回 PostgreSQL。
 
 ## 学习目标与实验边界
 
@@ -26,7 +26,7 @@ sequenceDiagram
     participant Sparse as BGE-M3 sparse encoder
     participant Milvus as Milvus hybrid + RRFRanker
     participant Rank as Child rerank
-    participant Parent as PostgreSQL parent context
+    participant Parent as Milvus parent_content
     participant LLM as Chat provider
     participant PG as PostgreSQL messages
 
@@ -56,7 +56,7 @@ sequenceDiagram
     API-->>Browser: done or error
 ```
 
-Route 先验证会话属于当前用户且属于请求中的知识库。链路只从该知识库中 `status='indexed'` 的文件取 `file_id`；v2 的 dense/sparse requests 使用完全相同的 `user_id` 与文件 filter，adapter 对返回 entity 再次复核范围。PostgreSQL parent 查询也带用户、有效文件和精确 parent ID 条件，但不产生候选。
+Route 先验证会话属于当前用户且属于请求中的知识库。链路只从该知识库中 `status='indexed'` 的文件取 `file_id`；dense/sparse requests 使用完全相同的 `user_id` 与文件 filter，adapter 对返回 entity 再次复核范围。命中 entity 已携带所属 `parent_content`，无需再查 PostgreSQL 正文。
 
 ## 第一章：检索决策与 LCEL 阶段
 
@@ -95,7 +95,7 @@ standalone_question
 
 ## 第二章：dense/sparse query 与 Milvus hybrid search
 
-v2 Hybrid retriever 分别生成两种 query vector，再把两个 ANN request 交给一次 Milvus `hybrid_search()`。两路目标不同，但共享同一个 scalar scope。
+Hybrid retriever 分别生成两种 query vector，再把两个 ANN request 交给一次 Milvus `hybrid_search()`。两路目标不同，但共享同一个 scalar scope。
 
 | 通道 | 存储与排序依据 | 擅长 | 当前隔离边界 |
 | --- | --- | --- | --- |
@@ -126,7 +126,7 @@ user_id : BGE-M3 model : fixed revision : max_length : normalized query SHA-256
 | [`backend/app/services/vectors/milvus_vector_store.py`](../../backend/app/services/vectors/milvus_vector_store.py) | 两个 filtered ANN request、Milvus RRFRanker、单路 fallback 与防御性范围校验。 |
 | [`backend/app/services/vectors/embedding_model.py`](../../backend/app/services/vectors/embedding_model.py) | 用户 embedding 设置与 cache identity。 |
 | [`backend/app/services/sparse_encoder_client.py`](../../backend/app/services/sparse_encoder_client.py) | 固定模型身份的 BGE-M3 query/document contract。 |
-| [`backend/app/repositories/knowledge_chunk_repository.py`](../../backend/app/repositories/knowledge_chunk_repository.py) | 精确 parent IDs 的批量 context 查询；v2 不调用 full-text SQL。 |
+| [`backend/app/services/vectors/knowledge_text_service.py`](../../backend/app/services/vectors/knowledge_text_service.py) | source preview、OCR 巡检等按 file/version 读取 Milvus child/parent text。 |
 
 ## 第三章：RRF 融合与可选 rerank
 
@@ -143,11 +143,11 @@ Milvus 对每路候选名次计算 RRF，并返回融合后的 child。adapter �
 - `rank_constant=60` 是 RRF 公式中的平滑常数，当前实现固定使用默认值。
 - `rrf_k` 是融合后保留给下一阶段的候选池大小。启用 rerank 时保留 `rrf_k` 个候选；不启用时直接保留最终 `top_k`。
 
-Rerank 使用 query 与每个候选 child 的联合相关性评分，成本高于 bi-encoder，因此只处理 Milvus RRF 后的小候选池。当前支持本地 BGE Cross-Encoder 和用户配置的远程 provider。v2 在 `enable_rerank=true` 且存在候选时执行；直接关闭时沿用 Milvus 顺序。成功结果增加 `rerank_score`、`rerank_rank` 和 `rerank_provider`。
+Rerank 使用 query 与每个候选 child 的联合相关性评分，成本高于 bi-encoder，因此只处理 Milvus RRF 后的小候选池。当前支持本地 BGE Cross-Encoder 和用户配置的远程 provider。在 `enable_rerank=true` 且存在候选时执行；直接关闭时沿用 Milvus 顺序。成功结果增加 `rerank_score`、`rerank_rank` 和 `rerank_provider`。
 
 Rerank 不可用时不会让整次检索失败：系统记录 `rerank_degraded=true` 和安全错误摘要，然后返回 RRF 前 `top_k`。引用序列化还会按当前 `rerank_score_threshold` 过滤低相关片段；降级路径没有 rerank score 时保持兼容，不会仅因缺少该字段丢弃候选。
 
-源码入口：[RRF](../../backend/app/services/retrieval/rrf.py)、[reranker](../../backend/app/services/retrieval/reranker.py)和[引用过滤/序列化](../../backend/app/services/rag/reference_serializer.py)。
+源码入口：[Milvus hybrid adapter](../../backend/app/services/vectors/milvus_vector_store.py)、[reranker](../../backend/app/services/retrieval/reranker.py)和[引用过滤/序列化](../../backend/app/services/rag/reference_serializer.py)。
 
 ## 第四章：diagnostics 是怎样一路带出来的
 
@@ -177,7 +177,7 @@ Rerank 不可用时不会让整次检索失败：系统记录 `rerank_degraded=t
     "settings": {
       "top_k": 4,
       "vector_top_k": 16,
-      "fulltext_top_k": 16,
+      "sparse_top_k": 16,
       "rrf_k": 8,
       "enable_rerank": true
     },
@@ -255,7 +255,7 @@ FastAPI response 使用 `text/event-stream; charset=utf-8`、`Cache-Control: no-
 | LLM/provider 流式失败 | 发送 `error`，不发送伪 `done` | `failed`；保存已产生的 partial answer、sources、retrieval 和安全 `error_message`。 |
 | 客户端中断 | 连接关闭，不再发送后续事件 | generator 关闭时写 `cancelled`；保留 partial answer、sources、retrieval。 |
 
-每次 v2 search 都使用严格范围：两个 request 的 filter 必须逐字相同，始终包含 `user_id`，指定知识库文件时再加入单文件等值或多文件集合过滤。adapter 对返回 metadata 做防御性范围复核。hybrid 或单路失败时不会改用更宽范围、无过滤扫描或读取全部 embedding；PostgreSQL 只按已选 parent IDs 加载上下文，不承担兜底召回。
+每次 search 都使用严格范围：两个 request 的 filter 必须逐字相同，始终包含 `user_id`，指定知识库文件时再加入单文件等值或多文件集合过滤。adapter 对返回 metadata 做防御性范围复核。hybrid 或单路失败时不会改用更宽范围、无过滤扫描或读取全部 embedding；parent context 直接来自同一受限结果 entity。
 
 `messages` 更新只允许命中 `role='assistant' AND status='generating'` 的占位记录，结束时一次写入 `content/status/error_message/sources/retrieval/completed_at`。会话历史默认只把 `completed` assistant message 重新送进模型，避免失败或取消的半截内容污染后续上下文；消息查询接口仍可向当前用户展示这些状态用于诊断。
 
@@ -313,13 +313,12 @@ curl -fsS \
       retrieval_mode: .diagnostics.retrieval_mode,
       dense_degraded: .diagnostics.dense_degraded,
       sparse_degraded: .diagnostics.sparse_degraded,
-      vector_degraded,
       source_count,
       diagnostics: {
         hybrid_count: .diagnostics.hybrid_count,
         parent_count: .diagnostics.parent_count,
-        vector_count: .diagnostics.vector_count,
-        fulltext_count: .diagnostics.fulltext_count,
+        dense_count: .diagnostics.dense_count,
+        sparse_count: .diagnostics.sparse_count,
         fused_count: .diagnostics.fused_count,
         reranked_count: .diagnostics.reranked_count,
         query_embedding_cache_hit: .diagnostics.query_embedding_cache_hit,
@@ -332,7 +331,7 @@ curl -fsS \
     }'
 ```
 
-使用相同规范化 query 再发一次请求，然后重新读取最后一条 diagnostics。在 300 秒 TTL 内且同一 backend process 未重启时，dense cache 应命中；v2 环境的 sparse cache 也应命中。source 通常是 `memory`，由另一个进程接手且 Redis 中仍有值时可能是 `redis`。默认隔离 project 未重建 v2 数据，因此 `retrieval_mode=legacy_dense_fulltext`，新字段保持默认值；不要把它误报为 v2 hybrid 验收。
+使用相同规范化 query 再发一次请求，然后重新读取最后一条 diagnostics。在 300 秒 TTL 内且同一 backend process 未重启时，dense 与 sparse cache 应命中。source 通常是 `memory`，由另一个进程接手且 Redis 中仍有值时可能是 `redis`；`retrieval_mode` 应为 `milvus_dense_sparse`。
 
 ### 可选故障观察：Milvus 降级
 
@@ -342,7 +341,7 @@ curl -fsS \
 firstrag_tutorial_compose stop milvus-standalone
 ```
 
-默认兼容路径中，若 PostgreSQL full-text 和 provider 仍可用，回答链路可继续，diagnostics 中 `vector_degraded=true`、`vector_count=0`、`fulltext_count>0`。v2 path 的 dense/sparse 都在 Milvus 内，停止 Milvus 会让 hybrid 与两个单路 fallback 全部失败，不能回退到 PostgreSQL keyword；该实验只验证安全失败和 diagnostics。观察完成后立即恢复并确认健康：
+Dense/sparse 与 parent text 都在 Milvus 内，停止 Milvus 会让 hybrid 与两个单路 fallback 全部失败，不能回退到 PostgreSQL keyword/text；该实验只验证安全失败和 diagnostics。观察完成后立即恢复并确认健康：
 
 ```bash
 firstrag_tutorial_compose start milvus-standalone

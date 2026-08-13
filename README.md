@@ -31,7 +31,7 @@ FirstRAG 是一个全栈 RAG（Retrieval-Augmented Generation，检索增强生�
 ## 你将学到什么
 
 - 如何把文件上传、SHA-256 去重、持久任务队列、worker、OCR、chunk 和 embedding 组织成异步入库链路。
-- 如何组合 Milvus filtered ANN、PostgreSQL full-text、RRF 和可选 rerank，并保留可解释的 retrieval diagnostics。
+- 如何组合 Milvus dense/sparse filtered hybrid search、RRF 和可选 rerank，并保留可解释的 retrieval diagnostics。
 - 如何通过 FastAPI、LCEL 和 Next.js API proxy 传递 SSE token、sources、usage 与失败状态。
 - 如何隔离用户数据和 provider API Key，并在 route、service、repository 之间保持清晰边界。
 - 如何使用 Docker Compose、migration、单元测试、Playwright、真实 eval 和 GitHub Actions 验证完整系统。
@@ -92,7 +92,7 @@ conda run -n firstrag python scripts/production_preflight.py --env-file .env --m
 1. 注册并登录一个本地测试账号。
 2. 进入“聊天模型设置”，填写自己的 OpenAI-compatible provider。
 3. 回到工作台，新建知识库并上传一份 `.md`、`.txt`、`.pdf`、`.docx`、`.png`、`.jpg/.jpeg` 或 `.webp` 文件；图片入库解析需要当前聊天模型支持 vision。
-4. 在“文件”弹窗中触发向量化，等待任务队列完成。无文本层的扫描 PDF 会在 worker 内通过本地 Tesseract OCR；文件完成索引后可从“OCR 巡检”集中查看低置信度页面，批量选择页面进行灰度、二值化、页面旋转和多 PSM 自适应重识别，查看每页识别历史、候选选优、置信度趋势与相邻文本差异，或直接进入 PDF 原页与文本并排校对、差异高亮和异步索引重建。图片文件则由当前用户的 vision 聊天模型解析为可检索 Markdown，再进入向量与全文检索。
+4. 在“文件”弹窗中触发向量化，等待任务队列完成。无文本层的扫描 PDF 会在 worker 内通过本地 Tesseract OCR；文件完成索引后可从“OCR 巡检”集中查看低置信度页面，批量选择页面进行灰度、二值化、页面旋转和多 PSM 自适应重识别，查看每页识别历史、候选选优、置信度趋势与相邻文本差异，或直接进入 PDF 原页与文本并排校对、差异高亮和异步索引重建。图片文件则由当前用户的 vision 聊天模型解析为可检索 Markdown，再进入 Milvus dense/sparse 检索。
 5. 对当前知识库提问，检查回答和引用来源；如果当前聊天模型支持 vision，也可以在聊天框附加 PNG、JPEG 或 WebP 图片进行单轮多模态提问。
 6. 如需调试检索效果，切换到高级模式后查看 retrieval diagnostics、提交反馈或打开质量看板。
 
@@ -118,7 +118,7 @@ Docker 中的 `backend`、`migrate` 和 `worker` 复用精简后的 Python runti
 | 向量库 | Milvus Standalone 3.0.0（etcd + MinIO） |
 | 稀疏编码 | BGE-M3 fixed revision + FlagEmbedding 1.4.0（Compose 内网单实例） |
 | RAG 编排 | LangChain / LCEL |
-| 检索 | 向量检索、PostgreSQL 全文检索、RRF、可选本地 CrossEncoder 或用户级远程 rerank |
+| 检索 | Milvus dense/sparse hybrid search、RRF、可选本地 CrossEncoder 或用户级远程 rerank |
 | 模型接口 | OpenAI 兼容协议，支持 DeepSeek、Qwen、Zhipu、Kimi、Doubao、Minimax 等 |
 | 任务处理 | PostgreSQL 队列 + 独立 vector index worker |
 

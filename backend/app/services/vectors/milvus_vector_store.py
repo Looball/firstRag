@@ -28,6 +28,7 @@ from app.services.vectors.vector_store import (
 
 
 CONTENT_MAX_BYTES = 65_535
+PARENT_CONTENT_MAX_BYTES = 65_535
 METADATA_MAX_BYTES = 65_536
 CHUNK_ID_MAX_CHARACTERS = 192
 FILE_ID_MAX_CHARACTERS = 64
@@ -121,7 +122,7 @@ class MilvusVectorStore:
 
     @property
     def dense_sparse_write_enabled(self) -> bool:
-        """返回当前 adapter 是否绑定 v2 dense+sparse schema/write。"""
+        """返回当前 adapter 是否绑定 v3 dense+sparse/text schema。"""
         return self._sparse_encoder is not None
 
     def _provider_error(
@@ -202,6 +203,11 @@ class MilvusVectorStore:
             )
             schema.add_field(field_name="parent_index", datatype=DataType.INT64)
             schema.add_field(field_name="child_index", datatype=DataType.INT64)
+            schema.add_field(
+                field_name="parent_content",
+                datatype=DataType.VARCHAR,
+                max_length=PARENT_CONTENT_MAX_BYTES,
+            )
         schema.add_field(field_name="metadata", datatype=DataType.JSON)
 
         index_params = self._client.prepare_index_params()
@@ -259,6 +265,7 @@ class MilvusVectorStore:
                 "parent_id": DataType.VARCHAR,
                 "parent_index": DataType.INT64,
                 "child_index": DataType.INT64,
+                "parent_content": DataType.VARCHAR,
             })
         if set(fields) != set(expected_types):
             raise ValueError("collection schema fields 与 ADR 不一致")
@@ -274,6 +281,7 @@ class MilvusVectorStore:
         }
         if self.dense_sparse_write_enabled:
             expected_max_lengths["parent_id"] = CHUNK_ID_MAX_CHARACTERS
+            expected_max_lengths["parent_content"] = PARENT_CONTENT_MAX_BYTES
         for field_name, expected_max_length in expected_max_lengths.items():
             actual_max_length = int(
                 fields[field_name].get("params", {}).get("max_length") or 0,
@@ -432,7 +440,7 @@ class MilvusVectorStore:
         user_id: int,
         file_id: UUID | str,
     ) -> None:
-        """v2 重建只替换当前 identity，保留 dense-only rollback collection。"""
+        """v3 重建只替换当前 identity，保留旧 rollback collection。"""
         if not self.dense_sparse_write_enabled:
             self._delete_file_from_user_collections(user_id, file_id)
             return
@@ -545,7 +553,7 @@ class MilvusVectorStore:
                     metadata.get(field_name) is None
                     for field_name in required_hierarchy_fields
                 ):
-                    raise ValueError("v2 entity 缺少 parent/child identity")
+                    raise ValueError("v3 entity 缺少 parent/child identity")
                 if str(metadata["parent_id"]) != build_parent_id(metadata):
                     raise ValueError("parent_id 不符合 stable ID 契约")
                 expected_id = build_child_id(metadata)
@@ -567,6 +575,9 @@ class MilvusVectorStore:
             parent_id = str(metadata.get("parent_id") or "")
             if sparse_embeddings is not None and len(parent_id) > CHUNK_ID_MAX_CHARACTERS:
                 raise ValueError("parent_id 超过 Milvus VARCHAR(192) 限制")
+            parent_content = str(metadata.pop("parent_content", content))
+            if len(parent_content.encode("utf-8")) > PARENT_CONTENT_MAX_BYTES:
+                raise ValueError("parent content 超过 Milvus VARCHAR 上限")
             for key in (
                 "user_id",
                 "file_id",
@@ -600,6 +611,7 @@ class MilvusVectorStore:
                     "parent_id": parent_id,
                     "parent_index": int(document.metadata["parent_index"]),
                     "child_index": int(document.metadata["child_index"]),
+                    "parent_content": parent_content,
                 })
             entities.append(entity)
         return entities
@@ -659,7 +671,13 @@ class MilvusVectorStore:
         """对账 IDs/count/hierarchy，并执行 dense/sparse filtered self-hit。"""
         output_fields = ["chunk_id", "index_version"]
         if sparse_embeddings is not None:
-            output_fields.extend(["parent_id", "parent_index", "child_index"])
+            output_fields.extend([
+                "parent_id",
+                "parent_index",
+                "child_index",
+                "content",
+                "parent_content",
+            ])
         rows = self._query_file_rows(
             user_id=user_id,
             file_id=file_id,
@@ -687,6 +705,22 @@ class MilvusVectorStore:
             }
             if actual_hierarchy != expected_hierarchy:
                 raise RuntimeError("Milvus 写后 parent/child identity 对账失败")
+            expected_text = {
+                chunk_id: (
+                    document.page_content,
+                    str(document.metadata["parent_content"]),
+                )
+                for chunk_id, document in zip(ids, documents, strict=True)
+            }
+            actual_text = {
+                str(row.get("chunk_id")): (
+                    str(row.get("content") or ""),
+                    str(row.get("parent_content") or ""),
+                )
+                for row in rows
+            }
+            if actual_text != expected_text:
+                raise RuntimeError("Milvus 写后 child/parent 文本对账失败")
         if not ids:
             return
         search_results = self._client.search(
@@ -818,7 +852,7 @@ class MilvusVectorStore:
         embeddings: Sequence[Sequence[float]],
         batch_size: int = WRITE_BATCH_SIZE,
     ) -> None:
-        """使用既有 dense embeddings 导入，并按 v2 配置补充 learned sparse。"""
+        """使用既有 dense embeddings 导入，并按 v3 配置补充 learned sparse。"""
         if len(documents) != len(ids):
             raise ValueError("documents 与 ids 数量必须一致")
         if batch_size < 1 or batch_size > 1_000:
@@ -997,6 +1031,7 @@ class MilvusVectorStore:
                     "parent_id",
                     "parent_index",
                     "child_index",
+                    "parent_content",
                 ])
             search_options = {
                 "collection_name": self.collection_name,
@@ -1067,6 +1102,9 @@ class MilvusVectorStore:
                             or ""
                         ),
                         "child_index": int(entity.get("child_index")),
+                        "parent_content": str(
+                            entity.get("parent_content") or ""
+                        ),
                     })
                 results.append(VectorSearchResult(
                     document=Document(
@@ -1096,7 +1134,7 @@ class MilvusVectorStore:
     ) -> HybridVectorSearchResponse:
         """执行 filtered dense/sparse search，双路可用时由 Milvus 做 RRF。"""
         if not self.dense_sparse_write_enabled:
-            raise ValueError("Milvus hybrid search 需要 v2 dense/sparse collection")
+            raise ValueError("Milvus hybrid search 需要 v3 dense/sparse/text collection")
         if min(dense_k, sparse_k, k, rrf_rank_constant) < 1:
             raise ValueError("hybrid search 参数必须大于 0")
         if query_embedding is None and query_sparse_embedding is None:
@@ -1170,6 +1208,7 @@ class MilvusVectorStore:
                 "parent_id",
                 "parent_index",
                 "child_index",
+                "parent_content",
                 "metadata",
             ]
             if len(requests) == 2:
@@ -1244,6 +1283,9 @@ class MilvusVectorStore:
                     "parent_id": parent_id,
                     "parent_index": int(entity.get("parent_index")),
                     "child_index": int(entity.get("child_index")),
+                    "parent_content": str(
+                        entity.get("parent_content") or ""
+                    ),
                     "retrieval_source": (
                         "milvus_hybrid"
                         if len(retrieval_sources) == 2
@@ -1297,6 +1339,7 @@ class MilvusVectorStore:
                 "parent_id",
                 "parent_index",
                 "child_index",
+                "parent_content",
             ])
         if include_embeddings:
             output_fields.append("embedding")
@@ -1324,6 +1367,9 @@ class MilvusVectorStore:
                     "parent_index": row.get("parent_index"),
                     "child_id": row.get("chunk_id"),
                     "child_index": row.get("child_index"),
+                    "parent_content": str(
+                        row.get("parent_content") or ""
+                    ),
                 })
             embedding = row.get("embedding") if include_embeddings else None
             records.append(VectorRecord(

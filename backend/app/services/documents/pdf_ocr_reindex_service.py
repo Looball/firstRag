@@ -9,7 +9,6 @@ from app.core.config import (
     PDF_OCR_REINDEX_MAX_BATCH_PAGES,
 )
 from app.db.locks import file_index_lock
-from app.repositories.knowledge_chunk_repository import list_user_pdf_ocr_page_rows
 from app.repositories.knowledge_file_repository import (
     get_user_knowledge_file,
     reset_file_index_state,
@@ -22,6 +21,7 @@ from app.services.knowledge_profile_cache import (
 from app.services.vectors.vector_index_queue_service import (
     enqueue_file_vector_index,
 )
+from app.services.vectors.knowledge_text_service import list_pdf_ocr_page_rows
 
 
 class PdfOcrReindexValidationError(ValueError):
@@ -61,7 +61,7 @@ def _get_indexed_ocr_page_numbers(
 ) -> set[int]:
     """读取当前索引版本中可重新识别的 OCR 页码。"""
     page_numbers: set[int] = set()
-    for row in list_user_pdf_ocr_page_rows(
+    for row in list_pdf_ocr_page_rows(
         user_id=user_id,
         file_id=knowledge_file_id,
         index_version=index_version,

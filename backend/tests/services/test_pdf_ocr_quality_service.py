@@ -66,7 +66,7 @@ class PdfOcrQualityServiceTests(unittest.TestCase):
                 "index_version": 4,
             },
         ), patch(
-            "app.services.documents.pdf_ocr_quality_service.list_user_pdf_ocr_page_rows",
+            "app.services.documents.pdf_ocr_quality_service.list_pdf_ocr_page_rows",
             return_value=rows,
         ), patch(
             "app.services.documents.pdf_ocr_quality_service.list_pdf_ocr_corrections",
@@ -123,7 +123,7 @@ class PdfOcrQualityServiceTests(unittest.TestCase):
                 "index_version": 1,
             },
         ), patch(
-            "app.services.documents.pdf_ocr_quality_service.list_user_pdf_ocr_page_rows",
+            "app.services.documents.pdf_ocr_quality_service.list_pdf_ocr_page_rows",
             return_value=[],
         ), patch(
             "app.services.documents.pdf_ocr_quality_service.list_pdf_ocr_corrections",

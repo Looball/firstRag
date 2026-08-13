@@ -56,7 +56,7 @@ class PdfOcrCorrectionServiceTests(unittest.TestCase):
             "app.services.documents.pdf_ocr_correction_service.get_user_knowledge_file",
             return_value=file_record,
         ), patch(
-            "app.services.documents.pdf_ocr_correction_service.get_user_pdf_page_chunks",
+            "app.services.documents.pdf_ocr_correction_service.get_pdf_page_rows",
             return_value=page_chunks,
         ), patch(
             "app.services.documents.pdf_ocr_correction_service.get_pdf_ocr_correction",
@@ -114,7 +114,7 @@ class PdfOcrCorrectionServiceTests(unittest.TestCase):
                 "index_version": 1,
             },
         ), patch(
-            "app.services.documents.pdf_ocr_correction_service.get_user_pdf_page_chunks",
+            "app.services.documents.pdf_ocr_correction_service.get_pdf_page_rows",
             return_value=[{
                 "content": "SAME TEXT",
                 "metadata": {"pdf_parse_method": "ocr"},
@@ -145,7 +145,7 @@ class PdfOcrCorrectionServiceTests(unittest.TestCase):
                 "index_version": 2,
             },
         ), patch(
-            "app.services.documents.pdf_ocr_correction_service.get_user_pdf_page_chunks",
+            "app.services.documents.pdf_ocr_correction_service.get_pdf_page_rows",
             return_value=[{
                 "content": "HUMAN CORRECTED",
                 "metadata": {"pdf_parse_method": "ocr"},

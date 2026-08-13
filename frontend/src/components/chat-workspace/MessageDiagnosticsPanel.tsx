@@ -78,6 +78,22 @@ export function MessageDiagnosticsPanel({
   const finalNeedRetrieval = diagnostic
     ? (diagnostic.finalNeedRetrieval ?? diagnostic.needRetrieval)
     : null;
+  const retrievalDegraded = diagnostic
+    ? diagnostic.vectorDegraded ||
+      diagnostic.diagnostics.denseDegraded ||
+      diagnostic.diagnostics.sparseDegraded ||
+      diagnostic.diagnostics.hybridDegraded
+    : false;
+  const retrievalErrors = diagnostic
+    ? Array.from(
+        new Set([
+          ...diagnostic.diagnostics.vectorErrors,
+          ...diagnostic.diagnostics.denseErrors,
+          ...diagnostic.diagnostics.sparseErrors,
+          ...diagnostic.diagnostics.hybridErrors,
+        ])
+      )
+    : [];
 
   return (
     <div className="mt-4 border-t border-[#d6dedb] pt-3">
@@ -125,8 +141,8 @@ export function MessageDiagnosticsPanel({
               value={diagnostic.overrideApplied ? "是" : "否"}
             />
             <DiagnosticMetric
-              label="向量降级："
-              value={diagnostic.vectorDegraded ? "是" : "否"}
+              label="检索降级："
+              value={retrievalDegraded ? "是" : "否"}
             />
             <DiagnosticMetric label="展示引用：" value={diagnostic.sourceCount} />
             <DiagnosticMetric
@@ -153,13 +169,19 @@ export function MessageDiagnosticsPanel({
 
           <div className="grid gap-2 border border-[#d5ded9] bg-[#fcfdfb] px-3 py-2 text-xs text-[#46514e] md:grid-cols-4">
             <DiagnosticMetric
-              label="Vector 召回"
-              value={formatDiagnosticCount(diagnostic.diagnostics.vectorCount)}
+              label="Dense 召回"
+              value={formatDiagnosticCount(
+                diagnostic.diagnostics.denseCount ??
+                  diagnostic.diagnostics.vectorCount
+              )}
               blockLabel
             />
             <DiagnosticMetric
-              label="Fulltext 召回"
-              value={formatDiagnosticCount(diagnostic.diagnostics.fulltextCount)}
+              label="Sparse 召回"
+              value={formatDiagnosticCount(
+                diagnostic.diagnostics.sparseCount ??
+                  diagnostic.diagnostics.fulltextCount
+              )}
               blockLabel
             />
             <DiagnosticMetric
@@ -248,10 +270,27 @@ export function MessageDiagnosticsPanel({
                     "检索调用",
                     formatDiagnosticTiming(diagnosticTiming?.retrieveDocumentsMs),
                   ],
-                  ["Embedding", formatDiagnosticTiming(diagnosticTiming?.embeddingMs)],
-                  ["Vector", formatDiagnosticTiming(diagnosticTiming?.vectorMs)],
-                  ["Fulltext", formatDiagnosticTiming(diagnosticTiming?.fulltextMs)],
-                  ["RRF", formatDiagnosticTiming(diagnosticTiming?.rrfMs)],
+                  [
+                    "Dense embedding",
+                    formatDiagnosticTiming(
+                      diagnosticTiming?.denseEmbeddingMs ??
+                        diagnosticTiming?.embeddingMs
+                    ),
+                  ],
+                  [
+                    "Sparse embedding",
+                    formatDiagnosticTiming(diagnosticTiming?.sparseEmbeddingMs),
+                  ],
+                  [
+                    "Milvus hybrid",
+                    formatDiagnosticTiming(
+                      diagnosticTiming?.hybridMs ?? diagnosticTiming?.vectorMs
+                    ),
+                  ],
+                  [
+                    "Parent context",
+                    formatDiagnosticTiming(diagnosticTiming?.parentContextMs),
+                  ],
                   ["Rerank", formatDiagnosticTiming(diagnosticTiming?.rerankMs)],
                   [
                     "检索总计",
@@ -284,12 +323,12 @@ export function MessageDiagnosticsPanel({
             </div>
           </div>
 
-          {diagnostic.vectorDegraded && (
+          {retrievalDegraded && (
             <div className="border border-[#f0b8a8] bg-[#fff1ed] px-3 py-2 text-xs text-[#9b3c29]">
-              <p>向量检索发生降级，已尝试使用全文检索兜底。</p>
-              {diagnostic.diagnostics.vectorErrors.length > 0 && (
+              <p>Milvus dense/sparse 检索发生降级，未扩大用户或文件范围。</p>
+              {retrievalErrors.length > 0 && (
                 <ul className="mt-1 list-disc space-y-1 pl-4">
-                  {diagnostic.diagnostics.vectorErrors.map((error) => (
+                  {retrievalErrors.map((error) => (
                     <li key={error}>{error}</li>
                   ))}
                 </ul>
@@ -324,9 +363,13 @@ export function MessageDiagnosticsPanel({
                       : "—"}
                   </p>
                   <p className="mt-1 text-[#64716d]">
-                    RRF：{formatDiagnosticScore(source.rrfScore)} · 向量距离：
-                    {formatDiagnosticScore(source.vectorScore)} · 文本分：
-                    {formatDiagnosticScore(source.fulltextScore)} · 相关性：
+                    Hybrid：{formatDiagnosticScore(source.hybridScore)} · Dense：
+                    {formatDiagnosticScore(
+                      source.denseScore ?? source.vectorScore
+                    )} · Sparse：
+                    {formatDiagnosticScore(
+                      source.sparseScore ?? source.fulltextScore
+                    )} · RRF：{formatDiagnosticScore(source.rrfScore)} · 相关性：
                     {formatDiagnosticScore(source.rerankScore)}
                   </p>
                 </div>

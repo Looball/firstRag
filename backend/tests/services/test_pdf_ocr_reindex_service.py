@@ -33,7 +33,7 @@ class PdfOcrReindexServiceTests(unittest.TestCase):
             "app.services.documents.pdf_ocr_reindex_service.get_user_knowledge_file",
             return_value=file_record,
         ), patch(
-            "app.services.documents.pdf_ocr_reindex_service.list_user_pdf_ocr_page_rows",
+            "app.services.documents.pdf_ocr_reindex_service.list_pdf_ocr_page_rows",
             return_value=[{"metadata": {"page_number": 2}}],
         ), patch(
             "app.services.documents.pdf_ocr_reindex_service.reset_file_index_state",
@@ -73,7 +73,7 @@ class PdfOcrReindexServiceTests(unittest.TestCase):
                 "index_version": 1,
             },
         ), patch(
-            "app.services.documents.pdf_ocr_reindex_service.list_user_pdf_ocr_page_rows",
+            "app.services.documents.pdf_ocr_reindex_service.list_pdf_ocr_page_rows",
             return_value=[],
         ), patch(
             "app.services.documents.pdf_ocr_reindex_service.reset_file_index_state",
@@ -101,7 +101,7 @@ class PdfOcrReindexServiceTests(unittest.TestCase):
                 "index_version": 1,
             },
         ), patch(
-            "app.services.documents.pdf_ocr_reindex_service.list_user_pdf_ocr_page_rows",
+            "app.services.documents.pdf_ocr_reindex_service.list_pdf_ocr_page_rows",
         ) as get_page, patch(
             "app.services.documents.pdf_ocr_reindex_service.reset_file_index_state",
         ) as reset:
@@ -148,7 +148,7 @@ class PdfOcrReindexServiceTests(unittest.TestCase):
                 "index_version": 2,
             },
         ), patch(
-            "app.services.documents.pdf_ocr_reindex_service.list_user_pdf_ocr_page_rows",
+            "app.services.documents.pdf_ocr_reindex_service.list_pdf_ocr_page_rows",
             return_value=[],
         ), patch(
             "app.services.documents.pdf_ocr_reindex_service.reset_file_index_state",
@@ -174,7 +174,7 @@ class PdfOcrReindexServiceTests(unittest.TestCase):
             "app.services.documents.pdf_ocr_reindex_service.get_user_knowledge_file",
             return_value=file_record,
         ), patch(
-            "app.services.documents.pdf_ocr_reindex_service.list_user_pdf_ocr_page_rows",
+            "app.services.documents.pdf_ocr_reindex_service.list_pdf_ocr_page_rows",
             return_value=[
                 {"metadata": {"page_number": 1}},
                 {"metadata": {"page_number": 3}},
