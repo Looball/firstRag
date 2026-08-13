@@ -144,7 +144,7 @@ T-144 删除：
 
 1. T-141 接入 encoder service 与契约测试，不切现有 retrieval。
 2. T-142 已在 `MILVUS_DENSE_SPARSE_WRITE_ENABLED` feature flag 后实现 v2 schema/write、独立 identity 和 dense/sparse 双 self-hit；默认仍使用现有 dense-only collection。
-3. T-143 实现 Milvus hybrid search 和新 diagnostics，仍不对未重建数据切流。
+3. T-143 已实现 Milvus hybrid search、新 diagnostics、child rerank 与 parent context 扩展，仍不对未重建数据切流。
 4. T-144 进入维护窗口：暂停新 indexing、等待 active jobs 为 0、备份 Milvus/PostgreSQL、创建 v2 collections、从源文件重新生成 dense+sparse、逐文件验收。
 5. current IDs/count、dense/sparse self-hit、隔离、真实 RAG/indexing eval 和 restart persistence 全部通过后切换默认。
 6. 观察期内保留旧 dense-only collections；rollback 只切回旧读路径，不把 v2 数据反向覆盖旧 schema。

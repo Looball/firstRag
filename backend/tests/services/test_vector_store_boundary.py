@@ -6,6 +6,7 @@ from uuid import UUID
 from langchain_core.documents import Document
 
 from app.services.vectors.vector_store import (
+    HybridVectorSearchResponse,
     VectorRecord,
     VectorSearchResponse,
     VectorStoreBoundary,
@@ -61,6 +62,21 @@ class FakeVectorStore:
     ) -> VectorSearchResponse:
         """返回空检索结果。"""
         return VectorSearchResponse()
+
+    def hybrid_search_vectors(
+        self,
+        *,
+        query_embedding: list[float] | None,
+        query_sparse_embedding: dict[int, float] | None,
+        user_id: int,
+        file_ids: list[UUID | str] | None,
+        dense_k: int,
+        sparse_k: int,
+        k: int,
+        rrf_rank_constant: int,
+    ) -> HybridVectorSearchResponse:
+        """返回空 dense/sparse 检索结果。"""
+        return HybridVectorSearchResponse()
 
     def list_file_vectors(
         self,

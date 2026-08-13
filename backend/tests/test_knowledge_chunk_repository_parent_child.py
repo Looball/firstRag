@@ -7,6 +7,7 @@ from langchain_core.documents import Document
 
 from app.repositories.knowledge_chunk_repository import (
     delete_file_chunks,
+    get_user_parent_chunks,
     replace_file_chunks,
 )
 
@@ -119,6 +120,21 @@ class KnowledgeChunkParentChildRepositoryTests(unittest.TestCase):
             "DELETE FROM knowledge_file_chunk_parents",
             executed_sql[1],
         )
+
+    def test_parent_context_batch_query_enforces_user_and_soft_delete(self) -> None:
+        """parent 扩展查询必须同时限制 user、parent IDs 与有效文件。"""
+        with patch(
+            "app.repositories.knowledge_chunk_repository.fetch_all",
+            return_value=[{"parent_id": "parent-a"}],
+        ) as fetch_all:
+            rows = get_user_parent_chunks(7, ["parent-a", "", "parent-a"])
+
+        self.assertEqual(rows, [{"parent_id": "parent-a"}])
+        sql, params = fetch_all.call_args.args
+        self.assertIn("parent.parent_id = ANY(%s::text[])", sql)
+        self.assertIn("parent.user_id = %s", sql)
+        self.assertIn("file.deleted_at IS NULL", sql)
+        self.assertEqual(params, (7, ["parent-a"]))
 
 
 if __name__ == "__main__":

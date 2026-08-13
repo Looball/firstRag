@@ -12,8 +12,10 @@ from app.services.cache_service import CacheBackendResult
 from app.services.retrieval.hybrid_retriever import (
     QUERY_EMBEDDING_CACHE_TTL_SECONDS,
     clear_query_embedding_cache,
+    expand_parent_contexts,
     get_hybrid_documents,
     get_query_embedding,
+    get_query_sparse_embedding,
     get_retrieval_diagnostics,
     get_vector_documents,
     reset_retrieval_diagnostics,
@@ -24,6 +26,8 @@ from app.services.retrieval.reranker import (
 )
 from app.services.retrieval.rrf import reciprocal_rank_fusion
 from app.services.vectors.vector_store import (
+    HybridVectorSearchResponse,
+    HybridVectorSearchResult,
     VectorSearchResponse,
     VectorSearchResult,
 )
@@ -68,6 +72,25 @@ class FakeFailingMilvusBoundary:
     def search_vectors(self, **_: object) -> None:
         """模拟 Milvus 服务不可用。"""
         raise TimeoutError("Milvus unavailable")
+
+
+class FakeHybridVectorStore:
+    """记录 v2 hybrid boundary 参数并返回预置 child candidates。"""
+
+    provider = "milvus"
+
+    def __init__(self, documents: list[Document]) -> None:
+        """保存返回文档和全部 hybrid 调用。"""
+        self.documents = documents
+        self.calls: list[dict[str, object]] = []
+
+    def hybrid_search_vectors(self, **kwargs: object) -> HybridVectorSearchResponse:
+        """返回带 provider-neutral score 的预置结果。"""
+        self.calls.append(dict(kwargs))
+        return HybridVectorSearchResponse(results=[
+            HybridVectorSearchResult(document=document, score=1.0)
+            for document in self.documents
+        ])
 
 
 class FakeReranker:
@@ -212,6 +235,349 @@ class RetrievalResilienceTests(unittest.TestCase):
             diagnostics["rerank_skip_reason"],
             "candidate_count_not_above_top_k",
         )
+
+    def test_v2_hybrid_uses_milvus_caps_children_and_expands_parents(
+        self,
+    ) -> None:
+        """v2 path 不得调用 PG keyword，并应 child rerank 后扩展唯一 parent。"""
+        children = [
+            Document(
+                page_content=f"child-{index}",
+                metadata={
+                    "user_id": 6,
+                    "file_id": "file-a",
+                    "chunk_id": f"child-{index}",
+                    "child_id": f"child-{index}",
+                    "chunk_index": index,
+                    "index_version": 2,
+                    "parent_id": "parent-a" if index < 3 else "parent-b",
+                    "parent_index": 0 if index < 3 else 1,
+                    "child_index": index if index < 3 else 0,
+                    "retrieval_sources": ["dense", "sparse"],
+                },
+            )
+            for index in range(4)
+        ]
+        store = FakeHybridVectorStore(children)
+        parents = [
+            {
+                "parent_id": "parent-a",
+                "file_id": "file-a",
+                "index_version": 2,
+                "parent_index": 0,
+                "content": "完整 parent A",
+                "metadata": {"page_number": 1},
+            },
+            {
+                "parent_id": "parent-b",
+                "file_id": "file-a",
+                "index_version": 2,
+                "parent_index": 1,
+                "content": "完整 parent B",
+                "metadata": {"page_number": 2},
+            },
+        ]
+        with patch(
+            "app.services.retrieval.hybrid_retriever."
+            "MILVUS_DENSE_SPARSE_WRITE_ENABLED",
+            True,
+        ), patch(
+            "app.services.retrieval.hybrid_retriever.get_query_embedding",
+            return_value=[0.1, 0.2],
+        ), patch(
+            "app.services.retrieval.hybrid_retriever."
+            "get_query_sparse_embedding",
+            return_value={7: 0.9},
+        ), patch(
+            "app.services.retrieval.hybrid_retriever.get_vector_store",
+            return_value=store,
+        ), patch(
+            "app.services.retrieval.hybrid_retriever.get_user_parent_chunks",
+            return_value=parents,
+        ), patch(
+            "app.services.retrieval.hybrid_retriever.get_fulltext_documents",
+        ) as fulltext, patch(
+            "app.services.retrieval.hybrid_retriever.get_reranker",
+            return_value=FakeReranker(),
+        ):
+            docs = get_hybrid_documents(
+                query="合同编号是什么",
+                user_id=6,
+                file_ids=["file-a"],
+                k=2,
+                vector_k=11,
+                fulltext_k=13,
+                rrf_k=4,
+                rerank=True,
+            )
+
+        fulltext.assert_not_called()
+        self.assertEqual(len(store.calls), 1)
+        self.assertEqual(store.calls[0]["dense_k"], 11)
+        self.assertEqual(store.calls[0]["sparse_k"], 13)
+        self.assertEqual([doc.page_content for doc in docs], [
+            "完整 parent A",
+            "完整 parent B",
+        ])
+        self.assertEqual([doc.metadata["child_content"] for doc in docs], [
+            "child-0",
+            "child-3",
+        ])
+        diagnostics = get_retrieval_diagnostics()
+        assert diagnostics is not None
+        self.assertEqual(diagnostics["retrieval_mode"], "milvus_dense_sparse")
+        self.assertEqual(diagnostics["parent_limited_candidate_count"], 3)
+        self.assertEqual(diagnostics["parent_count"], 2)
+
+    def test_v2_hybrid_degrades_to_dense_when_sparse_encoder_fails(self) -> None:
+        """BGE-M3 sparse query 失败时仍应通过相同 boundary 做 dense-only。"""
+        child = Document(
+            page_content="dense child",
+            metadata={
+                "user_id": 6,
+                "file_id": "file-a",
+                "chunk_id": "child-a",
+                "child_id": "child-a",
+                "chunk_index": 0,
+                "index_version": 2,
+                "parent_id": "parent-a",
+                "parent_index": 0,
+                "child_index": 0,
+                "retrieval_sources": ["dense"],
+            },
+        )
+        store = FakeHybridVectorStore([child])
+        with patch(
+            "app.services.retrieval.hybrid_retriever."
+            "MILVUS_DENSE_SPARSE_WRITE_ENABLED",
+            True,
+        ), patch(
+            "app.services.retrieval.hybrid_retriever.get_query_embedding",
+            return_value=[0.1, 0.2],
+        ), patch(
+            "app.services.retrieval.hybrid_retriever."
+            "get_query_sparse_embedding",
+            side_effect=RuntimeError("encoder unavailable"),
+        ), patch(
+            "app.services.retrieval.hybrid_retriever.get_vector_store",
+            return_value=store,
+        ), patch(
+            "app.services.retrieval.hybrid_retriever.get_user_parent_chunks",
+            return_value=[{
+                "parent_id": "parent-a",
+                "file_id": "file-a",
+                "index_version": 2,
+                "content": "dense child",
+                "metadata": {},
+            }],
+        ):
+            docs = get_hybrid_documents(
+                query="合同编号是什么",
+                user_id=6,
+                file_ids=["file-a"],
+                k=2,
+                rerank=False,
+            )
+
+        self.assertEqual(store.calls[0]["query_sparse_embedding"], None)
+        self.assertEqual(docs[0].page_content, "dense child")
+        diagnostics = get_retrieval_diagnostics()
+        assert diagnostics is not None
+        self.assertTrue(diagnostics["sparse_degraded"])
+        self.assertEqual(diagnostics["retrieval_sources"], ["dense"])
+        self.assertEqual(diagnostics["dense_count"], 1)
+        self.assertEqual(diagnostics["sparse_count"], 0)
+
+    def test_v2_hybrid_degrades_to_sparse_when_dense_provider_fails(self) -> None:
+        """用户 dense provider 失败时仍应通过相同 boundary 做 sparse-only。"""
+        child = Document(
+            page_content="sparse child",
+            metadata={
+                "user_id": 6,
+                "file_id": "file-a",
+                "chunk_id": "child-a",
+                "child_id": "child-a",
+                "chunk_index": 0,
+                "index_version": 2,
+                "parent_id": "parent-a",
+                "parent_index": 0,
+                "child_index": 0,
+                "retrieval_sources": ["sparse"],
+            },
+        )
+        store = FakeHybridVectorStore([child])
+        with patch(
+            "app.services.retrieval.hybrid_retriever."
+            "MILVUS_DENSE_SPARSE_WRITE_ENABLED",
+            True,
+        ), patch(
+            "app.services.retrieval.hybrid_retriever.get_query_embedding",
+            side_effect=RuntimeError("provider unavailable"),
+        ), patch(
+            "app.services.retrieval.hybrid_retriever."
+            "get_query_sparse_embedding",
+            return_value={7: 0.9},
+        ), patch(
+            "app.services.retrieval.hybrid_retriever.get_vector_store",
+            return_value=store,
+        ), patch(
+            "app.services.retrieval.hybrid_retriever.get_user_parent_chunks",
+            return_value=[{
+                "parent_id": "parent-a",
+                "file_id": "file-a",
+                "index_version": 2,
+                "content": "sparse child",
+                "metadata": {},
+            }],
+        ):
+            docs = get_hybrid_documents(
+                query="合同编号是什么",
+                user_id=6,
+                file_ids=["file-a"],
+                k=2,
+                rerank=False,
+            )
+
+        self.assertEqual(store.calls[0]["query_embedding"], None)
+        self.assertEqual(docs[0].page_content, "sparse child")
+        diagnostics = get_retrieval_diagnostics()
+        assert diagnostics is not None
+        self.assertTrue(diagnostics["dense_degraded"])
+        self.assertEqual(diagnostics["retrieval_sources"], ["sparse"])
+        self.assertEqual(diagnostics["dense_count"], 0)
+        self.assertEqual(diagnostics["sparse_count"], 1)
+
+    def test_v2_hybrid_failure_retries_dense_then_sparse_without_pg(self) -> None:
+        """Milvus hybrid 失败只允许在同一 boundary 内按 dense/sparse 降级。"""
+        child = Document(
+            page_content="sparse fallback child",
+            metadata={
+                "user_id": 6,
+                "file_id": "file-a",
+                "chunk_id": "child-a",
+                "child_id": "child-a",
+                "chunk_index": 0,
+                "index_version": 2,
+                "parent_id": "parent-a",
+                "parent_index": 0,
+                "child_index": 0,
+                "retrieval_sources": ["sparse"],
+            },
+        )
+        response = HybridVectorSearchResponse(results=[
+            HybridVectorSearchResult(document=child, score=1.0),
+        ])
+        store = unittest.mock.MagicMock()
+        store.hybrid_search_vectors.side_effect = [
+            RuntimeError("hybrid failed"),
+            RuntimeError("dense failed"),
+            response,
+        ]
+        with patch(
+            "app.services.retrieval.hybrid_retriever."
+            "MILVUS_DENSE_SPARSE_WRITE_ENABLED",
+            True,
+        ), patch(
+            "app.services.retrieval.hybrid_retriever.get_query_embedding",
+            return_value=[0.1, 0.2],
+        ), patch(
+            "app.services.retrieval.hybrid_retriever."
+            "get_query_sparse_embedding",
+            return_value={7: 0.9},
+        ), patch(
+            "app.services.retrieval.hybrid_retriever.get_vector_store",
+            return_value=store,
+        ), patch(
+            "app.services.retrieval.hybrid_retriever.get_user_parent_chunks",
+            return_value=[{
+                "parent_id": "parent-a",
+                "file_id": "file-a",
+                "index_version": 2,
+                "content": "sparse fallback child",
+                "metadata": {},
+            }],
+        ), patch(
+            "app.services.retrieval.hybrid_retriever.get_fulltext_documents",
+        ) as fulltext:
+            docs = get_hybrid_documents(
+                query="合同编号是什么",
+                user_id=6,
+                file_ids=["file-a"],
+                k=2,
+                rerank=False,
+            )
+
+        fulltext.assert_not_called()
+        calls = store.hybrid_search_vectors.call_args_list
+        self.assertEqual(len(calls), 3)
+        self.assertIsNotNone(calls[0].kwargs["query_embedding"])
+        self.assertIsNotNone(calls[0].kwargs["query_sparse_embedding"])
+        self.assertIsNotNone(calls[1].kwargs["query_embedding"])
+        self.assertIsNone(calls[1].kwargs["query_sparse_embedding"])
+        self.assertIsNone(calls[2].kwargs["query_embedding"])
+        self.assertIsNotNone(calls[2].kwargs["query_sparse_embedding"])
+        self.assertEqual(docs[0].page_content, "sparse fallback child")
+        diagnostics = get_retrieval_diagnostics()
+        assert diagnostics is not None
+        self.assertTrue(diagnostics["hybrid_degraded"])
+        self.assertTrue(diagnostics["dense_degraded"])
+        self.assertEqual(diagnostics["retrieval_sources"], ["sparse"])
+        self.assertEqual(diagnostics["dense_count"], 0)
+        self.assertEqual(diagnostics["sparse_count"], 1)
+
+    def test_sparse_query_cache_uses_model_revision_length_and_hash(self) -> None:
+        """重复 query 应复用包含 BGE-M3 identity 和 query hash 的 sparse cache。"""
+        reset_retrieval_diagnostics()
+        with patch(
+            "app.services.retrieval.hybrid_retriever."
+            "cache_service.get_json_cache",
+            return_value=CacheBackendResult(hit=False),
+        ), patch(
+            "app.services.retrieval.hybrid_retriever."
+            "cache_service.set_json_cache",
+            return_value=CacheBackendResult(hit=False),
+        ), patch(
+            "app.services.retrieval.hybrid_retriever.SparseEncoderClient",
+        ) as client_class:
+            client_class.return_value.encode_query.return_value = {7: 0.75}
+            first = get_query_sparse_embedding("  Hello   World  ", user_id=6)
+            second = get_query_sparse_embedding("hello world", user_id=6)
+
+        self.assertEqual(first, {7: 0.75})
+        self.assertEqual(second, first)
+        client_class.return_value.encode_query.assert_called_once()
+        diagnostics = get_retrieval_diagnostics()
+        assert diagnostics is not None
+        cache_key = diagnostics["query_sparse_embedding_cache_key"]
+        self.assertIn("BAAI/bge-m3", cache_key)
+        self.assertIn(":1024:", cache_key)
+        self.assertNotIn("hello world", cache_key)
+        self.assertTrue(diagnostics["query_sparse_embedding_cache_hit"])
+
+    def test_parent_expansion_drops_unverified_child(self) -> None:
+        """PostgreSQL 缺失当前 parent 时不得把未核验 child 交给 LLM。"""
+        child = Document(
+            page_content="可能属于旧 index version 的 child",
+            metadata={
+                "user_id": 6,
+                "file_id": "file-a",
+                "index_version": 2,
+                "parent_id": "missing-parent",
+                "child_id": "child-a",
+            },
+        )
+        reset_retrieval_diagnostics()
+        with patch(
+            "app.services.retrieval.hybrid_retriever.get_user_parent_chunks",
+            return_value=[],
+        ):
+            docs = expand_parent_contexts(documents=[child], user_id=6)
+
+        self.assertEqual(docs, [])
+        diagnostics = get_retrieval_diagnostics()
+        assert diagnostics is not None
+        self.assertTrue(diagnostics["parent_context_degraded"])
+        self.assertEqual(diagnostics["parent_count"], 0)
 
     def test_hybrid_retrieval_records_rerank_timing_when_needed(self) -> None:
         """候选数超过最终 top_k 时仍应执行并记录 rerank 耗时。"""

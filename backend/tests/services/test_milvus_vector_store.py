@@ -84,6 +84,7 @@ class FakeMilvusClient:
         self.upsert_calls = 0
         self.fail_upsert_call: int | None = None
         self.search_calls: list[dict[str, object]] = []
+        self.hybrid_search_calls: list[dict[str, object]] = []
         self.fail_search = False
         self.empty_search_calls = 0
 
@@ -269,6 +270,56 @@ class FakeMilvusClient:
             }
             for similarity, row in ranked
         ]]
+
+    def hybrid_search(
+        self,
+        *,
+        collection_name: str,
+        reqs: list[object],
+        ranker: object,
+        limit: int,
+        output_fields: list[str],
+        **options: object,
+    ) -> list[list[dict]]:
+        """模拟 Milvus RRFRanker 对两路 ANN 结果做服务端融合。"""
+        self.hybrid_search_calls.append({
+            "collection_name": collection_name,
+            "reqs": reqs,
+            "ranker": ranker,
+            "limit": limit,
+            "output_fields": output_fields,
+            **options,
+        })
+        rankings: list[list[dict]] = []
+        for request in reqs:
+            rankings.append(self.search(
+                collection_name=collection_name,
+                data=request._data,
+                anns_field=request._anns_field,
+                filter=request._expr,
+                limit=request._limit,
+                output_fields=output_fields,
+                search_params=request._param,
+                **options,
+            )[0])
+        fused: dict[str, tuple[float, dict]] = {}
+        for ranking in rankings:
+            for position, candidate in enumerate(ranking, start=1):
+                chunk_id = str(candidate["id"])
+                prior_score, _ = fused.get(chunk_id, (0.0, candidate))
+                fused[chunk_id] = (
+                    prior_score + 1.0 / (60 + position),
+                    candidate,
+                )
+        ordered = sorted(
+            fused.values(),
+            key=lambda item: item[0],
+            reverse=True,
+        )[:limit]
+        return [[{
+            **candidate,
+            "distance": score,
+        } for score, candidate in ordered]]
 
 
 def _document(
@@ -679,6 +730,112 @@ class MilvusVectorStoreTests(unittest.TestCase):
         self.assertEqual(
             client.search_calls[-1]["search_params"],
             {"metric_type": "IP", "params": {"drop_ratio_search": 0.0}},
+        )
+
+    def test_hybrid_search_uses_one_milvus_rrf_with_identical_scope(
+        self,
+    ) -> None:
+        """dense/sparse 必须共享 filter，并通过一次 Milvus hybrid_search 融合。"""
+        client = FakeMilvusClient()
+        store = _store(
+            client,
+            collection_name="firstrag_u1_v2_identity",
+            dense_sparse=True,
+        )
+        documents = [
+            _child_document(child_index=0, chunk_index=0, content="first"),
+            _child_document(child_index=1, chunk_index=1, content="second"),
+        ]
+        store.replace_file_vectors(
+            user_id=1,
+            file_id="file-a",
+            documents=documents,
+            ids=[_chunk_id(document) for document in documents],
+        )
+
+        response = store.hybrid_search_vectors(
+            query_embedding=[1.0, 0.25],
+            query_sparse_embedding={7: 0.5, 100: 1.0},
+            user_id=1,
+            file_ids=["file-a"],
+            dense_k=8,
+            sparse_k=9,
+            k=5,
+            rrf_rank_constant=60,
+        )
+
+        self.assertEqual(len(client.hybrid_search_calls), 1)
+        call = client.hybrid_search_calls[0]
+        requests = call["reqs"]
+        self.assertEqual(
+            [request._anns_field for request in requests],
+            ["embedding", "sparse_embedding"],
+        )
+        self.assertEqual(
+            {request._expr for request in requests},
+            {'user_id == 1 and file_id == "file-a"'},
+        )
+        self.assertEqual([request._limit for request in requests], [8, 9])
+        self.assertEqual(
+            [result.document.metadata["retrieval_sources"]
+             for result in response.results],
+            [["dense", "sparse"], ["dense", "sparse"]],
+        )
+        self.assertTrue(all(
+            result.document.metadata["parent_id"] == "1:file-a:v1:p0"
+            for result in response.results
+        ))
+
+    def test_hybrid_boundary_supports_dense_and_sparse_single_routes(
+        self,
+    ) -> None:
+        """任一路 query vector 缺失时 adapter 应执行相同 scope 的单路 ANN。"""
+        client = FakeMilvusClient()
+        store = _store(
+            client,
+            collection_name="firstrag_u1_v2_identity",
+            dense_sparse=True,
+        )
+        document = _child_document(content="single route")
+        store.replace_file_vectors(
+            user_id=1,
+            file_id="file-a",
+            documents=[document],
+            ids=[_chunk_id(document)],
+        )
+
+        dense = store.hybrid_search_vectors(
+            query_embedding=[1.0, 0.25],
+            query_sparse_embedding=None,
+            user_id=1,
+            file_ids=["file-a"],
+            dense_k=8,
+            sparse_k=9,
+            k=5,
+            rrf_rank_constant=60,
+        )
+        sparse = store.hybrid_search_vectors(
+            query_embedding=None,
+            query_sparse_embedding={7: 1.0},
+            user_id=1,
+            file_ids=["file-a"],
+            dense_k=8,
+            sparse_k=9,
+            k=5,
+            rrf_rank_constant=60,
+        )
+
+        self.assertEqual(
+            dense.results[0].document.metadata["retrieval_sources"],
+            ["dense"],
+        )
+        self.assertEqual(
+            sparse.results[0].document.metadata["retrieval_sources"],
+            ["sparse"],
+        )
+        self.assertEqual(
+            {call["filter"] for call in client.search_calls[-2:]},
+            {'user_id == 1 and file_id == "file-a"'},
         )
 
     def test_sparse_generation_failure_preserves_previous_v2_vectors(self) -> None:

@@ -23,14 +23,15 @@ FirstRAG/
   -> vector_index_worker 消费任务
   -> document_service 解析/切分（图片知识文件先经用户 vision 模型转为可检索文本）
   -> provider-neutral vector store boundary
-  -> 当前 vector store adapter 写入向量 + PostgreSQL 写入全文检索 chunk
+  -> Milvus child dense/sparse vectors + PostgreSQL parent/child context
 
 用户提问
   -> Next.js API 代理
   -> FastAPI /chat
   -> 可选校验并绑定聊天图片附件
   -> rag_service 构建 LCEL 链
-  -> 混合检索：向量 + 全文 + RRF + rerank
+  -> v2：Milvus dense+sparse hybrid/RRF -> child rerank -> PostgreSQL parent context
+     兼容：Milvus dense + PostgreSQL full-text + 应用层 RRF
   -> LLM 流式生成（带图片时使用多模态消息）
   -> SSE 返回 token、来源和检索诊断
   -> messages 持久化回答、sources、retrieval
@@ -76,7 +77,7 @@ FirstRAG/
 | 数据库工具 | `backend/app/db` | 连接、执行器、PostgreSQL advisory lock。 |
 | 基础设施 | `backend/app/core` | 配置、JWT、安全和密钥加密。 |
 | Worker | `backend/app/workers` | 异步向量化任务消费；扫描 PDF 页面在容器内通过 Tesseract OCR，主动重识别时比较预处理/PSM/旋转候选，保存页级置信度、选优依据和原始识别历史，一次消费单页或多页受控批次，并在切分前应用持久化人工修订。 |
-| Sparse encoder | `backend/sparse_encoder` | Compose 内网单实例加载固定 revision BGE-M3，提供 document/query learned sparse contract；当前 T-141 已接入 runtime 与共享 client，Milvus 写入/检索接线由后续任务完成。 |
+| Sparse encoder | `backend/sparse_encoder` | Compose 内网单实例加载固定 revision BGE-M3，提供 document/query learned sparse contract；worker 用于 v2 写入，backend 用于 v2 hybrid query。 |
 
 ## 存储组件
 
