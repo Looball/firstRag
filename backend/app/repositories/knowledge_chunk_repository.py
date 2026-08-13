@@ -256,6 +256,40 @@ def list_file_parent_identity_rows(
     )
 
 
+def get_user_parent_chunks(
+    user_id: int,
+    parent_ids: Sequence[str],
+) -> list[Row]:
+    """批量读取当前用户的 parent 正文，供 hybrid child 扩展上下文。"""
+    normalized_parent_ids = sorted({
+        str(parent_id)
+        for parent_id in parent_ids
+        if str(parent_id).strip()
+    })
+    if not normalized_parent_ids:
+        return []
+    return fetch_all(
+        """
+        SELECT
+            parent.parent_id,
+            parent.knowledge_file_id AS file_id,
+            parent.index_version,
+            parent.parent_index,
+            parent.content,
+            parent.metadata
+        FROM knowledge_file_chunk_parents AS parent
+        JOIN knowledge_files AS file
+          ON file.id = parent.knowledge_file_id
+         AND file.user_id = parent.user_id
+        WHERE parent.user_id = %s
+          AND parent.parent_id = ANY(%s::text[])
+          AND file.deleted_at IS NULL
+        ORDER BY parent.parent_id ASC;
+        """,
+        (user_id, normalized_parent_ids),
+    )
+
+
 def get_user_knowledge_file_chunk_context(
     user_id: int,
     file_id: UUID | str,

@@ -50,6 +50,22 @@ class VectorSearchResponse:
 
 
 @dataclass(frozen=True)
+class HybridVectorSearchResult:
+    """Milvus dense/sparse RRF 融合后的 child 候选。"""
+
+    document: Document
+    score: float
+
+
+@dataclass(frozen=True)
+class HybridVectorSearchResponse:
+    """Milvus 单次 hybrid search 的融合结果与结构化问题。"""
+
+    results: list[HybridVectorSearchResult] = field(default_factory=list)
+    issues: list[VectorSearchIssue] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
 class VectorStoreHealth:
     """vector store 健康检查结果。"""
 
@@ -133,6 +149,21 @@ class VectorStoreBoundary(Protocol):
         k: int,
     ) -> VectorSearchResponse:
         """按用户和可选文件范围检索，并按 distance 升序返回。"""
+        ...
+
+    def hybrid_search_vectors(
+        self,
+        *,
+        query_embedding: list[float] | None,
+        query_sparse_embedding: dict[int, float] | None,
+        user_id: int,
+        file_ids: list[UUID | str] | None,
+        dense_k: int,
+        sparse_k: int,
+        k: int,
+        rrf_rank_constant: int,
+    ) -> HybridVectorSearchResponse:
+        """执行 dense/sparse filtered search，并由 provider 完成 RRF。"""
         ...
 
     def list_file_vectors(

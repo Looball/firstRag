@@ -201,6 +201,7 @@ SPARSE_ENCODER_CLIENT_BATCH_SIZE = read_int_env(
     "SPARSE_ENCODER_CLIENT_BATCH_SIZE",
     16,
 )
+SPARSE_ENCODER_MAX_LENGTH = read_int_env("SPARSE_ENCODER_MAX_LENGTH", 1024)
 
 # Rerank provider 历史环境变量兼容。新版本远程 rerank 推荐在
 # 登录后的设置页按用户保存 provider/model/API Key。

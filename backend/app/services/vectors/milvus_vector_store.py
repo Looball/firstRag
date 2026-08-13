@@ -14,6 +14,8 @@ from langchain_core.embeddings import Embeddings
 from app.core.sensitive_data import sanitize_sensitive_text
 from app.services.sparse_encoder_client import SparseEncoderClient
 from app.services.vectors.vector_store import (
+    HybridVectorSearchResponse,
+    HybridVectorSearchResult,
     VectorRecord,
     VectorSearchResponse,
     VectorSearchResult,
@@ -1079,6 +1081,199 @@ class MilvusVectorStore:
             raise
         except Exception as exc:
             raise self._provider_error("search_vectors", exc) from exc
+
+    def hybrid_search_vectors(
+        self,
+        *,
+        query_embedding: list[float] | None,
+        query_sparse_embedding: dict[int, float] | None,
+        user_id: int,
+        file_ids: list[UUID | str] | None,
+        dense_k: int,
+        sparse_k: int,
+        k: int,
+        rrf_rank_constant: int,
+    ) -> HybridVectorSearchResponse:
+        """执行 filtered dense/sparse search，双路可用时由 Milvus 做 RRF。"""
+        if not self.dense_sparse_write_enabled:
+            raise ValueError("Milvus hybrid search 需要 v2 dense/sparse collection")
+        if min(dense_k, sparse_k, k, rrf_rank_constant) < 1:
+            raise ValueError("hybrid search 参数必须大于 0")
+        if query_embedding is None and query_sparse_embedding is None:
+            raise ValueError("hybrid search 至少需要一路 query vector")
+        try:
+            from pymilvus import AnnSearchRequest, RRFRanker
+
+            embeddings = None
+            dimensions = self._dimensions
+            if query_embedding is not None:
+                embeddings, dimensions = self._normalize_embeddings(
+                    [query_embedding],
+                    1,
+                )
+                if (
+                    self._dimensions is not None
+                    and dimensions != self._dimensions
+                ):
+                    raise ValueError("query embedding dimension 与设置不一致")
+            sparse_embeddings = None
+            if query_sparse_embedding is not None:
+                sparse_embeddings = self._normalize_sparse_embeddings(
+                    [query_sparse_embedding],
+                    1,
+                )
+            if dimensions is None:
+                raise ValueError("sparse-only search 需要已配置 dense dimension")
+
+            allowed_file_ids = {str(value) for value in file_ids or []}
+            expression = _search_filter(user_id, file_ids)
+            if not self._client.has_collection(
+                collection_name=self.collection_name,
+                timeout=self._timeout_seconds,
+            ):
+                return HybridVectorSearchResponse(results=[])
+            self._ensure_collection(dimensions)
+
+            requests = []
+            retrieval_sources: list[str] = []
+            if embeddings is not None:
+                requests.append(AnnSearchRequest(
+                    data=embeddings,
+                    anns_field="embedding",
+                    param={
+                        "metric_type": "COSINE",
+                        "params": {"ef": 64},
+                    },
+                    limit=dense_k,
+                    filter=expression,
+                ))
+                retrieval_sources.append("dense")
+            if sparse_embeddings is not None:
+                requests.append(AnnSearchRequest(
+                    data=sparse_embeddings,
+                    anns_field="sparse_embedding",
+                    param={
+                        "metric_type": "IP",
+                        "params": {"drop_ratio_search": 0.0},
+                    },
+                    limit=sparse_k,
+                    filter=expression,
+                ))
+                retrieval_sources.append("sparse")
+            output_fields = [
+                "chunk_id",
+                "content",
+                "user_id",
+                "file_id",
+                "chunk_index",
+                "index_version",
+                "parent_id",
+                "parent_index",
+                "child_index",
+                "metadata",
+            ]
+            if len(requests) == 2:
+                raw_results = self._client.hybrid_search(
+                    collection_name=self.collection_name,
+                    reqs=requests,
+                    ranker=RRFRanker(rrf_rank_constant),
+                    limit=k,
+                    output_fields=output_fields,
+                    consistency_level=self._consistency_level,
+                    timeout=self._timeout_seconds,
+                )
+            elif embeddings is not None:
+                raw_results = self._client.search(
+                    collection_name=self.collection_name,
+                    data=embeddings,
+                    anns_field="embedding",
+                    filter=expression,
+                    limit=k,
+                    output_fields=output_fields,
+                    search_params={
+                        "metric_type": "COSINE",
+                        "params": {"ef": 64},
+                    },
+                    consistency_level=self._consistency_level,
+                    timeout=self._timeout_seconds,
+                )
+            else:
+                raw_results = self._client.search(
+                    collection_name=self.collection_name,
+                    data=sparse_embeddings,
+                    anns_field="sparse_embedding",
+                    filter=expression,
+                    limit=k,
+                    output_fields=output_fields,
+                    search_params={
+                        "metric_type": "IP",
+                        "params": {"drop_ratio_search": 0.0},
+                    },
+                    consistency_level=self._consistency_level,
+                    timeout=self._timeout_seconds,
+                )
+            candidates = raw_results[0] if raw_results else []
+            results: list[HybridVectorSearchResult] = []
+            for fused_rank, candidate in enumerate(candidates, start=1):
+                entity = candidate.get("entity") or candidate
+                result_user_id = int(entity.get("user_id"))
+                result_file_id = str(entity.get("file_id") or "")
+                if result_user_id != int(user_id):
+                    raise RuntimeError("Milvus hybrid search 返回了用户范围外的向量")
+                if allowed_file_ids and result_file_id not in allowed_file_ids:
+                    raise RuntimeError("Milvus hybrid search 返回了文件范围外的向量")
+
+                child_id = str(
+                    entity.get("chunk_id") or candidate.get("id") or ""
+                )
+                parent_id = str(entity.get("parent_id") or "")
+                if not child_id or not parent_id:
+                    raise RuntimeError("Milvus hybrid search 返回了缺失层级身份的 child")
+                score = float(candidate.get("distance"))
+                if not math.isfinite(score):
+                    raise RuntimeError("Milvus hybrid search 返回了非有限 RRF score")
+
+                metadata = dict(entity.get("metadata") or {})
+                metadata.update({
+                    "chunk_id": child_id,
+                    "child_id": child_id,
+                    "user_id": result_user_id,
+                    "file_id": result_file_id,
+                    "chunk_index": int(entity.get("chunk_index")),
+                    "index_version": int(entity.get("index_version")),
+                    "parent_id": parent_id,
+                    "parent_index": int(entity.get("parent_index")),
+                    "child_index": int(entity.get("child_index")),
+                    "retrieval_source": (
+                        "milvus_hybrid"
+                        if len(retrieval_sources) == 2
+                        else retrieval_sources[0]
+                    ),
+                    "retrieval_sources": list(retrieval_sources),
+                    "hybrid_score": score,
+                    "hybrid_rank": fused_rank,
+                })
+                if len(retrieval_sources) == 2:
+                    metadata.update({
+                        "rrf_score": score,
+                        "rrf_rank": fused_rank,
+                    })
+                elif retrieval_sources[0] == "dense":
+                    metadata["dense_score"] = score
+                else:
+                    metadata["sparse_score"] = score
+                results.append(HybridVectorSearchResult(
+                    document=Document(
+                        page_content=str(entity.get("content") or ""),
+                        metadata=metadata,
+                    ),
+                    score=score,
+                ))
+            return HybridVectorSearchResponse(results=results)
+        except VectorStoreProviderError:
+            raise
+        except Exception as exc:
+            raise self._provider_error("hybrid_search_vectors", exc) from exc
 
     def list_file_vectors(
         self,

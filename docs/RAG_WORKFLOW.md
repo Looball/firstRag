@@ -21,10 +21,10 @@
 4. 文本或图片解析结果先按标题、PDF page、DOCX 段落组等结构边界形成 parent，再在单个 parent 内切成有 overlap 的 child；只有 child 进入向量/关键词召回。无结构文本使用 parent `2000/0`、child `600/100` 的递归 fallback，overlap 不跨 parent。全局 `chunk_index` 继续跨 PDF page 或 DOCX block 连续，parent/child stable ID 同时包含文件版本与层级序号。
 5. 当前登录用户保存的 embedding provider 生成向量，支持 Qwen、智谱、OpenAI、Voyage、Cohere、Jina 和自定义 OpenAI-compatible embedding API。用户可按厂商保存多份 API Key，当前生效配置决定实际调用的 provider/model/base_url。
 6. Milvus 保存向量；Compose 中 worker 与 backend 通过各自的 authenticated PyMilvus client 访问同一 Standalone，Strong consistency 和写后 self-hit 保证跨进程可见。
-7. PostgreSQL `knowledge_file_chunk_parents` 保存父块正文，`knowledge_file_chunks` 保存带 `parent_id` 外键的 child 正文和 metadata；当前 full-text 仍只检索 child，父块用于 source context 与后续 LLM 上下文扩展。
+7. PostgreSQL `knowledge_file_chunk_parents` 保存父块正文，`knowledge_file_chunks` 保存带 `parent_id` 外键的 child 正文和 metadata；v2 hybrid path 只从 PostgreSQL 批量加载已命中 child 的 parent context，不使用这些表产生或排序候选。
 8. 更新文件状态和任务状态。
 
-T-141 已在 Compose 中加入固定 revision BGE-M3 sparse encoder 和 backend/worker 共享 client；T-145 已建立 parent/child 切分、持久化和 identity 契约。T-142 已在 `MILVUS_DENSE_SPARSE_WRITE_ENABLED` feature flag 后实现独立 v2 collection identity、dense+sparse 双写和写后双 self-hit，但在 T-144 全量重建验收前该 flag 默认关闭，生产检索仍使用旧 dense-only collection + PostgreSQL full-text。聊天链也尚未调用 sparse query 或执行 parent 聚合，这部分由 T-143 完成。
+T-141 已在 Compose 中加入固定 revision BGE-M3 sparse encoder 和 backend/worker 共享 client；T-145 已建立 parent/child 切分、持久化和 identity 契约。T-142/T-143 已在 `MILVUS_DENSE_SPARSE_WRITE_ENABLED` feature flag 后实现独立 v2 collection、dense+sparse 双写、Milvus `hybrid_search + RRFRanker`、child rerank 和 parent context 扩展。T-144 全量重建验收前该 flag 默认关闭，未重建环境仍使用旧 dense-only collection + PostgreSQL full-text，不能只开 flag 读取历史数据。
 
 用户可从低质量 OCR 引用的原文预览中提交指定页重新识别。后端只允许当前用户、已完成索引且确由 OCR 生成的 PDF 页面；请求递增文件 `index_version`，把经过校验的强制页写入内部 job options，再由原有 worker 异步重建整个文件索引。主动重识别在共享总超时内比较原图自动布局、灰度/二值化单块文本和 90°/180°/270° 旋转候选，按有效文本与 confidence 确定性选优；首次 OCR 仍只运行一次基线候选。重建期间该文件暂不可检索，旧回答继续绑定旧 index version，不会被后台静默替换；任务成功后需要重新提问才能获得采用新文本的引用。
 
@@ -47,9 +47,10 @@ OCR 参数回归默认由 `pdf_ocr_eval_v2.json` 定义的合成评测集约束�
 5. 普通问题加载历史消息，构建 RAG 链。
 6. `rag_service` 兼容入口委托 `app/services/rag/` 内部模块读取 retrieval settings、判断是否需要检索，并可改写多轮问题。
 7. 召回候选片段：
-   - Milvus 向量检索和 PostgreSQL 全文检索并行粗召回。应用层预先生成 query embedding，Milvus scalar filter 始终包含 `user_id` 与可选 `file_id` 范围；COSINE similarity 由 adapter 转换为越小越近的 `vector_score`。
-   - RRF 融合多路结果。
-   - 可选 reranker 精排，默认本地 CrossEncoder；也可在用户设置中切换到 Qwen、Voyage、Cohere、Jina 或自定义 rerank API。
+   - v2 flag 开启时，应用层分别生成用户 provider 的 dense query vector 与固定 BGE-M3 的 sparse query vector；Milvus 在同一次 `hybrid_search()` 中执行 COSINE/IP 两个 `AnnSearchRequest`，二者使用完全相同的 `user_id` 与可选 `file_id` filter，并由 `RRFRanker` 融合。
+   - 应用层限制每个 parent 进入 rerank 的 child 数量，Cross-Encoder 精排 child 后为每个 parent 保留最高分 child，再从 PostgreSQL 批量加载 parent 正文；prompt 使用 parent context，source 仍保留命中 child 的正文、ID 和位置。
+   - sparse query/route 失败时降级为 dense-only，dense 失败时降级为 sparse-only；任何降级都复用原 scalar scope，返回后再次校验 user/file，绝不扩大范围。
+   - flag 关闭时继续使用 Milvus dense + PostgreSQL full-text + 应用层 RRF 的兼容路径，直到 T-144 重建和切流。
 8. 用户配置的 OpenAI 兼容聊天模型流式生成回答；带图片时，最终用户消息按 OpenAI-compatible 多模态 payload 发送。
 9. SSE 返回 token、sources、retrieval 诊断。
 10. 回答完成后持久化到 `messages`，用户图片 metadata 通过 `message_attachments` 与用户消息关联。
@@ -98,12 +99,12 @@ OCR 参数回归默认由 `pdf_ocr_eval_v2.json` 定义的合成评测集约束�
 | 决策 | `final_need_retrieval` / `need_retrieval` | 后端最终是否执行知识库检索。 |
 | Router 判断 | `llm_need_retrieval`、`llm_reason` | LLM Router 对本轮问题是否需要检索的原始判断与原因。 |
 | 规则覆盖 | `override_applied`、`override_reason` | 后端确定性规则是否覆盖 Router 判断，例如命中知识库文件画像。 |
-| 召回排序 | `diagnostics.vector_count`、`fulltext_count`、`fused_count`、`reranked_count` | vector/fulltext 召回数量、RRF 融合后数量和 rerank 精排后数量。 |
-| 召回降级 | `vector_degraded`、`fulltext_degraded`、`vector_errors`、`fulltext_errors` | 单路粗召回失败时的降级状态和错误摘要，另一通道仍可兜底。 |
+| 召回排序 | `retrieval_mode`、`dense_count`、`sparse_count`、`hybrid_count`、`fused_count`、`reranked_count` | v2 dense/sparse、Milvus RRF 和 child rerank 数量；兼容路径继续提供 `vector_count/fulltext_count`。 |
+| 召回降级 | `dense_degraded`、`sparse_degraded`、`hybrid_degraded` 与对应 `*_errors` | v2 query/vector route 的单路降级；兼容路径继续提供 `vector/fulltext` 字段。 |
 | 阶段耗时 | `diagnostics.timing.*_ms` | 问题改写、Router、检索、RRF、rerank、首 token 和整体流式回答耗时，单位毫秒。 |
 | 画像缓存 | `knowledge_profile_cache_hit`、`knowledge_profile_cache_source`、`knowledge_profile_indexed_file_count` | 本轮知识库画像是否命中 Redis 或进程内 fallback 短 TTL 缓存，以及画像中的已索引文件数量。 |
 | 设置缓存 | `retrieval_settings_cache_hit`、`retrieval_settings_source`、`retrieval_settings_cache_backend` | 本轮知识库检索设置是否命中缓存、设置来源，以及缓存后端是 Redis 还是进程内 fallback。 |
-| Query embedding 缓存 | `query_embedding_cache_hit`、`query_embedding_cache_source`、`query_embedding_cache_ttl_seconds` | 向量粗召回是否复用短 TTL query embedding 缓存；Redis 用于多实例共享，进程内缓存用于本实例快速命中，不缓存回答或最终检索结果。 |
+| Query embedding 缓存 | `query_embedding_cache_*`、`query_sparse_embedding_cache_*` | dense 与 sparse 使用互不混用的短 TTL cache；sparse identity 包含 BGE-M3 model、revision、max length 和 query hash。 |
 | LLM 配置 | `diagnostics.llm.provider`、`model`、`credential_mode`、`temperature`、`max_tokens` | 本轮实际使用的模型厂商、模型名、凭据来源和生成参数，不包含 API Key。 |
 | 最终引用 | `retrieval_sources`、`sources` | 最终展示给用户的引用片段及这些片段命中的召回通道。 |
 
@@ -118,13 +119,11 @@ OCR 参数回归默认由 `pdf_ocr_eval_v2.json` 定义的合成评测集约束�
 - `query_router_ms`：Query Router 判断耗时。
 - `finalize_decision_ms`：规则覆盖和最终检索决策耗时。
 - `retrieve_documents_ms`：执行检索阶段耗时。
-- `embedding_ms`、`vector_ms`、`fulltext_ms`、`rrf_ms`、`rerank_ms`：混合检索内部阶段耗时。
+- `dense_embedding_ms`、`sparse_embedding_ms`、`hybrid_ms`、`rerank_ms`、`parent_context_ms`：v2 hybrid path 阶段耗时；兼容路径保留 `embedding_ms/vector_ms/fulltext_ms/rrf_ms`。
 - `pre_answer_total_ms`：开始生成回答前的总耗时。
 - `first_answer_token_ms`：从后端开始处理到首个回答 token 的耗时。
 
-当 RRF 融合后的候选数量不超过最终 `top_k` 时，后端会跳过 rerank，
-并在 diagnostics 中写入 `rerank_skipped=true` 与 `rerank_skip_reason`。该策略用于避免
-小候选集场景下的无收益精排开销；候选数超过 `top_k` 时仍会执行 rerank。
+v2 path 在有候选且开启 rerank 时始终精排 child，以便按相关性选择每个 parent 的代表 child；只有候选为空时才写入 `rerank_skipped`。兼容路径继续在候选数不超过最终 `top_k` 时跳过 rerank。
 
 向量检索和全文检索在 hybrid retrieval 中并行执行。任一路粗召回失败时，失败通道会
 降级为空候选并写入对应 degraded/error diagnostics，另一通道的候选仍会进入 RRF 和后续
@@ -142,6 +141,8 @@ query embedding 使用 Redis + 进程内短 TTL 缓存，key 由用户 ID、embe
 维度和归一化后的 query 组成，用于减少 eval 重跑、短时间重复问题和多轮相近测试对
 embedding provider 的重复调用。缓存只保存 query embedding；embedding 生成失败不会写入缓存，
 后续请求仍可重试。
+
+Sparse query embedding 使用独立 Redis + 进程内短 TTL 缓存；逻辑 identity 为用户 ID、固定 BGE-M3 model、revision、`max_length` 与规范化 query SHA-256。缓存和 diagnostics 不保存 query 明文，encoder 失败也不会写入失败结果。
 
 Redis 不保存会话记录、assistant 回答、sources 或最终检索结果，这些长期数据仍由
 PostgreSQL 的 `conversations`、`messages` 和相关 JSON 字段持久化。Redis 故障只影响缓存命中、

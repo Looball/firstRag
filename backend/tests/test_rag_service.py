@@ -115,6 +115,36 @@ class RagReferenceFilteringTests(unittest.TestCase):
         self.assertTrue(references[0]["ocr_correction_applied"])
         self.assertEqual(references[0]["ocr_correction_revision"], 3)
 
+    def test_parent_context_source_serializes_actual_child_hit(self) -> None:
+        """prompt 可使用 parent 正文，但 source content 和 identity 必须指向 child。"""
+        references = serialize_reference_documents([
+            Document(
+                page_content="完整 parent 正文",
+                metadata={
+                    "file_id": str(uuid4()),
+                    "file_name": "contract.pdf",
+                    "parent_id": "parent-a",
+                    "parent_index": 1,
+                    "child_id": "child-a",
+                    "child_index": 2,
+                    "child_content": "实际命中的 child 正文",
+                    "retrieval_sources": ["dense", "sparse"],
+                    "hybrid_score": 0.031,
+                    "hybrid_rank": 1,
+                },
+            ),
+        ])
+
+        self.assertEqual(references[0]["content"], "实际命中的 child 正文")
+        self.assertEqual(references[0]["parent_id"], "parent-a")
+        self.assertEqual(references[0]["child_id"], "child-a")
+        self.assertEqual(references[0]["retrieval_sources"], [
+            "dense",
+            "sparse",
+        ])
+        self.assertEqual(references[0]["hybrid_score"], 0.031)
+        self.assertEqual(references[0]["hybrid_rank"], 1)
+
     def test_get_res_doc_excludes_low_relevance_context(self) -> None:
         """低相关片段不应进入最终提示词上下文。"""
         context = get_res_doc({

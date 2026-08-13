@@ -497,9 +497,9 @@ child_id  = {parent_id}:c{child_index}
 Dense embedding 使用当前用户保存的 provider、model、dimensions 和加密凭据。T-142 的 v2 collection identity 还包含固定 BGE-M3 model/revision；设置 `MILVUS_DENSE_SPARSE_WRITE_ENABLED=true` 后，worker 会先为所有 child 生成 dense 与 learned sparse，两路都成功才开始 Milvus mutation。T-144 全量重建验收前该 flag 默认关闭，避免把旧 dense-only collection 原地升级。每个 child 写入：
 
 - Milvus v1：dense `embedding`、正文和 metadata JSON，继续服务当前 filtered ANN retrieval。
-- Milvus v2：额外写入 `sparse_embedding`、`parent_id`、`parent_index`、`child_index`，并执行 dense/sparse filtered self-hit；在线 hybrid search 由 T-143 接入。
+- Milvus v2：额外写入 `sparse_embedding`、`parent_id`、`parent_index`、`child_index`，执行 dense/sparse filtered self-hit，并在同一 feature flag 下供在线 `hybrid_search + RRFRanker` 读取；T-144 重建前默认不切流。
 - PostgreSQL `knowledge_file_chunk_parents`：parent 正文和位置 metadata，服务 source context 与后续父块扩展。
-- PostgreSQL `knowledge_file_chunks`：child 正文、`parent_id` 外键、metadata、`tsvector`/trigram 索引，当前仍服务 full-text retrieval 和引用定位。
+- PostgreSQL `knowledge_file_chunks`：child 正文、`parent_id` 外键和 metadata；v2 path 只用于引用定位与审计，兼容路径在 T-144 前仍可使用已有 full-text indexes。
 
 两套存储不能共享事务，所以失败路径会删除当前 collection identity 的半成品和 PostgreSQL chunks，并把文件标记为 `failed`；补偿不会删除独立 dense-only rollback collection。用户永久删除文件时才扫描该用户全部 collection identities。`job.status=succeeded` 证明本次写入流程结束，但不单独证明任意 query 的 ANN 召回质量；检索质量要用当前 indexing/RAG eval 验证。
 

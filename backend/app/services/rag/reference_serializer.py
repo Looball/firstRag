@@ -113,7 +113,8 @@ def serialize_reference_documents(
 
         references.append({
             "index": index,
-            "content": doc.page_content,
+            # Prompt 使用扩展后的 parent context；引用仍精确指向命中 child。
+            "content": metadata.get("child_content", doc.page_content),
             "source": metadata.get("source"),
             "file_id": doc_file_id,
             "file_name": original_names.get(doc_file_id)
@@ -148,6 +149,10 @@ def serialize_reference_documents(
                 "ocr_correction_updated_at",
             ),
             "retrieval_sources": metadata.get("retrieval_sources"),
+            "dense_score": metadata.get("dense_score"),
+            "sparse_score": metadata.get("sparse_score"),
+            "hybrid_score": metadata.get("hybrid_score"),
+            "hybrid_rank": metadata.get("hybrid_rank"),
             "vector_score": metadata.get("vector_score"),
             "fulltext_score": metadata.get("fulltext_score"),
             "rrf_score": metadata.get("rrf_score"),

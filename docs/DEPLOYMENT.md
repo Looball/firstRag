@@ -28,7 +28,7 @@ cp .env.example .env
 | `RERANK_PROVIDER` / `RERANK_MODEL` / `RERANK_BASE_URL` / `RERANK_API_KEY` | 历史环境变量兼容；新版本远程 rerank 推荐在登录后的“模型设置”页按用户配置。 |
 | `MILVUS_URI` / `MILVUS_TOKEN` / `MILVUS_DATABASE` | Milvus 内网连接、认证 token 和 database；Compose 默认 URI 为 `http://milvus-standalone:19530`，真实 token 只放 `.env`。 |
 | `MILVUS_COLLECTION_PREFIX` / `MILVUS_TIMEOUT_SECONDS` / `MILVUS_CONSISTENCY_LEVEL` | Milvus collection 前缀、client timeout 与一致性；当前 ADR 固定 `Strong`。 |
-| `MILVUS_DENSE_SPARSE_WRITE_ENABLED` | T-142 v2 collection/write feature flag；T-144 全量重建与切流前默认 `false`，启用后每个 child 同时写入 dense 与 BGE-M3 learned sparse。 |
+| `MILVUS_DENSE_SPARSE_WRITE_ENABLED` | v2 write/read feature flag；启用后每个 child 双写并使用 Milvus dense+sparse hybrid retrieval。T-144 全量重建与切流前默认 `false`，禁止对未重建数据直接开启。 |
 | `SPARSE_ENCODER_CLIENT_BATCH_SIZE` | backend/worker 调用 encoder 的 document batch 大小，默认 `16`，必须不大于 encoder service 的 `SPARSE_ENCODER_MAX_BATCH_SIZE`。 |
 | `MILVUS_MINIO_ACCESS_KEY` / `MILVUS_MINIO_SECRET_KEY` | Milvus 内置 MinIO 的本地凭据；非本机隔离环境必须覆盖模板值。 |
 | `MILVUS_MEMORY_LIMIT` / `MILVUS_CPU_LIMIT` | Milvus Standalone 容器资源上限，默认 `8g` / `4.0`。 |
@@ -78,6 +78,8 @@ docker compose logs --tail=100 \
 ### BGE-M3 sparse encoder runtime
 
 `sparse-encoder` 使用独立 CPU-only 镜像与 named volume `bge_m3_cache`，固定 `BAAI/bge-m3@5617a9f61b028005a4858fdac845db406aefb181`、`FlagEmbedding==1.4.0`、`huggingface-hub==1.27.0`、`torch==2.13.0+cpu` 和 `transformers==5.15.0`。安全审计使用等价的 PyPI base version `torch==2.13.0`，并由测试保证除 `+cpu` local label 外不得与 runtime pins 漂移。模型权重约 2.3 GB；Hugging Face snapshot 与 Xet cache 会产生额外占用，建议为 named volume 预留至少 5 GB。下载、加载和最小 inference 完成前 `/health/ready` 返回 503，backend/worker 保持等待。预热 cache 后可设置 `SPARSE_ENCODER_OFFLINE=true`，此时缺失固定 snapshot 会明确启动失败。
+
+backend 和 worker 同时接收 `SPARSE_ENCODER_MAX_LENGTH`，使 query cache identity 与 encoder document/query 截断参数一致。v2 在线检索的 sparse query 失败会降级到 dense-only；dense provider 失败会降级到 sparse-only，并在 diagnostics 中标记 route。该在线降级不适用于 indexing：写入仍要求 dense/sparse 两路完整成功。
 
 ```bash
 docker compose logs -f sparse-encoder

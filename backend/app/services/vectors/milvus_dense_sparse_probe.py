@@ -1,4 +1,4 @@
-"""T-142 真实 Milvus dense+sparse schema、写入、重建与隔离验收 probe。"""
+"""T-142/T-143 真实 Milvus dense+sparse 生命周期与 hybrid search probe。"""
 
 from __future__ import annotations
 
@@ -184,14 +184,48 @@ def run_probe() -> dict[str, object]:
             user_id=OTHER_USER_ID,
             file_id=PROBE_FILE_ID,
             version=1,
-            count=1,
+            count=2,
         )
+
         rebuilt_ids = _write(
             primary,
             user_id=PROBE_USER_ID,
             file_id=PROBE_FILE_ID,
             version=2,
-            count=1,
+            count=2,
+        )
+        query_sparse = SparseEncoderClient().encode_query(
+            "T-142 learned sparse probe version 2 child 0",
+        )
+        hybrid_response = primary.hybrid_search_vectors(
+            query_embedding=[1.0, 0.1, 0.25],
+            query_sparse_embedding=query_sparse,
+            user_id=PROBE_USER_ID,
+            file_ids=[PROBE_FILE_ID],
+            dense_k=4,
+            sparse_k=4,
+            k=2,
+            rrf_rank_constant=60,
+        )
+        dense_response = primary.hybrid_search_vectors(
+            query_embedding=[1.0, 0.1, 0.25],
+            query_sparse_embedding=None,
+            user_id=PROBE_USER_ID,
+            file_ids=[PROBE_FILE_ID],
+            dense_k=4,
+            sparse_k=4,
+            k=2,
+            rrf_rank_constant=60,
+        )
+        sparse_response = primary.hybrid_search_vectors(
+            query_embedding=None,
+            query_sparse_embedding=query_sparse,
+            user_id=PROBE_USER_ID,
+            file_ids=[PROBE_FILE_ID],
+            dense_k=4,
+            sparse_k=4,
+            k=2,
+            rrf_rank_constant=60,
         )
 
         description = client.describe_collection(
@@ -250,6 +284,23 @@ def run_probe() -> dict[str, object]:
             })
             and first_ids != rebuilt_ids
             and [record.id for record in records] == rebuilt_ids
+            and [
+                result.document.metadata.get("retrieval_sources")
+                for result in hybrid_response.results
+            ] == [["dense", "sparse"], ["dense", "sparse"]]
+            and all(
+                result.document.metadata.get("file_id") == PROBE_FILE_ID
+                and result.document.metadata.get("user_id") == PROBE_USER_ID
+                for result in hybrid_response.results
+            )
+            and [
+                result.document.metadata.get("retrieval_sources")
+                for result in dense_response.results
+            ] == [["dense"], ["dense"]]
+            and [
+                result.document.metadata.get("retrieval_sources")
+                for result in sparse_response.results
+            ] == [["sparse"], ["sparse"]]
             and all(
                 record.document.metadata.get("parent_id")
                 for record in records
@@ -267,6 +318,12 @@ def run_probe() -> dict[str, object]:
             "fields": sorted(fields),
             "indexes": sorted(indexes),
             "rebuilt_ids": rebuilt_ids,
+            "hybrid_result_ids": [
+                result.document.metadata.get("child_id")
+                for result in hybrid_response.results
+            ],
+            "dense_result_count": len(dense_response.results),
+            "sparse_result_count": len(sparse_response.results),
             "cross_user_count": cross_user_count,
             "rollback_count_before_delete": rollback_count_before_delete,
             "deleted_count": deleted_count,

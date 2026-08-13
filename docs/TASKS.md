@@ -279,7 +279,7 @@
 | `T-140` | `PLAN-20260811-01` | `P1` | `Done` | 冻结 PostgreSQL full-text 基线并确定 BGE-M3 sparse ADR | `2026-08-11` | `b0c11b9` |
 | `T-141` | `PLAN-20260811-01` | `P1` | `Done` | 接入单实例 BGE-M3 sparse encoder runtime | `2026-08-11` | `8534823` |
 | `T-142` | `PLAN-20260811-01` | `P1` | `Done` | 扩展 Milvus dense/sparse schema 与写入生命周期 | `2026-08-13` | `923ba68` |
-| `T-143` | `PLAN-20260811-01` | `P1` | `Todo` | 将混合召回与 RRF 统一迁移到 Milvus |  |  |
+| `T-143` | `PLAN-20260811-01` | `P1` | `Done` | 将混合召回与 RRF 统一迁移到 Milvus |  |  |
 | `T-144` | `PLAN-20260811-01` | `P1` | `Todo` | 移除 PostgreSQL 关键词检索并完成重建与验收 |  |  |
 | `T-145` | `PLAN-20260811-01` | `P1` | `Done` | 固化父子块切分、stable ID 与上下文扩展契约 | `2026-08-11` | `14eeca2` |
 
@@ -5746,7 +5746,7 @@ git diff --check
 
 - 来源计划：`PLAN-20260811-01`
 - 优先级：`P1`
-- 状态：`Todo`
+- 状态：`Done`
 - 前置任务：`T-142`、`T-145`。
 - 目标：使用 Milvus `hybrid_search()` 并行执行 child chunk 的 dense COSINE 与 sparse IP 召回，通过 `RRFRanker` 融合、按 `parent_id` 聚合并经 Cross-Encoder 精排后扩展父块上下文。
 - 技术边界：
@@ -5759,6 +5759,15 @@ git diff --check
   - Milvus 单次 hybrid search 返回融合候选；应用层不再查询 PostgreSQL full-text 或重复执行第二次 RRF。
   - 长文档查询能够由精确 child 命中扩展出完整父块上下文，sources 仍定位到实际命中的 child，且不同 parent 的候选具有合理多样性。
   - dense 或 sparse 单路失败时按明确策略降级，不能扩大用户或文件范围。
+- 完成记录：
+  - provider-neutral vector store boundary 新增 dense/sparse hybrid response；Milvus v2 adapter 用完全相同的 user/file scalar filter 构造 COSINE 与 IP 两个 `AnnSearchRequest`，双路可用时只调用一次 `hybrid_search + RRFRanker(60)`，并在返回后复核 user、file、parent/child identity 和有限 score。
+  - dense 与 BGE-M3 sparse query 分别使用 Redis + memory 短 TTL cache；sparse identity 固定包含用户、model、revision、max length 与规范化 query hash，不保存 query 明文。encoder/provider 生成失败和 Milvus route 失败均按 dense-only / sparse-only 明确降级，不调用 PostgreSQL keyword 兜底或放宽 filter。
+  - Milvus RRF child 候选按每个 parent 最多 2 条进入 Cross-Encoder，精排后每个 parent 只保留最高分 child；PostgreSQL 仅按用户和 parent IDs 批量读取正文，在 12,000 字符 context budget 内扩展。缺失或越界 parent 不返回未核验 child；prompt 使用 parent，Sources 保留实际命中 child 的正文、ID、位置和 hybrid 分数。
+  - `MILVUS_DENSE_SPARSE_WRITE_ENABLED` 同时守护 v2 write/read；T-144 重建切流前默认 `false`，公开 settings 暂时把 `fulltext_top_k` 兼容解释为 sparse candidate limit，旧 dense + PostgreSQL full-text 路径保持可回滚。
+  - 正式 Compose rebuild 后 migration `applied=0 skipped=10`，Milvus authenticated probe、BGE-M3、backend、worker 和 frontend 正常；宿主机 `8000` 被既有进程占用，本次继续临时映射 `18000`，容器内 `backend:8000` 未改变。发现持久化 Milvus 仍使用仓库旧本地默认密码后，在不删除 121 条现有 entities/volumes 的前提下同步到当前 Compose token，正向认证与无 token 拒绝门禁均通过。
+  - 容器根目录只读挂载的 backend 全量 unittest `448/448` 通过；真实固定 revision BGE-M3/Milvus probe 通过，重建后 hybrid、dense-only、sparse-only 各返回 2 个 v2 child，跨用户为 0，删除残留为 0；教程门禁、14 个 GitHub Actions pin、compileall、Compose config、backend/frontend smoke、production preflight 和 `git diff --check` 通过。
+- 验证命令：`BACKEND_PORT=18000 docker compose up -d --build`；`docker compose run --rm --no-deps -w /workspace -e PYTHONPATH=/workspace/backend:/workspace -v <repo>:/workspace:ro backend python -m unittest discover backend/tests`；`docker compose run --rm --no-deps backend python -m app.services.vectors.milvus_dense_sparse_probe`；`python3 scripts/check_tutorial_docs.py`；`python3 scripts/check_github_actions_pins.py`；`conda run -n firstrag python -m compileall -q backend/app backend/tests scripts`；`docker compose config --quiet`；`conda run -n firstrag python scripts/production_preflight.py --env-file .env --migration-method compose --check-runtime-health`；`git diff --check`。
+- 完成日期：`2026-08-13`
 
 ## T-144 移除 PostgreSQL 关键词检索并完成重建与验收
 
