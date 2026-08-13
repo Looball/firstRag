@@ -18,13 +18,13 @@
 1. `vector_index_worker` 领取 `queued` 任务。
 2. 使用 PostgreSQL advisory lock 避免同一文件并发索引。
 3. `document_service` 加载 PDF、DOCX、Markdown、TXT 或图片知识文件。PDF 先按页解析原生文本，并剔除 `pymupdf4llm` 为纯图片生成的 `picture ... intentionally omitted` 占位提示；无有效文本层的页面渲染为 PNG 并通过本地 Tesseract OCR。同一次识别同时生成正文和 TSV word confidence，写入真实页码、解析方式、字符加权置信度、质量等级和识别次数 metadata。DOCX 从 OOXML 主文档按标题和段落边界加载，保留原始段落范围。图片文件会使用当前用户配置的 vision 聊天模型解析为可检索 Markdown；聊天图片附件不走这条入库链路。
-4. 文本或图片解析结果切分为 chunk；同一文件跨 PDF page 或 DOCX block 使用全局连续的 `chunk_index`。
+4. 文本或图片解析结果先按标题、PDF page、DOCX 段落组等结构边界形成 parent，再在单个 parent 内切成有 overlap 的 child；只有 child 进入向量/关键词召回。无结构文本使用 parent `2000/0`、child `600/100` 的递归 fallback，overlap 不跨 parent。全局 `chunk_index` 继续跨 PDF page 或 DOCX block 连续，parent/child stable ID 同时包含文件版本与层级序号。
 5. 当前登录用户保存的 embedding provider 生成向量，支持 Qwen、智谱、OpenAI、Voyage、Cohere、Jina 和自定义 OpenAI-compatible embedding API。用户可按厂商保存多份 API Key，当前生效配置决定实际调用的 provider/model/base_url。
 6. Milvus 保存向量；Compose 中 worker 与 backend 通过各自的 authenticated PyMilvus client 访问同一 Standalone，Strong consistency 和写后 self-hit 保证跨进程可见。
-7. PostgreSQL `knowledge_file_chunks` 保存 chunk 正文和 metadata，用于全文检索。
+7. PostgreSQL `knowledge_file_chunk_parents` 保存父块正文，`knowledge_file_chunks` 保存带 `parent_id` 外键的 child 正文和 metadata；当前 full-text 仍只检索 child，父块用于 source context 与后续 LLM 上下文扩展。
 8. 更新文件状态和任务状态。
 
-T-141 已在 Compose 中加入固定 revision BGE-M3 sparse encoder 和 backend/worker 共享 client，但本节当前生产链路仍是 dense Milvus + PostgreSQL full-text；worker 尚未把 learned sparse vector 写入 collection，聊天检索也尚未调用该 service。T-142/T-143 完成并通过重建门禁前，不把 runtime 就绪误写成 sparse retrieval 已切换。
+T-141 已在 Compose 中加入固定 revision BGE-M3 sparse encoder 和 backend/worker 共享 client；T-145 已建立 parent/child 切分、持久化和 identity 契约。T-142 已在 `MILVUS_DENSE_SPARSE_WRITE_ENABLED` feature flag 后实现独立 v2 collection identity、dense+sparse 双写和写后双 self-hit，但在 T-144 全量重建验收前该 flag 默认关闭，生产检索仍使用旧 dense-only collection + PostgreSQL full-text。聊天链也尚未调用 sparse query 或执行 parent 聚合，这部分由 T-143 完成。
 
 用户可从低质量 OCR 引用的原文预览中提交指定页重新识别。后端只允许当前用户、已完成索引且确由 OCR 生成的 PDF 页面；请求递增文件 `index_version`，把经过校验的强制页写入内部 job options，再由原有 worker 异步重建整个文件索引。主动重识别在共享总超时内比较原图自动布局、灰度/二值化单块文本和 90°/180°/270° 旋转候选，按有效文本与 confidence 确定性选优；首次 OCR 仍只运行一次基线候选。重建期间该文件暂不可检索，旧回答继续绑定旧 index version，不会被后台静默替换；任务成功后需要重新提问才能获得采用新文本的引用。
 
@@ -89,7 +89,7 @@ OCR 参数回归默认由 `pdf_ocr_eval_v2.json` 定义的合成评测集约束�
 - `sources`：回答引用的文件、chunk、分数和检索来源。
 - `retrieval`：最终是否检索、Router LLM 原始判断、规则覆盖原因、改写问题、召回数量、降级状态和诊断信息。
 
-前端可使用 source 中持久化的 `file_id + chunk_index + index_version` 调用 chunk 上下文 API，从 PostgreSQL 精确读取目标 chunk 和相邻正文；source 同时携带 PDF 页码或 DOCX 段落范围。旧 source 缺少 `index_version` 时回退到最新可用 chunk 版本。该能力用于引用核验，不重新执行 embedding、全文检索或 rerank；旧 source 缺少文件/chunk 定位字段、文件已永久删除或重新索引后指定版本不再存在时安全返回不可用状态。
+前端可使用 source 中持久化的 `file_id + chunk_index + index_version` 调用 chunk 上下文 API，从 PostgreSQL 精确读取目标 child、同一 parent 内的相邻 child 和完整 parent 正文；source 同时携带 `parent_id`、`child_id`、PDF 页码或 DOCX 段落范围。旧 source/旧 chunk 缺少层级 identity 时继续按全局相邻 chunk 回退，缺少 `index_version` 时回退到最新可用版本。该能力用于引用核验，不重新执行 embedding、全文检索或 rerank；文件已永久删除或重新索引后指定版本不再存在时安全返回不可用状态。
 
 诊断展示应区分三类信息：
 

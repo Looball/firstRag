@@ -123,7 +123,7 @@ RRF 只读取每路内部的排名位置。对某个 chunk，当前公式是：
 rrf_score(chunk) = Σ weight_i / (60 + rank_i)
 ```
 
-Chunk 使用 `user_id:file_id:chunk_index` 去重；同一个 chunk 同时出现在 vector 与 full-text 前列时会累加两路贡献。结果 metadata 包含 `rrf_score`、`rrf_rank`、`retrieval_sources` 和各通道 `source_ranks`。
+RRF 继续使用 `user_id:file_id:chunk_index` 跨新旧通道去重，定位字段缺失时才回退到 `child_id/chunk_id`；同一个 child 同时出现在 vector 与 full-text 前列时会累加两路贡献。结果 metadata 包含 `parent_id`、`child_id`、`rrf_score`、`rrf_rank`、`retrieval_sources` 和各通道 `source_ranks`。T-145 已建立层级 identity，但按 parent 限流、child 精排后扩展完整父块属于 T-143，当前聊天链仍使用 child 正文。
 
 要区分两个容易混淆的参数：
 

@@ -11,6 +11,7 @@ from unittest.mock import ANY, Mock, patch
 from zipfile import ZIP_DEFLATED, ZipFile
 
 import pymupdf
+from langchain_core.documents import Document
 
 from app.services.documents.document_service import (
     ImageDocumentParseError,
@@ -22,6 +23,7 @@ from app.services.documents.document_service import (
     parse_tesseract_tsv_confidence,
     run_pdf_page_ocr,
     split_documents,
+    split_documents_with_parents,
 )
 from app.services.documents.pdf_ocr_engine import PdfOcrCandidateSummary
 from app.services.llm_service import ChatModelSettings
@@ -201,6 +203,99 @@ class DocumentServiceTests(unittest.TestCase):
         self.assertEqual(stdout.getvalue(), "")
         mock_vector_store.replace_file_vectors.assert_called_once()
         mock_vector_store.count_vectors.assert_called_once_with(user_id=42)
+
+    def test_markdown_parent_child_split_preserves_heading_boundaries(self) -> None:
+        """Markdown child 不得跨越标题形成的 parent 边界。"""
+        document = Document(
+            page_content=(
+                "# ALPHA-SECTION\n\n"
+                + "甲段内容。" * 180
+                + "\n\n# BETA-SECTION\n\n"
+                + "乙段内容。" * 180
+            ),
+            metadata={
+                "user_id": "7",
+                "file_id": "file-a",
+                "content_format": "markdown",
+            },
+        )
+
+        result = split_documents_with_parents([document])
+
+        self.assertGreaterEqual(len(result.parents), 2)
+        self.assertTrue(result.children)
+        self.assertEqual(
+            [parent.metadata["parent_index"] for parent in result.parents],
+            list(range(len(result.parents))),
+        )
+        self.assertEqual(
+            [child.metadata["chunk_index"] for child in result.children],
+            list(range(len(result.children))),
+        )
+        self.assertTrue(all(
+            child.metadata["chunk_level"] == "child"
+            and len(child.page_content) <= 600
+            for child in result.children
+        ))
+        self.assertFalse(any(
+            "ALPHA-SECTION" in child.page_content
+            and "BETA-SECTION" in child.page_content
+            for child in result.children
+        ))
+        parent_indexes = {parent.metadata["parent_index"] for parent in result.parents}
+        self.assertEqual(
+            {child.metadata["parent_index"] for child in result.children},
+            parent_indexes,
+        )
+
+    def test_plain_text_fallback_is_deterministic_and_has_no_orphans(self) -> None:
+        """无结构长文本应稳定拆为多个 parent，且每个 parent 都有 child。"""
+        document = Document(
+            page_content="\n\n".join(
+                f"第{index:03d}段-" + "内容" * 40
+                for index in range(60)
+            ),
+            metadata={
+                "user_id": "7",
+                "file_id": "file-b",
+                "content_format": "plain_text",
+            },
+        )
+
+        first = split_documents_with_parents([document])
+        second = split_documents_with_parents([document])
+
+        self.assertGreater(len(first.parents), 1)
+        self.assertEqual(
+            [parent.page_content for parent in first.parents],
+            [parent.page_content for parent in second.parents],
+        )
+        self.assertEqual(
+            [
+                (
+                    child.metadata["parent_index"],
+                    child.metadata["child_index"],
+                    child.metadata["chunk_index"],
+                )
+                for child in first.children
+            ],
+            [
+                (
+                    child.metadata["parent_index"],
+                    child.metadata["child_index"],
+                    child.metadata["chunk_index"],
+                )
+                for child in second.children
+            ],
+        )
+        child_parent_indexes = {
+            child.metadata["parent_index"]
+            for child in first.children
+        }
+        self.assertEqual(
+            child_parent_indexes,
+            {parent.metadata["parent_index"] for parent in first.parents},
+        )
 
     def test_pdf_chunks_keep_real_page_numbers_and_global_indexes(self) -> None:
         """PDF 分块应保留真实页码，并在跨页后继续递增 chunk index。"""

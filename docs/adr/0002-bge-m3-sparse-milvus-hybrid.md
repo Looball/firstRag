@@ -95,14 +95,25 @@ user_id | dense_provider | dense_model | dense_dimensions
 
 | 字段 | Milvus 类型 | 说明 |
 | --- | --- | --- |
-| `chunk_id` | `VARCHAR(192)` | stable primary key |
+| `chunk_id` | `VARCHAR(192)` | child stable primary key，格式为 `{parent_id}:c{child_index}` |
 | `embedding` | `FLOAT_VECTOR(dim)` | 当前用户 dense provider 输出 |
 | `sparse_embedding` | `SPARSE_FLOAT_VECTOR` | BGE-M3 lexical weights；至少一个非零、index 为非负整数、weight 为有限非负 float |
 | `content` | `VARCHAR(65535)` | chunk 正文 |
 | `user_id` / `file_id` / `chunk_index` / `index_version` | scalar | 权限、范围和生命周期 |
+| `parent_id` / `parent_index` / `child_index` | scalar | parent 聚合、child 去重和上下文扩展 |
 | `metadata` | `JSON` | source/OCR/location metadata |
 
 写入前分别校验 dense 与 sparse；两者均生成成功后才删除旧 entities 和 upsert。写后门禁同时执行同 user/file dense top-1 self-hit 与 sparse top-1 self-hit，随后再写 PostgreSQL chunks 并发布 `indexed`。
+
+## Parent/child chunk 契约
+
+T-145 在 v2 schema 写入前固定以下边界：
+
+- Markdown 标题、PDF page、DOCX 标题/段落组优先形成 parent；无可靠结构时以 `2000` 字符、`0` overlap 递归切分 parent。
+- 每个 parent 内以 `600` 字符、`100` overlap 切分 child，禁止 overlap 跨 parent；只有 child 生成 dense 与 sparse vector。
+- parent ID 为 `{user_id}:{file_id}:v{index_version}:p{parent_index}`，child ID 为 `{parent_id}:c{child_index}`；全局 `chunk_index` 继续兼容 source feedback 和预览 API。
+- PostgreSQL `knowledge_file_chunk_parents` 保存 parent 正文，`knowledge_file_chunks.parent_id` 外键保存 child 归属；PostgreSQL 可以提供 source/context，但 T-144 后不参与候选召回或关键词排序。
+- T-143 的在线顺序固定为 Milvus child hybrid search、按 parent 限流去重、Cross-Encoder 精排 child、扩展 parent 正文、按 context budget 截断。T-145 只建立数据与 identity 契约，不提前宣称该在线切流已完成。
 
 ## Hybrid search 与 diagnostics
 
@@ -132,7 +143,7 @@ T-144 删除：
 ## Rollout 与 rollback
 
 1. T-141 接入 encoder service 与契约测试，不切现有 retrieval。
-2. T-142 在 feature flag 后实现 v2 schema/write，默认仍使用现有 dense-only collection。
+2. T-142 已在 `MILVUS_DENSE_SPARSE_WRITE_ENABLED` feature flag 后实现 v2 schema/write、独立 identity 和 dense/sparse 双 self-hit；默认仍使用现有 dense-only collection。
 3. T-143 实现 Milvus hybrid search 和新 diagnostics，仍不对未重建数据切流。
 4. T-144 进入维护窗口：暂停新 indexing、等待 active jobs 为 0、备份 Milvus/PostgreSQL、创建 v2 collections、从源文件重新生成 dense+sparse、逐文件验收。
 5. current IDs/count、dense/sparse self-hit、隔离、真实 RAG/indexing eval 和 restart persistence 全部通过后切换默认。

@@ -80,12 +80,41 @@ def replace_file_chunks(
     index_version: int,
     chunks: list[Document],
     chunk_ids: list[str],
+    parents: list[Document] | None = None,
+    parent_ids: list[str] | None = None,
 ) -> int:
-    """替换单个文件在 PostgreSQL 中的全文检索分块。"""
+    """在一个事务中替换单个文件的 parent 与 child chunks。"""
     if len(chunks) != len(chunk_ids):
         raise ValueError("chunks 和 chunk_ids 数量不一致")
+    normalized_parents = parents or []
+    normalized_parent_ids = parent_ids or []
+    if len(normalized_parents) != len(normalized_parent_ids):
+        raise ValueError("parents 和 parent_ids 数量不一致")
 
     normalized_file_id = str(file_id)
+    parent_rows = [
+        (
+            parent_id,
+            user_id,
+            normalized_file_id,
+            index_version,
+            parent.metadata["parent_index"],
+            parent.page_content,
+            Jsonb(parent.metadata),
+        )
+        for parent_id, parent in zip(
+            normalized_parent_ids,
+            normalized_parents,
+            strict=True,
+        )
+    ]
+    known_parent_ids = set(normalized_parent_ids)
+    child_parent_ids = {
+        str(chunk.metadata.get("parent_id") or "")
+        for chunk in chunks
+    }
+    if known_parent_ids and child_parent_ids != known_parent_ids:
+        raise ValueError("child parent_id 与待写入 parents 不一致")
     rows = [
         (
             chunk_id,
@@ -93,6 +122,8 @@ def replace_file_chunks(
             normalized_file_id,
             index_version,
             chunk.metadata["chunk_index"],
+            chunk.metadata.get("parent_id"),
+            chunk.metadata.get("child_index"),
             chunk.page_content,
             Jsonb(chunk.metadata),
         )
@@ -109,6 +140,31 @@ def replace_file_chunks(
                 """,
                 (user_id, normalized_file_id),
             )
+            cursor.execute(
+                """
+                DELETE FROM knowledge_file_chunk_parents
+                WHERE user_id = %s
+                  AND knowledge_file_id = %s;
+                """,
+                (user_id, normalized_file_id),
+            )
+
+            if parent_rows:
+                cursor.executemany(
+                    """
+                    INSERT INTO knowledge_file_chunk_parents (
+                        parent_id,
+                        user_id,
+                        knowledge_file_id,
+                        index_version,
+                        parent_index,
+                        content,
+                        metadata
+                    )
+                    VALUES (%s, %s, %s, %s, %s, %s, %s);
+                    """,
+                    parent_rows,
+                )
 
             if not rows:
                 return 0
@@ -121,10 +177,12 @@ def replace_file_chunks(
                     knowledge_file_id,
                     index_version,
                     chunk_index,
+                    parent_id,
+                    child_index,
                     content,
                     metadata
                 )
-                VALUES (%s, %s, %s, %s, %s, %s, %s);
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s);
                 """,
                 rows,
             )
@@ -135,7 +193,7 @@ def delete_file_chunks(
     user_id: int,
     file_id: UUID | str,
 ) -> int:
-    """删除单个文件在 PostgreSQL 中的全文检索分块。"""
+    """删除单个文件在 PostgreSQL 中的 parent 与 child chunks。"""
     with get_connection() as connection:
         with connection.cursor() as cursor:
             cursor.execute(
@@ -146,7 +204,16 @@ def delete_file_chunks(
                 """,
                 (user_id, str(file_id)),
             )
-            return cursor.rowcount
+            deleted_children = cursor.rowcount
+            cursor.execute(
+                """
+                DELETE FROM knowledge_file_chunk_parents
+                WHERE user_id = %s
+                  AND knowledge_file_id = %s;
+                """,
+                (user_id, str(file_id)),
+            )
+            return deleted_children
 
 
 def list_file_chunk_identity_rows(
@@ -158,11 +225,32 @@ def list_file_chunk_identity_rows(
         """
         SELECT
             chunk_id,
+            parent_id,
+            child_index,
             index_version
         FROM knowledge_file_chunks
         WHERE user_id = %s
           AND knowledge_file_id = %s
         ORDER BY chunk_id ASC;
+        """,
+        (user_id, str(file_id)),
+    )
+
+
+def list_file_parent_identity_rows(
+    user_id: int,
+    file_id: UUID | str,
+) -> list[Row]:
+    """读取单个用户文件在 PostgreSQL 中的 parent ID 与索引版本。"""
+    return fetch_all(
+        """
+        SELECT
+            parent_id,
+            index_version
+        FROM knowledge_file_chunk_parents
+        WHERE user_id = %s
+          AND knowledge_file_id = %s
+        ORDER BY parent_id ASC;
         """,
         (user_id, str(file_id)),
     )
@@ -183,6 +271,7 @@ def get_user_knowledge_file_chunk_context(
                 chunk.knowledge_file_id,
                 chunk.index_version,
                 chunk.chunk_index AS target_chunk_index,
+                chunk.parent_id AS target_parent_id,
                 file.original_name
             FROM knowledge_file_chunks AS chunk
             JOIN knowledge_files AS file
@@ -200,10 +289,19 @@ def get_user_knowledge_file_chunk_context(
             target.original_name,
             target.index_version,
             target.target_chunk_index,
+            target.target_parent_id,
+            parent.parent_index,
+            parent.content AS parent_content,
+            parent.metadata AS parent_metadata,
             context.chunk_index,
             context.content,
             context.metadata
         FROM target_chunk AS target
+        LEFT JOIN knowledge_file_chunk_parents AS parent
+          ON parent.user_id = %s
+         AND parent.knowledge_file_id = target.knowledge_file_id
+         AND parent.index_version = target.index_version
+         AND parent.parent_id = target.target_parent_id
         JOIN knowledge_file_chunks AS context
           ON context.user_id = %s
          AND context.knowledge_file_id = target.knowledge_file_id
@@ -211,6 +309,10 @@ def get_user_knowledge_file_chunk_context(
         WHERE context.chunk_index BETWEEN
               target.target_chunk_index - %s
               AND target.target_chunk_index + %s
+          AND (
+              target.target_parent_id IS NULL
+              OR context.parent_id = target.target_parent_id
+          )
         ORDER BY context.chunk_index ASC;
         """,
         (
@@ -219,6 +321,7 @@ def get_user_knowledge_file_chunk_context(
             chunk_index,
             index_version,
             index_version,
+            user_id,
             user_id,
             radius,
             radius,

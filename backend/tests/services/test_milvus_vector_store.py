@@ -56,6 +56,25 @@ class FakeEmbeddings:
         ]
 
 
+class FakeSparseEncoder:
+    """按输入顺序生成可复现 learned sparse vectors。"""
+
+    def __init__(self) -> None:
+        """初始化调用计数和可控失败开关。"""
+        self.calls = 0
+        self.fail = False
+
+    def encode_documents(self, texts: list[str]) -> list[dict[int, float]]:
+        """为每个 child 返回包含共享词和独有词的 sparse vector。"""
+        self.calls += 1
+        if self.fail:
+            raise RuntimeError("sparse encoder unavailable api_key=secret")
+        return [
+            {7: 0.5, 100 + index: 1.0}
+            for index, _text in enumerate(texts)
+        ]
+
+
 class FakeMilvusClient:
     """保存在内存中的 PyMilvus client fake。"""
 
@@ -190,7 +209,7 @@ class FakeMilvusClient:
         self,
         *,
         collection_name: str,
-        data: list[list[float]],
+        data: list[object],
         filter: str,
         limit: int = 10,
         output_fields: list[str] | None = None,
@@ -216,11 +235,26 @@ class FakeMilvusClient:
             for row in self.collections[collection_name]["rows"].values()
             if _matches(filter, row)
         ]
-        ranked = sorted(
-            (
+        anns_field = str(options.get("anns_field") or "embedding")
+        if anns_field == "sparse_embedding":
+            query_sparse = dict(data[0])
+            scored_rows = (
+                (
+                    sum(
+                        float(weight) * float(row["sparse_embedding"].get(index, 0.0))
+                        for index, weight in query_sparse.items()
+                    ),
+                    row,
+                )
+                for row in rows
+            )
+        else:
+            scored_rows = (
                 (_cosine_similarity(data[0], row["embedding"]), row)
                 for row in rows
-            ),
+            )
+        ranked = sorted(
+            scored_rows,
             key=lambda item: item[0],
             reverse=True,
         )[:limit]
@@ -258,9 +292,42 @@ def _document(
     )
 
 
+def _child_document(
+    *,
+    user_id: int = 1,
+    file_id: str = "file-a",
+    parent_index: int = 0,
+    child_index: int = 0,
+    chunk_index: int = 0,
+    index_version: int = 1,
+    content: str = "child",
+) -> Document:
+    """创建满足 T-145 parent/child stable identity 的 child 文档。"""
+    parent_id = f"{user_id}:{file_id}:v{index_version}:p{parent_index}"
+    return Document(
+        page_content=content,
+        metadata={
+            "user_id": user_id,
+            "file_id": file_id,
+            "parent_id": parent_id,
+            "parent_index": parent_index,
+            "child_index": child_index,
+            "chunk_index": chunk_index,
+            "index_version": index_version,
+            "page_number": 1,
+        },
+    )
+
+
 def _chunk_id(document: Document) -> str:
     """根据测试文档生成 stable chunk ID。"""
     metadata = document.metadata
+    if "parent_index" in metadata and "child_index" in metadata:
+        return (
+            f"{metadata['user_id']}:{metadata['file_id']}:"
+            f"v{metadata['index_version']}:p{metadata['parent_index']}:"
+            f"c{metadata['child_index']}"
+        )
     return (
         f"{metadata['user_id']}:{metadata['file_id']}:"
         f"v{metadata['index_version']}:{metadata['chunk_index']}"
@@ -272,6 +339,8 @@ def _store(
     *,
     dimensions: int = 2,
     collection_name: str = "firstrag_u1_identity",
+    dense_sparse: bool = False,
+    sparse_encoder: FakeSparseEncoder | None = None,
 ) -> MilvusVectorStore:
     """创建当前用户 Milvus adapter。"""
     return MilvusVectorStore(
@@ -279,6 +348,11 @@ def _store(
         collection_name=collection_name,
         user_collection_prefix="firstrag_u1_",
         embedding_model=FakeEmbeddings(dimensions),
+        sparse_encoder=(
+            (sparse_encoder or FakeSparseEncoder())
+            if dense_sparse
+            else None
+        ),
         dimensions=dimensions,
         timeout_seconds=10,
         consistency_level="Strong",
@@ -542,6 +616,207 @@ class MilvusVectorStoreTests(unittest.TestCase):
         self.assertEqual(records[0].id, "1:file-a:v2:0")
         self.assertEqual(records[0].document.page_content, "new")
         self.assertEqual(records[0].document.metadata["page_number"], 1)
+
+    def test_dense_sparse_replace_creates_v2_schema_and_audits_both_vectors(
+        self,
+    ) -> None:
+        """v2 写入应保存层级字段并完成 dense/sparse 双 self-hit。"""
+        client = FakeMilvusClient()
+        sparse_encoder = FakeSparseEncoder()
+        store = _store(
+            client,
+            collection_name="firstrag_u1_v2_identity",
+            dense_sparse=True,
+            sparse_encoder=sparse_encoder,
+        )
+        documents = [
+            _child_document(child_index=0, chunk_index=0, content="first"),
+            _child_document(child_index=1, chunk_index=1, content="second"),
+        ]
+        ids = [_chunk_id(document) for document in documents]
+
+        store.replace_file_vectors(
+            user_id=1,
+            file_id="file-a",
+            documents=documents,
+            ids=ids,
+        )
+
+        description = client.describe_collection(
+            collection_name=store.collection_name,
+        )
+        fields = {field["name"]: field for field in description["fields"]}
+        self.assertEqual(set(fields), {
+            "chunk_id",
+            "embedding",
+            "sparse_embedding",
+            "content",
+            "user_id",
+            "file_id",
+            "chunk_index",
+            "index_version",
+            "parent_id",
+            "parent_index",
+            "child_index",
+            "metadata",
+        })
+        sparse_index = client.describe_index(
+            collection_name=store.collection_name,
+            index_name="idx_sparse_embedding_inverted",
+        )
+        self.assertEqual(sparse_index["index_type"], "SPARSE_INVERTED_INDEX")
+        self.assertEqual(sparse_index["metric_type"], "IP")
+        self.assertEqual(sparse_index["inverted_index_algo"], "DAAT_MAXSCORE")
+        rows = client.collections[store.collection_name]["rows"]
+        self.assertEqual(rows[ids[0]]["parent_id"], "1:file-a:v1:p0")
+        self.assertEqual(rows[ids[1]]["child_index"], 1)
+        self.assertEqual(rows[ids[0]]["sparse_embedding"], {7: 0.5, 100: 1.0})
+        self.assertEqual(sparse_encoder.calls, 1)
+        self.assertEqual(
+            [call["anns_field"] for call in client.search_calls[-2:]],
+            ["embedding", "sparse_embedding"],
+        )
+        self.assertEqual(
+            client.search_calls[-1]["search_params"],
+            {"metric_type": "IP", "params": {"drop_ratio_search": 0.0}},
+        )
+
+    def test_sparse_generation_failure_preserves_previous_v2_vectors(self) -> None:
+        """sparse 生成失败必须发生在 mutation 前并保留上一版本。"""
+        client = FakeMilvusClient()
+        sparse_encoder = FakeSparseEncoder()
+        store = _store(
+            client,
+            collection_name="firstrag_u1_v2_identity",
+            dense_sparse=True,
+            sparse_encoder=sparse_encoder,
+        )
+        original = _child_document(index_version=1, content="original")
+        store.replace_file_vectors(
+            user_id=1,
+            file_id="file-a",
+            documents=[original],
+            ids=[_chunk_id(original)],
+        )
+        sparse_encoder.fail = True
+        replacement = _child_document(index_version=2, content="replacement")
+
+        with self.assertRaises(VectorStoreProviderError) as raised:
+            store.replace_file_vectors(
+                user_id=1,
+                file_id="file-a",
+                documents=[replacement],
+                ids=[_chunk_id(replacement)],
+            )
+
+        self.assertNotIn("secret", str(raised.exception))
+        records = store.list_file_vectors(user_id=1, file_id="file-a")
+        self.assertEqual([record.id for record in records], [_chunk_id(original)])
+
+    def test_zero_sparse_vector_is_rejected_before_mutation(self) -> None:
+        """空或全零 learned sparse vector 不得进入 Milvus。"""
+        client = FakeMilvusClient()
+        sparse_encoder = FakeSparseEncoder()
+        store = _store(
+            client,
+            collection_name="firstrag_u1_v2_identity",
+            dense_sparse=True,
+            sparse_encoder=sparse_encoder,
+        )
+        document = _child_document()
+        with patch.object(
+            sparse_encoder,
+            "encode_documents",
+            return_value=[{7: 0.0}],
+        ), self.assertRaisesRegex(VectorStoreProviderError, "零向量"):
+            store.replace_file_vectors(
+                user_id=1,
+                file_id="file-a",
+                documents=[document],
+                ids=[_chunk_id(document)],
+            )
+
+        self.assertEqual(client.collections, {})
+
+    def test_v2_adapter_rejects_dense_only_collection_without_deleting_rows(
+        self,
+    ) -> None:
+        """v2 identity 不得原地复用 dense-only schema。"""
+        client = FakeMilvusClient()
+        collection_name = "firstrag_u1_shared_identity"
+        dense_store = _store(client, collection_name=collection_name)
+        legacy = _document(index_version=1, content="legacy")
+        dense_store.replace_file_vectors(
+            user_id=1,
+            file_id="file-a",
+            documents=[legacy],
+            ids=[_chunk_id(legacy)],
+        )
+        v2_store = _store(
+            client,
+            collection_name=collection_name,
+            dense_sparse=True,
+        )
+        child = _child_document(index_version=2, content="v2")
+
+        with self.assertRaisesRegex(VectorStoreProviderError, "schema fields"):
+            v2_store.replace_file_vectors(
+                user_id=1,
+                file_id="file-a",
+                documents=[child],
+                ids=[_chunk_id(child)],
+            )
+
+        records = dense_store.list_file_vectors(user_id=1, file_id="file-a")
+        self.assertEqual([record.id for record in records], [_chunk_id(legacy)])
+
+    def test_v2_replace_preserves_separate_dense_only_rollback_identity(
+        self,
+    ) -> None:
+        """写入独立 v2 collection 时不得删除旧 dense-only rollback 数据。"""
+        client = FakeMilvusClient()
+        dense_store = _store(
+            client,
+            collection_name="firstrag_u1_dense_identity",
+        )
+        legacy = _document(index_version=1, content="legacy")
+        dense_store.replace_file_vectors(
+            user_id=1,
+            file_id="file-a",
+            documents=[legacy],
+            ids=[_chunk_id(legacy)],
+        )
+        v2_store = _store(
+            client,
+            collection_name="firstrag_u1_v2_identity",
+            dense_sparse=True,
+        )
+        child = _child_document(index_version=2, content="v2")
+
+        v2_store.replace_file_vectors(
+            user_id=1,
+            file_id="file-a",
+            documents=[child],
+            ids=[_chunk_id(child)],
+        )
+
+        self.assertEqual(
+            dense_store.count_vectors(user_id=1, file_id="file-a"),
+            1,
+        )
+        self.assertEqual(
+            v2_store.count_vectors(user_id=1, file_id="file-a"),
+            1,
+        )
+        v2_store.delete_current_file_vectors(user_id=1, file_id="file-a")
+        self.assertEqual(
+            dense_store.count_vectors(user_id=1, file_id="file-a"),
+            1,
+        )
+        self.assertEqual(
+            v2_store.count_vectors(user_id=1, file_id="file-a"),
+            0,
+        )
 
     def test_dimension_mismatch_preserves_previous_vectors(self) -> None:
         """schema 不兼容时必须在 delete 前失败，保留上一版本。"""

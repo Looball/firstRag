@@ -451,6 +451,20 @@ def get_knowledge_file_chunk_context(
             "index_version": first_row["index_version"],
         },
         "target_chunk_index": first_row["target_chunk_index"],
+        "target_parent_id": first_row.get("target_parent_id"),
+        "parent": (
+            {
+                "parent_id": first_row["target_parent_id"],
+                "parent_index": first_row.get("parent_index"),
+                "content": first_row.get("parent_content"),
+                "location": serialize_chunk_location_metadata(
+                    first_row.get("parent_metadata"),
+                ),
+            }
+            if first_row.get("target_parent_id")
+            and first_row.get("parent_content") is not None
+            else None
+        ),
         "chunks": [
             {
                 "chunk_index": row["chunk_index"],

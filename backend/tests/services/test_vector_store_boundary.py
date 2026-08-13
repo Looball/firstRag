@@ -11,6 +11,7 @@ from app.services.vectors.vector_store import (
     VectorStoreBoundary,
     VectorStoreHealth,
     build_chunk_ids,
+    build_parent_ids,
 )
 
 
@@ -41,6 +42,14 @@ class FakeVectorStore:
         file_id: UUID | str,
     ) -> None:
         """测试 fake 不持久化数据。"""
+
+    def delete_current_file_vectors(
+        self,
+        *,
+        user_id: int,
+        file_id: UUID | str,
+    ) -> None:
+        """测试 fake 不持久化当前 identity 数据。"""
 
     def search_vectors(
         self,
@@ -102,6 +111,8 @@ class VectorStoreBoundaryTests(unittest.TestCase):
                     "file_id": "00000000-0000-0000-0000-000000000001",
                     "index_version": 3,
                     "chunk_index": 0,
+                    "parent_index": 0,
+                    "child_index": 0,
                 },
             ),
             Document(
@@ -111,6 +122,8 @@ class VectorStoreBoundaryTests(unittest.TestCase):
                     "file_id": "00000000-0000-0000-0000-000000000001",
                     "index_version": 3,
                     "chunk_index": 1,
+                    "parent_index": 0,
+                    "child_index": 1,
                 },
             ),
         ]
@@ -118,9 +131,38 @@ class VectorStoreBoundaryTests(unittest.TestCase):
         self.assertEqual(
             build_chunk_ids(chunks),
             [
-                "7:00000000-0000-0000-0000-000000000001:v3:0",
-                "7:00000000-0000-0000-0000-000000000001:v3:1",
+                "7:00000000-0000-0000-0000-000000000001:v3:p0:c0",
+                "7:00000000-0000-0000-0000-000000000001:v3:p0:c1",
             ],
+        )
+        self.assertEqual(
+            chunks[0].metadata["parent_id"],
+            "7:00000000-0000-0000-0000-000000000001:v3:p0",
+        )
+        self.assertEqual(
+            chunks[1].metadata["child_id"],
+            "7:00000000-0000-0000-0000-000000000001:v3:p0:c1",
+        )
+
+    def test_parent_ids_are_stable_and_written_to_metadata(self) -> None:
+        """父块 ID 应包含用户、文件、版本与 parent 序号。"""
+        parent = Document(
+            page_content="parent",
+            metadata={
+                "user_id": 7,
+                "file_id": "00000000-0000-0000-0000-000000000001",
+                "index_version": 3,
+                "parent_index": 2,
+            },
+        )
+
+        self.assertEqual(
+            build_parent_ids([parent]),
+            ["7:00000000-0000-0000-0000-000000000001:v3:p2"],
+        )
+        self.assertEqual(
+            parent.metadata["parent_id"],
+            "7:00000000-0000-0000-0000-000000000001:v3:p2",
         )
 
 

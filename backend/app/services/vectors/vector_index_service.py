@@ -13,6 +13,7 @@ from app.db.executor import Row
 from app.repositories.knowledge_chunk_repository import (
     delete_file_chunks,
     list_file_chunk_identity_rows,
+    list_file_parent_identity_rows,
     list_user_pdf_ocr_page_history_rows,
     replace_file_chunks,
 )
@@ -27,7 +28,7 @@ from app.repositories.pdf_ocr_history_repository import (
 from app.services.documents.document_service import (
     EmptyDocumentError,
     load_document,
-    split_documents,
+    split_documents_with_parents,
 )
 from app.services.knowledge_profile_cache import (
     invalidate_file_knowledge_base_contexts,
@@ -35,6 +36,7 @@ from app.services.knowledge_profile_cache import (
 from app.services.vectors.vector_store import (
     VectorStoreBoundary,
     build_chunk_ids,
+    build_parent_ids,
 )
 from app.services.vectors.vector_store_factory import (
     get_vector_store,
@@ -358,9 +360,28 @@ def compensate_failed_file_index(
     file_id: UUID | str,
     vectordb: VectorStoreBoundary | Any | None = None,
 ) -> None:
-    """尽力清除一次失败索引留下的向量与全文检索分块。"""
+    """尽力清除当前失败 identity 与 PostgreSQL chunks，保留 rollback 向量。"""
     try:
-        delete_file_vector_entries(user_id, file_id, vectordb)
+        resolved_vectordb = vectordb
+        if resolved_vectordb is None:
+            try:
+                resolved_vectordb = get_vector_store(user_id=user_id)
+            except ValueError:
+                resolved_vectordb = get_vector_store_for_cleanup(user_id)
+        delete_current = getattr(
+            resolved_vectordb,
+            "delete_current_file_vectors",
+            None,
+        )
+        if callable(delete_current) and bool(
+            getattr(resolved_vectordb, "collection_name", ""),
+        ):
+            delete_current(user_id=user_id, file_id=file_id)
+        else:
+            resolved_vectordb.delete_file_vectors(
+                user_id=user_id,
+                file_id=file_id,
+            )
     except Exception:
         logger.exception("补偿清理向量失败 file_id=%s", file_id)
 
@@ -375,20 +396,43 @@ def audit_postgres_chunk_identity(
     user_id: int,
     file_id: UUID | str,
     expected_chunk_ids: list[str],
+    expected_parent_ids: list[str],
     expected_index_version: int,
 ) -> None:
-    """确认 PostgreSQL chunk ID/version 与本次向量写入完全一致。"""
-    rows = list_file_chunk_identity_rows(user_id, file_id)
-    actual_ids = {str(row["chunk_id"]) for row in rows}
+    """确认 PostgreSQL parent/child identity 与本次向量写入完全一致。"""
+    child_rows = list_file_chunk_identity_rows(user_id, file_id)
+    parent_rows = list_file_parent_identity_rows(user_id, file_id)
+    actual_ids = {str(row["chunk_id"]) for row in child_rows}
     expected_ids = set(expected_chunk_ids)
-    actual_versions = {int(row["index_version"]) for row in rows}
+    actual_parent_ids = {str(row["parent_id"]) for row in parent_rows}
+    expected_parent_id_set = set(expected_parent_ids)
+    actual_child_parent_ids = {
+        str(row["parent_id"])
+        for row in child_rows
+        if row.get("parent_id") is not None
+    }
+    child_identity_pairs = {
+        (str(row.get("parent_id")), int(row["child_index"]))
+        for row in child_rows
+        if row.get("parent_id") is not None
+        and row.get("child_index") is not None
+    }
+    actual_versions = {
+        int(row["index_version"])
+        for row in [*child_rows, *parent_rows]
+    }
     if (
-        len(rows) != len(expected_chunk_ids)
+        len(child_rows) != len(expected_chunk_ids)
         or actual_ids != expected_ids
+        or len(parent_rows) != len(expected_parent_ids)
+        or actual_parent_ids != expected_parent_id_set
+        or actual_child_parent_ids != expected_parent_id_set
+        or len(child_identity_pairs) != len(expected_chunk_ids)
         or actual_versions != {expected_index_version}
     ):
         raise RuntimeError(
-            "PostgreSQL chunk 审计失败：ID 或 index_version 与向量写入不一致",
+            "PostgreSQL parent/child 审计失败："
+            "ID 或 index_version 与向量写入不一致",
         )
 
 
@@ -424,17 +468,20 @@ def index_file_vectors(
         source_job_id=source_job_id,
         trigger=job_trigger,
     )
-    chunks = split_documents(documents)
+    split_result = split_documents_with_parents(documents)
+    parents = split_result.parents
+    chunks = split_result.children
     if not chunks:
         raise EmptyDocumentError("文件为空，未解析出可入库的文本分块")
 
-    for chunk in chunks:
-        chunk.metadata["index_version"] = index_version
+    for document in [*parents, *chunks]:
+        document.metadata["index_version"] = index_version
 
     normalized_file_id = str(file_id)
     vectordb: VectorStoreBoundary | None = None
     try:
         vectordb = get_vector_store(user_id=user_id)
+        parent_ids = build_parent_ids(parents)
         chunk_ids = build_chunk_ids(chunks)
         vectordb.replace_file_vectors(
             user_id=user_id,
@@ -448,11 +495,14 @@ def index_file_vectors(
             index_version=index_version,
             chunks=chunks,
             chunk_ids=chunk_ids,
+            parents=parents,
+            parent_ids=parent_ids,
         )
         audit_postgres_chunk_identity(
             user_id=user_id,
             file_id=file_id,
             expected_chunk_ids=chunk_ids,
+            expected_parent_ids=parent_ids,
             expected_index_version=index_version,
         )
         record_pdf_ocr_history_entries(
@@ -473,6 +523,7 @@ def index_file_vectors(
     actual_collection_name = vectordb.ensure_collection()
     return {
         "file_id": normalized_file_id,
+        "parent_count": len(parents),
         "chunk_count": len(chunks),
         "character_count": sum(
             len(chunk.page_content)

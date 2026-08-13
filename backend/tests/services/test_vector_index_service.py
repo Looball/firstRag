@@ -4,7 +4,7 @@ from contextlib import nullcontext
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 from uuid import uuid4
 
 from langchain_core.documents import Document
@@ -12,6 +12,7 @@ from langchain_core.documents import Document
 from app.services.vectors.vector_index_service import (
     audit_postgres_chunk_identity,
     build_pdf_ocr_history_entries,
+    compensate_failed_file_index,
     index_file_vectors,
     index_knowledge_file_record,
 )
@@ -22,6 +23,42 @@ from app.services.vectors.milvus_vector_store import MilvusVectorStore
 
 class VectorIndexServiceTests(unittest.TestCase):
     """验证文件记录字段能够正确传入文档解析层。"""
+
+    def test_compensation_deletes_only_current_vector_identity(self) -> None:
+        """失败补偿应保留独立 dense-only rollback collection。"""
+        vector_store = Mock()
+        with patch(
+            "app.services.vectors.vector_index_service.delete_file_chunks",
+        ) as delete_chunks:
+            compensate_failed_file_index(7, "file-a", vector_store)
+
+        vector_store.delete_current_file_vectors.assert_called_once_with(
+            user_id=7,
+            file_id="file-a",
+        )
+        vector_store.delete_file_vectors.assert_not_called()
+        delete_chunks.assert_called_once_with(7, "file-a")
+
+    def test_compensation_cleanup_adapter_scans_all_identities(self) -> None:
+        """无法恢复当前 identity 时，credential-free cleanup 应避免残留。"""
+        cleanup_store = Mock()
+        cleanup_store.collection_name = ""
+        with patch(
+            "app.services.vectors.vector_index_service.get_vector_store",
+            side_effect=ValueError("missing settings"),
+        ), patch(
+            "app.services.vectors.vector_index_service.get_vector_store_for_cleanup",
+            return_value=cleanup_store,
+        ), patch(
+            "app.services.vectors.vector_index_service.delete_file_chunks",
+        ):
+            compensate_failed_file_index(7, "file-a")
+
+        cleanup_store.delete_file_vectors.assert_called_once_with(
+            user_id=7,
+            file_id="file-a",
+        )
+        cleanup_store.delete_current_file_vectors.assert_not_called()
 
     def test_index_file_vectors_forwards_original_file_name(self) -> None:
         """索引时应使用用户上传文件名，而不是引用未定义的文件记录。"""
@@ -112,35 +149,134 @@ class VectorIndexServiceTests(unittest.TestCase):
         with patch(
             "app.services.vectors.vector_index_service.list_file_chunk_identity_rows",
             return_value=[
-                {"chunk_id": "chunk-a", "index_version": 4},
-                {"chunk_id": "chunk-b", "index_version": 4},
+                {
+                    "chunk_id": "chunk-a",
+                    "parent_id": "parent-a",
+                    "child_index": 0,
+                    "index_version": 4,
+                },
+                {
+                    "chunk_id": "chunk-b",
+                    "parent_id": "parent-a",
+                    "child_index": 1,
+                    "index_version": 4,
+                },
             ],
+        ), patch(
+            "app.services.vectors.vector_index_service.list_file_parent_identity_rows",
+            return_value=[{"parent_id": "parent-a", "index_version": 4}],
         ):
             audit_postgres_chunk_identity(
                 user_id=1,
                 file_id=file_id,
                 expected_chunk_ids=["chunk-b", "chunk-a"],
+                expected_parent_ids=["parent-a"],
                 expected_index_version=4,
             )
 
         for rows in (
-            [{"chunk_id": "chunk-a", "index_version": 4}],
+            [{
+                "chunk_id": "chunk-a",
+                "parent_id": "parent-a",
+                "child_index": 0,
+                "index_version": 4,
+            }],
             [
-                {"chunk_id": "chunk-a", "index_version": 3},
-                {"chunk_id": "chunk-b", "index_version": 3},
+                {
+                    "chunk_id": "chunk-a",
+                    "parent_id": "parent-a",
+                    "child_index": 0,
+                    "index_version": 3,
+                },
+                {
+                    "chunk_id": "chunk-b",
+                    "parent_id": "parent-a",
+                    "child_index": 1,
+                    "index_version": 3,
+                },
             ],
         ):
             with self.subTest(rows=rows), patch(
                 "app.services.vectors.vector_index_service.list_file_chunk_identity_rows",
                 return_value=rows,
+            ), patch(
+                "app.services.vectors.vector_index_service.list_file_parent_identity_rows",
+                return_value=[{"parent_id": "parent-a", "index_version": 4}],
             ):
-                with self.assertRaisesRegex(RuntimeError, "chunk 审计失败"):
+                with self.assertRaisesRegex(RuntimeError, "parent/child 审计失败"):
                     audit_postgres_chunk_identity(
                         user_id=1,
                         file_id=file_id,
                         expected_chunk_ids=["chunk-a", "chunk-b"],
+                        expected_parent_ids=["parent-a"],
                         expected_index_version=4,
                     )
+
+    def test_index_file_vectors_persists_parent_child_hierarchy(self) -> None:
+        """索引应同时写入 parent 正文与带稳定 identity 的 child。"""
+        file_id = uuid4()
+        vector_store = Mock()
+        vector_store.ensure_collection.return_value = "collection"
+        with TemporaryDirectory() as temp_dir:
+            storage_path = Path(temp_dir) / "document.md"
+            storage_path.write_text("placeholder", encoding="utf-8")
+            loaded = Document(
+                page_content="# 第一章\n\n" + "企业制度内容。" * 120,
+                metadata={
+                    "user_id": "1",
+                    "file_id": str(file_id),
+                    "file_name": "document.md",
+                    "file_type": "md",
+                    "content_format": "markdown",
+                },
+            )
+            with patch(
+                "app.services.vectors.vector_index_service.load_document",
+                return_value=[loaded],
+            ), patch(
+                "app.services.vectors.vector_index_service.get_vector_store",
+                return_value=vector_store,
+            ), patch(
+                "app.services.vectors.vector_index_service.replace_file_chunks",
+            ) as replace_chunks, patch(
+                "app.services.vectors.vector_index_service.audit_postgres_chunk_identity",
+            ) as audit_identity, patch(
+                "app.services.vectors.vector_index_service.record_pdf_ocr_history_entries",
+            ):
+                result = index_file_vectors(
+                    user_id=1,
+                    file_id=file_id,
+                    storage_path=storage_path,
+                    index_version=4,
+                    original_name="document.md",
+                )
+
+        self.assertEqual(result["parent_count"], 1)
+        self.assertGreater(result["chunk_count"], 1)
+        replace_kwargs = replace_chunks.call_args.kwargs
+        self.assertEqual(len(replace_kwargs["parents"]), 1)
+        self.assertEqual(
+            replace_kwargs["parent_ids"],
+            [f"1:{file_id}:v4:p0"],
+        )
+        self.assertTrue(all(
+            chunk.metadata["parent_id"] == f"1:{file_id}:v4:p0"
+            for chunk in replace_kwargs["chunks"]
+        ))
+        self.assertEqual(
+            replace_kwargs["chunk_ids"],
+            [
+                f"1:{file_id}:v4:p0:c{child_index}"
+                for child_index in range(result["chunk_count"])
+            ],
+        )
+        audit_identity.assert_called_once_with(
+            user_id=1,
+            file_id=file_id,
+            expected_chunk_ids=replace_kwargs["chunk_ids"],
+            expected_parent_ids=replace_kwargs["parent_ids"],
+            expected_index_version=4,
+        )
 
     def test_index_record_loads_persistent_pdf_ocr_corrections(self) -> None:
         """worker 索引文件时应加载并传递全部持久化页级修订。"""
@@ -235,6 +371,53 @@ class VectorIndexServiceTests(unittest.TestCase):
         self.assertNotIn("-", store.collection_name)
         self.assertIs(store._client, client)
         self.assertIs(store._embedding_model, embedding_model)
+        self.assertIsNone(store._sparse_encoder)
+
+    def test_factory_v2_identity_includes_sparse_model_and_revision(self) -> None:
+        """启用 T-142 flag 后应创建独立 v2 identity 并绑定 sparse client。"""
+        settings = EmbeddingModelSettings(
+            provider="qwen",
+            model="text-embedding-v4",
+            api_key="test-only",
+            base_url=None,
+            dimensions=1024,
+            timeout_seconds=10,
+            max_retries=0,
+        )
+        dense_only_name = vector_store_factory.build_milvus_user_collection_name(
+            "firstrag",
+            42,
+            settings,
+        )
+        with patch.object(
+            vector_store_factory,
+            "MILVUS_DENSE_SPARSE_WRITE_ENABLED",
+            True,
+        ), patch.object(
+            vector_store_factory,
+            "get_effective_embedding_model_settings",
+            return_value=settings,
+        ), patch.object(
+            vector_store_factory,
+            "create_embedding_model_from_settings",
+            return_value=object(),
+        ), patch.object(
+            vector_store_factory,
+            "_create_milvus_client",
+            return_value=object(),
+        ):
+            store = vector_store_factory.get_vector_store(user_id=42)
+
+        expected_name = vector_store_factory.build_milvus_user_collection_name(
+            "firstrag",
+            42,
+            settings,
+            sparse_model=vector_store_factory.SPARSE_ENCODER_MODEL,
+            sparse_revision=vector_store_factory.SPARSE_ENCODER_REVISION,
+        )
+        self.assertEqual(store.collection_name, expected_name)
+        self.assertNotEqual(store.collection_name, dense_only_name)
+        self.assertIsNotNone(store._sparse_encoder)
 
     def test_cleanup_factory_does_not_require_embedding_settings(self) -> None:
         """永久删除在用户凭据缺失时仍应能扫描 Milvus identities。"""

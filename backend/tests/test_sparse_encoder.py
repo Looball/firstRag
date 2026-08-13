@@ -196,6 +196,45 @@ class SparseEncoderClientTests(unittest.TestCase):
 
         self.assertEqual(vector, {1: 0.5})
 
+    def test_document_encoding_batches_large_child_sets(self) -> None:
+        """document encoding 应按 client batch 拆分并保持原始顺序。"""
+        observed_batches: list[list[str]] = []
+
+        def respond(request, timeout):
+            """按每批输入构造匹配 contract 的 fake response。"""
+            del timeout
+            request_payload = json.loads(request.data)
+            texts = request_payload["texts"]
+            observed_batches.append(texts)
+            payload = EncodeResponse(
+                model=BGE_M3_MODEL_ID,
+                revision=BGE_M3_REVISION,
+                mode="document",
+                vectors=[{int(text): 1.0} for text in texts],
+            ).model_dump_json().encode("utf-8")
+            return _FakeUrlResponse(payload)
+
+        with patch(
+            "app.services.sparse_encoder_client.urlopen",
+            side_effect=respond,
+        ):
+            vectors = SparseEncoderClient(batch_size=2).encode_documents([
+                "0",
+                "1",
+                "2",
+                "3",
+                "4",
+            ])
+
+        self.assertEqual(observed_batches, [["0", "1"], ["2", "3"], ["4"]])
+        self.assertEqual(vectors, [
+            {0: 1.0},
+            {1: 1.0},
+            {2: 1.0},
+            {3: 1.0},
+            {4: 1.0},
+        ])
+
     def test_client_rejects_revision_drift_without_leaking_text(self) -> None:
         """服务 revision 漂移时失败，异常不包含原始企业文本。"""
         payload = json.dumps(
