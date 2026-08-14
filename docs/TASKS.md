@@ -41,7 +41,7 @@
 ## 当前基线
 
 - 2026-08-11 无外部密钥的全栈浏览器门禁已收敛为 Milvus-only：隔离 Compose project 使用临时 PostgreSQL、Milvus/etcd/MinIO、uploads volumes 和本地 OpenAI-compatible stub，覆盖注册、前端登录、TXT 上传、worker 向量化、restart persistence、SSE 回答与 sources 展示；测试结束自动清理专用容器和数据。
-- 2026-08-01 已刷新静态回归验收：后端最近一次全量 373 项测试通过；前端 Vitest 181 项通过、lint 0 error（保留 2 个 `<img>` 性能 warning），Next.js 16.2.12 production build 与 Playwright E2E 3/3 通过。
+- 2026-08-13 已刷新最新静态与全栈回归验收：后端最近一次全量 442 项测试通过；前端 Vitest 181 项通过、lint 0 error（保留 2 个既有 `<img>` 性能 warning），Next.js production build 与 credential-free full-stack E2E 1/1 通过。
 - 2026-08-09 已刷新前端依赖安全审计：Next.js 与 eslint-config-next 保持 16.2.12、PostCSS 固定到 8.5.23，transitive Nano ID 升级到 3.3.18；当前 production npm audit policy 为 `0 findings / 0 exceptions`。
 - 2026-08-11 已刷新后端依赖安全审计：移除旧 vector store 依赖和限时 no-fix 例外，production `pip-audit` 为 `0 findings / 0 exceptions`；Trivy 继续由 CI 检查 backend/frontend 镜像的可修复 high/critical OS finding。
 - 2026-07-27 已刷新 GitHub Actions supply chain 基线：13 个外部 Action 引用均固定到官方 release 的 40 位 commit SHA，CI 自动拒绝 tag/branch/短 SHA 和缺失版本注释；Dependabot 每周聚合提出 Action 更新 PR。
@@ -279,7 +279,7 @@
 | `T-140` | `PLAN-20260811-01` | `P1` | `Done` | 冻结 PostgreSQL full-text 基线并确定 BGE-M3 sparse ADR | `2026-08-11` | `b0c11b9` |
 | `T-141` | `PLAN-20260811-01` | `P1` | `Done` | 接入单实例 BGE-M3 sparse encoder runtime | `2026-08-11` | `8534823` |
 | `T-142` | `PLAN-20260811-01` | `P1` | `Done` | 扩展 Milvus dense/sparse schema 与写入生命周期 | `2026-08-13` | `923ba68` |
-| `T-143` | `PLAN-20260811-01` | `P1` | `Done` | 将混合召回与 RRF 统一迁移到 Milvus |  |  |
+| `T-143` | `PLAN-20260811-01` | `P1` | `Done` | 将混合召回与 RRF 统一迁移到 Milvus | 2026-08-13 | `f9c9c5c` |
 | `T-144` | `PLAN-20260811-01` | `P1` | `Done` | 移除 PostgreSQL 文本存储与关键词检索，并完成 Milvus 重建与验收 | 2026-08-13 | 见任务完成记录 |
 | `T-145` | `PLAN-20260811-01` | `P1` | `Done` | 固化父子块切分、stable ID 与上下文扩展契约 | `2026-08-11` | `14eeca2` |
 
