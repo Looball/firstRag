@@ -1,367 +1,107 @@
-# AGENTS.md
+# FirstRAG Agent 协作规范
 
-本文档面向 Codex、Claude Code、Copilot Agent 等 AI Agent，说明在 FirstRAG 仓库中协作、修改代码、补充文档和处理 Git 的规则。正文使用中文，专业术语和工程名词保留英文。
+本文面向 Codex、Claude Code、Copilot Agent 等 AI Agent。正文使用中文，专业术语和工程名词保留 English。
 
-## 1. Project Overview
+## 当前阶段
 
-FirstRAG 是一个全栈 RAG（Retrieval-Augmented Generation）应用，采用 monorepo 结构组织前端、后端、文档和部署配置。
+- FirstRAG 已进入“功能冻结、教程优先”阶段。默认不增加非必要产品功能，也不为缩短文件继续拆分职责清晰的模块。
+- `main` 是唯一长期主线；修改从最新 `main` 创建短期 `codex/...` 分支，经 PR 和 required checks 合并回 `main`。不维护长期 `tutorial` 分支。
+- Bug、安全漏洞、依赖兼容和教程可复现性所需的最小修复仍正常维护。
+- 教程和示例必须引用当前真实实现、API、schema 和运行行为，不创建与生产链路长期并行的教学实现。产品快照由 `product-v1.0.0` tag 固定。
 
-当前仓库进入“功能冻结、教程优先”的维护阶段：`main` 是唯一长期主线，后续重点是在真实可运行实现上补充教程、源码地图、可复现实验和练习。默认不再增加非必要产品功能，也不为了缩短文件行数继续拆分职责已经清晰的模块；Bug、安全漏洞、依赖兼容和教程可复现性所需的最小修复仍正常维护。教程化前的完整产品快照由 `product-v1.0.0` tag 固定。
+## 通用原则
 
-核心能力：
+- 先读代码、文档、测试和 Git 状态，再修改；优先复用现有模块、helper、repository 和 service。
+- 只处理当前任务，避免 unrelated refactor；保留用户已有的未提交改动。
+- 不读取或打印 `~/.zshrc`、shell history、SSH private key、完整 `.env` 等敏感内容。
+- 根目录 `.env` 仅作为运行时配置来源；不得打印、复制或提交 API Key、JWT、数据库密码、私钥和完整用户凭据。
+- 涉及用户数据时必须检查 `user_id`、权限隔离和软删除条件。
 
-- 用户注册、登录和 JWT 认证。
-- 知识库、知识文件、会话和消息管理。
-- 文件上传、SHA-256 去重、异步 vector index job。
-- 文档解析、chunk 切分、embedding、Milvus 向量入库。
-- Milvus dense/sparse filtered hybrid search、RRFRanker、child CrossEncoder rerank 与 Milvus parent context。
-- OpenAI-compatible LLM 流式回答，并通过 SSE 返回 token、sources 和 retrieval diagnostics。
-- 用户可配置自己的 LLM provider、model 和 API Key。
-- 用户可配置自己的 embedding provider（千问/Qwen 或智谱/ZhipuAI）、model 和 API Key。
-- rerank 支持本地 BGE Cross-Encoder 和远程 Qwen rerank API 两种 provider。
-- Compose 内置单实例固定 revision BGE-M3 sparse encoder；Milvus v3 entity 同时保存 dense/sparse vectors、child text 和 parent text。
+## 代码分层
 
-核心数据流：
-
-```text
-用户上传文件
-  -> frontend API proxy
-  -> FastAPI route
-  -> 文件落盘 + PostgreSQL metadata
-  -> vector_index_jobs
-  -> vector_index_worker
-  -> document_service 解析/切分
-  -> Milvus child dense/sparse vectors + child/parent text
-  -> dense 使用用户配置的 provider，sparse 使用内网 BGE-M3
-
-用户提问
-  -> frontend API proxy
-  -> FastAPI /chat
-  -> rag_service 构建 LCEL chain
-  -> Milvus dense+sparse hybrid/RRF + child rerank + entity parent context
-  -> LLM streaming
-  -> SSE 返回回答、sources、retrieval diagnostics
-```
-
-## 2. Development Principles
-
-- 所有任务从最新 `main` 创建短期 `codex/...` 分支，通过 PR 和 required checks 合并回 `main`；不维护长期 `tutorial` 分支。
-- 教程和示例必须引用当前真实实现、API、schema 和运行行为，不创建与生产链路长期并行的教学实现。
-- 先阅读现有代码和文档，再修改实现。
-- 优先复用已有模块、helper、repository 和 service，不随意引入新抽象。
-- 保持分层边界清晰：route 不写业务逻辑，repository 不写业务判断，service 不接收 HTTP 对象。
-- 任何涉及用户数据的逻辑必须优先考虑权限隔离和软删除条件。
-- 修改行为前确认影响面，避免把 unrelated refactor 混进当前任务。
-- 不访问 `~/.zshrc`、全局 shell 配置或其他可能包含 API Key 的敏感文件。
-- 根目录 `.env` 是运行时配置来源，不打印、不提交、不复制其中的敏感值。
-
-## 3. Repository Structure
-
-```text
-FirstRAG/
-├── frontend/                 # Next.js / React frontend
-├── backend/                  # FastAPI backend
-├── docs/                     # 项目文档
-├── deploy/                   # 部署相关
-│   ├── docker/
-│   └── nginx/
-├── scripts/                  # 初始化、迁移、测试脚本
-├── .env.example              # 环境变量模板
-├── docker-compose.yml        # Docker Compose 配置
-├── README.md
-└── .gitignore
-```
-
-后端关键目录：
-
-| 目录 | 职责 |
+| 目录 | 约束 |
 | --- | --- |
-| `backend/app/api/` | FastAPI route，参数校验、认证、权限检查、HTTP error。 |
+| `backend/app/api/` | FastAPI route：参数校验、认证、权限检查和 HTTP 错误转换；不写业务 SQL。 |
 | `backend/app/schemas/` | Pydantic request/response model。 |
-| `backend/app/services/` | 业务逻辑、RAG chain、LLM 调用、embedding/rerank provider、vector indexing。 |
-| `backend/app/repositories/` | 数据访问层，纯 SQL 查询。 |
-| `backend/app/db/` | 数据库连接、executor、migration SQL、advisory lock。 |
-| `backend/app/core/` | config、security、secret cipher。 |
-| `backend/app/workers/` | background worker。 |
-| `backend/sparse_encoder/` | 内网 BGE-M3 sparse encoding service、共享 contract 和 probe。 |
-| `backend/tests/` | 后端测试。 |
-
-前端关键目录：
-
-| 目录 | 职责 |
-| --- | --- |
+| `backend/app/services/` | 业务编排、RAG、provider 调用和 indexing；接收基本类型，不接收 FastAPI Request/Response。 |
+| `backend/app/repositories/` | 只做数据访问；SQL 通过 `backend/app/db/executor.py` 的 `fetch_all`、`fetch_one`、`execute` 执行。 |
+| `backend/app/db/` | 数据库连接、migration、advisory lock 和 SQL。 |
+| `backend/app/workers/` | 异步任务 worker。 |
+| `backend/sparse_encoder/` | 内网固定 revision BGE-M3 sparse encoder、contract 和 probe。 |
 | `frontend/src/app/` | Next.js App Router 页面和 layout。 |
-| `frontend/src/app/api/` | Next.js API proxy。 |
-| `frontend/src/components/` | 可复用 UI component。 |
-| `frontend/src/lib/` | 前端 utility、auth 和 settings helper。 |
+| `frontend/src/components/`、`frontend/src/lib/` | 可复用 UI、auth、API 和 utility。 |
+| `frontend/src/app/api/` | 只做代理、header 转发、错误适配和 streaming 透传。 |
 
-## 4. Backend Conventions
+## Backend、Frontend 和 API 约定
 
-- 后端运行目录为 `backend/`，但配置读取 monorepo 根目录 `.env`。
-- FastAPI app 入口为 `backend/app/main.py`，兼容入口为 `backend/main.py`。
-- route 文件使用 `APIRouter` 注册，按业务域拆分。
-- 认证统一通过 `Depends(get_current_user_id)` 注入 `user_id`。
-- 权限校验在 route 层完成，例如知识库、文件、会话是否属于当前用户。
-- route 层只调用 repository 做权限查询，不直接写 SQL。
-- service 函数接收基本类型参数，例如 `user_id`、`file_id`、`conversation_id`。
-- service 层负责复杂业务流程，例如 RAG chain、hybrid retrieval、LLM streaming、vector indexing。
-- 外部 API 调用在 service 层封装，包括 LLM provider、embedding provider 和 rerank provider。
-- LLM 与 embedding provider 由登录用户在设置页保存 provider/model/API Key；rerank provider 仍通过 `backend/app/core/config.py` 的环境变量选择，默认本地 BGE Cross-Encoder。
-- repository 文件按业务域拆分，所有查询通过 `backend/app/db/executor.py` 的 `fetch_all`、`fetch_one`、`execute`。
+- 认证统一使用 `Depends(get_current_user_id)` 注入 `user_id`；资源不存在或不属于当前用户时返回 `404`。
+- 后端配置从 monorepo 根目录 `.env` 读取；入口为 `backend/app/main.py`，兼容入口为 `backend/main.py`。
+- 前端认证请求携带 `Authorization: Bearer <access_token>`；动态 route handler 显式声明 `params` 类型。
+- SSE chat proxy 必须保持 streaming body，不得提前读完整响应。响应使用 `text/event-stream`，保留 `Cache-Control: no-cache` 和 `X-Accel-Buffering: no`。
+- 用户输入的 API Key 只能提交给后端，不得写入 `localStorage`、`sessionStorage`、URL、日志或错误上报。
+- 常用 HTTP 语义：认证失败 `401`，资源不存在 `404`，参数错误 `400`，文件过大 `413`，provider/依赖故障可返回 `502`。
 
-## 5. Frontend Conventions
+## RAG 与 indexing 约定
 
-- 前端使用 Next.js App Router。
-- 页面逻辑放在 `frontend/src/app/`，可复用 UI 放在 `frontend/src/components/`。
-- API Route 只做代理、header 转发、错误适配和 streaming 透传，不实现后端业务逻辑。
-- 前端请求后端默认通过 `BACKEND_ORIGIN` 和 `BACKEND_API_PREFIX` 配置。
-- 所有需要认证的请求必须携带 `Authorization: Bearer <access_token>`。
-- SSE chat proxy 必须保持 streaming body，不要把流式响应提前读完整再返回。
-- 用户 API Key 只允许在用户输入后提交给后端，不写入 `localStorage`、`sessionStorage`、URL、日志或错误上报。
-- 动态 route handler 显式声明 `params` 类型，避免未定义的 `RouteContext`。
+- 文件上传只负责落盘、metadata 持久化和 enqueue；重型 parsing、chunk、embedding 和 vector write 必须由 `vector_index_jobs` / `vector_index_worker` 异步完成。
+- 同一文件 indexing 使用 PostgreSQL advisory lock 或版本号保护；删除、重建和失败补偿必须同时处理 Milvus entities 与 active jobs。
+- Milvus 是唯一受支持的 vector store。PostgreSQL 保存关系型 metadata、任务和审计信息，不保存或检索 parent/child 正文，也不承担关键词召回。
+- dense query 使用用户配置的 embedding provider；sparse query 使用固定 revision BGE-M3。Milvus dense/sparse request 必须使用相同的 `user_id` / `file_id` filter，并由 `RRFRanker` 融合 child。
+- 每个 parent 限制 child 候选数，先对 child 做 Cross-Encoder rerank，再使用 Milvus entity 的 parent text 构建 context；sources 保留实际命中的 child 和位置。
+- dense 或 sparse 单路失败时只能按明确策略降级为另一通道，不得放宽 filter 或回退到 PostgreSQL keyword retrieval；必须保留 diagnostics。
+- dense cache identity 包含用户、provider、model 和 dimensions；sparse cache identity 包含 BGE-M3 model、revision、max length 和 query hash，不保存 query 明文。
+- LLM streaming 期间持久化 assistant message；失败时写入 `failed` 和 `error_message`。回答的 `sources` 与 retrieval diagnostics 保存到 `messages.sources`、`messages.retrieval`。
 
-## 6. RAG Pipeline Rules
+## Database 约定
 
-- 文件上传只负责落盘、metadata 持久化和可选 enqueue，不在 HTTP request 中做重型 indexing。
-- vector indexing 必须通过 `vector_index_jobs` 和 `vector_index_worker` 异步执行。
-- indexing 使用的 embedding 来自用户保存的 provider（千问/ZhipuAI），而非系统级环境变量。
-- 同一文件 indexing 需要使用 PostgreSQL advisory lock 或版本号保护，避免旧任务覆盖新结果。
-- 删除向量化结果时必须同时处理 Milvus entities 和 active jobs。
-- RAG retrieval 需要尽量保留 diagnostics，便于前端展示和后续评估。
-- hybrid retrieval 的顺序和职责：
-  - dense query 使用用户配置的 embedding provider，sparse query 使用固定 BGE-M3；两者分别缓存。
-  - Milvus 两个 `AnnSearchRequest` 使用相同 user/file filter，并由 `RRFRanker` 融合 child。
-  - 每个 parent 限制 child 候选数，reranker 精排 child 后再从 PostgreSQL 批量加载 parent 正文。
-  - sparse 失败降级为 dense-only，dense 失败降级为 sparse-only；不得扩大 filter 或回退到 PostgreSQL keyword。
-  - PostgreSQL 不保存或检索 parent/child 正文；source preview、OCR 页定位与 LLM context 均读取 Milvus entity。
-- dense query embedding 按用户、provider、model 和 dimensions 缓存；sparse cache identity 包含 BGE-M3 model、revision、max length 和 query hash。
-- LLM streaming 过程中要持久化 assistant message 状态，失败时写入 `failed` 和 `error_message`。
-- 回答 sources 和 retrieval diagnostics 应保存到 `messages.sources` 与 `messages.retrieval`。
+- `backend/app/db/sql/000_initial_schema.sql` 是空库初始化基线；新增表、字段、索引或约束必须新增三位递增 migration，例如 `001_create_message_tags.sql`。
+- SQL 参数使用 `%s`，禁止拼接用户输入；涉及用户数据的查询必须带 `user_id`，软删除表必须过滤 `deleted_at IS NULL`。
+- 任务表应明确 `status`、`attempts`、`error_message`、`created_at`、`updated_at` 等状态字段。
+- 不提交包含 `ALTER TABLE ... OWNER TO ...` 等个人数据库角色绑定的导出语句；不假定数据库被手动修改。
+- 修改数据库结构时同步更新 repository、schema、`docs/SCHEMAS.md` 和必要测试。
 
-## 7. Database Rules
+## 文档与编码
 
-- PostgreSQL 存储关系型数据，Milvus 是唯一受支持的向量数据库。
-- 数据库 SQL 位于 `backend/app/db/sql/`。
-- `000_initial_schema.sql` 是当前空库初始化基线；后续新增表、字段、索引或约束从 `001_xxx.sql` 开始新增 migration SQL，不直接假定数据库已手动修改。
-- migration 文件按三位编号递增命名，例如 `001_create_message_tags.sql`。
-- 不提交本地数据库导出的 `ALTER TABLE ... OWNER TO ...` 这类绑定个人角色的语句。
-- SQL 参数使用 `%s` 占位符，禁止拼接用户输入。
-- 涉及用户数据的查询必须带 `user_id` 条件。
-- 软删除表查询必须过滤 `deleted_at IS NULL`。
-- 多表关联时同时检查 `user_id` 和软删除条件。
-- 任务型表需要明确 status、attempts、error_message、created_at、updated_at 等状态字段。
-- 不确定表结构时优先查看 `backend/app/db/sql/`，必要时再使用 `pg_dump` 查看实际数据库。
+- 文档应描述真实现状，不把计划能力写成已实现能力；架构、API、schema、RAG 或部署变化须同步更新 `docs/`。
+- Agent 协作规则同步维护 `docs/AGENT_GUIDE.md` 与本文件；详细专题放在 `docs/backend/` 等目录。
+- 类、函数和方法保留 docstring；关键业务逻辑用中文注释说明意图，避免无意义注释。
+- Python 优先使用类型注解；TypeScript 避免隐式 `any`；错误信息简洁、安全、可理解；日志不得包含完整 secret。
 
-核心表：
+## Git 工作流
 
-| 表 | 用途 |
-| --- | --- |
-| `users` | 用户账户。 |
-| `knowledge_bases` | 知识库。 |
-| `knowledge_files` | 知识文件 metadata。 |
-| `knowledge_base_files` | 知识库与文件关联。 |
-| `conversations` | 会话。 |
-| `messages` | 消息、sources、retrieval diagnostics。 |
-| `vector_index_jobs` | 向量化任务队列。 |
-| `user_llm_settings` | 用户当前 LLM 设置。 |
-| `user_llm_provider_credentials` | 用户按 provider 保存的加密 API Key。 |
-| `user_embedding_settings` | 用户当前 embedding/向量模型设置（provider、model、加密 API Key）。 |
+1. 修改前运行 `git status --short`，确认当前分支和已有改动。
+2. 从最新 `main` 创建短期 `codex/...` 分支；PR review 修复提交到对应 PR 分支。
+3. 只暂存当前任务相关文件，不覆盖或回滚用户改动。
+4. 提交前运行 `git diff --cached --check`，使用简洁明确的 commit message。
+5. 默认只提交本地；除非用户明确要求，不 push、不开启 force push。
 
-## 8. API Rules
+禁止使用以下破坏性命令，除非用户明确、具体要求：`git reset --hard`、`git clean -fd`、`git checkout -- .`。禁止删除 `uploads/`、数据库数据、Milvus volumes、`vector_db/` 或模型缓存，除非用户确认确切范围和影响。
 
-- 成功响应统一包含 `success: true`，除历史兼容接口外尽量保持一致。
-- 认证失败返回 `401`。
-- 资源不存在或不属于当前用户时返回 `404`，避免泄露资源存在性。
-- 参数错误返回 `400`。
-- 文件过大返回 `413`。
-- 后端服务依赖或外部 provider 调用失败时，可返回 `502` 并给出用户可理解的 `detail`。
-- ID 参数使用 UUID，由 FastAPI 自动校验。
-- 文件上传使用 `multipart/form-data` 和 `UploadFile`。
-- Chat 接口使用 `text/event-stream`，响应头保留 `Cache-Control: no-cache` 和 `X-Accel-Buffering: no`。
-- 路径约定：
-  - auth：`/register`、`/login`
-  - chat：`/chat`
-  - knowledge base：`/chat/knowledge-base(s)/...`
-  - knowledge file：`/chat/knowledge-files/...`
-  - vector index：`/chat/knowledge-files/{id}/vectors`、`/chat/vector-index-jobs/{id}`
-  - conversations：`/chat/knowledge-bases/{id}/conversations/...`
-  - user settings：`/user/settings/...`
-  - user embedding settings：`/user/settings/embedding`、`/user/settings/embedding-providers`、`/user/settings/embedding/test`
+## 验证要求
 
-## 9. Documentation Rules
-
-- 项目级文档放在 `docs/` 顶层。
-- 业务专题或历史材料可放在 `docs/backend/` 等子目录。
-- 修改架构、API、数据表、RAG 流程、启动方式时，同步更新相关文档。
-- 文档正文使用中文，专业术语和名词保留英文。
-- 文档应说明真实现状，不写尚未实现的能力为既有能力。
-- 长文档优先使用表格、流程图和代码块提高可读性。
-- Agent 相关协作规范同步维护 `docs/AGENT_GUIDE.md` 与本文件。
-
-## 10. Coding Standards
-
-- 保持现有代码风格一致。
-- 所有类、函数、方法必须有 docstring。
-- 关键业务逻辑使用中文注释说明意图。
-- 避免无意义注释，例如“给变量赋值”。
-- Python 代码优先使用类型注解。
-- TypeScript 代码避免隐式 `any` 扩散。
-- 错误信息面向用户时应简洁、安全、可理解。
-- 内部日志可以保留详细异常，但不得输出完整 API Key、JWT、数据库密码等敏感值。
-- 不引入和任务无关的大规模格式化或重构。
-
-## 11. Git Workflow
-
-修改项目文件后：
-
-1. 运行 `git status --short`。
-2. 只暂存当前任务相关文件。
-3. 不包含 unrelated existing changes。
-4. 使用清晰、简洁的 commit message。
-5. 提交后在最终回复中报告 commit hash。
-
-注意：
-
-- 可能存在用户未提交改动，禁止擅自 revert。
-- 所有改动使用从最新 `main` 创建的短期任务分支，不直接提交受保护的 `main`。
-- 不建立与 `main` 长期并行的教程开发分支；教程任务仍通过短期分支和 PR 交付。
-- PR review 修复应提交到对应 PR 分支。
-- 不使用 `git reset --hard`、`git checkout --`、`git clean` 等破坏性命令，除非用户明确要求。
-- 删除分支前确认内容已合并或最终文件内容一致。
-
-## 12. Testing Requirements
-
-- 默认验证路径改为 Docker Compose。每次完成代码或配置修改后，先在仓库根目录构建并启动容器：
+- 默认验证以 Docker Compose 为准：
 
 ```bash
 docker compose up -d --build
-```
-
-- 容器启动后检查服务状态：
-
-```bash
-docker compose ps
-```
-
-- 查看关键服务日志，确认 `migrate` 和 `milvus-health-probe` 成功结束，`redis`、`postgres`、`milvus-etcd`、`milvus-minio`、`milvus-standalone`、`sparse-encoder`、`backend`、`worker` 和 `frontend` 没有启动错误：
-
-```bash
-docker compose logs --tail=100 redis postgres milvus-etcd milvus-minio milvus-standalone milvus-health-probe sparse-encoder migrate backend worker frontend
-```
-
-- 涉及数据库结构、部署配置或公开 demo 前置检查时，补充运行：
-
-```bash
-conda run -n firstrag python scripts/production_preflight.py --env-file .env --migration-method compose --check-runtime-health
-```
-
-- 涉及后端 API、前端页面、RAG、上传、向量化或认证改动时，应基于已启动的容器做 smoke test；至少覆盖相关服务健康、登录、上传小文件、向量化、提问和 sources 展示中受影响的链路。
-- 修改 PDF OCR engine、预处理、候选策略、语言包或 Tesseract runtime 时，运行 `conda run -n firstrag python scripts/eval_pdf_ocr.py`，需要验证缓慢漂移时同时传入 `--history-dir docs/evals/ocr_runs --trend-report docs/evals/latest_pdf_ocr_trend.md`，并在 Compose backend 容器内复跑同一模块门禁。
-- 本地 conda / npm 命令仅作为补充排查手段或在用户明确要求时运行，不再作为每次验证的默认构建方式。
-- 如果 Docker、依赖、服务、数据库或外部 API Key 不可用，应在最终回复中明确说明未运行或失败的检查和原因。
-
-## 13. Common Tasks
-
-### 启动完整应用
-
-```bash
-docker compose up -d --build
-```
-
-默认访问 `http://localhost:3000`。FastAPI backend、Next.js frontend、PostgreSQL、Redis、Milvus Standalone 及其 etcd/MinIO、BGE-M3 sparse encoder、migration 和 vector index worker 均由 Compose 管理。
-
-### 查看服务状态和日志
-
-```bash
 docker compose ps
 docker compose logs --tail=100 redis postgres milvus-etcd milvus-minio milvus-standalone milvus-health-probe sparse-encoder migrate backend worker frontend
 ```
 
-### 本地调试后端
+- 涉及数据库、部署、RAG、上传、向量化或认证时，补充运行 `conda run -n firstrag python scripts/production_preflight.py --env-file .env --migration-method compose --check-runtime-health`，并对受影响链路做 health、登录、上传、indexing、chat、sources smoke test。
+- `scripts/acceptance_check.sh` 是补充验收入口；没有 Docker 或只做静态检查时才使用相应 skip 参数，并在最终报告中说明范围。
+- 修改 PDF OCR engine、预处理、候选策略、语言包或 Tesseract runtime 时，运行：
 
 ```bash
-cd backend
-conda activate firstrag
-python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+conda run -n firstrag python scripts/eval_pdf_ocr.py
 ```
 
-本地单独启动 FastAPI 只用于专项调试；常规验证仍以 Docker Compose 为准。
+必要时同时传入 `--history-dir docs/evals/ocr_runs --trend-report docs/evals/latest_pdf_ocr_trend.md`，并在 Compose backend 容器内复跑。
+- Docker、依赖、数据库、服务或外部 API Key 不可用时，不得把未运行的检查写成通过，必须在最终回复中说明原因。
 
-### 本地调试前端
+## 常用入口与参考文档
 
-```bash
-cd frontend
-npm install
-npm run dev
-```
-
-本地单独启动 Next.js 只用于页面专项调试；常规验证仍以 Docker Compose 为准。
-
-### 本地调试 vector index worker
-
-```bash
-cd backend
-conda activate firstrag
-python -m app.workers.vector_index_worker
-```
-
-本地单独启动 worker 只用于专项排查；常规验证仍以 Docker Compose 为准。
-
-### 新增 API
-
-1. 在 `backend/app/schemas/` 定义 request model。
-2. 在 `backend/app/repositories/` 增加 SQL 查询。
-3. 在 `backend/app/services/` 编排业务逻辑。
-4. 在 `backend/app/api/` 增加 route 和权限检查。
-5. 更新 `docs/API.md` 和必要测试。
-
-### 新增数据库字段
-
-1. 新增 `backend/app/db/sql/NNN_description.sql`。
-2. 更新 repository 查询和序列化逻辑。
-3. 更新 `docs/SCHEMAS.md`。
-4. 增加或更新测试。
-
-### 修改 RAG 行为
-
-1. 阅读 `docs/RAG_WORKFLOW.md`。
-2. 定位 `backend/app/services/rag_service.py` 和 `backend/app/services/retrieval/`。
-3. 保留或更新 retrieval diagnostics。
-4. 更新 `docs/RAG_WORKFLOW.md`。
-
-## 14. Documents Reference
-
-优先阅读：
-
-- `README.md`：项目首页和快速开始。
-- `docs/README.md`：文档目录说明。
-- `docs/ARCHITECTURE.md`：系统架构。
-- `docs/API.md`：API 接口。
-- `docs/SCHEMAS.md`：数据结构。
-- `docs/RAG_WORKFLOW.md`：RAG 流程。
-- `docs/FRONTEND.md`：前端说明。
-- `docs/BACKEND.md`：后端说明。
-- `docs/DEPLOYMENT.md`：部署和启动。
-- `docs/AGENT_GUIDE.md`：Agent 协作规范。
-- `docs/CODING_STYLE.md`：编码规范。
-
-专项资料：
-
-- `docs/backend/frontend_llm_settings_protocol.md`：前端设置页与后端 LLM settings 协议。
-- `docs/backend/user_settings_api.md`：用户模型设置 API 细节。
-- `docs/backend/development_design.md`：早期 RAG demo 设计与审查记录。
-
-## 15. Forbidden Operations
-
-禁止执行以下操作，除非用户明确、具体地要求：
-
-- 读取、打印或复制 `~/.zshrc`、shell history、SSH private key、完整 `.env` 等敏感内容。
-- 提交 API Key、JWT、数据库密码、私钥或完整用户凭据。
-- 使用 `git reset --hard`、`git clean -fd`、`git checkout -- .` 等破坏性命令。
-- force push 到共享分支。
-- 覆盖或删除用户未提交改动。
-- 将前端原始完整 API Key 保存到浏览器持久化存储。
-- 绕过 route 层权限检查直接暴露用户数据。
-- 在 repository 层拼接用户输入生成 SQL。
-- 把长耗时向量化任务放在 HTTP request 中同步执行。
-- 删除 `uploads/`、`vector_db/`、数据库数据或模型缓存，除非用户明确要求并确认影响。
+- 完整应用：`docker compose up -d --build`，默认前端 `http://localhost:3000`。
+- 后端专项调试：`cd backend && conda activate firstrag && python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000`。
+- 新增 API：schema → repository → service → route → `docs/API.md` / tests。
+- 修改 RAG：先读 `docs/RAG_WORKFLOW.md`，重点检查 `backend/app/services/rag_service.py` 和 `backend/app/services/retrieval/`。
+- 优先参考：`README.md`、`docs/ARCHITECTURE.md`、`docs/API.md`、`docs/SCHEMAS.md`、`docs/RAG_WORKFLOW.md`、`docs/DEPLOYMENT.md`、`docs/AGENT_GUIDE.md`、`docs/TASKS.md`。

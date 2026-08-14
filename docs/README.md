@@ -56,7 +56,8 @@ FirstRAG 的项目代码、文档和仓库自编教程素材采用 [Apache Licen
 | --- | --- |
 | [`AGENT_GUIDE.md`](AGENT_GUIDE.md) | AI Agent / Codex / Claude Code 协作规范。 |
 | [`CODING_STYLE.md`](CODING_STYLE.md) | 代码风格、提交和测试约定。 |
-| [`TASKS.md`](TASKS.md) | 长期任务台账、计划批次、优先级、状态和验收标准。 |
+| [`TASKS.md`](TASKS.md) | 当前任务状态、计划批次、任务总览和未完成任务。 |
+| [`archive/TASKS_HISTORY.md`](archive/TASKS_HISTORY.md) | 历史任务详情、验收标准、完成记录和验证命令。 |
 
 ## Historical material
 
