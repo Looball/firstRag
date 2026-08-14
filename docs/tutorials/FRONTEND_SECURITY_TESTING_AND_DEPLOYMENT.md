@@ -246,13 +246,13 @@ backend
 | Service | 职责 | 持久化/边界 |
 | --- | --- | --- |
 | `redis` | shared rate limit、热点缓存、worker runtime 状态。 | 默认不发布 host port；不是业务真相存储。 |
-| `postgres` | 用户、知识库、文件 metadata、chunks、jobs、messages 与 settings。 | named volume `postgres_data`；必须备份。 |
+| `postgres` | 用户、知识库、文件 metadata、jobs、messages 与 settings；不保存当前 Milvus child/parent 正文。 | named volume `postgres_data`；必须备份。 |
 | `milvus-etcd` / `milvus-minio` | Milvus metadata/coordination 与 object storage。 | named volumes；不发布 host port。 |
 | `milvus-standalone` | 用户/embedding identity 隔离 collection 和 filtered ANN。 | `milvus_data`；强认证，不发布 host port。 |
 | `milvus-health-probe` | 在 backend/worker 前执行 authenticated round-trip。 | 一次性 job，成功退出是正常状态。 |
 | `migrate` | 在应用启动前执行数据库 migration。 | 一次性 job，成功退出是正常状态。 |
 | `backend` | FastAPI route、权限、业务 service、SSE。 | 依赖健康的 Redis/PostgreSQL/Milvus、authenticated probe 和成功 migration。 |
-| `worker` | 领取 vector index job、解析/OCR、embedding 和双存储写入。 | 与 HTTP request 解耦；需要 uploads/models 和相同后端配置。 |
+| `worker` | 领取 vector index job、解析/OCR、embedding，并写入 PostgreSQL metadata/job 与 Milvus child/parent text/vector。 | 与 HTTP request 解耦；需要 uploads/models 和相同后端配置。 |
 | `frontend` | Next.js UI 和 API proxy。 | 容器内只访问 `http://backend:8000`。 |
 
 启动与观察：

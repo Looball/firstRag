@@ -58,7 +58,7 @@ FIRSTRAG_E2E_PAUSE_AFTER_TEST=1 scripts/run_full_stack_e2e.sh
   -> 注册临时用户
   -> 写入仅指向 provider-stub 的模型设置
   -> Playwright 登录并上传合成 TXT
-  -> worker 解析、切分、embedding 和写入双存储
+  -> worker 解析、切分、embedding，并写入 PostgreSQL metadata/job 与 Milvus child/parent text/vector
   -> 页面提问并接收 SSE 回答
   -> 校验回答和引用来源
   -> 暂停，供学习者检查 UI 与日志
@@ -189,7 +189,7 @@ scripts/run_full_stack_e2e.sh
 
 脚本暂停时分别查看 `worker`、`backend` 和 `provider-stub` 日志，按时间写出 upload、job、embedding、chat 与 SSE 的顺序，并记录每一步由哪个 service 负责。不要复制临时 token 或完整设置 payload。
 
-自检方向：upload/backend 先持久化任务，worker 随后调用 embedding stub 并写入双存储；提问发生在索引成功之后，backend 调用 chat stub 并以 SSE 返回。provider 不直接访问浏览器。
+自检方向：upload/backend 先持久化 metadata/job，worker 随后调用 embedding stub，并把索引实体写入 Milvus；提问发生在索引成功之后，backend 调用 chat stub 并以 SSE 返回。provider 不直接访问浏览器。
 
 ### 扩展练习
 

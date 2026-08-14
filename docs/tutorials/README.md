@@ -8,7 +8,7 @@
 | --- | --- |
 | 本页 | 选择学习路线，了解章节顺序和统一写法。 |
 | [无外部密钥入门实验](CREDENTIAL_FREE_QUICKSTART.md) | 在隔离 Compose project 中运行注册、上传、向量化、检索、SSE 和 sources 完整链路。 |
-| [文件入库与异步索引](FILE_INGESTION_AND_INDEXING.md) | 从一个 `file_id` 追踪权限、去重、任务队列、worker、OCR、chunk 与双存储。 |
+| [文件入库与异步索引](FILE_INGESTION_AND_INDEXING.md) | 从一个 `file_id` 追踪权限、去重、任务队列、worker、OCR、chunk，以及 PostgreSQL metadata/job 与 Milvus child/parent text/vector。 |
 | [混合检索与流式回答](HYBRID_RETRIEVAL_AND_STREAMING.md) | 从一次提问追踪两路粗召回、RRF、rerank、SSE、持久化与 diagnostics。 |
 | [前端、安全、测试与部署进阶](FRONTEND_SECURITY_TESTING_AND_DEPLOYMENT.md) | 追踪页面状态、API proxy、凭据、限流、测试门禁、Compose 与生产 preflight。 |
 | [教程示例素材](fixtures/README.md) | 使用可追溯的 TXT、Markdown 和现场生成 OCR 素材完成练习。 |
