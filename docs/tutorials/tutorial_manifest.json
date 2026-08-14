@@ -12,6 +12,12 @@
   ],
   "core_chapters": [
     {
+      "path": "docs/tutorials/RAG_FROM_ZERO_TO_PRODUCTION.md",
+      "title": "从零构建并上线自己的 RAG",
+      "required_headings": ["学习目标与路线", "基础练习", "诊断练习", "扩展练习"],
+      "credential_free_heading": "基础练习"
+    },
+    {
       "path": "docs/tutorials/CREDENTIAL_FREE_QUICKSTART.md",
       "title": "无外部密钥入门实验",
       "required_headings": ["基础练习", "诊断练习", "扩展练习"],

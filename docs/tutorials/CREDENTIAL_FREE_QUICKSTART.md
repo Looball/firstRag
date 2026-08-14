@@ -58,7 +58,7 @@ FIRSTRAG_E2E_PAUSE_AFTER_TEST=1 scripts/run_full_stack_e2e.sh
   -> 注册临时用户
   -> 写入仅指向 provider-stub 的模型设置
   -> Playwright 登录并上传合成 TXT
-  -> worker 解析、切分、embedding 和写入双存储
+  -> worker 解析、切分、embedding，并写入 PostgreSQL metadata/job 与 Milvus child/parent text/vector
   -> 页面提问并接收 SSE 回答
   -> 校验回答和引用来源
   -> 暂停，供学习者检查 UI 与日志
@@ -163,7 +163,7 @@ scripts/run_full_stack_e2e.sh
 - `--env-file /dev/null` 且 E2E override 清空 backend/worker 的 `env_file`，不会读取根 `.env`。
 - 每次默认使用带进程号的 `firstrag-t089-*` Compose project；PostgreSQL、Milvus/etcd/MinIO 和 uploads 使用该 project 独立 volumes。
 - provider stub 只在 Compose 内部网络监听，由 seed 脚本写入测试用户设置；占位 API Key 不是外部服务凭据。
-- 清理只使用当前 project 名，不删除默认 `uploads/`、`vector_db/`、数据库或其他 Compose project 的 volumes。
+- 清理只使用当前 project 名，不删除默认 project 的 `uploads/`、`postgres_data`、`milvus_data`、`milvus_etcd_data`、`milvus_minio_data`、`bge_m3_cache` 或其他 Compose project 的 volumes。
 
 ## 与真实 provider 路径的差异
 
@@ -189,12 +189,12 @@ scripts/run_full_stack_e2e.sh
 
 脚本暂停时分别查看 `worker`、`backend` 和 `provider-stub` 日志，按时间写出 upload、job、embedding、chat 与 SSE 的顺序，并记录每一步由哪个 service 负责。不要复制临时 token 或完整设置 payload。
 
-自检方向：upload/backend 先持久化任务，worker 随后调用 embedding stub 并写入双存储；提问发生在索引成功之后，backend 调用 chat stub 并以 SSE 返回。provider 不直接访问浏览器。
+自检方向：upload/backend 先持久化 metadata/job，worker 随后调用 embedding stub，并把索引实体写入 Milvus；提问发生在索引成功之后，backend 调用 chat stub 并以 SSE 返回。provider 不直接访问浏览器。
 
 ### 扩展练习
 
 把 [`fictional_station.md`](fixtures/fictional_station.md) 上传到隔离知识库并完成向量化，询问“备用电池最低安全电量是多少”。只检查 sources 是否指向该 Markdown 文件和 diagnostics 是否发生检索，不把 stub 的固定回答当成事实答案。
 
-自检方向：预期 source 文件名包含 `fictional_station.md`，full-text/vector 至少一路提供候选；ground truth 是 68%，但 credential-free stub 只用于协议链路，回答文本不构成质量验收。
+自检方向：预期 source 文件名包含 `fictional_station.md`，Milvus dense/sparse 至少一路提供候选；ground truth 是 68%，但 credential-free stub 只用于协议链路，回答文本不构成质量验收。
 
 继续阅读：[教程示例素材](fixtures/README.md)、[文件入库与异步索引](FILE_INGESTION_AND_INDEXING.md)、[源码地图](CODE_MAP.md)、[RAG 核心流程](../RAG_WORKFLOW.md)、[评测说明](../evals/README.md)。

@@ -7,8 +7,9 @@
 | 内容 | 用途 |
 | --- | --- |
 | 本页 | 选择学习路线，了解章节顺序和统一写法。 |
+| [从零构建并上线自己的 RAG](RAG_FROM_ZERO_TO_PRODUCTION.md) | 推荐主线：从 RAG 理论、无密钥实验、真实源码到 VPS、HTTPS、备份和回滚。 |
 | [无外部密钥入门实验](CREDENTIAL_FREE_QUICKSTART.md) | 在隔离 Compose project 中运行注册、上传、向量化、检索、SSE 和 sources 完整链路。 |
-| [文件入库与异步索引](FILE_INGESTION_AND_INDEXING.md) | 从一个 `file_id` 追踪权限、去重、任务队列、worker、OCR、chunk 与双存储。 |
+| [文件入库与异步索引](FILE_INGESTION_AND_INDEXING.md) | 从一个 `file_id` 追踪权限、去重、任务队列、worker、OCR、chunk，以及 PostgreSQL metadata/job 与 Milvus child/parent text/vector。 |
 | [混合检索与流式回答](HYBRID_RETRIEVAL_AND_STREAMING.md) | 从一次提问追踪两路粗召回、RRF、rerank、SSE、持久化与 diagnostics。 |
 | [前端、安全、测试与部署进阶](FRONTEND_SECURITY_TESTING_AND_DEPLOYMENT.md) | 追踪页面状态、API proxy、凭据、限流、测试门禁、Compose 与生产 preflight。 |
 | [教程示例素材](fixtures/README.md) | 使用可追溯的 TXT、Markdown 和现场生成 OCR 素材完成练习。 |
@@ -16,11 +17,13 @@
 | [系统架构](../ARCHITECTURE.md) | 查看模块边界、核心数据流和存储职责。 |
 | [RAG 核心流程](../RAG_WORKFLOW.md) | 查看入库、检索、生成与 diagnostics 的当前行为。 |
 
+推荐先完成[从零构建并上线自己的 RAG](RAG_FROM_ZERO_TO_PRODUCTION.md)，再把下面四篇文档作为专题深挖：无密钥实验验证可运行链路，文件入库教程解释 upload 到 worker，混合检索教程解释 Milvus dense/sparse 到 SSE，前端安全教程解释 proxy、测试和部署。
+
 专题实验、完整章节、练习门禁和授权边界已按 [PLAN-20260802-01](../archive/TASKS_HISTORY.md#t-123-建立教程入口学习路线与源码地图) 全部交付。
 
 ## 10 分钟导览
 
-1. 用 2 分钟阅读 [系统架构的核心数据流](../ARCHITECTURE.md#核心数据流)，先建立“上传”和“提问”两条主链路。
+1. 先阅读[从零构建并上线自己的 RAG](RAG_FROM_ZERO_TO_PRODUCTION.md)，再用 2 分钟阅读 [系统架构的核心数据流](../ARCHITECTURE.md#核心数据流)，建立“上传”和“提问”两条主链路。
 2. 用 3 分钟打开 [源码地图](CODE_MAP.md)，找到 FastAPI app、Next.js 工作台、vector worker 和 Compose 入口。
 3. 用 5 分钟从下面选择一条路线，阅读其“第一步”和“第二步”；不需要先读完全部 reference 文档。
 
@@ -72,7 +75,7 @@
 | --- | --- |
 | 适合读者 | 关注 Docker Compose、migration、CI、安全审计、评测和生产检查的工程开发者。 |
 | 先修条件 | Docker、GitHub Actions 和基础 Linux/网络知识。 |
-| 预计产出 | 能解释七个 Compose service 的启动关系，选择正确的测试门禁，并区分本地验证、真实 RAG eval 与生产 preflight。 |
+| 预计产出 | 能解释 Compose services 的启动关系，选择正确的测试门禁，并区分本地验证、真实 RAG eval 与生产 preflight。 |
 | 第一步 | 阅读 [部署与本地工作流](../DEPLOYMENT.md) 和 [评测说明](../evals/README.md)。 |
 | 第二步 | 沿 [测试、评测与部署源码地图](CODE_MAP.md#测试评测与部署) 查看脚本和 workflow。 |
 | 第三步 | 完成[前端、安全、测试与部署进阶](FRONTEND_SECURITY_TESTING_AND_DEPLOYMENT.md)，运行与改动范围匹配的最小验证，再由 PR required checks 完成全量门禁。 |
@@ -87,7 +90,7 @@
 | T-123 | 教程入口、四条学习路线、源码地图 | Done |
 | T-124 | 无真实 API Key 的隔离入门实验 | Done |
 | T-125 | [文件上传、任务队列、worker、解析/OCR、chunk 与向量写入](FILE_INGESTION_AND_INDEXING.md) | Done |
-| T-126 | [vector/full-text、RRF、rerank、SSE、sources 与 diagnostics](HYBRID_RETRIEVAL_AND_STREAMING.md) | Done |
+| T-126 | [Milvus dense/sparse hybrid、RRF、rerank、SSE、sources 与 diagnostics](HYBRID_RETRIEVAL_AND_STREAMING.md) | Done |
 | T-127 | [前端、安全、测试、CI 与部署](FRONTEND_SECURITY_TESTING_AND_DEPLOYMENT.md) | Done |
 | T-128 | [分级练习、示例素材与文档回归门禁](#教程文档回归门禁) | Done |
 | T-129 | [License 与公开使用边界](#license-与公开使用边界) | Done |
@@ -111,6 +114,16 @@
 ```
 
 章节中的命令必须说明运行目录、外部依赖和是否需要真实账号/API Key；结果必须来自当前实现或可复现报告，不能把计划能力、历史数据或熟悉但未计算的指标当成当前结论。
+
+## 毕业验收清单
+
+完成主线后，应能提供以下证据：
+
+- 无外部密钥 E2E 通过，并能解释 Compose 服务、worker、Milvus 和 SSE 的职责。
+- 自己的文档完成 upload、异步 indexing、Milvus dense/sparse 写入、hybrid retrieval、rerank、parent context 和回答引用。
+- golden set、Recall@K 边界、source 命中、失败样本和 retrieval diagnostics 已记录。
+- 跨用户隔离、API Key 脱敏、SSRF、限流、Nginx SSE 和 HTTPS 已检查。
+- PostgreSQL、uploads、Milvus 三类数据完成一次备份恢复演练，并能说明升级和回滚版本。
 
 ## 教程文档回归门禁
 
