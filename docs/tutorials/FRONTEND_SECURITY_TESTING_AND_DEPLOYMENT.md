@@ -12,7 +12,7 @@
 - 从 `page.tsx` 找到负责请求提交、SSE 解析和消息回写的 hook。
 - 解释 JWT、用户 API Key、自定义 provider URL 和 `Retry-After` 分别在哪里处理。
 - 为一次改动选择合适的 Vitest、Playwright、credential-free E2E、OCR eval 或真实 RAG/indexing eval。
-- 解释七个 Compose service 的职责、migration 的一次性行为和 production preflight 的限制。
+- 解释 Compose services 的职责、migration 的一次性行为和 production preflight 的限制。
 - 准确说出 `main` 当前要求的四个 GitHub Actions check。
 - 区分“本地 Compose 可运行”“真实 provider 链路通过”和“公网生产环境已交付”。
 
@@ -198,7 +198,7 @@ FastAPI 429 + Retry-After
 credential-free E2E 适合验证工程链路，不适合宣称模型或检索质量。当改动涉及以下任一项时，需要使用登录用户已经保存的 LLM/embedding 设置运行相应真实验收：
 
 - embedding model、dimensions、chunk 或 vector metadata；
-- vector/full-text recall、RRF、rerank 或 query routing；
+- Milvus dense/sparse retrieval、RRF、rerank 或 query routing；
 - prompt、LLM streaming、sources 或 retrieval diagnostics；
 - provider 兼容性、超时、配额或错误适配。
 
@@ -395,7 +395,7 @@ scripts/run_full_stack_e2e.sh
 | Playwright 通过但真实上传失败 | 测试是否是 fixture E2E，继续跑 credential-free full-stack E2E。 | fixture E2E 不覆盖 FastAPI 与存储。 |
 | credential-free E2E 通过但回答质量差 | 使用真实账号运行 RAG/indexing eval，检查 diagnostics。 | stub 只证明协议链路。 |
 | preflight 通过但公网不可访问 | 域名、TLS、Nginx、firewall、端口和公网 smoke。 | preflight 不是发布工具。 |
-| 有 dump 但恢复失败 | secret、uploads/vector_db 快照时间、migration 和恢复演练记录。 | 文件存在不代表一致且可恢复。 |
+| 有 dump 但恢复失败 | secret、`uploads/` 与三个 Milvus volume 的快照时间、migration 和恢复演练记录。 | 文件存在不代表一致且可恢复。 |
 
 ## 11. 分级练习
 
@@ -425,4 +425,4 @@ scripts/run_full_stack_e2e.sh
 - RAG、indexing 和 OCR 门禁：[评测说明](../evals/README.md)。
 - 纵向代码入口：[源码地图](CODE_MAP.md)。
 
-配套的[教程示例素材](fixtures/README.md)和[教程文档回归门禁](README.md#教程文档回归门禁)由 T-128 交付。下一步是 T-129：明确教程仓库 License 与公开使用边界。
+配套的[教程示例素材](fixtures/README.md)和[教程文档回归门禁](README.md#教程文档回归门禁)由 T-128 交付；[License 与公开使用边界](README.md#license-与公开使用边界)由 T-129 交付。后续维护以当前实现、Compose 拓扑和 required checks 为准。

@@ -72,7 +72,7 @@
 | --- | --- |
 | 适合读者 | 关注 Docker Compose、migration、CI、安全审计、评测和生产检查的工程开发者。 |
 | 先修条件 | Docker、GitHub Actions 和基础 Linux/网络知识。 |
-| 预计产出 | 能解释七个 Compose service 的启动关系，选择正确的测试门禁，并区分本地验证、真实 RAG eval 与生产 preflight。 |
+| 预计产出 | 能解释 Compose services 的启动关系，选择正确的测试门禁，并区分本地验证、真实 RAG eval 与生产 preflight。 |
 | 第一步 | 阅读 [部署与本地工作流](../DEPLOYMENT.md) 和 [评测说明](../evals/README.md)。 |
 | 第二步 | 沿 [测试、评测与部署源码地图](CODE_MAP.md#测试评测与部署) 查看脚本和 workflow。 |
 | 第三步 | 完成[前端、安全、测试与部署进阶](FRONTEND_SECURITY_TESTING_AND_DEPLOYMENT.md)，运行与改动范围匹配的最小验证，再由 PR required checks 完成全量门禁。 |
@@ -87,7 +87,7 @@
 | T-123 | 教程入口、四条学习路线、源码地图 | Done |
 | T-124 | 无真实 API Key 的隔离入门实验 | Done |
 | T-125 | [文件上传、任务队列、worker、解析/OCR、chunk 与向量写入](FILE_INGESTION_AND_INDEXING.md) | Done |
-| T-126 | [vector/full-text、RRF、rerank、SSE、sources 与 diagnostics](HYBRID_RETRIEVAL_AND_STREAMING.md) | Done |
+| T-126 | [Milvus dense/sparse hybrid、RRF、rerank、SSE、sources 与 diagnostics](HYBRID_RETRIEVAL_AND_STREAMING.md) | Done |
 | T-127 | [前端、安全、测试、CI 与部署](FRONTEND_SECURITY_TESTING_AND_DEPLOYMENT.md) | Done |
 | T-128 | [分级练习、示例素材与文档回归门禁](#教程文档回归门禁) | Done |
 | T-129 | [License 与公开使用边界](#license-与公开使用边界) | Done |
