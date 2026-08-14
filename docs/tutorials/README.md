@@ -16,7 +16,7 @@
 | [系统架构](../ARCHITECTURE.md) | 查看模块边界、核心数据流和存储职责。 |
 | [RAG 核心流程](../RAG_WORKFLOW.md) | 查看入库、检索、生成与 diagnostics 的当前行为。 |
 
-专题实验、完整章节、练习门禁和授权边界已按 [PLAN-20260802-01](../TASKS.md#t-123-建立教程入口学习路线与源码地图) 全部交付。
+专题实验、完整章节、练习门禁和授权边界已按 [PLAN-20260802-01](../archive/TASKS_HISTORY.md#t-123-建立教程入口学习路线与源码地图) 全部交付。
 
 ## 10 分钟导览
 
@@ -50,7 +50,7 @@
 | 第三步 | 完成[混合检索与流式回答](HYBRID_RETRIEVAL_AND_STREAMING.md)，从一次提问追踪到 RRF、SSE 与消息落库。 |
 | 可以跳过 | 前端视觉组件、公开 demo 部署和 OCR 校对 UI；需要时再回查。 |
 
-入库章节已由 [T-125](../TASKS.md#t-125-编写文件入库与异步索引教程) 交付；混合检索与流式回答章节已由 [T-126](../TASKS.md#t-126-编写混合检索与流式回答教程) 交付。
+入库章节已由 [T-125](../archive/TASKS_HISTORY.md#t-125-编写文件入库与异步索引教程) 交付；混合检索与流式回答章节已由 [T-126](../archive/TASKS_HISTORY.md#t-126-编写混合检索与流式回答教程) 交付。
 
 ## 路线三：前端
 
@@ -64,7 +64,7 @@
 | 第三步 | 完成[前端、安全、测试与部署进阶](FRONTEND_SECURITY_TESTING_AND_DEPLOYMENT.md)，再从现有 Vitest 与 Playwright 用例中选择一个交互做回归验证。 |
 | 可以跳过 | OCR engine 内部算法、PostgreSQL migration 和远程 provider 实现。 |
 
-前端、安全边界和测试策略的进阶章节已由 [T-127](../TASKS.md#t-127-编写前端安全测试与部署进阶教程) 交付。
+前端、安全边界和测试策略的进阶章节已由 [T-127](../archive/TASKS_HISTORY.md#t-127-编写前端安全测试与部署进阶教程) 交付。
 
 ## 路线四：工程化
 
@@ -78,7 +78,7 @@
 | 第三步 | 完成[前端、安全、测试与部署进阶](FRONTEND_SECURITY_TESTING_AND_DEPLOYMENT.md)，运行与改动范围匹配的最小验证，再由 PR required checks 完成全量门禁。 |
 | 可以跳过 | React 组件细节和 OCR 校对交互；除非变更影响对应链路。 |
 
-工程化进阶章节已由 [T-127](../TASKS.md#t-127-编写前端安全测试与部署进阶教程) 交付，练习素材和文档自动校验由 [T-128](../TASKS.md#t-128-增加练习示例素材与文档回归门禁) 交付。
+工程化进阶章节已由 [T-127](../archive/TASKS_HISTORY.md#t-127-编写前端安全测试与部署进阶教程) 交付，练习素材和文档自动校验由 [T-128](../archive/TASKS_HISTORY.md#t-128-增加练习示例素材与文档回归门禁) 交付。
 
 ## 专题交付顺序
 
