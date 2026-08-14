@@ -40,12 +40,13 @@ FirstRAG 是一个全栈 RAG（Retrieval-Augmented Generation，检索增强生�
 
 | 路线 | 适合读者 | 入口 |
 | --- | --- | --- |
+| 主线教程 | 希望从 RAG 理论一路做到真实源码、评测和 VPS 上线。 | [从零构建并上线自己的 RAG](docs/tutorials/RAG_FROM_ZERO_TO_PRODUCTION.md) |
 | 快速入门 | 第一次接触 RAG，希望先理解系统如何运行。 | [教程导航：快速入门](docs/tutorials/README.md#路线一快速入门) |
 | 后端与 RAG | 关注 FastAPI、异步 indexing、hybrid retrieval 和 SSE。 | [教程导航：后端与 RAG](docs/tutorials/README.md#路线二后端与-rag) |
 | 前端 | 关注 Next.js proxy、React hooks、streaming 状态和引用 UI。 | [教程导航：前端](docs/tutorials/README.md#路线三前端) |
 | 工程化 | 关注 Docker、CI、安全审计、评测和生产检查。 | [教程导航：工程化](docs/tutorials/README.md#路线四工程化) |
 
-推荐先完成 [10 分钟导览](docs/tutorials/README.md#10-分钟导览)，再运行 [无外部密钥入门实验](docs/tutorials/CREDENTIAL_FREE_QUICKSTART.md)，沿 [文件入库与异步索引](docs/tutorials/FILE_INGESTION_AND_INDEXING.md) 从 `file_id` 追踪到双存储，并使用 [源码地图](docs/tutorials/CODE_MAP.md) 定位真实代码。隔离实验使用确定性 provider stub；运行完整应用仍需要用户自己的聊天与 embedding provider。
+推荐先完成[从零构建并上线自己的 RAG](docs/tutorials/RAG_FROM_ZERO_TO_PRODUCTION.md)，再运行[无外部密钥入门实验](docs/tutorials/CREDENTIAL_FREE_QUICKSTART.md)和四篇专题教程。当前主线是 Milvus v3 dense/sparse hybrid、parent-child text、RRF、rerank、SSE 和 retrieval diagnostics；隔离实验使用确定性 provider stub，运行完整应用仍需要用户自己的聊天与 embedding provider。
 
 ## 项目截图
 
@@ -105,7 +106,7 @@ conda run -n firstrag python scripts/eval_pdf_ocr.py
 门禁覆盖正常页、90° 旋转、低对比度、模糊、中英文混排、轻度倾斜、盐椒噪点、侧边阴影、小字号和表格布局，直接复用生产 OCR engine，并同时约束逐样本相似度、旋转策略、宏平均质量和总耗时。每份报告带稳定 suite fingerprint，历史趋势不会混合不同版本的评测集。
 CI 会保留每次 OCR 报告 artifact，并按相同 benchmark suite、runner 和 Tesseract 环境在 job summary 展示最近质量和耗时趋势；本地趋势命令与阈值见 [`docs/evals/README.md`](docs/evals/README.md#pdf-ocr-回归门禁)。
 
-Docker 中的 `backend`、`migrate` 和 `worker` 复用精简后的 Python runtime 镜像；`torch`、`transformers` 和 `FlagEmbedding` 只安装在独立 `sparse-encoder` 镜像，避免 backend 与 worker 各加载一份 BGE-M3。当前 T-141 只交付 runtime 与共享 client，dense/sparse 写入和 Milvus hybrid search 分别由 T-142/T-143 接入。
+Docker 中的 `backend`、`migrate` 和 `worker` 复用精简后的 Python runtime 镜像；`torch`、`transformers` 和 `FlagEmbedding` 只安装在独立 `sparse-encoder` 镜像，避免 backend 与 worker 各加载一份 BGE-M3。当前 runtime、dense/sparse 写入、Milvus hybrid search、child rerank 和 parent context 均已接入，Milvus entity 同时保存向量、child text 与 parent text。
 
 ## 技术栈
 
@@ -148,7 +149,7 @@ cp .env.example .env
 docker compose up -d --build
 ```
 
-Compose 会启动 Redis、PostgreSQL、migration、FastAPI 后端、Next.js 前端和 worker，并挂载 `uploads/`、`vector_db/` 和 `models/`。Redis 默认只在 Compose 网络内提供缓存、限流和 worker 运行态，不映射公网端口；生产可通过 `REDIS_URL` 切到托管 Redis 内网或 `rediss://` 认证连接串。查看状态：
+Compose 会启动 Redis、PostgreSQL、migration、Milvus、BGE-M3 sparse encoder、FastAPI 后端、Next.js 前端和 worker，并持久化 `uploads/`、`models/` 以及 PostgreSQL、Milvus 的 named volumes。Redis 默认只在 Compose 网络内提供缓存、限流和 worker 运行态，不映射公网端口；生产可通过 `REDIS_URL` 切到托管 Redis 内网或 `rediss://` 认证连接串。查看状态：
 
 ```bash
 docker compose ps
@@ -212,9 +213,10 @@ FirstRAG/
 
 | 文档 | 说明 |
 | --- | --- |
-| `docs/tutorials/README.md` | 教程总览、四条学习路线和统一章节模板。 |
+| `docs/tutorials/README.md` | 教程总览、主线入口、四条学习路线和统一章节模板。 |
+| `docs/tutorials/RAG_FROM_ZERO_TO_PRODUCTION.md` | 从理论、真实源码、无密钥实验到 VPS、HTTPS、备份和回滚的主线教程。 |
 | `docs/tutorials/CREDENTIAL_FREE_QUICKSTART.md` | 无真实账号、API Key 或公网模型服务的隔离全栈实验。 |
-| `docs/tutorials/FILE_INGESTION_AND_INDEXING.md` | 文件上传、异步索引、OCR、chunk 和双存储教程。 |
+| `docs/tutorials/FILE_INGESTION_AND_INDEXING.md` | 文件上传、异步索引、OCR、chunk、Milvus entity 与 PostgreSQL metadata 教程。 |
 | `docs/tutorials/HYBRID_RETRIEVAL_AND_STREAMING.md` | 混合检索、RRF、rerank、SSE、消息落库与 diagnostics 教程。 |
 | `docs/tutorials/FRONTEND_SECURITY_TESTING_AND_DEPLOYMENT.md` | 前端状态与 proxy、凭据安全、测试门禁、Compose 和生产部署边界教程。 |
 | `docs/tutorials/fixtures/README.md` | 可追溯的 TXT、Markdown 和合成 OCR 教程素材。 |

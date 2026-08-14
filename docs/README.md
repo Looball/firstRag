@@ -8,14 +8,16 @@
 - 非必要产品功能和纯粹按行数进行的拆分暂停；Bug、安全、兼容性和教程可复现性修复继续维护。
 - 教程内容必须指向当前真实实现，reference 文档继续作为 API、schema、架构和运行行为的事实来源。
 - 教程化前的完整产品快照使用 `product-v1.0.0` tag 固定。
+- 当前 RAG 基线是 Milvus v3 dense/sparse hybrid、RRF、child rerank 和 parent context；Milvus entity 保存向量与 child/parent text，PostgreSQL 保存 metadata、任务和消息，不承担当前正文检索。历史 Chroma 和 `vector_db` 只在迁移记录中保留背景。
 
 ## Tutorial
 
 | 文档 | 说明 |
 | --- | --- |
-| [`tutorials/README.md`](tutorials/README.md) | 10 分钟导览、四条学习路线、专题交付状态和统一章节模板。 |
+| [`tutorials/README.md`](tutorials/README.md) | 主线入口、10 分钟导览、四条学习路线、专题交付状态和统一章节模板。 |
+| [`tutorials/RAG_FROM_ZERO_TO_PRODUCTION.md`](tutorials/RAG_FROM_ZERO_TO_PRODUCTION.md) | 从理论、真实源码、无密钥实验到 VPS、HTTPS、备份和回滚的主线教程。 |
 | [`tutorials/CREDENTIAL_FREE_QUICKSTART.md`](tutorials/CREDENTIAL_FREE_QUICKSTART.md) | 无真实账号、API Key 或公网模型服务的隔离全栈入门实验。 |
-| [`tutorials/FILE_INGESTION_AND_INDEXING.md`](tutorials/FILE_INGESTION_AND_INDEXING.md) | 文件从 HTTP upload 到异步任务、OCR、chunk、Milvus 与 PostgreSQL 的可追踪教程。 |
+| [`tutorials/FILE_INGESTION_AND_INDEXING.md`](tutorials/FILE_INGESTION_AND_INDEXING.md) | 文件从 HTTP upload 到异步任务、OCR、chunk、Milvus entity 与 PostgreSQL metadata 的可追踪教程。 |
 | [`tutorials/HYBRID_RETRIEVAL_AND_STREAMING.md`](tutorials/HYBRID_RETRIEVAL_AND_STREAMING.md) | 一次提问从 hybrid retrieval、RRF、rerank 到 SSE、落库与 diagnostics 的教程。 |
 | [`tutorials/FRONTEND_SECURITY_TESTING_AND_DEPLOYMENT.md`](tutorials/FRONTEND_SECURITY_TESTING_AND_DEPLOYMENT.md) | 前端状态与 proxy、凭据安全、测试门禁、Compose 和生产部署边界教程。 |
 | [`tutorials/fixtures/README.md`](tutorials/fixtures/README.md) | 仓库自编 TXT、Markdown、OCR ground truth 素材的用途、来源与清理说明。 |
